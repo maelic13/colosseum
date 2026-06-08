@@ -7,7 +7,7 @@ thinking / GPT-5.5 extra high.
 ## Phase A — Foundation
 - [x] **Step 0** — Initialize repository (git, `.gitignore`, GPL-3.0 `LICENSE`) · _Small_
 - [x] **Step 1** — Author `PLAN.md` + `GUIDE.md` · _Small_
-- [ ] **Step 2** — Architecture scaffold (workspace, crates, deps, public seams, CI stub) · _Large_
+- [x] **Step 2** — Architecture scaffold (workspace, crates, deps, public seams, CI stub) · _Large_
 
 ## Phase B — Backend (logic, no UI)
 - [ ] **Step 3** — `colosseum-core`: domain types, Elo, pairings, adjudication + unit tests · _Large_
