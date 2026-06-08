@@ -17,6 +17,9 @@ pub enum EngineError {
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
 
+    #[error("corrupt stored data: {0}")]
+    Corrupt(String),
+
     #[error("could not determine application directories")]
     NoProjectDirs,
 }
