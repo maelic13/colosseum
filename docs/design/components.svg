@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 760" font-family="Inter, Segoe UI, sans-serif">
+  <rect width="900" height="760" fill="#1a1e26"/>
+  <text x="32" y="42" fill="#e7eaf0" font-size="20" font-weight="600">Colosseum — Component Sheet</text>
+  <text x="32" y="62" fill="#97a1b1" font-size="12">Reference rendering for GUIDELINES.md §3. All on BG_PANEL #1a1e26.</text>
+
+  <!-- ── Pill tabs ── -->
+  <text x="32" y="102" fill="#97a1b1" font-size="13" font-weight="600">3.1 PILL TABS</text>
+  <rect x="32" y="114" width="320" height="44" rx="8" fill="#12151b"/>
+  <rect x="44" y="122" width="104" height="28" rx="14" fill="#e0a93b" fill-opacity="0.18"/>
+  <text x="96" y="140" fill="#f2c15e" font-size="14" font-weight="600" text-anchor="middle">Tournament</text>
+  <text x="206" y="140" fill="#97a1b1" font-size="14" text-anchor="middle">Engines</text>
+  <rect x="252" y="122" width="84" height="28" rx="14" fill="#2c3340"/>
+  <text x="294" y="140" fill="#e7eaf0" font-size="14" text-anchor="middle">hover</text>
+
+  <!-- ── Status pills ── -->
+  <text x="420" y="102" fill="#97a1b1" font-size="13" font-weight="600">3.2 STATUS PILLS</text>
+  <g font-size="12" font-weight="600">
+    <rect x="420" y="118" width="86" height="24" rx="12" fill="#5fb873" fill-opacity="0.16" stroke="#5fb873" stroke-opacity="0.45"/>
+    <circle cx="436" cy="130" r="3.5" fill="#5fb873"/><text x="446" y="134" fill="#5fb873">Running</text>
+    <rect x="516" y="118" width="88" height="24" rx="12" fill="#d9a54f" fill-opacity="0.16" stroke="#d9a54f" stroke-opacity="0.45"/>
+    <circle cx="532" cy="130" r="3.5" fill="#d9a54f"/><text x="542" y="134" fill="#d9a54f">Stopping</text>
+    <rect x="614" y="118" width="86" height="24" rx="12" fill="#e0a93b" fill-opacity="0.16" stroke="#e0a93b" stroke-opacity="0.45"/>
+    <circle cx="630" cy="130" r="3.5" fill="#e0a93b"/><text x="640" y="134" fill="#e0a93b">Finished</text>
+    <rect x="710" y="118" width="62" height="24" rx="12" fill="#6c7686" fill-opacity="0.16" stroke="#6c7686" stroke-opacity="0.45"/>
+    <circle cx="726" cy="130" r="3.5" fill="none" stroke="#6c7686"/><text x="736" y="134" fill="#6c7686">Idle</text>
+  </g>
+
+  <!-- ── Buttons ── -->
+  <text x="32" y="206" fill="#97a1b1" font-size="13" font-weight="600">3.3 BUTTONS</text>
+  <g font-size="13.5" font-weight="600">
+    <rect x="32" y="220" width="158" height="32" rx="6" fill="#e0a93b"/>
+    <text x="111" y="240" fill="#12151b" text-anchor="middle">▶  Start Tournament</text>
+    <rect x="202" y="220" width="124" height="32" rx="6" fill="#232934" stroke="#323a47"/>
+    <text x="264" y="240" fill="#e7eaf0" text-anchor="middle" font-weight="400">New Tournament</text>
+    <rect x="338" y="220" width="64" height="32" rx="6" fill="#5fb873" fill-opacity="0.16" stroke="#5fb873" stroke-opacity="0.45"/>
+    <text x="370" y="240" fill="#5fb873" text-anchor="middle">▶ Go</text>
+    <rect x="414" y="220" width="72" height="32" rx="6" fill="#d9a54f" fill-opacity="0.16" stroke="#d9a54f" stroke-opacity="0.45"/>
+    <text x="450" y="240" fill="#d9a54f" text-anchor="middle">⏸ Stop</text>
+    <rect x="498" y="220" width="110" height="32" rx="6" fill="#db5d52" fill-opacity="0.16" stroke="#db5d52" stroke-opacity="0.45"/>
+    <text x="553" y="240" fill="#db5d52" text-anchor="middle">⏹ Force-Stop</text>
+  </g>
+  <text x="32" y="272" fill="#6c7686" font-size="11">primary · secondary · tinted success / warn / danger — fill 16%, stroke 45%, text 100%</text>
+
+  <!-- ── Section card ── -->
+  <text x="32" y="316" fill="#97a1b1" font-size="13" font-weight="600">3.4 SECTION CARD</text>
+  <rect x="32" y="328" width="400" height="150" rx="8" fill="#232934" stroke="#323a47"/>
+  <text x="46" y="354" fill="#e7eaf0" font-size="14" font-weight="600">Time Control</text>
+  <text x="46" y="370" fill="#97a1b1" font-size="11.5">Per-move thinking time for both engines.</text>
+  <text x="46" y="404" fill="#97a1b1" font-size="13">Per move</text>
+  <rect x="120" y="388" width="76" height="26" rx="6" fill="#0e1116" stroke="#323a47"/>
+  <text x="132" y="405" fill="#e7eaf0" font-size="13">100</text>
+  <rect x="204" y="388" width="58" height="26" rx="6" fill="#0e1116" stroke="#323a47"/>
+  <text x="216" y="405" fill="#e7eaf0" font-size="13">ms ▾</text>
+  <text x="274" y="405" fill="#6c7686" font-size="12">= 100 ms</text>
+  <text x="46" y="444" fill="#97a1b1" font-size="13">Parallel games</text>
+  <rect x="148" y="428" width="76" height="26" rx="6" fill="#0e1116" stroke="#323a47"/>
+  <text x="160" y="445" fill="#e7eaf0" font-size="13">4</text>
+
+  <!-- ── Engine card rows ── -->
+  <text x="470" y="316" fill="#97a1b1" font-size="13" font-weight="600">3.8 ENGINE LIST ROWS</text>
+  <rect x="470" y="328" width="260" height="44" rx="6" fill="#e0a93b" fill-opacity="0.12" stroke="#e0a93b" stroke-opacity="0.4"/>
+  <rect x="482" y="342" width="14" height="14" rx="3" fill="#e0a93b"/>
+  <path d="M485 349 l3 3 l6 -6" stroke="#12151b" stroke-width="2" fill="none"/>
+  <text x="506" y="348" fill="#f2c15e" font-size="13.5" font-weight="600">Stockfish 17</text>
+  <text x="506" y="363" fill="#97a1b1" font-size="11.5">v17.0</text>
+  <rect x="470" y="378" width="260" height="44" rx="6" fill="#2c3340"/>
+  <rect x="482" y="392" width="14" height="14" rx="3" fill="none" stroke="#97a1b1"/>
+  <text x="506" y="398" fill="#e7eaf0" font-size="13.5">Berserk 13 (hover)</text>
+  <text x="506" y="413" fill="#97a1b1" font-size="11.5">berserk-x64.exe</text>
+  <rect x="470" y="428" width="260" height="44" rx="6" fill="none"/>
+  <rect x="482" y="442" width="14" height="14" rx="3" fill="none" stroke="#97a1b1"/>
+  <text x="506" y="448" fill="#e7eaf0" font-size="13.5">Ethereal 14</text>
+  <text x="506" y="463" fill="#97a1b1" font-size="11.5">v14.25</text>
+
+  <!-- ── Rank badges + delta chips ── -->
+  <text x="32" y="522" fill="#97a1b1" font-size="13" font-weight="600">3.5 RANK BADGES &amp; Δ CHIPS</text>
+  <circle cx="44" cy="546" r="9" fill="#e0a93b" fill-opacity="0.2" stroke="#e0a93b" stroke-opacity="0.5"/>
+  <text x="44" y="550" fill="#e0a93b" font-size="11" font-weight="600" text-anchor="middle">1</text>
+  <circle cx="72" cy="546" r="9" fill="#aab4c4" fill-opacity="0.2" stroke="#aab4c4" stroke-opacity="0.5"/>
+  <text x="72" y="550" fill="#aab4c4" font-size="11" font-weight="600" text-anchor="middle">2</text>
+  <circle cx="100" cy="546" r="9" fill="#c08255" fill-opacity="0.2" stroke="#c08255" stroke-opacity="0.5"/>
+  <text x="100" y="550" fill="#c08255" font-size="11" font-weight="600" text-anchor="middle">3</text>
+  <text x="126" y="550" fill="#6c7686" font-size="12" font-family="JetBrains Mono, monospace">4</text>
+  <rect x="160" y="536" width="44" height="20" rx="4" fill="#5fb873" fill-opacity="0.16"/>
+  <text x="182" y="550" fill="#5fb873" font-size="12" text-anchor="middle" font-family="JetBrains Mono, monospace">+24</text>
+  <rect x="212" y="536" width="44" height="20" rx="4" fill="#db5d52" fill-opacity="0.16"/>
+  <text x="234" y="550" fill="#db5d52" font-size="12" text-anchor="middle" font-family="JetBrains Mono, monospace">−18</text>
+  <text x="276" y="550" fill="#6c7686" font-size="12" font-family="JetBrains Mono, monospace">0</text>
+
+  <!-- ── Progress ── -->
+  <text x="360" y="522" fill="#97a1b1" font-size="13" font-weight="600">3.7 PROGRESS</text>
+  <text x="360" y="549" fill="#97a1b1" font-size="13">128 / 240 games</text>
+  <rect x="470" y="540" width="160" height="6" rx="3" fill="#0e1116"/>
+  <rect x="470" y="540" width="85" height="6" rx="3" fill="#e0a93b"/>
+
+  <!-- ── H2H heatmap ── -->
+  <text x="32" y="606" fill="#97a1b1" font-size="13" font-weight="600">3.6 HEAD-TO-HEAD HEATMAP</text>
+  <g font-size="11.5" font-family="JetBrains Mono, monospace">
+    <text x="110" y="634" fill="#97a1b1" text-anchor="middle" font-family="Inter">Stockfish</text>
+    <text x="190" y="634" fill="#97a1b1" text-anchor="middle" font-family="Inter">Berserk</text>
+    <text x="270" y="634" fill="#97a1b1" text-anchor="middle" font-family="Inter">Ethereal</text>
+    <text x="32" y="660" fill="#e7eaf0" font-size="12" font-family="Inter" font-weight="600">Stockfish</text>
+    <text x="110" y="660" fill="#6c7686" text-anchor="middle">—</text>
+    <rect x="160" y="644" width="60" height="22" rx="4" fill="#5fb873" fill-opacity="0.22"/>
+    <text x="190" y="660" fill="#e7eaf0" text-anchor="middle">7-2-1</text>
+    <rect x="240" y="644" width="60" height="22" rx="4" fill="#5fb873" fill-opacity="0.12"/>
+    <text x="270" y="660" fill="#e7eaf0" text-anchor="middle">5-3-2</text>
+    <text x="32" y="690" fill="#e7eaf0" font-size="12" font-family="Inter" font-weight="600">Berserk</text>
+    <rect x="80" y="674" width="60" height="22" rx="4" fill="#db5d52" fill-opacity="0.22"/>
+    <text x="110" y="690" fill="#e7eaf0" text-anchor="middle">1-2-7</text>
+    <text x="190" y="690" fill="#6c7686" text-anchor="middle">—</text>
+    <text x="270" y="690" fill="#e7eaf0" text-anchor="middle">3-4-3</text>
+  </g>
+
+  <!-- ── Empty state ── -->
+  <text x="470" y="606" fill="#97a1b1" font-size="13" font-weight="600">3.9 EMPTY STATE</text>
+  <rect x="470" y="618" width="300" height="120" rx="8" fill="#1a1e26" stroke="#323a47"/>
+  <circle cx="620" cy="654" r="14" fill="none" stroke="#e0a93b" stroke-opacity="0.35" stroke-width="3"/>
+  <circle cx="620" cy="654" r="6.5" fill="none" stroke="#e0a93b" stroke-opacity="0.28" stroke-width="2.5"/>
+  <text x="620" y="694" fill="#97a1b1" font-size="15" font-weight="600" text-anchor="middle">No engines yet</text>
+  <text x="620" y="714" fill="#6c7686" font-size="12.5" text-anchor="middle">Add engines in the Engines tab to get started.</text>
+</svg>

@@ -1,0 +1,19 @@
+# Normalize line endings to LF in the repository for cross-platform consistency.
+* text=auto eol=lf
+
+# Explicitly treat common source/text types as text (LF in repo).
+*.rs    text eol=lf
+*.toml  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.sh    text eol=lf
+
+# Windows scripts keep CRLF.
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
+
+# Treat engine binaries / databases as binary if ever committed.
+*.exe   binary
+*.sqlite binary

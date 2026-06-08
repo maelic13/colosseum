@@ -1,0 +1,52 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock is committed for the GUI binary (application, not library)
+# (kept — do not ignore)
+
+# Local app data produced during development / testing
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+/pgn/
+*.pgn
+
+# Temporary engine copies created by tests (real engine copied into temp dirs)
+/test-engines/
+/tmp/
+
+# Logs
+*.log
+
+# OS cruft
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+# Linux
+*~
+.directory
+.Trash-*
+
+# Editor / IDE
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+
+# Build / packaging output
+/dist/
+
+# Claude Code local tooling state (un-ignore specific shared files if needed)
+.claude/
+/.localtest/

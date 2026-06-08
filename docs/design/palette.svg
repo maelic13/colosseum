@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 540" font-family="Inter, Segoe UI, sans-serif">
+  <rect width="860" height="540" fill="#12151b"/>
+  <text x="32" y="44" fill="#e7eaf0" font-size="20" font-weight="600">Colosseum — Color Tokens</text>
+  <text x="32" y="66" fill="#97a1b1" font-size="12">Base palette is frozen; new tokens marked NEW. Tints = color at 16% fill / 45% stroke over dark.</text>
+
+  <!-- Surfaces -->
+  <text x="32" y="104" fill="#97a1b1" font-size="13" font-weight="600">SURFACES</text>
+  <g font-size="11">
+    <rect x="32"  y="116" width="120" height="64" rx="8" fill="#12151b" stroke="#323a47"/>
+    <text x="42" y="158" fill="#e7eaf0">BG_DARKEST</text><text x="42" y="172" fill="#97a1b1">#12151b</text>
+    <rect x="164" y="116" width="120" height="64" rx="8" fill="#1a1e26" stroke="#323a47"/>
+    <text x="174" y="158" fill="#e7eaf0">BG_PANEL</text><text x="174" y="172" fill="#97a1b1">#1a1e26</text>
+    <rect x="296" y="116" width="120" height="64" rx="8" fill="#232934" stroke="#323a47"/>
+    <text x="306" y="158" fill="#e7eaf0">BG_ELEVATED</text><text x="306" y="172" fill="#97a1b1">#232934</text>
+    <rect x="428" y="116" width="120" height="64" rx="8" fill="#2c3340" stroke="#323a47"/>
+    <text x="438" y="158" fill="#e7eaf0">BG_HOVER</text><text x="438" y="172" fill="#97a1b1">#2c3340</text>
+    <rect x="560" y="116" width="120" height="64" rx="8" fill="#0e1116" stroke="#323a47"/>
+    <text x="570" y="158" fill="#e7eaf0">BG_INPUT</text><text x="570" y="172" fill="#97a1b1">#0e1116</text>
+    <rect x="692" y="116" width="120" height="64" rx="8" fill="#1f242d" stroke="#323a47"/>
+    <text x="702" y="158" fill="#e7eaf0">BG_FAINT</text><text x="702" y="172" fill="#97a1b1">#1f242d</text>
+  </g>
+
+  <!-- Text & stroke -->
+  <text x="32" y="222" fill="#97a1b1" font-size="13" font-weight="600">TEXT &amp; LINES</text>
+  <g font-size="11">
+    <rect x="32"  y="234" width="120" height="64" rx="8" fill="#e7eaf0"/>
+    <text x="42" y="276" fill="#12151b">TEXT</text><text x="42" y="290" fill="#444a55">#e7eaf0</text>
+    <rect x="164" y="234" width="120" height="64" rx="8" fill="#97a1b1"/>
+    <text x="174" y="276" fill="#12151b">TEXT_WEAK</text><text x="174" y="290" fill="#2a2f38">#97a1b1</text>
+    <rect x="296" y="234" width="120" height="64" rx="8" fill="#6c7686"/>
+    <text x="306" y="276" fill="#12151b">TEXT_FAINT • NEW</text><text x="306" y="290" fill="#2a2f38">#6c7686</text>
+    <rect x="428" y="234" width="120" height="64" rx="8" fill="#323a47"/>
+    <text x="438" y="276" fill="#e7eaf0">STROKE</text><text x="438" y="290" fill="#97a1b1">#323a47</text>
+  </g>
+
+  <!-- Accent & semantic -->
+  <text x="32" y="340" fill="#97a1b1" font-size="13" font-weight="600">ACCENT &amp; SEMANTIC</text>
+  <g font-size="11">
+    <rect x="32"  y="352" width="120" height="64" rx="8" fill="#e0a93b"/>
+    <text x="42" y="394" fill="#12151b" font-weight="600">ACCENT</text><text x="42" y="408" fill="#3a2d0e">#e0a93b</text>
+    <rect x="164" y="352" width="120" height="64" rx="8" fill="#f2c15e"/>
+    <text x="174" y="394" fill="#12151b" font-weight="600">ACCENT_BRIGHT</text><text x="174" y="408" fill="#3a2d0e">#f2c15e</text>
+    <rect x="296" y="352" width="120" height="64" rx="8" fill="#5fb873"/>
+    <text x="306" y="394" fill="#12151b" font-weight="600">SUCCESS</text><text x="306" y="408" fill="#10311a">#5fb873</text>
+    <rect x="428" y="352" width="120" height="64" rx="8" fill="#d9a54f"/>
+    <text x="438" y="394" fill="#12151b" font-weight="600">WARN</text><text x="438" y="408" fill="#3a2a0e">#d9a54f</text>
+    <rect x="560" y="352" width="120" height="64" rx="8" fill="#db5d52"/>
+    <text x="570" y="394" fill="#12151b" font-weight="600">DANGER</text><text x="570" y="408" fill="#3a1310">#db5d52</text>
+  </g>
+
+  <!-- Medals + tints -->
+  <text x="32" y="458" fill="#97a1b1" font-size="13" font-weight="600">MEDALS (NEW) + TINT EXAMPLES</text>
+  <g font-size="11">
+    <rect x="32"  y="470" width="120" height="48" rx="8" fill="#e0a93b"/>
+    <text x="42" y="498" fill="#12151b">MEDAL_GOLD</text>
+    <rect x="164" y="470" width="120" height="48" rx="8" fill="#aab4c4"/>
+    <text x="174" y="498" fill="#12151b">MEDAL_SILVER #aab4c4</text>
+    <rect x="296" y="470" width="120" height="48" rx="8" fill="#c08255"/>
+    <text x="306" y="498" fill="#12151b">MEDAL_BRONZE #c08255</text>
+    <!-- tint demos -->
+    <rect x="452" y="470" width="120" height="48" rx="10" fill="#5fb873" fill-opacity="0.16" stroke="#5fb873" stroke-opacity="0.45"/>
+    <text x="468" y="498" fill="#5fb873">tint(SUCCESS)</text>
+    <rect x="584" y="470" width="120" height="48" rx="10" fill="#db5d52" fill-opacity="0.16" stroke="#db5d52" stroke-opacity="0.45"/>
+    <text x="600" y="498" fill="#db5d52">tint(DANGER)</text>
+    <rect x="716" y="470" width="120" height="48" rx="10" fill="#e0a93b" fill-opacity="0.18" stroke="#e0a93b" stroke-opacity="0.45"/>
+    <text x="732" y="498" fill="#f2c15e">tint(ACCENT)</text>
+  </g>
+</svg>

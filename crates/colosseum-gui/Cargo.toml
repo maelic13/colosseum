@@ -1,0 +1,73 @@
+[package]
+name = "colosseum-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Chess engine testing suite — run tournaments, track Elo, view live results"
+keywords = ["chess", "engine", "tournament", "uci", "gui"]
+categories = ["games"]
+
+[[bin]]
+name = "colosseum"
+path = "src/main.rs"
+
+# ── Linux packages (built in release CI via cargo-deb / cargo-generate-rpm) ──
+# `--target <triple>` rewrites the target/release/ asset paths automatically.
+[package.metadata.deb]
+name = "colosseum"
+section = "games"
+priority = "optional"
+extended-description = """\
+Desktop GUI for running UCI chess-engine-vs-engine tournaments: round robin \
+and gauntlet formats, parallel games, live board view, maximum-likelihood \
+Elo ratings, and PGN/CSV export."""
+assets = [
+  ["target/release/colosseum", "usr/bin/", "755"],
+  ["../../packaging/colosseum.desktop", "usr/share/applications/", "644"],
+  ["../../packaging/colosseum.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
+  ["../../LICENSE", "usr/share/doc/colosseum/", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "colosseum"
+assets = [
+  { source = "target/release/colosseum", dest = "/usr/bin/colosseum", mode = "755" },
+  { source = "packaging/colosseum.desktop", dest = "/usr/share/applications/colosseum.desktop", mode = "644" },
+  { source = "packaging/colosseum.png", dest = "/usr/share/icons/hicolor/256x256/apps/colosseum.png", mode = "644" },
+  { source = "LICENSE", dest = "/usr/share/doc/colosseum/LICENSE", mode = "644", doc = true },
+]
+
+[dependencies]
+anyhow = "1.0.102"
+colosseum-core = { path = "../colosseum-core" }
+colosseum-engine = { path = "../colosseum-engine" }
+crossbeam-channel = "0.5.15"
+eframe = "0.35.0"
+egui = "0.35.0"
+egui_extras = { version = "0.35.0", features = ["svg"] }
+raw-window-handle = "0.6"
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "webp",
+    "bmp",
+    "gif",
+    "ico",
+] }
+rfd = "0.17.2"
+serde = { version = "1", features = ["derive"] }
+shakmaty = "0.30.0"
+serde_json = "1"
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+ureq = "3.1.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"

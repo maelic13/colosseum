@@ -1,0 +1,1425 @@
+//! Tournament scheduler: the Go / Stop / Force-Stop / resume state machine.
+//!
+//! The driver runs on a tokio runtime. It launches up to `concurrency` games at once
+//! (each game owns two engine processes), collects their reports, persists results,
+//! updates standings + Elo, appends PGN, and publishes a [`TournamentSnapshot`] that
+//! the GUI reads each frame. Control commands arrive over an mpsc channel; lightweight
+//! [`TournamentEvent`]s are pushed to a crossbeam channel to nudge the GUI to refresh.
+//!
+//! Control semantics:
+//! - **Go**: start, or resume after Stop, or top up running games to the limit.
+//! - **Stop**: launch no new games; let in-flight games finish and count as results.
+//! - **Force-Stop**: abort in-flight games (kill engines via drop), discard them.
+
+use std::collections::HashMap;
+use std::future::Future;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use crossbeam_channel::Sender;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::task::JoinSet;
+
+use colosseum_core::{
+    CommonEngineOptions, EngineConfig, EngineId, GameId, GameResult, Pairing, Standings,
+    StartPosition, Termination, TournamentConfig, TournamentEvent, TournamentId, UciOptionValue,
+    generate_schedule, standings::GameOutcome,
+};
+use colosseum_uci::SpawnOptions;
+
+use crate::error::EngineError;
+use crate::live::{LiveGameHandle, LiveGameState};
+use crate::openings::{ResolvedOpening, load_openings};
+use crate::runner::{EngineGameSpec, GameSpec, run_game};
+use crate::store::{self, Store, TournamentRow};
+
+/// Elo assigned to an engine that has no configured rating.
+const DEFAULT_ELO: f64 = 1500.0;
+/// Extra time beyond the move time before a move is judged a timeout.
+const TIMEOUT_TOLERANCE: Duration = Duration::from_secs(2);
+/// Time allowed for handshake / isready. Generous because a *slow* startup
+/// under heavy parallelism (many engines spawning + initialising at once) is
+/// not a real failure — cutting it short falsely reports the engine as a
+/// setup crash (Deep Junior did exactly this under 15 concurrent games).
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Cap on retained recent engine-error messages.
+const MAX_RECENT_ERRORS: usize = 50;
+
+/// A control command from the GUI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Command {
+    Go,
+    Stop,
+    ForceStop,
+    /// Change how many games may run at once. In-flight games always finish;
+    /// only the launch rate changes (effective immediately, persisted).
+    SetConcurrency(usize),
+}
+
+/// High-level tournament status for display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TournamentStatus {
+    Idle,
+    Running,
+    /// Stop pressed; draining in-flight games.
+    Stopping,
+    Stopped,
+    Finished,
+}
+
+/// An engine's current rating, change since the tournament started, and the
+/// estimate's uncertainty. Always the joint maximum-likelihood recompute over
+/// every finished game ([`colosseum_core::ml_ratings`]) anchored to the
+/// participants' seed ratings — order-independent and free of K-factor tuning.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EloEntry {
+    pub current: f64,
+    pub delta: f64,
+    /// 95%-confidence half-width (± Elo) of the ML estimate; `None` until the
+    /// engine has informative games.
+    pub error: Option<f64>,
+}
+
+/// Recompute the ML rating snapshot from the standings: rating, delta vs the
+/// seed, and the asymptotic error bar, for every participant.
+///
+/// The writeback mode shapes the *model*: under `Chosen`/`Estimate` only the
+/// covered engines move — the rest are anchored at their seeds, in the
+/// numbers shown and inside the estimation (a newcomer rated against a fixed
+/// field). `None` and `All` are the full joint recompute.
+fn elo_entries(
+    standings: &Standings,
+    seeds: &[(EngineId, f64)],
+    writeback: &colosseum_core::RatingWriteback,
+) -> HashMap<EngineId, EloEntry> {
+    use colosseum_core::RatingWriteback;
+    let ratings = match writeback {
+        RatingWriteback::None | RatingWriteback::All => {
+            colosseum_core::ml_ratings(standings, seeds)
+        }
+        RatingWriteback::Chosen(ids) => colosseum_core::ml_ratings_anchored(standings, seeds, ids),
+        RatingWriteback::Estimate(id) => {
+            colosseum_core::ml_ratings_anchored(standings, seeds, &[*id])
+        }
+    };
+    seeds
+        .iter()
+        .map(|&(id, seed)| {
+            let current = ratings.get(&id).copied().unwrap_or(seed);
+            let error = colosseum_core::rating_error(standings, &ratings, id);
+            (
+                id,
+                EloEntry {
+                    current,
+                    delta: current - seed,
+                    error,
+                },
+            )
+        })
+        .collect()
+}
+
+/// A game currently being played (in-flight).
+#[derive(Debug, Clone)]
+pub struct InFlightGame {
+    pub game_id: GameId,
+    pub white: EngineId,
+    pub black: EngineId,
+    pub round: u32,
+    /// Order the game was launched in (monotonic per driver); the live view
+    /// uses it to find the newest game when auto-following.
+    pub launch_seq: u64,
+    /// Live state written by the runner, read by the GUI's live view.
+    pub live: LiveGameHandle,
+}
+
+/// A consistent snapshot of tournament state for the GUI to render.
+#[derive(Debug, Clone)]
+pub struct TournamentSnapshot {
+    pub status: TournamentStatus,
+    pub standings: Standings,
+    pub elo: HashMap<EngineId, EloEntry>,
+    pub games_finished: usize,
+    pub games_total: usize,
+    pub recent_errors: Vec<String>,
+    /// Play time accumulated while games were actually running (frozen the
+    /// moment a Force-Stop kills them or a Stop drains the last one).
+    pub elapsed_active: std::time::Duration,
+    /// When the current active stretch began (`None` while paused/stopped).
+    /// Live elapsed = `elapsed_active + running_since.elapsed()`.
+    pub running_since: Option<std::time::Instant>,
+    /// Sum of `duration_ms` across all finished games with a measured duration.
+    pub total_game_ms: u64,
+    /// Count of finished games that have a measured duration (denominator for avg).
+    pub games_timed: usize,
+    /// Games currently in flight (launched but not yet finished).
+    pub in_flight_games: Vec<InFlightGame>,
+    /// How many finished games ended with each termination reason.
+    pub termination_counts: HashMap<Termination, usize>,
+    /// Current parallel-games limit (live-adjustable).
+    pub concurrency: usize,
+}
+
+/// A handle to a running tournament: send commands, read the live snapshot.
+pub struct Tournament {
+    pub id: TournamentId,
+    commands: UnboundedSender<Command>,
+    snapshot: Arc<Mutex<TournamentSnapshot>>,
+}
+
+impl Tournament {
+    /// Start, resume, or top up to the concurrency limit.
+    pub fn go(&self) {
+        let _ = self.commands.send(Command::Go);
+    }
+
+    /// Stop launching new games; let in-flight games finish.
+    pub fn stop(&self) {
+        let _ = self.commands.send(Command::Stop);
+    }
+
+    /// Abort in-flight games (kill engines) and discard them.
+    pub fn force_stop(&self) {
+        let _ = self.commands.send(Command::ForceStop);
+    }
+
+    /// Change the parallel-games limit. Running games finish normally; new
+    /// games launch only up to the new limit. Works while running or stopped
+    /// (the limit then applies on resume) and is persisted for resume.
+    pub fn set_concurrency(&self, limit: usize) {
+        let _ = self.commands.send(Command::SetConcurrency(limit.max(1)));
+    }
+
+    /// A cheap clone of the shared snapshot handle for the GUI to read each frame.
+    #[must_use]
+    pub fn snapshot_handle(&self) -> Arc<Mutex<TournamentSnapshot>> {
+        Arc::clone(&self.snapshot)
+    }
+}
+
+/// Per-engine launch template, resolved once.
+#[derive(Clone)]
+struct EngineTemplate {
+    id: EngineId,
+    name: String,
+    spawn: SpawnOptions,
+    options: Vec<(String, Option<String>)>,
+    start_elo: f64,
+}
+
+/// A scheduled game: id, pairing, and the opening assigned to it.
+#[derive(Clone)]
+struct ScheduledGame {
+    game_id: GameId,
+    pairing: Pairing,
+    /// Opening start FEN (`None` = standard start position).
+    start_fen: Option<String>,
+    /// Opening moves (UCI) to pre-play before the engines move.
+    opening_moves: Vec<String>,
+}
+
+/// Create a fresh tournament: persist it, its participants and pending games, and
+/// return a control [`Tournament`] handle plus the driver future to spawn on a runtime.
+///
+/// Requires at least two engines.
+pub fn create_tournament(
+    name: &str,
+    config: TournamentConfig,
+    engines: Vec<EngineConfig>,
+    store: Store,
+    events: Sender<TournamentEvent>,
+) -> Result<(Tournament, impl Future<Output = ()> + use<>), EngineError> {
+    if engines.len() < 2 {
+        return Err(EngineError::Corrupt(
+            "a tournament needs at least two engines".into(),
+        ));
+    }
+
+    let id = TournamentId::new();
+    store.create_tournament(id, name, &config)?;
+
+    // Resolve per-engine templates and register participants.
+    let mut templates: HashMap<EngineId, EngineTemplate> = HashMap::new();
+    let mut ids: Vec<EngineId> = Vec::with_capacity(engines.len());
+    for (seed, engine) in engines.iter().enumerate() {
+        let start_elo = engine.meta.elo.map_or(DEFAULT_ELO, f64::from);
+        store.add_tournament_engine(id, engine.id, engine, seed as u32, start_elo)?;
+        templates.insert(
+            engine.id,
+            EngineTemplate {
+                id: engine.id,
+                name: versioned_name(engine),
+                spawn: SpawnOptions {
+                    path: engine.path.clone(),
+                    args: engine.args.clone(),
+                    working_dir: engine.working_dir.clone(),
+                    env: engine.env.clone().into_iter().collect(),
+                },
+                options: resolve_options(
+                    engine,
+                    &config.common,
+                    config.engine_overrides.get(&engine.id),
+                ),
+                start_elo,
+            },
+        );
+        ids.push(engine.id);
+    }
+
+    let seeds: Vec<(EngineId, f64)> = ids
+        .iter()
+        .map(|eid| (*eid, templates[eid].start_elo))
+        .collect();
+    let init_standings = Standings::with_engines(&ids);
+
+    // Resolve the opening book once (if any). One opening is drawn per *encounter*
+    // (a run of `games_per_pair` consecutive games), so both colours are played
+    // from the same position; the book cycles if there are more encounters than
+    // openings.
+    let openings: Vec<ResolvedOpening> = match &config.start_position {
+        StartPosition::Startpos => Vec::new(),
+        StartPosition::Book(book) => load_openings(book)?,
+    };
+    let games_per_pair = config.games_per_pair.max(1) as usize;
+
+    // Build the schedule, then persist it in one transaction — row-by-row
+    // insertion pays a disk sync per game and froze the UI for large runs.
+    let pairings = generate_schedule(&ids, &config);
+    let mut schedule = Vec::with_capacity(pairings.len());
+    for (i, pairing) in pairings.into_iter().enumerate() {
+        let game_id = GameId::new();
+        let (start_fen, opening_moves) = if openings.is_empty() {
+            (None, Vec::new())
+        } else {
+            let opening = &openings[(i / games_per_pair) % openings.len()];
+            (opening.start_fen.clone(), opening.moves.clone())
+        };
+        schedule.push(ScheduledGame {
+            game_id,
+            pairing,
+            start_fen,
+            opening_moves,
+        });
+    }
+    let rows: Vec<store::PendingGame<'_>> = schedule
+        .iter()
+        .map(|s| store::PendingGame {
+            id: s.game_id,
+            round: s.pairing.round,
+            white: s.pairing.white,
+            black: s.pairing.black,
+            start_fen: s.start_fen.as_deref(),
+            opening_moves: &s.opening_moves,
+        })
+        .collect();
+    let persist_start = std::time::Instant::now();
+    store.insert_pending_games(id, &rows)?;
+    tracing::info!(
+        target: "scheduler",
+        "scheduled {} games in {:?}",
+        rows.len(),
+        persist_start.elapsed()
+    );
+
+    let total_games = schedule.len();
+    let snapshot = Arc::new(Mutex::new(TournamentSnapshot {
+        status: TournamentStatus::Idle,
+        standings: init_standings.clone(),
+        elo: elo_entries(&init_standings, &seeds, &config.rating_writeback),
+        games_finished: 0,
+        games_total: total_games,
+        recent_errors: Vec::new(),
+        elapsed_active: std::time::Duration::ZERO,
+        running_since: None,
+        total_game_ms: 0,
+        games_timed: 0,
+        in_flight_games: Vec::new(),
+        termination_counts: HashMap::new(),
+        concurrency: config.concurrency.max(1),
+    }));
+    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+    let driver = drive(Driver {
+        id,
+        event_name: name.to_string(),
+        config,
+        templates,
+        schedule,
+        total_games,
+        store,
+        events,
+        snapshot: Arc::clone(&snapshot),
+        commands: cmd_rx,
+        seeds,
+        init_standings,
+        init_finished: 0,
+        init_terminations: HashMap::new(),
+    });
+
+    Ok((
+        Tournament {
+            id,
+            commands: cmd_tx,
+            snapshot,
+        },
+        driver,
+    ))
+}
+
+/// Everything the driver loop owns.
+struct Driver {
+    id: TournamentId,
+    event_name: String,
+    config: TournamentConfig,
+    templates: HashMap<EngineId, EngineTemplate>,
+    /// Games remaining to be played.  For fresh tournaments this is the full
+    /// schedule; for resumed tournaments it contains only the unfinished games.
+    schedule: Vec<ScheduledGame>,
+    /// Total games in the full tournament schedule, including already-finished
+    /// games on resume (used for `games_total` in snapshots).
+    total_games: usize,
+    store: Store,
+    events: Sender<TournamentEvent>,
+    snapshot: Arc<Mutex<TournamentSnapshot>>,
+    commands: UnboundedReceiver<Command>,
+    /// Participants' start Elos — the anchor for the ML rating recompute.
+    seeds: Vec<(EngineId, f64)>,
+    /// Pre-initialized standings (empty for fresh tournaments, replayed from
+    /// the database for resumed ones).
+    init_standings: Standings,
+    /// Games already finished before this driver started (0 fresh, >0 resumed).
+    init_finished: usize,
+    /// Termination counts replayed from the database on resume, so the
+    /// Terminations breakdown covers the whole tournament, not this session.
+    init_terminations: HashMap<Termination, usize>,
+}
+
+async fn drive(mut driver: Driver) {
+    let total = driver.total_games;
+    let mut concurrency = driver.config.concurrency.max(1);
+    // Take the init state out of `driver` using `mem::take`/`replace` so the
+    // struct remains fully initialized and `&driver` borrows remain valid later.
+    let seeds = std::mem::take(&mut driver.seeds);
+    let mut standings = std::mem::replace(&mut driver.init_standings, Standings::with_engines(&[]));
+    let mut finished_count = driver.init_finished;
+    let mut recent_errors: Vec<String> = Vec::new();
+
+    let mut games: JoinSet<crate::runner::GameReport> = JoinSet::new();
+    let mut in_flight: HashMap<GameId, InFlightGame> = HashMap::new();
+    // The launch queue. Games leave it when launched and *return to the front*
+    // when a Force-Stop discards them mid-game — otherwise those games would be
+    // silently skipped for the rest of the session (and the next launch would
+    // show a later round number with nothing finished yet).
+    let mut pending: std::collections::VecDeque<ScheduledGame> =
+        std::mem::take(&mut driver.schedule).into();
+    // Launched-but-unfinished specs, kept so a Force-Stop can re-queue them.
+    let mut launched: HashMap<GameId, ScheduledGame> = HashMap::new();
+    let mut launch_seq = 0u64;
+    let mut running = false;
+    // Resumed-and-already-complete tournaments start (and stay) finished —
+    // Go must not flip them back to Running.
+    let mut finished = total > 0 && finished_count == total && pending.is_empty();
+    // The tournament play clock: accumulates while games are in flight and
+    // freezes the moment they stop (Force-Stop, or the last game of a Stop
+    // draining). Live elapsed = `elapsed_active + running_since.elapsed()`.
+    let mut elapsed_active = std::time::Duration::ZERO;
+    let mut running_since: Option<std::time::Instant> = None;
+    let mut total_game_ms: u64 = 0;
+    let mut games_timed: usize = 0;
+    let mut termination_counts = std::mem::take(&mut driver.init_terminations);
+
+    loop {
+        // Launch while running, with spare capacity and pending games.
+        let mut launched_any = false;
+        while running && games.len() < concurrency {
+            let Some(scheduled) = pending.pop_front() else {
+                break;
+            };
+            if running_since.is_none() {
+                running_since = Some(std::time::Instant::now());
+            }
+            launched.insert(scheduled.game_id, scheduled.clone());
+            let _ = driver.store.mark_game_running(scheduled.game_id);
+            let _ = driver.events.send(TournamentEvent::GameStarted {
+                game_id: scheduled.game_id,
+                white: scheduled.pairing.white,
+                black: scheduled.pairing.black,
+                round: scheduled.pairing.round,
+            });
+            let live: LiveGameHandle = LiveGameState::new_handle(
+                scheduled.game_id,
+                scheduled.pairing.round,
+                (
+                    scheduled.pairing.white,
+                    driver.templates[&scheduled.pairing.white].name.clone(),
+                ),
+                (
+                    scheduled.pairing.black,
+                    driver.templates[&scheduled.pairing.black].name.clone(),
+                ),
+                scheduled.start_fen.clone(),
+                driver.config.time_control,
+            );
+            // Capture each side's *library* Elo as of this launch: for
+            // engines the write-back updates that is the latest recompute
+            // (mirrored to the library after every game), for the rest the
+            // tournament-start seed (their library never moves). Stored on
+            // the game so parallel finishes can't change it mid-display.
+            {
+                let seed_of =
+                    |eid: EngineId| seeds.iter().find(|(sid, _)| *sid == eid).map(|(_, s)| *s);
+                let elo_at_launch = |eid: EngineId| -> Option<i32> {
+                    let value = if driver.config.rating_writeback.applies_to(eid) {
+                        driver
+                            .snapshot
+                            .lock()
+                            .ok()
+                            .and_then(|s| s.elo.get(&eid).map(|e| e.current))
+                            .or_else(|| seed_of(eid))
+                    } else {
+                        seed_of(eid)
+                    };
+                    value.map(|v| v.round() as i32)
+                };
+                if let Ok(mut lg) = live.lock() {
+                    lg.white_elo = elo_at_launch(scheduled.pairing.white);
+                    lg.black_elo = elo_at_launch(scheduled.pairing.black);
+                }
+            }
+            launch_seq += 1;
+            in_flight.insert(
+                scheduled.game_id,
+                InFlightGame {
+                    game_id: scheduled.game_id,
+                    white: scheduled.pairing.white,
+                    black: scheduled.pairing.black,
+                    round: scheduled.pairing.round,
+                    launch_seq,
+                    live: Arc::clone(&live),
+                },
+            );
+            let spec = build_game_spec(&driver, &scheduled);
+            games.spawn(run_game(spec, live));
+            launched_any = true;
+        }
+        // The GUI's "Playing" panel reads `in_flight_games` from the snapshot;
+        // without this sync it would show the pre-launch list (perpetually
+        // `concurrency - 1` in steady state) until the next game finished.
+        if launched_any && let Ok(mut snap) = driver.snapshot.lock() {
+            snap.in_flight_games = in_flight.values().cloned().collect();
+            snap.running_since = running_since;
+        }
+
+        // All games launched and drained: the tournament is finished.
+        if running && games.is_empty() && pending.is_empty() {
+            running = false;
+            finished = true;
+            if let Some(since) = running_since.take() {
+                elapsed_active += since.elapsed();
+            }
+            let _ = driver
+                .store
+                .set_tournament_status(driver.id, store::STATUS_FINISHED);
+            publish(
+                &driver.snapshot,
+                &standings,
+                &seeds,
+                &driver.config.rating_writeback,
+                finished_count,
+                total,
+                TournamentStatus::Finished,
+                &recent_errors,
+                elapsed_active,
+                running_since,
+                total_game_ms,
+                games_timed,
+                &[],
+                &termination_counts,
+            );
+            let _ = driver.events.send(TournamentEvent::StandingsUpdated);
+            let _ = driver.events.send(TournamentEvent::TournamentFinished);
+        }
+
+        tokio::select! {
+            command = driver.commands.recv() => match command {
+                Some(Command::Go) => {
+                    if !finished {
+                        running = true;
+                        let _ = driver.store.set_tournament_status(driver.id, store::STATUS_RUNNING);
+                        publish_status(&driver.snapshot, TournamentStatus::Running);
+                    }
+                }
+                Some(Command::Stop) => {
+                    running = false;
+                    let _ = driver.store.set_tournament_status(driver.id, store::STATUS_STOPPED);
+                    let status = if in_flight.is_empty() {
+                        TournamentStatus::Stopped
+                    } else {
+                        TournamentStatus::Stopping
+                    };
+                    publish_status(&driver.snapshot, status);
+                }
+                Some(Command::ForceStop) => {
+                    games.shutdown().await; // abort tasks -> drop engines -> kill_on_drop
+                    // Discarded games go back to the *front* of the queue in
+                    // their original launch order, so Go replays them next —
+                    // they were never finished, only aborted.
+                    let mut discarded: Vec<(u64, ScheduledGame)> = Vec::new();
+                    for (game_id, flight) in in_flight.drain() {
+                        let _ = driver.store.discard_game(game_id);
+                        if let Some(spec) = launched.remove(&game_id) {
+                            discarded.push((flight.launch_seq, spec));
+                        }
+                    }
+                    discarded.sort_by_key(|(seq, _)| *seq);
+                    for (_, spec) in discarded.into_iter().rev() {
+                        pending.push_front(spec);
+                    }
+                    running = false;
+                    // Games are dead: freeze the play clock right now.
+                    if let Some(since) = running_since.take() {
+                        elapsed_active += since.elapsed();
+                    }
+                    let _ = driver.store.set_tournament_status(driver.id, store::STATUS_STOPPED);
+                    if let Ok(mut snap) = driver.snapshot.lock() {
+                        snap.status = TournamentStatus::Stopped;
+                        snap.in_flight_games.clear();
+                        snap.elapsed_active = elapsed_active;
+                        snap.running_since = None;
+                    }
+                }
+                Some(Command::SetConcurrency(limit)) => {
+                    concurrency = limit.max(1);
+                    // Persist so a later resume uses the new limit too.
+                    driver.config.concurrency = concurrency;
+                    let _ = driver.store.update_tournament_config(driver.id, &driver.config);
+                    if let Ok(mut snap) = driver.snapshot.lock() {
+                        snap.concurrency = concurrency;
+                    }
+                }
+                None => break, // handle dropped
+            },
+
+            Some(joined) = games.join_next(), if !games.is_empty() => {
+                match joined {
+                    Ok(report) => {
+                        let flight = in_flight.remove(&report.game_id);
+                        launched.remove(&report.game_id);
+                        *termination_counts.entry(report.termination).or_insert(0) += 1;
+                        if let Some(dur_ms) = report.stats.duration_ms {
+                            total_game_ms += dur_ms;
+                            games_timed += 1;
+                        }
+                        let _ = driver.store.finish_game(
+                            report.game_id,
+                            report.result,
+                            report.termination,
+                            report.stats.white_nps,
+                            report.stats.black_nps,
+                            report.stats.white_depth,
+                            report.stats.black_depth,
+                            report.stats.white_move_ms,
+                            report.stats.black_move_ms,
+                            report.stats.plies,
+                            &report.pgn,
+                        );
+                        append_pgn(&driver.config, &report.pgn);
+
+                        standings.record(GameOutcome {
+                            white: report.white,
+                            black: report.black,
+                            result: report.result,
+                            termination: report.termination,
+                            white_nps: report.stats.white_nps,
+                            black_nps: report.stats.black_nps,
+                            white_depth: report.stats.white_depth,
+                            black_depth: report.stats.black_depth,
+                            white_move_ms: report.stats.white_move_ms,
+                            black_move_ms: report.stats.black_move_ms,
+                        });
+                        finished_count += 1;
+
+                        if let Some(message) = &report.error {
+                            // Human-readable: which engine failed, how, and
+                            // against whom — not a game GUID.
+                            let name_of = |id: EngineId| {
+                                driver
+                                    .templates
+                                    .get(&id)
+                                    .map_or_else(|| "?".to_string(), |t| t.name.clone())
+                            };
+                            let culprit = match report.result {
+                                GameResult::WhiteWin => Some(report.black),
+                                GameResult::BlackWin => Some(report.white),
+                                GameResult::Draw => None,
+                            };
+                            let what = match report.termination {
+                                Termination::EngineCrash => "crashed",
+                                Termination::IllegalMove => "played an illegal move",
+                                Termination::TimeForfeit => "lost on time",
+                                _ => "failed",
+                            };
+                            let round = flight.as_ref().map_or(0, |f| f.round);
+                            let text = match culprit {
+                                Some(c) => {
+                                    let opp = if c == report.white { report.black } else { report.white };
+                                    format!(
+                                        "{} {} vs {} (round {round}) — loss awarded. Detail: {message}",
+                                        name_of(c), what, name_of(opp)
+                                    )
+                                }
+                                None => format!(
+                                    "{} vs {} (round {round}): {message}",
+                                    name_of(report.white), name_of(report.black)
+                                ),
+                            };
+                            push_error(&mut recent_errors, text);
+                            let _ = driver.events.send(TournamentEvent::EngineError {
+                                engine: culprit.unwrap_or(report.white),
+                                message: message.clone(),
+                            });
+                        }
+
+                        let _ = driver.events.send(TournamentEvent::GameFinished {
+                            game_id: report.game_id,
+                            result: report.result,
+                            termination: report.termination,
+                            stats: report.stats,
+                        });
+
+                        let status = if running {
+                            TournamentStatus::Running
+                        } else if in_flight.is_empty() {
+                            TournamentStatus::Stopped
+                        } else {
+                            TournamentStatus::Stopping
+                        };
+                        // A graceful Stop finishes draining here: freeze the
+                        // play clock with the last in-flight game.
+                        if !running
+                            && in_flight.is_empty()
+                            && let Some(since) = running_since.take()
+                        {
+                            elapsed_active += since.elapsed();
+                        }
+                        let in_flight_snap: Vec<InFlightGame> =
+                            in_flight.values().cloned().collect();
+                        publish(
+                            &driver.snapshot,
+                            &standings,
+                            &seeds,
+                            &driver.config.rating_writeback,
+                            finished_count,
+                            total,
+                            status,
+                            &recent_errors,
+                            elapsed_active,
+                            running_since,
+                            total_game_ms,
+                            games_timed,
+                            &in_flight_snap,
+                            &termination_counts,
+                        );
+                        let _ = driver.events.send(TournamentEvent::StandingsUpdated);
+                    }
+                    Err(join_error) => {
+                        if join_error.is_panic() {
+                            tracing::error!(target: "scheduler", "game task panicked: {join_error}");
+                        }
+                        // Cancelled tasks (Force-Stop) are expected; ignore.
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Resume an existing tournament from persisted database state.
+///
+/// Loads the engine config snapshots, replays finished games into standings and
+/// Elo, resets any `running` or `discarded` games to `pending` (so they will
+/// be replayed), then hands back the same `(Tournament, driver-future)` pair as
+/// [`create_tournament`].  Call [`Tournament::go`] to start (re)playing.
+///
+/// Returns an error if the tournament has fewer than two participants in the
+/// database, or if any participant is missing its stored config snapshot.
+pub fn resume_tournament(
+    row: TournamentRow,
+    store: Store,
+    events: Sender<TournamentEvent>,
+) -> Result<(Tournament, impl Future<Output = ()> + use<>), EngineError> {
+    let id = row.id;
+    let config = row.config;
+
+    // Load participants sorted by their original insertion seed.
+    let participants = store.list_tournament_engines(id)?;
+    if participants.len() < 2 {
+        return Err(EngineError::Corrupt(
+            "tournament has fewer than 2 engines in the database".into(),
+        ));
+    }
+
+    // Rebuild engine templates from the stored config snapshots.
+    let mut templates: HashMap<EngineId, EngineTemplate> = HashMap::new();
+    let mut ids: Vec<EngineId> = Vec::with_capacity(participants.len());
+    let mut seeds: Vec<(EngineId, f64)> = Vec::with_capacity(participants.len());
+
+    for p in &participants {
+        let engine = p.config.as_ref().ok_or_else(|| {
+            EngineError::Corrupt(format!(
+                "no engine config snapshot stored for participant {:?}",
+                p.engine
+            ))
+        })?;
+        seeds.push((p.engine, p.start_elo));
+        templates.insert(
+            p.engine,
+            EngineTemplate {
+                id: p.engine,
+                name: versioned_name(engine),
+                spawn: SpawnOptions {
+                    path: engine.path.clone(),
+                    args: engine.args.clone(),
+                    working_dir: engine.working_dir.clone(),
+                    env: engine.env.clone().into_iter().collect(),
+                },
+                options: resolve_options(
+                    engine,
+                    &config.common,
+                    config.engine_overrides.get(&p.engine),
+                ),
+                start_elo: p.start_elo,
+            },
+        );
+        ids.push(p.engine);
+    }
+
+    // Load all games for this tournament (ORDER BY round, rowid = original order).
+    let all_games = store.list_games(id)?;
+    let total_games = all_games.len();
+
+    // Reset in-flight (running) and force-stopped (discarded) games to pending
+    // so they will be replayed in this session (one statement, not per-row).
+    store.reset_unfinished_games(id)?;
+
+    // Replay finished games to reconstruct the standings and the termination
+    // breakdown (ratings are always recomputed from standings, so they need
+    // no replay of their own).
+    let mut standings = Standings::with_engines(&ids);
+    let mut finished_count = 0usize;
+    let mut termination_counts: HashMap<Termination, usize> = HashMap::new();
+
+    // Build remaining schedule from non-finished games (preserving original DB order).
+    let mut schedule: Vec<ScheduledGame> = Vec::new();
+
+    for game in &all_games {
+        if game.status == store::GAME_FINISHED {
+            if let Some(result) = game.result {
+                if let Some(t) = game.termination {
+                    *termination_counts.entry(t).or_insert(0) += 1;
+                }
+                standings.record(GameOutcome {
+                    white: game.white,
+                    black: game.black,
+                    result,
+                    // Neutral fallback for legacy rows without a termination.
+                    termination: game.termination.unwrap_or(Termination::Checkmate),
+                    white_nps: game.white_nps,
+                    black_nps: game.black_nps,
+                    white_depth: game.white_depth,
+                    black_depth: game.black_depth,
+                    white_move_ms: game.white_move_ms,
+                    black_move_ms: game.black_move_ms,
+                });
+                finished_count += 1;
+            }
+        } else {
+            schedule.push(ScheduledGame {
+                game_id: game.id,
+                pairing: Pairing {
+                    round: game.round,
+                    white: game.white,
+                    black: game.black,
+                },
+                start_fen: game.start_fen.clone(),
+                opening_moves: game.opening_moves.clone(),
+            });
+        }
+    }
+
+    // Mark the tournament as stopped (running again when Go is pressed) —
+    // unless every game is already played: loading a finished tournament for
+    // viewing must keep it Finished, in the DB and on screen.
+    let all_done = total_games > 0 && finished_count == total_games;
+    let status = if all_done {
+        store.set_tournament_status(id, store::STATUS_FINISHED)?;
+        TournamentStatus::Finished
+    } else {
+        store.set_tournament_status(id, store::STATUS_STOPPED)?;
+        TournamentStatus::Stopped
+    };
+
+    let snapshot = Arc::new(Mutex::new(TournamentSnapshot {
+        status,
+        standings: standings.clone(),
+        elo: elo_entries(&standings, &seeds, &config.rating_writeback),
+        games_finished: finished_count,
+        games_total: total_games,
+        recent_errors: Vec::new(),
+        elapsed_active: std::time::Duration::ZERO,
+        running_since: None,
+        total_game_ms: 0,
+        games_timed: 0,
+        in_flight_games: Vec::new(),
+        termination_counts: termination_counts.clone(),
+        concurrency: config.concurrency.max(1),
+    }));
+
+    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+    let driver_fut = drive(Driver {
+        id,
+        event_name: row.name,
+        config,
+        templates,
+        schedule,
+        total_games,
+        store,
+        events,
+        snapshot: Arc::clone(&snapshot),
+        commands: cmd_rx,
+        seeds,
+        init_standings: standings,
+        init_finished: finished_count,
+        init_terminations: termination_counts,
+    });
+
+    Ok((
+        Tournament {
+            id,
+            commands: cmd_tx,
+            snapshot,
+        },
+        driver_fut,
+    ))
+}
+
+/// One participant's identity within a stored tournament summary.
+#[derive(Debug, Clone)]
+pub struct ResultParticipant {
+    pub id: EngineId,
+    pub name: String,
+    pub version: String,
+}
+
+/// A read-only reconstruction of a stored tournament's outcome: final standings,
+/// Elo, participant identities, and game counts. Built by replaying the finished
+/// games in order — no engine processes are spawned. Backs the History tab.
+#[derive(Debug, Clone)]
+pub struct TournamentResults {
+    pub standings: Standings,
+    pub elo: HashMap<EngineId, EloEntry>,
+    pub participants: Vec<ResultParticipant>,
+    /// The tournament's rating-writeback mode (which engines' deltas count).
+    pub rating_writeback: colosseum_core::RatingWriteback,
+    /// Tournament-start ratings per participant.
+    pub seeds: Vec<(EngineId, f64)>,
+    pub games_finished: usize,
+    pub games_total: usize,
+    /// Finished games with a decisive (non-draw) result.
+    pub decisive: usize,
+    /// Finished games drawn.
+    pub draws: usize,
+}
+
+/// Reconstruct a stored tournament's results without spawning any engines.
+///
+/// Finished games are replayed in DB order to rebuild the standings; ratings
+/// are then the same ML recompute the live view shows, so history and live
+/// tables always agree.
+pub fn load_tournament_results(
+    store: &Store,
+    row: &TournamentRow,
+) -> Result<TournamentResults, EngineError> {
+    let id = row.id;
+
+    let participants_raw = store.list_tournament_engines(id)?;
+    let mut ids = Vec::with_capacity(participants_raw.len());
+    let mut seeds = Vec::with_capacity(participants_raw.len());
+    let mut participants = Vec::with_capacity(participants_raw.len());
+    for p in &participants_raw {
+        ids.push(p.engine);
+        seeds.push((p.engine, p.start_elo));
+        let (name, version) = match &p.config {
+            Some(cfg) => (display_name(cfg), cfg.meta.version.clone()),
+            None => (p.engine.to_string(), String::new()),
+        };
+        participants.push(ResultParticipant {
+            id: p.engine,
+            name,
+            version,
+        });
+    }
+
+    let all_games = store.list_games(id)?;
+    let total_games = all_games.len();
+
+    let mut standings = Standings::with_engines(&ids);
+    let mut finished = 0usize;
+    let mut decisive = 0usize;
+    let mut draws = 0usize;
+
+    for game in &all_games {
+        if game.status != store::GAME_FINISHED {
+            continue;
+        }
+        let Some(result) = game.result else { continue };
+        standings.record(GameOutcome {
+            white: game.white,
+            black: game.black,
+            result,
+            termination: game.termination.unwrap_or(Termination::Checkmate),
+            white_nps: game.white_nps,
+            black_nps: game.black_nps,
+            white_depth: game.white_depth,
+            black_depth: game.black_depth,
+            white_move_ms: game.white_move_ms,
+            black_move_ms: game.black_move_ms,
+        });
+        finished += 1;
+        if result == GameResult::Draw {
+            draws += 1;
+        } else {
+            decisive += 1;
+        }
+    }
+
+    Ok(TournamentResults {
+        elo: elo_entries(&standings, &seeds, &row.config.rating_writeback),
+        standings,
+        participants,
+        rating_writeback: row.config.rating_writeback.clone(),
+        seeds,
+        games_finished: finished,
+        games_total: total_games,
+        decisive,
+        draws,
+    })
+}
+
+/// Build the full [`GameSpec`] for a scheduled game.
+fn build_game_spec(driver: &Driver, scheduled: &ScheduledGame) -> GameSpec {
+    let white = &driver.templates[&scheduled.pairing.white];
+    let black = &driver.templates[&scheduled.pairing.black];
+    GameSpec {
+        game_id: scheduled.game_id,
+        event: driver.event_name.clone(),
+        site: "Colosseum".into(),
+        date: today_pgn_date(),
+        round: scheduled.pairing.round,
+        white: to_game_spec(white),
+        black: to_game_spec(black),
+        start_fen: scheduled.start_fen.clone(),
+        opening_moves: scheduled.opening_moves.clone(),
+        time_control: driver.config.time_control,
+        time_control_label: time_control_label(&driver.config),
+        adjudication: driver.config.adjudication,
+        ponder: driver.config.common.ponder,
+        timeout_tolerance: TIMEOUT_TOLERANCE,
+        handshake_timeout: HANDSHAKE_TIMEOUT,
+    }
+}
+
+fn to_game_spec(template: &EngineTemplate) -> EngineGameSpec {
+    EngineGameSpec {
+        id: template.id,
+        name: template.name.clone(),
+        spawn: template.spawn.clone(),
+        options: template.options.clone(),
+    }
+}
+
+/// Merge an engine's own option values with the tournament's common options
+/// and its per-tournament overrides. Precedence (low → high): engine library
+/// options → common tournament options → per-engine tournament overrides.
+fn resolve_options(
+    engine: &EngineConfig,
+    common: &CommonEngineOptions,
+    overrides: Option<&std::collections::BTreeMap<String, UciOptionValue>>,
+) -> Vec<(String, Option<String>)> {
+    // Button options map to (name, None) — they send `setoption name X` with no value.
+    // All other options map to (name, Some(value_string)).
+    let mut values: std::collections::BTreeMap<String, Option<String>> = engine
+        .options
+        .iter()
+        .map(|(name, value)| {
+            let v = match value {
+                UciOptionValue::Button => None,
+                other => Some(other.as_uci_string()),
+            };
+            (name.clone(), v)
+        })
+        .collect();
+
+    // Thread/hash counts are forwarded to whatever the engine actually calls
+    // them ("Threads", "Max CPUs", "Cores", "Memory"…), clamped to each
+    // option's declared range — silently sending a literal "Threads" to an
+    // engine that only knows "Max CPUs" would be ignored, and sending an
+    // out-of-range Hash can crash engines (e.g. Rybka 3).
+    if let Some(threads) = common.threads {
+        insert_matched(
+            &mut values,
+            engine,
+            colosseum_core::is_thread_option,
+            i64::from(threads),
+        );
+    }
+    if let Some(hash) = common.hash_mb {
+        insert_matched(
+            &mut values,
+            engine,
+            colosseum_core::is_hash_option,
+            i64::from(hash),
+        );
+    }
+    if common.tablebases {
+        if let Some(path) = &common.syzygy_path
+            && !path.is_empty()
+        {
+            values.insert("SyzygyPath".into(), Some(path.clone()));
+        }
+        if let Some(rule) = common.syzygy_50_move_rule {
+            values.insert("Syzygy50MoveRule".into(), Some(rule.to_string()));
+        }
+    }
+    // Ponder is always forwarded (default off keeps fast games fair).
+    values.insert("Ponder".into(), Some(common.ponder.to_string()));
+
+    // Per-engine tournament overrides win over everything above.
+    if let Some(overrides) = overrides {
+        for (name, value) in overrides {
+            let v = match value {
+                UciOptionValue::Button => None,
+                other => Some(other.as_uci_string()),
+            };
+            values.insert(name.clone(), v);
+        }
+    }
+
+    // Tablebases off is a tournament-wide statement: withhold every
+    // tablebase option regardless of where it came from (library config,
+    // the globally injected paths, or an override), so the engines never
+    // learn the paths exist.
+    if !common.tablebases {
+        values.retain(|name, _| !colosseum_core::is_tablebase_option(name));
+    }
+
+    values.into_iter().collect()
+}
+
+/// Insert `value` under every detected option whose name matches `matches`,
+/// clamped to the option's declared range. Falls back to nothing when the
+/// engine declares no matching option (the GUI surfaces that as a
+/// compatibility note).
+fn insert_matched(
+    values: &mut std::collections::BTreeMap<String, Option<String>>,
+    engine: &EngineConfig,
+    matches: fn(&str) -> bool,
+    value: i64,
+) {
+    for opt in &engine.detected_options {
+        if !matches(opt.name()) {
+            continue;
+        }
+        // A thread/hash count is always a Spin (numeric) option. Skip anything
+        // else that merely name-matches — e.g. HIARCS's boolean "Busy Threads"
+        // toggle, which must not be clobbered to the thread count.
+        if let colosseum_core::UciOption::Spin { min, max, .. } = opt {
+            let v = value.clamp(*min, *max);
+            values.insert(opt.name().to_string(), Some(v.to_string()));
+        }
+    }
+}
+
+fn display_name(engine: &EngineConfig) -> String {
+    if engine.meta.name.is_empty() {
+        engine
+            .path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| engine.id.to_string())
+    } else {
+        engine.meta.name.clone()
+    }
+}
+
+/// The engine's full identity — "name version" (e.g. `Basilisk 1.7.0`) — used
+/// wherever a single string must uniquely name an engine: PGN White/Black tags,
+/// the live game headers, and the games rail. Name and version are separate
+/// library fields, but together they are the identifier, so four `Rybka`s or
+/// two `Basilisk`s never collapse into indistinguishable entries.
+fn versioned_name(engine: &EngineConfig) -> String {
+    let name = display_name(engine);
+    let version = engine.meta.version.trim();
+    if version.is_empty() {
+        name
+    } else {
+        format!("{name} {version}")
+    }
+}
+
+fn time_control_label(config: &TournamentConfig) -> String {
+    use colosseum_core::TimeControl;
+    // Render seconds compactly: whole numbers without a trailing ".0".
+    fn secs(ms: u64) -> String {
+        let s = ms as f64 / 1000.0;
+        if (s.fract()).abs() < f64::EPSILON {
+            format!("{s:.0}")
+        } else {
+            format!("{s:.1}")
+        }
+    }
+    match config.time_control {
+        TimeControl::PerMove { ms } => format!("movetime/{ms}ms"),
+        TimeControl::SuddenDeath { base_ms } => format!("{}s", secs(base_ms)),
+        TimeControl::Increment { base_ms, inc_ms } => {
+            format!("{}+{}", secs(base_ms), secs(inc_ms))
+        }
+        TimeControl::Nodes { nodes } => format!("nodes/{nodes}"),
+        TimeControl::Depth { depth } => format!("depth/{depth}"),
+    }
+}
+
+fn append_pgn(config: &TournamentConfig, pgn: &str) {
+    let Some(path) = &config.pgn_output else {
+        return;
+    };
+    use std::io::Write;
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        Ok(mut file) => {
+            if let Err(err) = writeln!(file, "{pgn}") {
+                tracing::warn!(target: "scheduler", "failed to append PGN: {err}");
+            }
+        }
+        Err(err) => tracing::warn!(target: "scheduler", "failed to open PGN file: {err}"),
+    }
+}
+
+fn push_error(errors: &mut Vec<String>, message: String) {
+    errors.push(message);
+    if errors.len() > MAX_RECENT_ERRORS {
+        let overflow = errors.len() - MAX_RECENT_ERRORS;
+        errors.drain(0..overflow);
+    }
+}
+
+fn today_pgn_date() -> String {
+    let now = time::OffsetDateTime::now_utc();
+    format!(
+        "{:04}.{:02}.{:02}",
+        now.year(),
+        u8::from(now.month()),
+        now.day()
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish(
+    snapshot: &Arc<Mutex<TournamentSnapshot>>,
+    standings: &Standings,
+    seeds: &[(EngineId, f64)],
+    writeback: &colosseum_core::RatingWriteback,
+    finished: usize,
+    total: usize,
+    status: TournamentStatus,
+    recent_errors: &[String],
+    elapsed_active: std::time::Duration,
+    running_since: Option<std::time::Instant>,
+    total_game_ms: u64,
+    games_timed: usize,
+    in_flight_games: &[InFlightGame],
+    termination_counts: &HashMap<Termination, usize>,
+) {
+    // Recomputed from scratch every publish: for realistic fields this is
+    // sub-millisecond, and it guarantees the shown ratings never depend on
+    // game order or a K-factor.
+    let elo_map = elo_entries(standings, seeds, writeback);
+    if let Ok(mut snap) = snapshot.lock() {
+        snap.status = status;
+        snap.standings = standings.clone();
+        snap.elo = elo_map;
+        snap.games_finished = finished;
+        snap.games_total = total;
+        snap.recent_errors = recent_errors.to_vec();
+        snap.elapsed_active = elapsed_active;
+        snap.running_since = running_since;
+        snap.total_game_ms = total_game_ms;
+        snap.games_timed = games_timed;
+        snap.in_flight_games = in_flight_games.to_vec();
+        snap.termination_counts = termination_counts.clone();
+    }
+}
+
+fn publish_status(snapshot: &Arc<Mutex<TournamentSnapshot>>, status: TournamentStatus) {
+    if let Ok(mut snap) = snapshot.lock() {
+        snap.status = status;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn test_engine() -> EngineConfig {
+        let mut engine = EngineConfig::new(PathBuf::from("engine.exe"));
+        engine.detected_options = vec![
+            colosseum_core::UciOption::Spin {
+                name: "Hash".into(),
+                default: 32,
+                min: 2,
+                max: 4096,
+            },
+            colosseum_core::UciOption::Spin {
+                name: "Max CPUs".into(),
+                default: 1,
+                min: 1,
+                max: 2048,
+            },
+        ];
+        engine
+    }
+
+    #[test]
+    fn per_engine_overrides_beat_common_options() {
+        let mut engine = test_engine();
+        engine
+            .options
+            .insert("Hash".into(), UciOptionValue::Spin(64));
+        let common = CommonEngineOptions {
+            hash_mb: Some(1024),
+            ..CommonEngineOptions::default()
+        };
+
+        // Common tournament options beat the engine's saved value…
+        let resolved = resolve_options(&engine, &common, None);
+        let hash = resolved.iter().find(|(n, _)| n == "Hash").unwrap();
+        assert_eq!(hash.1.as_deref(), Some("1024"));
+
+        // …but a per-tournament override beats both (the "Rybka can't take
+        // the common Hash" case).
+        let mut ov = std::collections::BTreeMap::new();
+        ov.insert("Hash".to_string(), UciOptionValue::Spin(2048));
+        let resolved = resolve_options(&engine, &common, Some(&ov));
+        let hash = resolved.iter().find(|(n, _)| n == "Hash").unwrap();
+        assert_eq!(hash.1.as_deref(), Some("2048"));
+    }
+
+    #[test]
+    fn common_options_map_to_engine_specific_names_and_clamp() {
+        let engine = test_engine();
+        let common = CommonEngineOptions {
+            threads: Some(6),
+            hash_mb: Some(8192),
+            ..CommonEngineOptions::default()
+        };
+        let resolved = resolve_options(&engine, &common, None);
+
+        // Threads land on the engine's actual "Max CPUs" option, and no
+        // bogus literal "Threads" option is sent.
+        let cpus = resolved.iter().find(|(n, _)| n == "Max CPUs").unwrap();
+        assert_eq!(cpus.1.as_deref(), Some("6"));
+        assert!(!resolved.iter().any(|(n, _)| n == "Threads"));
+
+        // Hash is clamped to the engine's declared max (8192 → 4096).
+        let hash = resolved.iter().find(|(n, _)| n == "Hash").unwrap();
+        assert_eq!(hash.1.as_deref(), Some("4096"));
+    }
+
+    /// Regression: Rybka's "CPU Usage" is a 1–100 % throttle, and its boolean
+    /// thread toggles must not be clobbered by the thread-count mapping. Only
+    /// the genuine count option ("Max CPUs") should receive the thread value.
+    #[test]
+    fn thread_mapping_leaves_cpu_usage_and_bool_toggles_alone() {
+        let mut engine = EngineConfig::new(PathBuf::from("rybka.exe"));
+        engine.detected_options = vec![
+            colosseum_core::UciOption::Spin {
+                name: "Max CPUs".into(),
+                default: 2048,
+                min: 1,
+                max: 2048,
+            },
+            colosseum_core::UciOption::Spin {
+                name: "CPU Usage".into(),
+                default: 100,
+                min: 1,
+                max: 100,
+            },
+            colosseum_core::UciOption::Check {
+                name: "Busy Threads".into(),
+                default: true,
+            },
+        ];
+        let common = CommonEngineOptions {
+            threads: Some(1),
+            ..CommonEngineOptions::default()
+        };
+        let resolved = resolve_options(&engine, &common, None);
+
+        // The count option is set to 1 (single-threaded)…
+        let cpus = resolved.iter().find(|(n, _)| n == "Max CPUs").unwrap();
+        assert_eq!(cpus.1.as_deref(), Some("1"));
+        // …but the percentage throttle is NOT touched (would be 1 % CPU!)…
+        assert!(
+            !resolved.iter().any(|(n, _)| n == "CPU Usage"),
+            "CPU Usage must not be sent as a thread count"
+        );
+        // …and the boolean toggle is left alone too.
+        assert!(!resolved.iter().any(|(n, _)| n == "Busy Threads"));
+    }
+
+    /// Tablebases off withholds every tablebase option, no matter whether it
+    /// came from the engine's stored options, the common tournament options,
+    /// or a per-engine override.
+    #[test]
+    fn tablebases_off_strips_all_tablebase_options() {
+        let mut engine = test_engine();
+        engine
+            .options
+            .insert("SyzygyPath".into(), UciOptionValue::Str("D:/tb".into()));
+        engine
+            .options
+            .insert("NalimovCache".into(), UciOptionValue::Spin(32));
+        let mut ov = std::collections::BTreeMap::new();
+        ov.insert(
+            "GaviotaTbPath".to_string(),
+            UciOptionValue::Str("D:/gtb".into()),
+        );
+        let common = CommonEngineOptions {
+            syzygy_path: Some("D:/tb".into()),
+            syzygy_50_move_rule: Some(true),
+            tablebases: false,
+            ..CommonEngineOptions::default()
+        };
+        let resolved = resolve_options(&engine, &common, Some(&ov));
+        assert!(
+            !resolved
+                .iter()
+                .any(|(n, _)| colosseum_core::is_tablebase_option(n)),
+            "no tablebase option may reach the engine: {resolved:?}"
+        );
+
+        // With tablebases on (default), the same setup forwards them.
+        let common = CommonEngineOptions {
+            syzygy_path: Some("D:/tb".into()),
+            ..CommonEngineOptions::default()
+        };
+        let resolved = resolve_options(&engine, &common, Some(&ov));
+        assert!(resolved.iter().any(|(n, _)| n == "SyzygyPath"));
+        assert!(resolved.iter().any(|(n, _)| n == "GaviotaTbPath"));
+    }
+}

@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.88"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/maelic13/colosseum"
+authors = ["Miloslav Macůrek <macurek.m@gmail.com>"]
+
+# Releases are built by .github/workflows/release.yml (triggered by v* tags):
+# Windows ZIP + MSI (x64/arm64), Linux tar.gz + .deb + .rpm, macOS DMG + tar.gz.
+
+# ── Release profile ───────────────────────────────────────────────────────────
+# Optimize the shipped binary; engine I/O timing benefits from opt builds.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

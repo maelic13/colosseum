@@ -1,0 +1,13 @@
+[package]
+name = "colosseum-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0.18"
+uuid = { version = "1.23.2", features = ["v4", "serde"] }
