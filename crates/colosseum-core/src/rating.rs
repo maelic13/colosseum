@@ -91,3 +91,58 @@ impl Rating for IncrementalElo {
         self.current(engine) - self.baseline.get(&engine).copied().unwrap_or(0.0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EPS: f64 = 1e-9;
+
+    #[test]
+    fn expected_is_symmetric_and_centered() {
+        assert!((IncrementalElo::expected(1500.0, 1500.0) - 0.5).abs() < EPS);
+        let ea = IncrementalElo::expected(1600.0, 1400.0);
+        let eb = IncrementalElo::expected(1400.0, 1600.0);
+        assert!((ea + eb - 1.0).abs() < EPS);
+        assert!(ea > 0.5 && eb < 0.5);
+    }
+
+    #[test]
+    fn draw_between_equals_is_no_change() {
+        let a = EngineId::new();
+        let b = EngineId::new();
+        let mut elo = IncrementalElo::with_seed(32.0, [(a, 1500.0), (b, 1500.0)]);
+        let deltas = elo.update(a, b, GameResult::Draw);
+        for d in deltas {
+            assert!(d.delta.abs() < EPS);
+        }
+        assert!((elo.current(a) - 1500.0).abs() < EPS);
+        assert!((elo.current(b) - 1500.0).abs() < EPS);
+    }
+
+    #[test]
+    fn win_is_zero_sum_and_signed_correctly() {
+        let a = EngineId::new();
+        let b = EngineId::new();
+        let mut elo = IncrementalElo::with_seed(32.0, [(a, 1500.0), (b, 1500.0)]);
+        let deltas = elo.update(a, b, GameResult::WhiteWin);
+        // Equal ratings, expected 0.5, K=32 -> winner +16, loser -16.
+        let da = deltas.iter().find(|d| d.engine == a).unwrap().delta;
+        let db = deltas.iter().find(|d| d.engine == b).unwrap().delta;
+        assert!((da - 16.0).abs() < EPS);
+        assert!((db + 16.0).abs() < EPS);
+        assert!((da + db).abs() < EPS); // zero-sum
+        assert!((elo.delta_since_start(a) - 16.0).abs() < EPS);
+        assert!((elo.delta_since_start(b) + 16.0).abs() < EPS);
+    }
+
+    #[test]
+    fn unseeded_engines_default_to_zero_baseline() {
+        let a = EngineId::new();
+        let b = EngineId::new();
+        let mut elo = IncrementalElo::new(32.0);
+        elo.update(a, b, GameResult::WhiteWin);
+        // Baseline captured at first sighting (0.0), so delta reflects the full change.
+        assert!((elo.delta_since_start(a) - elo.current(a)).abs() < EPS);
+    }
+}

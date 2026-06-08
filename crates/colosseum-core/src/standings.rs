@@ -1,0 +1,266 @@
+//! Live standings aggregation: per-engine W-D-L + points, a head-to-head matrix, and
+//! average nps. Ratings (Elo / Elo Δ) live in [`crate::rating`] and are joined in the
+//! GUI; engine *names* are joined from the engine library. This type only aggregates
+//! game outcomes, so it can be updated incrementally after every finished game.
+
+use std::cmp::Ordering;
+use std::collections::HashMap;
+
+use crate::{game::GameResult, ids::EngineId};
+
+/// One engine's record against one specific opponent (from this engine's view).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HeadToHead {
+    pub wins: u32,
+    pub draws: u32,
+    pub losses: u32,
+}
+
+impl HeadToHead {
+    #[must_use]
+    pub fn games(&self) -> u32 {
+        self.wins + self.draws + self.losses
+    }
+
+    #[must_use]
+    pub fn points(&self) -> f64 {
+        f64::from(self.wins) + 0.5 * f64::from(self.draws)
+    }
+}
+
+/// One engine's overall record plus nps accumulation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct EngineStanding {
+    pub wins: u32,
+    pub draws: u32,
+    pub losses: u32,
+    nps_total: u128,
+    nps_samples: u64,
+}
+
+impl EngineStanding {
+    #[must_use]
+    pub fn games(&self) -> u32 {
+        self.wins + self.draws + self.losses
+    }
+
+    /// Tournament points (1 per win, 0.5 per draw).
+    #[must_use]
+    pub fn points(&self) -> f64 {
+        f64::from(self.wins) + 0.5 * f64::from(self.draws)
+    }
+
+    /// Average nps across sampled games, if any were sampled.
+    #[must_use]
+    pub fn avg_nps(&self) -> Option<u64> {
+        if self.nps_samples == 0 {
+            None
+        } else {
+            Some((self.nps_total / u128::from(self.nps_samples)) as u64)
+        }
+    }
+}
+
+/// A finished game's outcome, fed into [`Standings::record`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameOutcome {
+    pub white: EngineId,
+    pub black: EngineId,
+    pub result: GameResult,
+    pub white_nps: Option<u64>,
+    pub black_nps: Option<u64>,
+}
+
+/// Aggregated standings for a tournament.
+#[derive(Debug, Clone, Default)]
+pub struct Standings {
+    per_engine: HashMap<EngineId, EngineStanding>,
+    /// Keyed by `(engine, opponent)`; record is from `engine`'s perspective.
+    head_to_head: HashMap<(EngineId, EngineId), HeadToHead>,
+}
+
+impl Standings {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Pre-register engines so they appear (with a zero record) before playing.
+    #[must_use]
+    pub fn with_engines(engines: &[EngineId]) -> Self {
+        let mut standings = Self::default();
+        for &engine in engines {
+            standings.per_engine.entry(engine).or_default();
+        }
+        standings
+    }
+
+    /// Incorporate one finished game.
+    pub fn record(&mut self, outcome: GameOutcome) {
+        {
+            let white = self.per_engine.entry(outcome.white).or_default();
+            match outcome.result {
+                GameResult::WhiteWin => white.wins += 1,
+                GameResult::BlackWin => white.losses += 1,
+                GameResult::Draw => white.draws += 1,
+            }
+            if let Some(nps) = outcome.white_nps {
+                white.nps_total += u128::from(nps);
+                white.nps_samples += 1;
+            }
+        }
+        {
+            let black = self.per_engine.entry(outcome.black).or_default();
+            match outcome.result {
+                GameResult::WhiteWin => black.losses += 1,
+                GameResult::BlackWin => black.wins += 1,
+                GameResult::Draw => black.draws += 1,
+            }
+            if let Some(nps) = outcome.black_nps {
+                black.nps_total += u128::from(nps);
+                black.nps_samples += 1;
+            }
+        }
+
+        // Head-to-head, both directions.
+        record_h2h(
+            self.head_to_head
+                .entry((outcome.white, outcome.black))
+                .or_default(),
+            outcome.result,
+            true,
+        );
+        record_h2h(
+            self.head_to_head
+                .entry((outcome.black, outcome.white))
+                .or_default(),
+            outcome.result,
+            false,
+        );
+    }
+
+    /// Overall standing for an engine (zeroed if it has not played).
+    #[must_use]
+    pub fn standing(&self, engine: EngineId) -> EngineStanding {
+        self.per_engine.get(&engine).copied().unwrap_or_default()
+    }
+
+    /// `engine`'s record against `opponent`.
+    #[must_use]
+    pub fn head_to_head(&self, engine: EngineId, opponent: EngineId) -> HeadToHead {
+        self.head_to_head
+            .get(&(engine, opponent))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// All engines currently tracked.
+    pub fn engines(&self) -> impl Iterator<Item = EngineId> + '_ {
+        self.per_engine.keys().copied()
+    }
+
+    /// Engines ordered by points (descending), breaking ties deterministically by id.
+    /// Name/Elo sorts are applied in the GUI where those values are available.
+    #[must_use]
+    pub fn ranked_by_points(&self) -> Vec<EngineId> {
+        let mut rows: Vec<(EngineId, f64)> = self
+            .per_engine
+            .iter()
+            .map(|(id, standing)| (*id, standing.points()))
+            .collect();
+        rows.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.0.0.cmp(&b.0.0))
+        });
+        rows.into_iter().map(|(id, _)| id).collect()
+    }
+}
+
+fn record_h2h(record: &mut HeadToHead, result: GameResult, is_white: bool) {
+    let win = (result == GameResult::WhiteWin && is_white)
+        || (result == GameResult::BlackWin && !is_white);
+    let loss = (result == GameResult::BlackWin && is_white)
+        || (result == GameResult::WhiteWin && !is_white);
+    if result == GameResult::Draw {
+        record.draws += 1;
+    } else if win {
+        record.wins += 1;
+    } else if loss {
+        record.losses += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn outcome(w: EngineId, b: EngineId, result: GameResult) -> GameOutcome {
+        GameOutcome {
+            white: w,
+            black: b,
+            result,
+            white_nps: Some(1_000_000),
+            black_nps: Some(2_000_000),
+        }
+    }
+
+    #[test]
+    fn points_wdl_and_h2h() {
+        let a = EngineId::new();
+        let b = EngineId::new();
+        let mut s = Standings::with_engines(&[a, b]);
+
+        s.record(outcome(a, b, GameResult::WhiteWin)); // a beats b
+        s.record(outcome(b, a, GameResult::Draw)); // draw
+        s.record(outcome(a, b, GameResult::BlackWin)); // b beats a
+
+        let sa = s.standing(a);
+        let sb = s.standing(b);
+        assert_eq!((sa.wins, sa.draws, sa.losses), (1, 1, 1));
+        assert_eq!((sb.wins, sb.draws, sb.losses), (1, 1, 1));
+        assert!((sa.points() - 1.5).abs() < f64::EPSILON);
+        assert!((sb.points() - 1.5).abs() < f64::EPSILON);
+
+        let ab = s.head_to_head(a, b);
+        let ba = s.head_to_head(b, a);
+        assert_eq!((ab.wins, ab.draws, ab.losses), (1, 1, 1));
+        assert_eq!((ba.wins, ba.draws, ba.losses), (1, 1, 1));
+        assert_eq!(ab.games(), 3);
+    }
+
+    #[test]
+    fn average_nps() {
+        let a = EngineId::new();
+        let b = EngineId::new();
+        let mut s = Standings::new();
+        s.record(outcome(a, b, GameResult::Draw)); // a:1.0M, b:2.0M
+        s.record(outcome(b, a, GameResult::Draw)); // b:1.0M, a:2.0M
+        // a sampled 1.0M then 2.0M -> 1.5M; b sampled 2.0M then 1.0M -> 1.5M.
+        assert_eq!(s.standing(a).avg_nps(), Some(1_500_000));
+        assert_eq!(s.standing(b).avg_nps(), Some(1_500_000));
+    }
+
+    #[test]
+    fn ranking_orders_by_points() {
+        let a = EngineId::new();
+        let b = EngineId::new();
+        let c = EngineId::new();
+        let mut s = Standings::with_engines(&[a, b, c]);
+        // a beats b and c; b beats c.
+        s.record(outcome(a, b, GameResult::WhiteWin));
+        s.record(outcome(a, c, GameResult::WhiteWin));
+        s.record(outcome(b, c, GameResult::WhiteWin));
+        let ranked = s.ranked_by_points();
+        assert_eq!(ranked.first().copied(), Some(a)); // 2 pts
+        assert_eq!(ranked.last().copied(), Some(c)); // 0 pts
+    }
+
+    #[test]
+    fn unknown_engine_is_zeroed() {
+        let s = Standings::new();
+        let x = EngineId::new();
+        assert_eq!(s.standing(x), EngineStanding::default());
+        assert_eq!(s.standing(x).avg_nps(), None);
+    }
+}

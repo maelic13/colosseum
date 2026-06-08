@@ -15,16 +15,21 @@ pub mod ids;
 pub mod options;
 pub mod pairing;
 pub mod rating;
+pub mod standings;
 pub mod time;
 pub mod tournament;
 
 // Convenience re-exports.
-pub use adjudication::{AdjudicationConfig, DrawAdjudication, ResignAdjudication};
+pub use adjudication::{
+    Adjudication, AdjudicationConfig, DrawAdjudication, ResignAdjudication, adjudicate,
+};
 pub use engine::{EngineConfig, EngineMeta};
 pub use event::TournamentEvent;
 pub use game::{GameResult, GameStats, Pairing, Termination};
 pub use ids::{EngineId, GameId, TournamentId};
 pub use options::{UciOption, UciOptionValue};
+pub use pairing::{generate_schedule, round_robin};
 pub use rating::{IncrementalElo, Rating, RatingDelta};
-pub use time::TimeControl;
+pub use standings::{EngineStanding, GameOutcome, HeadToHead, Standings};
+pub use time::{TimeControl, TimeUnit};
 pub use tournament::{CommonEngineOptions, EloPolicy, Format, StartPosition, TournamentConfig};
