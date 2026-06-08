@@ -1,10 +1,20 @@
 //! UCI protocol and engine process management.
 //!
-//! Step 2 establishes the crate and its error seam. Step 4 implements: async process
-//! spawn (args/workdir/env), the `uci`/`isready` handshake, `option` line parsing,
-//! `setoption`, `position`/`go movetime`, `info`/`bestmove` parsing, per-move
-//! timeouts, crash/hang detection, guaranteed child cleanup, and optional I/O logging.
+//! - [`parse`]: pure parsers for `option`/`info`/`bestmove` lines.
+//! - [`EngineProcess`]: an async handle that spawns an engine, performs the
+//!   `uci`/`isready` handshake, sets options, runs searches to `bestmove` under a
+//!   deadline, and shuts the engine down cleanly (`kill_on_drop` guards against leaks).
+//! - [`UciPosition`] / [`GoLimits`]: the `position` and `go` command builders.
+//! - [`Score`]: engine score reporting.
 
 pub mod error;
+pub mod parse;
+pub mod position;
+pub mod process;
+pub mod score;
 
 pub use error::UciError;
+pub use parse::{InfoLine, parse_bestmove, parse_info_line, parse_option_line};
+pub use position::{GoLimits, UciPosition};
+pub use process::{EngineProcess, HandshakeInfo, SearchOutput, SpawnOptions};
+pub use score::Score;
