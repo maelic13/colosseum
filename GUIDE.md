@@ -12,7 +12,7 @@ thinking / GPT-5.5 extra high.
 ## Phase B — Backend (logic, no UI)
 - [x] **Step 3** — `colosseum-core`: domain types, Elo, pairings, adjudication, standings + unit tests · _Large_
 - [x] **Step 4** — `colosseum-uci`: UCI protocol & process management + temp-Stockfish tests · _Large_
-- [ ] **Step 5** — `colosseum-engine`: scheduler, Go/Stop/Force-Stop, PGN, persistence + integration tests · _Large_
+- [x] **Step 5** — `colosseum-engine`: scheduler, Go/Stop/Force-Stop, PGN, persistence + integration tests · _Large_
 - [ ] **Step 6** — Persistence & resume wiring; `--portable` mode · _Small_
 
 ## Phase C — GUI

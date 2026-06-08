@@ -9,8 +9,12 @@ pub mod error;
 pub mod paths;
 pub mod pgn;
 pub mod runner;
+pub mod scheduler;
 pub mod store;
 
 pub use error::EngineError;
 pub use runner::{EngineGameSpec, GameReport, GameSpec, run_game};
+pub use scheduler::{
+    Command, EloEntry, Tournament, TournamentSnapshot, TournamentStatus, create_tournament,
+};
 pub use store::{GameRow, Store, TournamentEngineRow, TournamentRow};
