@@ -11,6 +11,7 @@ use colosseum_core::branding::DISPLAY_NAME;
 use colosseum_engine::TournamentStatus;
 
 use crate::backend::Backend;
+use crate::engines_tab::EnginesTab;
 use crate::theme;
 
 /// Top-level tabs. Tournament is the primary, default tab.
@@ -47,6 +48,7 @@ pub struct ColosseumApp {
     backend: Backend,
     tab: Tab,
     close: CloseState,
+    engines_tab: EnginesTab,
 }
 
 impl ColosseumApp {
@@ -57,6 +59,7 @@ impl ColosseumApp {
             backend,
             tab: Tab::default(),
             close: CloseState::Open,
+            engines_tab: EnginesTab::default(),
         }
     }
 
@@ -247,7 +250,7 @@ impl ColosseumApp {
             });
     }
 
-    /// The central tab body. Real content lands in Steps 8–10.
+    /// The central tab body.
     fn body(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default()
             .frame(
@@ -263,13 +266,9 @@ impl ColosseumApp {
                      run a tournament with a live results table.",
                     "Implemented in Step 9.",
                 ),
-                Tab::Engines => placeholder(
-                    ui,
-                    "Engines",
-                    "Add engines individually or scan a folder; auto-detect and edit their \
-                     UCI options and metadata.",
-                    "Implemented in Step 8.",
-                ),
+                Tab::Engines => {
+                    self.engines_tab.show(ui, &mut self.backend);
+                }
             });
     }
 }

@@ -1,0 +1,1058 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! Engine Management tab: add, scan, auto-detect, edit, and delete engines.
+//!
+//! The tab is a two-pane split — a resizable engine list on the left and an
+//! edit panel on the right.  Adding an engine (single file or folder scan)
+//! spawns a background detection task on the tokio runtime so the GUI thread
+//! never blocks.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use crossbeam_channel::Receiver;
+use eframe::egui::{self, Color32, DragValue, Layout, RichText, ScrollArea, Ui};
+
+use colosseum_core::{EngineConfig, EngineId, UciOption, UciOptionValue};
+use colosseum_engine::{DetectResult, detect_engine};
+
+use crate::backend::Backend;
+use crate::theme;
+
+// ── Public tab state ─────────────────────────────────────────────────────────
+
+/// All persistent state for the Engine Management tab.
+#[derive(Default)]
+pub struct EnginesTab {
+    selected_id: Option<EngineId>,
+    /// Edit buffer for the selected engine; `None` when nothing is selected.
+    edit: Option<EngineEditBuf>,
+    /// A running add-single / folder-scan job.
+    pending: Option<DetectJob>,
+    /// A separate re-detect channel for an already-listed engine.
+    redetect_rx: Option<Receiver<Result<DetectResult, String>>>,
+    redetect_for: Option<EngineId>,
+    /// Error message from the last detection, shown until dismissed.
+    detect_error: Option<String>,
+}
+
+impl EnginesTab {
+    /// Draw the full tab body.  Call every frame.
+    pub fn show(&mut self, ui: &mut Ui, backend: &mut Backend) {
+        // Poll any background work first so results are visible this frame.
+        self.poll_detect(backend);
+        self.poll_redetect();
+
+        self.show_toolbar(ui, backend);
+
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(2.0);
+
+        // Two-pane layout: resizable list | edit panel.
+        egui::SidePanel::left("engines_list_panel")
+            .default_width(270.0)
+            .width_range(160.0..=440.0)
+            .resizable(true)
+            .frame(egui::Frame::new().inner_margin(egui::Margin {
+                right: 10,
+                ..Default::default()
+            }))
+            .show_inside(ui, |ui| {
+                self.show_list(ui, &backend.engines);
+            });
+
+        ScrollArea::vertical()
+            .id_salt("engines_edit_scroll")
+            .show(ui, |ui| {
+                if self.edit.is_some() {
+                    self.show_edit(ui, backend);
+                } else {
+                    empty_state(ui);
+                }
+            });
+    }
+}
+
+// ── Detection jobs ────────────────────────────────────────────────────────────
+
+/// A background add-single / folder-scan job.
+struct DetectJob {
+    rx: Receiver<(PathBuf, Result<DetectResult, String>)>,
+    total: usize,
+    done: usize,
+}
+
+impl EnginesTab {
+    /// Drain the add/scan channel; create `EngineConfig`s for successes.
+    fn poll_detect(&mut self, backend: &mut Backend) {
+        if self.pending.is_none() {
+            return;
+        }
+
+        // Collect results while holding the borrow; release it before calling
+        // `select_engine` (which also borrows `self` mutably).
+        let mut new_ids: Vec<EngineId> = Vec::new();
+        let mut last_error: Option<String> = None;
+        let mut disconnected = false;
+
+        {
+            let job = self.pending.as_mut().unwrap();
+            loop {
+                match job.rx.try_recv() {
+                    Ok((path, Ok(result))) => {
+                        job.done += 1;
+                        let id = add_engine_from_detect(path, result, backend);
+                        new_ids.push(id);
+                    }
+                    Ok((path, Err(msg))) => {
+                        job.done += 1;
+                        let name = path
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("?")
+                            .to_string();
+                        last_error = Some(format!("{name}: {msg}"));
+                    }
+                    Err(crossbeam_channel::TryRecvError::Empty) => break,
+                    Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
+            }
+        } // borrow on self.pending ends here
+
+        if let Some(err) = last_error {
+            self.detect_error = Some(err);
+        }
+
+        let done = self.pending.as_ref().map_or(0, |j| j.done);
+        let total = self.pending.as_ref().map_or(0, |j| j.total);
+        if disconnected || done >= total {
+            self.pending = None;
+        }
+
+        let engines_snap = backend.engines.clone();
+        for id in new_ids {
+            if self.selected_id.is_none() {
+                self.select_engine(&id, &engines_snap);
+            }
+        }
+    }
+
+    /// Drain the re-detect channel and update the edit buffer when done.
+    fn poll_redetect(&mut self) {
+        let (Some(rx), Some(for_id)) = (&self.redetect_rx, &self.redetect_for) else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(Ok(result)) => {
+                if let Some(edit) = &mut self.edit
+                    && &edit.engine_id == for_id
+                {
+                    edit.detected_options = result.options;
+                    // Offer detected name/author only when the user hasn't typed one.
+                    if let Some(n) = result.name
+                        && edit.name.trim().is_empty()
+                    {
+                        edit.name = n;
+                    }
+                    if let Some(a) = result.author
+                        && edit.version.trim().is_empty()
+                    {
+                        edit.version = a;
+                    }
+                    edit.redetect_pending = false;
+                    edit.dirty = true;
+                }
+                self.redetect_rx = None;
+                self.redetect_for = None;
+            }
+            Ok(Err(e)) => {
+                self.detect_error = Some(format!("Re-detect failed: {e}"));
+                if let Some(edit) = &mut self.edit {
+                    edit.redetect_pending = false;
+                }
+                self.redetect_rx = None;
+                self.redetect_for = None;
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                if let Some(edit) = &mut self.edit {
+                    edit.redetect_pending = false;
+                }
+                self.redetect_rx = None;
+                self.redetect_for = None;
+            }
+        }
+    }
+
+    fn start_single(&mut self, path: PathBuf, backend: &Backend) {
+        let (tx, rx) = crossbeam_channel::bounded(4);
+        let p = path.clone();
+        backend.runtime.spawn(async move {
+            let res = detect_engine(&p).await.map_err(|e| e.to_string());
+            let _ = tx.send((p, res));
+        });
+        self.pending = Some(DetectJob {
+            rx,
+            total: 1,
+            done: 0,
+        });
+        self.detect_error = None;
+    }
+
+    fn start_folder(&mut self, dir: &Path, backend: &Backend) {
+        let paths = find_executables(dir);
+        if paths.is_empty() {
+            self.detect_error = Some("No executable files found in that folder.".to_string());
+            return;
+        }
+        let total = paths.len();
+        let (tx, rx) = crossbeam_channel::bounded(total + 4);
+        backend.runtime.spawn(async move {
+            for path in paths {
+                let res = detect_engine(&path).await.map_err(|e| e.to_string());
+                if tx.send((path, res)).is_err() {
+                    break;
+                }
+            }
+        });
+        self.pending = Some(DetectJob { rx, total, done: 0 });
+        self.detect_error = None;
+    }
+
+    fn start_redetect(&mut self, path: PathBuf, engine_id: EngineId, backend: &Backend) {
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        backend.runtime.spawn(async move {
+            let res = detect_engine(&path).await.map_err(|e| e.to_string());
+            let _ = tx.send(res);
+        });
+        self.redetect_rx = Some(rx);
+        self.redetect_for = Some(engine_id);
+    }
+
+    fn select_engine(&mut self, id: &EngineId, engines: &[EngineConfig]) {
+        if let Some(engine) = engines.iter().find(|e| &e.id == id) {
+            self.selected_id = Some(*id);
+            self.edit = Some(EngineEditBuf::from_engine(engine));
+        }
+    }
+}
+
+// ── Toolbar ───────────────────────────────────────────────────────────────────
+
+impl EnginesTab {
+    fn show_toolbar(&mut self, ui: &mut Ui, backend: &mut Backend) {
+        ui.horizontal(|ui| {
+            let busy = self.pending.is_some();
+
+            let add_resp = ui
+                .add_enabled(
+                    !busy,
+                    egui::Button::new(
+                        RichText::new("＋ Add Engine")
+                            .color(theme::ACCENT)
+                            .size(13.5),
+                    ),
+                )
+                .on_hover_text("Pick an engine executable and auto-detect its UCI options.");
+            if add_resp.clicked() {
+                let mut dialog = rfd::FileDialog::new().set_title("Select engine executable");
+                if let Some(last) = &backend.config.last_engine_dir {
+                    dialog = dialog.set_directory(last);
+                }
+                if let Some(path) = dialog.pick_file() {
+                    if let Some(dir) = path.parent() {
+                        backend.config.last_engine_dir = Some(dir.to_path_buf());
+                    }
+                    self.start_single(path, backend);
+                }
+            }
+
+            ui.add_space(4.0);
+
+            let folder_resp = ui
+                .add_enabled(
+                    !busy,
+                    egui::Button::new(RichText::new("＋ Add Folder").color(theme::TEXT).size(13.5)),
+                )
+                .on_hover_text(
+                    "Scan a folder for engine executables and add those that respond to UCI.",
+                );
+            if folder_resp.clicked() {
+                let mut dialog = rfd::FileDialog::new().set_title("Select folder of engines");
+                if let Some(last) = &backend.config.last_engine_dir {
+                    dialog = dialog.set_directory(last);
+                }
+                if let Some(dir) = dialog.pick_folder() {
+                    backend.config.last_engine_dir = Some(dir.clone());
+                    self.start_folder(&dir, backend);
+                }
+            }
+
+            ui.add_space(16.0);
+
+            if let Some(job) = &self.pending {
+                let label = if job.total == 1 {
+                    "⏳ Detecting…".to_string()
+                } else {
+                    format!("⏳ Scanning {}/{}…", job.done, job.total)
+                };
+                ui.label(RichText::new(label).color(theme::ACCENT).size(13.0));
+            }
+
+            if let Some(err) = self.detect_error.clone() {
+                ui.label(
+                    RichText::new(format!("⚠ {err}"))
+                        .color(theme::DANGER)
+                        .size(13.0),
+                );
+                ui.add_space(4.0);
+                if ui
+                    .small_button(RichText::new("×").color(theme::TEXT_WEAK))
+                    .clicked()
+                {
+                    self.detect_error = None;
+                }
+            }
+        });
+    }
+}
+
+// ── Engine list ───────────────────────────────────────────────────────────────
+
+impl EnginesTab {
+    fn show_list(&mut self, ui: &mut Ui, engines: &[EngineConfig]) {
+        ui.label(
+            RichText::new(format!(
+                "{} engine{}",
+                engines.len(),
+                if engines.len() == 1 { "" } else { "s" }
+            ))
+            .color(theme::TEXT_WEAK)
+            .size(12.0),
+        );
+        ui.add_space(4.0);
+
+        ScrollArea::vertical()
+            .id_salt("engines_list_scroll")
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+
+                if engines.is_empty() {
+                    ui.add_space(20.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            RichText::new("No engines yet")
+                                .color(theme::TEXT_WEAK)
+                                .size(13.5),
+                        );
+                    });
+                    return;
+                }
+
+                let mut clicked_id: Option<EngineId> = None;
+
+                for engine in engines {
+                    let selected = self.selected_id.as_ref() == Some(&engine.id);
+
+                    let display_name = engine_display_name(engine);
+
+                    let fill = if selected {
+                        theme::BG_ELEVATED
+                    } else {
+                        Color32::TRANSPARENT
+                    };
+
+                    let row_resp = egui::Frame::new()
+                        .fill(fill)
+                        .corner_radius(egui::CornerRadius::same(6))
+                        .inner_margin(egui::Margin::symmetric(8, 5))
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        RichText::new(&display_name)
+                                            .color(if selected {
+                                                theme::ACCENT
+                                            } else {
+                                                theme::TEXT
+                                            })
+                                            .size(13.5)
+                                            .strong(),
+                                    );
+                                    if let Some(stem) =
+                                        engine.path.file_name().and_then(|s| s.to_str())
+                                    {
+                                        ui.label(
+                                            RichText::new(stem).color(theme::TEXT_WEAK).size(11.5),
+                                        );
+                                    }
+                                });
+                                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if let Some(elo) = engine.meta.elo {
+                                        ui.label(
+                                            RichText::new(elo.to_string())
+                                                .color(theme::TEXT_WEAK)
+                                                .size(12.0),
+                                        );
+                                    }
+                                });
+                            });
+                        })
+                        .response;
+
+                    let interact = ui.interact(
+                        row_resp.rect,
+                        egui::Id::new("engine_row").with(engine.id),
+                        egui::Sense::click(),
+                    );
+
+                    if interact.hovered() && !selected {
+                        ui.painter().rect_filled(
+                            row_resp.rect,
+                            egui::CornerRadius::same(6),
+                            theme::BG_HOVER,
+                        );
+                    }
+
+                    if interact.clicked() {
+                        clicked_id = Some(engine.id);
+                    }
+
+                    ui.add_space(2.0);
+                }
+
+                // Apply selection outside the loop (borrow rules).
+                if let Some(id) = clicked_id {
+                    let engines_snapshot: Vec<EngineConfig> = engines.to_vec();
+                    self.select_engine(&id, &engines_snapshot);
+                }
+            });
+    }
+}
+
+// ── Edit buffer ───────────────────────────────────────────────────────────────
+
+struct EngineEditBuf {
+    engine_id: EngineId,
+
+    // Identity
+    name: String,
+    version: String,
+    elo_str: String,
+
+    // Launch
+    path: PathBuf,
+    args_str: String,
+    working_dir_str: String,
+
+    // Env vars
+    env_rows: Vec<[String; 2]>,
+    new_env_key: String,
+    new_env_val: String,
+
+    // UCI options
+    detected_options: Vec<UciOption>,
+    option_overrides: BTreeMap<String, UciOptionValue>,
+
+    // UI state
+    dirty: bool,
+    delete_confirm: bool,
+    redetect_pending: bool,
+}
+
+impl EngineEditBuf {
+    fn from_engine(e: &EngineConfig) -> Self {
+        Self {
+            engine_id: e.id,
+            name: e.meta.name.clone(),
+            version: e.meta.version.clone(),
+            elo_str: e.meta.elo.map(|v| v.to_string()).unwrap_or_default(),
+            path: e.path.clone(),
+            args_str: e.args.join(" "),
+            working_dir_str: e
+                .working_dir
+                .as_deref()
+                .and_then(|p| p.to_str())
+                .unwrap_or("")
+                .to_string(),
+            env_rows: e.env.iter().map(|(k, v)| [k.clone(), v.clone()]).collect(),
+            new_env_key: String::new(),
+            new_env_val: String::new(),
+            detected_options: e.detected_options.clone(),
+            option_overrides: e.options.clone(),
+            dirty: false,
+            delete_confirm: false,
+            redetect_pending: false,
+        }
+    }
+
+    /// Write the buffer back to the matching engine and persist.
+    fn commit(&mut self, backend: &mut Backend) {
+        let Some(engine) = backend.engines.iter_mut().find(|e| e.id == self.engine_id) else {
+            return;
+        };
+        engine.meta.name = self.name.clone();
+        engine.meta.version = self.version.clone();
+        engine.meta.elo = self.elo_str.trim().parse::<i32>().ok();
+        engine.args = self
+            .args_str
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        engine.working_dir = if self.working_dir_str.trim().is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(self.working_dir_str.trim()))
+        };
+        engine.env = self
+            .env_rows
+            .iter()
+            .filter(|[k, _]| !k.trim().is_empty())
+            .map(|[k, v]| (k.clone(), v.clone()))
+            .collect();
+        engine.options = self.option_overrides.clone();
+        engine.detected_options = self.detected_options.clone();
+        backend.save_engines();
+        self.dirty = false;
+    }
+}
+
+// ── Edit panel ────────────────────────────────────────────────────────────────
+
+impl EnginesTab {
+    fn show_edit(&mut self, ui: &mut Ui, backend: &mut Backend) {
+        // Take to avoid simultaneous mutable borrows of `self`.
+        let Some(mut edit) = self.edit.take() else {
+            return;
+        };
+
+        let mut do_delete = false;
+        let mut do_redetect = false;
+
+        // ─ Heading ─
+        ui.horizontal(|ui| {
+            let name = engine_display_name_from_parts(&edit.name, &edit.path);
+            ui.label(RichText::new(&name).size(19.0).strong().color(theme::TEXT));
+            if edit.dirty {
+                ui.label(
+                    RichText::new("● unsaved")
+                        .color(theme::WARN)
+                        .size(11.5)
+                        .italics(),
+                );
+            }
+            if edit.redetect_pending {
+                ui.label(
+                    RichText::new("⏳ detecting…")
+                        .color(theme::ACCENT)
+                        .size(11.5),
+                );
+            }
+        });
+        ui.add_space(8.0);
+
+        // ─ Identity ─
+        section_label(ui, "Identity");
+        egui::Grid::new("edit_identity")
+            .num_columns(2)
+            .spacing([8.0, 6.0])
+            .show(ui, |ui| {
+                field_label(ui, "Name");
+                if ui
+                    .add(text_field(&mut edit.name).hint_text("e.g. Stockfish 16"))
+                    .changed()
+                {
+                    edit.dirty = true;
+                }
+                ui.end_row();
+
+                field_label(ui, "Version");
+                if ui
+                    .add(text_field(&mut edit.version).hint_text("e.g. 16"))
+                    .changed()
+                {
+                    edit.dirty = true;
+                }
+                ui.end_row();
+
+                field_label(ui, "Elo");
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut edit.elo_str)
+                            .desired_width(90.0)
+                            .hint_text("optional"),
+                    )
+                    .changed()
+                {
+                    edit.dirty = true;
+                }
+                ui.end_row();
+            });
+
+        ui.add_space(10.0);
+
+        // ─ Launch ─
+        section_label(ui, "Launch");
+        egui::Grid::new("edit_launch")
+            .num_columns(2)
+            .spacing([8.0, 6.0])
+            .show(ui, |ui| {
+                field_label(ui, "Path");
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(edit.path.to_string_lossy())
+                            .color(theme::TEXT_WEAK)
+                            .size(12.0)
+                            .monospace(),
+                    )
+                    .truncate(),
+                );
+                ui.end_row();
+
+                field_label(ui, "Args");
+                if ui
+                    .add(
+                        text_field(&mut edit.args_str)
+                            .hint_text("extra arguments (space-separated)"),
+                    )
+                    .changed()
+                {
+                    edit.dirty = true;
+                }
+                ui.end_row();
+
+                field_label(ui, "Work dir");
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            text_field(&mut edit.working_dir_str)
+                                .hint_text("defaults to engine directory"),
+                        )
+                        .changed()
+                    {
+                        edit.dirty = true;
+                    }
+                    if ui
+                        .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
+                        .clicked()
+                        && let Some(dir) = rfd::FileDialog::new()
+                            .set_title("Select working directory")
+                            .pick_folder()
+                    {
+                        edit.working_dir_str = dir.to_string_lossy().to_string();
+                        edit.dirty = true;
+                    }
+                });
+                ui.end_row();
+            });
+
+        ui.add_space(10.0);
+
+        // ─ Environment variables ─
+        section_label(ui, "Environment Variables");
+
+        let mut remove_idx: Option<usize> = None;
+        for (i, row) in edit.env_rows.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut row[0])
+                            .desired_width(150.0)
+                            .hint_text("KEY"),
+                    )
+                    .changed()
+                {
+                    edit.dirty = true;
+                }
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut row[1])
+                            .desired_width(f32::INFINITY)
+                            .hint_text("value"),
+                    )
+                    .changed()
+                {
+                    edit.dirty = true;
+                }
+                if ui
+                    .small_button(RichText::new("×").color(theme::DANGER))
+                    .clicked()
+                {
+                    remove_idx = Some(i);
+                }
+            });
+        }
+        if let Some(i) = remove_idx {
+            edit.env_rows.remove(i);
+            edit.dirty = true;
+        }
+        // New row.
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut edit.new_env_key)
+                    .desired_width(150.0)
+                    .hint_text("NEW KEY"),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut edit.new_env_val)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("value"),
+            );
+            if ui
+                .add_enabled(
+                    !edit.new_env_key.trim().is_empty(),
+                    egui::Button::new(RichText::new("＋").color(theme::ACCENT)),
+                )
+                .clicked()
+            {
+                edit.env_rows.push([
+                    std::mem::take(&mut edit.new_env_key),
+                    std::mem::take(&mut edit.new_env_val),
+                ]);
+                edit.dirty = true;
+            }
+        });
+
+        ui.add_space(10.0);
+
+        // ─ UCI Options ─
+        ui.horizontal(|ui| {
+            section_label(ui, "UCI Options");
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                let can_redetect = !edit.redetect_pending && self.redetect_rx.is_none();
+                if ui
+                    .add_enabled(
+                        can_redetect,
+                        egui::Button::new(
+                            RichText::new(if edit.redetect_pending {
+                                "Detecting…"
+                            } else {
+                                "Re-detect"
+                            })
+                            .size(12.5)
+                            .color(theme::TEXT_WEAK),
+                        ),
+                    )
+                    .on_hover_text("Re-run the UCI handshake to refresh options and identity.")
+                    .clicked()
+                {
+                    do_redetect = true;
+                }
+            });
+        });
+
+        if edit.detected_options.is_empty() {
+            ui.label(
+                RichText::new("No options detected yet — use Re-detect to query the engine.")
+                    .color(theme::TEXT_WEAK)
+                    .size(12.5)
+                    .italics(),
+            );
+        } else {
+            egui::Grid::new("uci_opts_grid")
+                .num_columns(2)
+                .spacing([8.0, 5.0])
+                .show(ui, |ui| {
+                    let options = edit.detected_options.clone();
+                    for opt in &options {
+                        show_option_row(ui, opt, &mut edit.option_overrides, &mut edit.dirty);
+                        ui.end_row();
+                    }
+                });
+        }
+
+        ui.add_space(16.0);
+        ui.separator();
+        ui.add_space(8.0);
+
+        // ─ Action row ─
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    edit.dirty,
+                    egui::Button::new(
+                        RichText::new("Save Changes")
+                            .color(theme::BG_DARKEST)
+                            .size(13.5),
+                    )
+                    .fill(theme::ACCENT),
+                )
+                .clicked()
+            {
+                edit.commit(backend);
+            }
+
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if edit.delete_confirm {
+                    if ui
+                        .button(RichText::new("Cancel").color(theme::TEXT_WEAK).size(13.0))
+                        .clicked()
+                    {
+                        edit.delete_confirm = false;
+                    }
+                    ui.add_space(4.0);
+                    if ui
+                        .button(
+                            RichText::new("Confirm Delete")
+                                .color(theme::DANGER)
+                                .size(13.0),
+                        )
+                        .clicked()
+                    {
+                        do_delete = true;
+                    }
+                } else if ui
+                    .button(
+                        RichText::new("Delete Engine")
+                            .color(theme::DANGER)
+                            .size(13.0),
+                    )
+                    .clicked()
+                {
+                    edit.delete_confirm = true;
+                }
+            });
+        });
+
+        // ─ Execute deferred actions ─
+
+        if do_delete {
+            backend.engines.retain(|e| e.id != edit.engine_id);
+            backend.save_engines();
+            self.selected_id = None;
+            // edit is dropped; don't restore it
+            return;
+        }
+
+        if do_redetect {
+            let path = edit.path.clone();
+            let id = edit.engine_id;
+            edit.redetect_pending = true;
+            self.start_redetect(path, id, backend);
+        }
+
+        self.edit = Some(edit);
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Create an `EngineConfig` from detection results and push it to `backend.engines`.
+/// Returns the new engine's `EngineId`.
+fn add_engine_from_detect(path: PathBuf, result: DetectResult, backend: &mut Backend) -> EngineId {
+    let mut cfg = EngineConfig::new(path);
+    cfg.meta.name = result.name.unwrap_or_else(|| {
+        cfg.path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Unknown")
+            .to_string()
+    });
+    if let Some(author) = result.author {
+        cfg.meta.version = author;
+    }
+    cfg.detected_options = result.options;
+    let id = cfg.id;
+    backend.engines.push(cfg);
+    backend.save_engines();
+    id
+}
+
+/// Enumerate executable files (non-recursive) in `dir`.
+fn find_executables(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && is_executable(p))
+        .collect();
+    paths.sort();
+    paths
+}
+
+fn is_executable(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        path.extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("exe"))
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        path.metadata()
+            .map(|m| m.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+    }
+}
+
+/// Display name for an engine: `meta.name` if set, otherwise the executable stem.
+fn engine_display_name(e: &EngineConfig) -> String {
+    if e.meta.name.is_empty() {
+        e.path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("?")
+            .to_string()
+    } else {
+        e.meta.name.clone()
+    }
+}
+
+fn engine_display_name_from_parts(name: &str, path: &Path) -> String {
+    if name.trim().is_empty() {
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("?")
+            .to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+/// Section heading with a subtle line underneath.
+fn section_label(ui: &mut Ui, title: &str) {
+    ui.label(
+        RichText::new(title)
+            .color(theme::TEXT_WEAK)
+            .size(11.5)
+            .strong(),
+    );
+    ui.add_space(3.0);
+}
+
+/// Dim label for a grid row's left column.
+fn field_label(ui: &mut Ui, text: &str) {
+    ui.label(RichText::new(text).color(theme::TEXT_WEAK).size(13.0));
+}
+
+/// A `TextEdit::singleline` filling available width.
+fn text_field(buf: &mut String) -> egui::TextEdit<'_> {
+    egui::TextEdit::singleline(buf).desired_width(f32::INFINITY)
+}
+
+/// Draw one UCI option row (label | editor).  Sets `dirty` if the value changed.
+fn show_option_row(
+    ui: &mut Ui,
+    opt: &UciOption,
+    overrides: &mut BTreeMap<String, UciOptionValue>,
+    dirty: &mut bool,
+) {
+    ui.label(RichText::new(opt.name()).color(theme::TEXT_WEAK).size(13.0));
+
+    match opt {
+        UciOption::Check { name, default } => {
+            let mut val = matches!(overrides.get(name), Some(UciOptionValue::Check(true)))
+                || (overrides.get(name).is_none() && *default);
+
+            if ui.checkbox(&mut val, "").changed() {
+                overrides.insert(name.clone(), UciOptionValue::Check(val));
+                *dirty = true;
+            }
+        }
+
+        UciOption::Spin {
+            name,
+            default,
+            min,
+            max,
+        } => {
+            let current = match overrides.get(name) {
+                Some(UciOptionValue::Spin(v)) => *v,
+                _ => *default,
+            };
+            let mut val = current;
+            let resp = ui.add(DragValue::new(&mut val).range(*min..=*max).speed(1.0));
+            if resp.changed() {
+                overrides.insert(name.clone(), UciOptionValue::Spin(val));
+                *dirty = true;
+            }
+            ui.label(
+                RichText::new(format!("({min}–{max})"))
+                    .color(Color32::from_rgb(0x6c, 0x76, 0x86))
+                    .size(11.5),
+            );
+        }
+
+        UciOption::Combo {
+            name,
+            default,
+            vars,
+        } => {
+            let current = match overrides.get(name) {
+                Some(UciOptionValue::Combo(s)) => s.clone(),
+                _ => default.clone(),
+            };
+            let mut selected = current.clone();
+            egui::ComboBox::from_id_salt(egui::Id::new("opt_combo").with(name))
+                .selected_text(&selected)
+                .width(200.0)
+                .show_ui(ui, |ui| {
+                    for v in vars {
+                        if ui.selectable_value(&mut selected, v.clone(), v).clicked() {
+                            overrides.insert(name.clone(), UciOptionValue::Combo(selected.clone()));
+                            *dirty = true;
+                        }
+                    }
+                });
+        }
+
+        UciOption::Str { name, default } => {
+            let current = match overrides.get(name) {
+                Some(UciOptionValue::Str(s)) => s.clone(),
+                _ => default.clone(),
+            };
+            let mut val = current;
+            if ui
+                .add(
+                    egui::TextEdit::singleline(&mut val)
+                        .desired_width(240.0)
+                        .hint_text(default),
+                )
+                .changed()
+            {
+                overrides.insert(name.clone(), UciOptionValue::Str(val));
+                *dirty = true;
+            }
+        }
+
+        UciOption::Button { name } => {
+            // Buttons are informational in the editor; they trigger UCI setoption
+            // at search time if the user sets them.
+            if ui
+                .small_button(RichText::new("trigger").color(theme::TEXT_WEAK))
+                .on_hover_text(format!(
+                    "Sends 'setoption name {name}' to the engine at game start."
+                ))
+                .clicked()
+            {
+                // No stored value for buttons; just note the intent in overrides
+                // as a placeholder (button values are never serialised as a value).
+            }
+        }
+    }
+}
+
+/// Placeholder shown in the right pane when no engine is selected.
+fn empty_state(ui: &mut Ui) {
+    ui.vertical_centered(|ui| {
+        ui.add_space(80.0);
+        ui.label(
+            RichText::new("No engine selected")
+                .color(theme::TEXT_WEAK)
+                .size(15.0),
+        );
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new("Pick an engine from the list, or add one with the buttons above.")
+                .color(Color32::from_rgb(0x6c, 0x76, 0x86))
+                .size(13.0),
+        );
+    });
+}

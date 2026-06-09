@@ -47,8 +47,7 @@ pub struct Backend {
         reason = "queried by the Tournament/History flows in Step 9"
     )]
     pub store: Store,
-    /// Runtime that drives tournament games.
-    #[expect(dead_code, reason = "tournament drivers are spawned here in Step 9")]
+    /// Runtime that drives engine detection (Step 8) and tournament games (Step 9).
     pub runtime: tokio::runtime::Runtime,
     pub active: Option<ActiveTournament>,
 }
@@ -125,6 +124,13 @@ impl Backend {
     pub fn save_config(&self) {
         if let Err(e) = self.config.save(&self.dirs.config_file()) {
             tracing::warn!("failed to save config: {e}");
+        }
+    }
+
+    /// Persist the engine library to disk, logging any failure.
+    pub fn save_engines(&self) {
+        if let Err(e) = EngineLibrary::save(&self.engines, &self.dirs.engines_file()) {
+            tracing::warn!("failed to save engines: {e}");
         }
     }
 }

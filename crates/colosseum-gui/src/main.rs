@@ -8,6 +8,7 @@
 
 mod app;
 mod backend;
+mod engines_tab;
 mod icon;
 mod theme;
 
