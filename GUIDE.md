@@ -23,7 +23,15 @@ thinking / GPT-5.5 extra high.
 
 ## Phase D — Release
 - [x] **Step 11** — Cross-platform packaging & release (cargo-dist; Flatpak/MSI/DMG/tarball) · _Small_
-- [ ] **Step 12** — README, CHANGELOG, docs polish · _Small_
+- [x] **Step 12** — README, CHANGELOG, docs polish · _Small_
+
+---
+
+### v0.1.0 shipped ✓
+
+All 12 steps complete. See [README.md](README.md) for build & run instructions,
+[CHANGELOG.md](CHANGELOG.md) for what's in v0.1.0, and [PLAN.md](PLAN.md) for the
+full architecture reference.
 
 ---
 
