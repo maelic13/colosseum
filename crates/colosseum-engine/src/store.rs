@@ -56,12 +56,15 @@ pub struct GameRow {
     pub status: String,
 }
 
-/// One participating engine's seed and starting Elo within a tournament.
-#[derive(Debug, Clone, Copy)]
+/// One participating engine's seed, starting Elo, and config snapshot within a tournament.
+#[derive(Debug, Clone)]
 pub struct TournamentEngineRow {
     pub engine: EngineId,
     pub seed: u32,
     pub start_elo: f64,
+    /// Full engine config snapshot stored at tournament creation.
+    /// `None` for databases created before Step 6 that lack the column.
+    pub config: Option<EngineConfig>,
 }
 
 /// A SQLite-backed store.
@@ -86,6 +89,22 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(SCHEMA)?;
+        // Migration: add `engine_config_json` to `tournament_engines` if absent.
+        // This column was introduced in Step 6; databases from Step 5 lack it.
+        let has_col: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tournament_engines') \
+                 WHERE name='engine_config_json'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_col {
+            conn.execute_batch(
+                "ALTER TABLE tournament_engines ADD COLUMN engine_config_json TEXT;",
+            )?;
+        }
         Ok(Self { conn })
     }
 
@@ -256,31 +275,42 @@ impl Store {
 
     // ---- participants --------------------------------------------------------
 
-    /// Register a participating engine with its seed and starting Elo.
+    /// Register a participating engine with its seed, starting Elo, and config snapshot.
     pub fn add_tournament_engine(
         &self,
         tournament: TournamentId,
-        engine: EngineId,
+        engine_id: EngineId,
+        engine_config: &EngineConfig,
         seed: u32,
         start_elo: f64,
     ) -> Result<()> {
+        let config_json = serde_json::to_string(engine_config)?;
         self.conn.execute(
-            "INSERT INTO tournament_engines (tournament_id, engine_id, seed, start_elo)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO tournament_engines
+               (tournament_id, engine_id, seed, start_elo, engine_config_json)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(tournament_id, engine_id) DO UPDATE SET
-               seed=excluded.seed, start_elo=excluded.start_elo",
-            params![tournament.to_string(), engine.to_string(), seed, start_elo],
+               seed=excluded.seed, start_elo=excluded.start_elo,
+               engine_config_json=excluded.engine_config_json",
+            params![
+                tournament.to_string(),
+                engine_id.to_string(),
+                seed,
+                start_elo,
+                config_json,
+            ],
         )?;
         Ok(())
     }
 
-    /// List the participating engines of a tournament.
+    /// List the participating engines of a tournament, ordered by insertion seed.
     pub fn list_tournament_engines(
         &self,
         tournament: TournamentId,
     ) -> Result<Vec<TournamentEngineRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT engine_id, seed, start_elo FROM tournament_engines
+            "SELECT engine_id, seed, start_elo, engine_config_json
+             FROM tournament_engines
              WHERE tournament_id = ?1 ORDER BY seed",
         )?;
         let rows = stmt.query_map(params![tournament.to_string()], |row| {
@@ -288,15 +318,20 @@ impl Store {
                 row.get::<_, String>(0)?,
                 row.get::<_, u32>(1)?,
                 row.get::<_, f64>(2)?,
+                row.get::<_, Option<String>>(3)?,
             ))
         })?;
         let mut engines = Vec::new();
         for row in rows {
-            let (engine, seed, start_elo) = row?;
+            let (engine, seed, start_elo, config_json) = row?;
+            let config = config_json
+                .map(|json| serde_json::from_str::<EngineConfig>(&json))
+                .transpose()?;
             engines.push(TournamentEngineRow {
                 engine: EngineId(parse_uuid(&engine)?),
                 seed,
                 start_elo,
+                config,
             });
         }
         Ok(engines)
@@ -336,6 +371,23 @@ impl Store {
     /// Mark a game as discarded (e.g. aborted by Force-Stop).
     pub fn discard_game(&self, id: GameId) -> Result<()> {
         self.set_game_status(id, GAME_DISCARDED)
+    }
+
+    /// Reset a game back to `pending` so it can be replayed on resume.
+    ///
+    /// Clears result, termination, nps, plies, PGN and timestamps.  Used on
+    /// tournament resume for games that were `running` (in-flight when the app
+    /// exited) or `discarded` (aborted by a prior Force-Stop).
+    pub fn reset_game_to_pending(&self, id: GameId) -> Result<()> {
+        self.conn.execute(
+            "UPDATE games
+             SET status = ?2, result = NULL, termination = NULL,
+                 white_nps = NULL, black_nps = NULL, plies = NULL, pgn = NULL,
+                 started_at = NULL, finished_at = NULL
+             WHERE id = ?1",
+            params![id.to_string(), GAME_PENDING],
+        )?;
+        Ok(())
     }
 
     fn set_game_status(&self, id: GameId, status: &str) -> Result<()> {
@@ -482,10 +534,11 @@ CREATE TABLE IF NOT EXISTS tournaments (
 );
 
 CREATE TABLE IF NOT EXISTS tournament_engines (
-  tournament_id TEXT NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
-  engine_id     TEXT NOT NULL,
-  seed          INTEGER,
-  start_elo     REAL,
+  tournament_id      TEXT NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+  engine_id          TEXT NOT NULL,
+  seed               INTEGER,
+  start_elo          REAL,
+  engine_config_json TEXT,
   PRIMARY KEY (tournament_id, engine_id)
 );
 
@@ -530,7 +583,7 @@ mod tests {
         let config = TournamentConfig::default();
         store.create_tournament(tid, "Test", &config).unwrap();
         store
-            .add_tournament_engine(tid, engine.id, 0, 3600.0)
+            .add_tournament_engine(tid, engine.id, &engine, 0, 3600.0)
             .unwrap();
 
         let other = EngineId::new();

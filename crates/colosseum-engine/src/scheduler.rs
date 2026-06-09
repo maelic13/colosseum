@@ -29,7 +29,7 @@ use colosseum_uci::SpawnOptions;
 
 use crate::error::EngineError;
 use crate::runner::{EngineGameSpec, GameSpec, run_game};
-use crate::store::{self, Store};
+use crate::store::{self, Store, TournamentRow};
 
 /// Elo assigned to an engine that has no configured rating.
 const DEFAULT_ELO: f64 = 1500.0;
@@ -77,18 +77,6 @@ pub struct TournamentSnapshot {
     pub recent_errors: Vec<String>,
 }
 
-impl TournamentSnapshot {
-    fn new(total: usize) -> Self {
-        Self {
-            status: TournamentStatus::Idle,
-            standings: Standings::new(),
-            elo: HashMap::new(),
-            games_finished: 0,
-            games_total: total,
-            recent_errors: Vec::new(),
-        }
-    }
-}
 
 /// A handle to a running tournament: send commands, read the live snapshot.
 pub struct Tournament {
@@ -162,7 +150,7 @@ pub fn create_tournament(
     let mut ids: Vec<EngineId> = Vec::with_capacity(engines.len());
     for (seed, engine) in engines.iter().enumerate() {
         let start_elo = engine.meta.elo.map_or(DEFAULT_ELO, f64::from);
-        store.add_tournament_engine(id, engine.id, seed as u32, start_elo)?;
+        store.add_tournament_engine(id, engine.id, engine, seed as u32, start_elo)?;
         templates.insert(
             engine.id,
             EngineTemplate {
@@ -181,6 +169,13 @@ pub fn create_tournament(
         ids.push(engine.id);
     }
 
+    let seeds: Vec<(EngineId, f64)> = ids
+        .iter()
+        .map(|eid| (*eid, templates[eid].start_elo))
+        .collect();
+    let init_standings = Standings::with_engines(&ids);
+    let init_elo = IncrementalElo::with_seed(config.k_factor, seeds.iter().copied());
+
     // Build and persist the schedule.
     let pairings = generate_schedule(&ids, &config);
     let mut schedule = Vec::with_capacity(pairings.len());
@@ -190,7 +185,27 @@ pub fn create_tournament(
         schedule.push(ScheduledGame { game_id, pairing });
     }
 
-    let snapshot = Arc::new(Mutex::new(TournamentSnapshot::new(schedule.len())));
+    let total_games = schedule.len();
+    let elo_snapshot: HashMap<EngineId, EloEntry> = ids
+        .iter()
+        .map(|eid| {
+            (
+                *eid,
+                EloEntry {
+                    current: templates[eid].start_elo,
+                    delta: 0.0,
+                },
+            )
+        })
+        .collect();
+    let snapshot = Arc::new(Mutex::new(TournamentSnapshot {
+        status: TournamentStatus::Idle,
+        standings: init_standings.clone(),
+        elo: elo_snapshot,
+        games_finished: 0,
+        games_total: total_games,
+        recent_errors: Vec::new(),
+    }));
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
     let driver = drive(Driver {
@@ -200,10 +215,15 @@ pub fn create_tournament(
         templates,
         ids,
         schedule,
+        total_games,
         store,
         events,
         snapshot: Arc::clone(&snapshot),
         commands: cmd_rx,
+        seeds,
+        init_standings,
+        init_elo,
+        init_finished: Vec::new(),
     });
 
     Ok((
@@ -223,25 +243,37 @@ struct Driver {
     config: TournamentConfig,
     templates: HashMap<EngineId, EngineTemplate>,
     ids: Vec<EngineId>,
+    /// Games remaining to be played.  For fresh tournaments this is the full
+    /// schedule; for resumed tournaments it contains only the unfinished games.
     schedule: Vec<ScheduledGame>,
+    /// Total games in the full tournament schedule, including already-finished
+    /// games on resume (used for `games_total` in snapshots).
+    total_games: usize,
     store: Store,
     events: Sender<TournamentEvent>,
     snapshot: Arc<Mutex<TournamentSnapshot>>,
     commands: UnboundedReceiver<Command>,
+    /// Original start Elos for `EndOfTournament` recompute.
+    seeds: Vec<(EngineId, f64)>,
+    /// Pre-initialized standings (empty for fresh tournaments, replayed from
+    /// the database for resumed ones).
+    init_standings: Standings,
+    /// Pre-initialized Elo model (seeded for fresh, replayed for resumed).
+    init_elo: IncrementalElo,
+    /// Pre-completed game results (empty for fresh, filled for resumed).
+    init_finished: Vec<(EngineId, EngineId, GameResult)>,
 }
 
 async fn drive(mut driver: Driver) {
-    let total = driver.schedule.len();
+    let total = driver.total_games;
     let concurrency = driver.config.concurrency.max(1);
-
-    let seeds: Vec<(EngineId, f64)> = driver
-        .ids
-        .iter()
-        .map(|id| (*id, driver.templates[id].start_elo))
-        .collect();
-    let mut elo = IncrementalElo::with_seed(driver.config.k_factor, seeds.iter().copied());
-    let mut standings = Standings::with_engines(&driver.ids);
-    let mut finished_results: Vec<(EngineId, EngineId, GameResult)> = Vec::new();
+    // Take the init state out of `driver` using `mem::take`/`replace` so the
+    // struct remains fully initialized and `&driver` borrows remain valid later.
+    let seeds = std::mem::take(&mut driver.seeds);
+    let mut elo = std::mem::replace(&mut driver.init_elo, IncrementalElo::new(0.0));
+    let mut standings =
+        std::mem::replace(&mut driver.init_standings, Standings::with_engines(&[]));
+    let mut finished_results = std::mem::take(&mut driver.init_finished);
     let mut recent_errors: Vec<String> = Vec::new();
 
     let mut games: JoinSet<crate::runner::GameReport> = JoinSet::new();
@@ -249,17 +281,6 @@ async fn drive(mut driver: Driver) {
     let mut next_index = 0usize;
     let mut running = false;
     let mut finished = false;
-
-    publish(
-        &driver.snapshot,
-        &standings,
-        &elo,
-        &driver.ids,
-        finished_results.len(),
-        total,
-        TournamentStatus::Idle,
-        &recent_errors,
-    );
 
     loop {
         // Launch while running, with spare capacity and pending games.
@@ -409,6 +430,164 @@ async fn drive(mut driver: Driver) {
             }
         }
     }
+}
+
+/// Resume an existing tournament from persisted database state.
+///
+/// Loads the engine config snapshots, replays finished games into standings and
+/// Elo, resets any `running` or `discarded` games to `pending` (so they will
+/// be replayed), then hands back the same `(Tournament, driver-future)` pair as
+/// [`create_tournament`].  Call [`Tournament::go`] to start (re)playing.
+///
+/// Returns an error if the tournament has fewer than two participants in the
+/// database, or if any participant is missing its stored config snapshot.
+pub fn resume_tournament(
+    row: TournamentRow,
+    store: Store,
+    events: Sender<TournamentEvent>,
+) -> Result<(Tournament, impl Future<Output = ()>), EngineError> {
+    let id = row.id;
+    let config = row.config;
+
+    // Load participants sorted by their original insertion seed.
+    let participants = store.list_tournament_engines(id)?;
+    if participants.len() < 2 {
+        return Err(EngineError::Corrupt(
+            "tournament has fewer than 2 engines in the database".into(),
+        ));
+    }
+
+    // Rebuild engine templates from the stored config snapshots.
+    let mut templates: HashMap<EngineId, EngineTemplate> = HashMap::new();
+    let mut ids: Vec<EngineId> = Vec::with_capacity(participants.len());
+    let mut seeds: Vec<(EngineId, f64)> = Vec::with_capacity(participants.len());
+
+    for p in &participants {
+        let engine = p.config.as_ref().ok_or_else(|| {
+            EngineError::Corrupt(format!(
+                "no engine config snapshot stored for participant {:?}",
+                p.engine
+            ))
+        })?;
+        seeds.push((p.engine, p.start_elo));
+        templates.insert(
+            p.engine,
+            EngineTemplate {
+                id: p.engine,
+                name: display_name(engine),
+                spawn: SpawnOptions {
+                    path: engine.path.clone(),
+                    args: engine.args.clone(),
+                    working_dir: engine.working_dir.clone(),
+                    env: engine.env.clone().into_iter().collect(),
+                },
+                options: resolve_options(engine, &config.common),
+                start_elo: p.start_elo,
+            },
+        );
+        ids.push(p.engine);
+    }
+
+    // Load all games for this tournament (ORDER BY round, rowid = original order).
+    let all_games = store.list_games(id)?;
+    let total_games = all_games.len();
+
+    // Reset in-flight (running) and force-stopped (discarded) games to pending
+    // so they will be replayed in this session.
+    for game in &all_games {
+        if game.status == store::GAME_RUNNING || game.status == store::GAME_DISCARDED {
+            store.reset_game_to_pending(game.id)?;
+        }
+    }
+
+    // Replay finished games to reconstruct standings and Elo.
+    let mut elo = IncrementalElo::with_seed(config.k_factor, seeds.iter().copied());
+    let mut standings = Standings::with_engines(&ids);
+    let mut finished_results: Vec<(EngineId, EngineId, GameResult)> = Vec::new();
+
+    // Build remaining schedule from non-finished games (preserving original DB order).
+    let mut schedule: Vec<ScheduledGame> = Vec::new();
+
+    for game in &all_games {
+        if game.status == store::GAME_FINISHED {
+            if let Some(result) = game.result {
+                standings.record(GameOutcome {
+                    white: game.white,
+                    black: game.black,
+                    result,
+                    white_nps: game.white_nps,
+                    black_nps: game.black_nps,
+                });
+                finished_results.push((game.white, game.black, result));
+                if config.elo_policy == EloPolicy::PerGame {
+                    elo.update(game.white, game.black, result);
+                }
+            }
+        } else {
+            schedule.push(ScheduledGame {
+                game_id: game.id,
+                pairing: Pairing {
+                    round: game.round,
+                    white: game.white,
+                    black: game.black,
+                },
+            });
+        }
+    }
+
+    // Mark the tournament as stopped; it becomes running again when Go is pressed.
+    store.set_tournament_status(id, store::STATUS_STOPPED)?;
+
+    let elo_snapshot: HashMap<EngineId, EloEntry> = ids
+        .iter()
+        .map(|eid| {
+            (
+                *eid,
+                EloEntry {
+                    current: elo.current(*eid),
+                    delta: elo.delta_since_start(*eid),
+                },
+            )
+        })
+        .collect();
+
+    let snapshot = Arc::new(Mutex::new(TournamentSnapshot {
+        status: TournamentStatus::Stopped,
+        standings: standings.clone(),
+        elo: elo_snapshot,
+        games_finished: finished_results.len(),
+        games_total: total_games,
+        recent_errors: Vec::new(),
+    }));
+
+    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+
+    let driver_fut = drive(Driver {
+        id,
+        event_name: row.name,
+        config,
+        templates,
+        ids,
+        schedule,
+        total_games,
+        store,
+        events,
+        snapshot: Arc::clone(&snapshot),
+        commands: cmd_rx,
+        seeds,
+        init_standings: standings,
+        init_elo: elo,
+        init_finished: finished_results,
+    });
+
+    Ok((
+        Tournament {
+            id,
+            commands: cmd_tx,
+            snapshot,
+        },
+        driver_fut,
+    ))
 }
 
 /// Build the full [`GameSpec`] for a scheduled game.

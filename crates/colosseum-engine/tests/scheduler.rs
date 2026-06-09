@@ -11,7 +11,7 @@ use colosseum_core::{
     AdjudicationConfig, EngineConfig, Format, TimeControl, TournamentConfig, TournamentEvent,
     UciOptionValue,
 };
-use colosseum_engine::scheduler::{TournamentStatus, create_tournament};
+use colosseum_engine::scheduler::{TournamentStatus, create_tournament, resume_tournament};
 use colosseum_engine::store::{self, Store};
 
 fn engine_cfg(name: &str, exe: &Path, opts: &[(&str, &str)]) -> EngineConfig {
@@ -279,4 +279,118 @@ async fn failed_engine_loses_with_error() {
     assert!(error_events >= 1);
 
     handle.abort();
+}
+
+/// Simulates an app restart: starts a tournament, stops it mid-way, drops the
+/// handle (simulating an app exit), reopens the database, calls
+/// `resume_tournament`, and verifies the full schedule completes.
+#[tokio::test]
+async fn resume_across_restart() {
+    let Some((_guard, exe)) = common::engine_or_skip() else {
+        eprintln!("skipping resume_across_restart: no engine");
+        return;
+    };
+
+    // ── Phase 1: start tournament, let at least 1 game finish, then stop ──
+    let (_dir, store1, db_path) = temp_db();
+    let engines = vec![
+        engine_cfg("A", &exe, &[("Hash", "16")]),
+        engine_cfg("B", &exe, &[("Hash", "16")]),
+        engine_cfg("C", &exe, &[("Hash", "16")]),
+    ];
+    let (events_tx, _events_rx) = crossbeam_channel::unbounded();
+    let (t1, driver1) =
+        create_tournament("Restart", fast_config(1, 8, 10), engines, store1, events_tx).unwrap();
+    let tid = t1.id;
+    let handle1 = tokio::spawn(driver1);
+    t1.go();
+
+    // Wait until at least 1 game finishes before stopping.
+    let snap1 = t1.snapshot_handle();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if snap1.lock().unwrap().games_finished >= 1 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no game finished before deadline"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    t1.stop();
+    assert!(
+        wait_status(&snap1, TournamentStatus::Stopped, Duration::from_secs(30)).await,
+        "did not reach Stopped"
+    );
+    let finished_before = snap1.lock().unwrap().games_finished;
+    assert!(
+        finished_before >= 1,
+        "expected ≥1 game finished before restart"
+    );
+
+    // Simulate app exit: drop the handle so the driver's command channel closes
+    // (driver receives None and exits the loop cleanly).
+    drop(t1);
+    let _ = tokio::time::timeout(Duration::from_secs(5), handle1).await;
+
+    // ── Phase 2: reopen database and resume ──
+    let store2 = Store::open(&db_path).unwrap();
+    let row = store2
+        .load_tournament(tid)
+        .unwrap()
+        .expect("tournament should still be in the database");
+    let (events_tx2, _events_rx2) = crossbeam_channel::unbounded();
+    let (t2, driver2) = resume_tournament(row, store2, events_tx2).unwrap();
+    let handle2 = tokio::spawn(driver2);
+
+    // The resumed snapshot should already reflect the pre-restart finished games.
+    let snap2 = t2.snapshot_handle();
+    assert_eq!(
+        snap2.lock().unwrap().games_finished,
+        finished_before,
+        "resumed snapshot should start at the pre-restart finished count"
+    );
+    assert_eq!(
+        snap2.lock().unwrap().games_total,
+        6,
+        "total should be the full tournament schedule"
+    );
+    assert_eq!(
+        snap2.lock().unwrap().status,
+        TournamentStatus::Stopped,
+        "resumed tournament should start as Stopped, not Idle"
+    );
+
+    t2.go();
+    assert!(
+        wait_status(&snap2, TournamentStatus::Finished, Duration::from_secs(60)).await,
+        "resumed tournament did not finish"
+    );
+
+    let final_snap = snap2.lock().unwrap().clone();
+    assert_eq!(
+        final_snap.games_finished, 6,
+        "all 6 games should be finished"
+    );
+    assert_eq!(final_snap.games_total, 6);
+    // Each of the 3 engines should have played exactly 4 games.
+    for id in final_snap.standings.engines() {
+        assert_eq!(
+            final_snap.standings.standing(id).games(),
+            4,
+            "each engine should have played 4 games"
+        );
+    }
+
+    // Verify DB: all games finished.
+    let store3 = Store::open(&db_path).unwrap();
+    let db_games = store3.list_games(tid).unwrap();
+    assert_eq!(db_games.len(), 6);
+    assert!(
+        db_games.iter().all(|g| g.status == store::GAME_FINISHED),
+        "all DB games should be finished after resume"
+    );
+
+    handle2.abort();
 }

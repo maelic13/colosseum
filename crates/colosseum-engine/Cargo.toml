@@ -9,6 +9,7 @@ authors.workspace = true
 
 [dependencies]
 anyhow = "1.0.102"
+toml = "0.8"
 colosseum-core = { version = "0.1.0", path = "../colosseum-core" }
 colosseum-uci = { version = "0.1.0", path = "../colosseum-uci" }
 crossbeam-channel = "0.5.15"
