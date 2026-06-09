@@ -13,7 +13,7 @@ thinking / GPT-5.5 extra high.
 - [x] **Step 3** — `colosseum-core`: domain types, Elo, pairings, adjudication, standings + unit tests · _Large_
 - [x] **Step 4** — `colosseum-uci`: UCI protocol & process management + temp-Stockfish tests · _Large_
 - [x] **Step 5** — `colosseum-engine`: scheduler, Go/Stop/Force-Stop, PGN, persistence + integration tests · _Large_
-- [ ] **Step 6** — Persistence & resume wiring; `--portable` mode · _Small_
+- [x] **Step 6** — Persistence & resume wiring; `--portable` mode · _Small_
 
 ## Phase C — GUI
 - [ ] **Step 7** — GUI scaffold, modern theme + app icon, backend bridge, close-confirm · _Large/Small_
