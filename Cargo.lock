@@ -672,6 +672,7 @@ dependencies = [
  "anyhow",
  "colosseum-core",
  "colosseum-engine",
+ "crossbeam-channel",
  "eframe",
  "egui",
  "egui_extras",

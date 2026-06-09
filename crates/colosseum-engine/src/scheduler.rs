@@ -77,7 +77,6 @@ pub struct TournamentSnapshot {
     pub recent_errors: Vec<String>,
 }
 
-
 /// A handle to a running tournament: send commands, read the live snapshot.
 pub struct Tournament {
     pub id: TournamentId,
@@ -271,8 +270,7 @@ async fn drive(mut driver: Driver) {
     // struct remains fully initialized and `&driver` borrows remain valid later.
     let seeds = std::mem::take(&mut driver.seeds);
     let mut elo = std::mem::replace(&mut driver.init_elo, IncrementalElo::new(0.0));
-    let mut standings =
-        std::mem::replace(&mut driver.init_standings, Standings::with_engines(&[]));
+    let mut standings = std::mem::replace(&mut driver.init_standings, Standings::with_engines(&[]));
     let mut finished_results = std::mem::take(&mut driver.init_finished);
     let mut recent_errors: Vec<String> = Vec::new();
 

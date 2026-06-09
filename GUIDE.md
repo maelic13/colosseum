@@ -16,7 +16,7 @@ thinking / GPT-5.5 extra high.
 - [x] **Step 6** — Persistence & resume wiring; `--portable` mode · _Small_
 
 ## Phase C — GUI
-- [ ] **Step 7** — GUI scaffold, modern theme + app icon, backend bridge, close-confirm · _Large/Small_
+- [x] **Step 7** — GUI scaffold, modern theme + app icon, backend bridge, close-confirm · _Large/Small_
 - [ ] **Step 8** — Engine Management tab (add, add-folder, auto-detect & edit options, metadata) · _Small_
 - [ ] **Step 9** — Tournament tab: options, Go/Stop/Force-Stop, **live sortable results table** · _Large_
 - [ ] **Step 10** — Starting positions / openings (EPD + PGN, integrated UI) — final feature · _Large_

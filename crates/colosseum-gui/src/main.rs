@@ -1,50 +1,21 @@
-//! Colosseum GUI binary.
+//! Colosseum GUI binary: a cross-platform chess-engine tournament runner.
 //!
-//! Step 2 provides a minimal, runnable two-tab shell so the GUI stack is known to
-//! build and launch on each platform. Step 7 adds the modern theme, app icon, and
-//! the throttled bridge to the backend event stream; Steps 8–10 fill the tabs.
+//! `main` initialises logging, builds the [`Backend`] (storage, runtime, engine
+//! library), constructs the native window (theme, icon, restored geometry), and
+//! hands control to [`ColosseumApp`]. The tab bodies are filled in Steps 8–10.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod app;
+mod backend;
+mod icon;
+mod theme;
 
 use colosseum_core::branding::DISPLAY_NAME;
 use eframe::egui;
 
-/// Top-level tabs. Tournament is the primary tab.
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
-enum Tab {
-    #[default]
-    Tournament,
-    Engines,
-}
-
-#[derive(Default)]
-struct ColosseumApp {
-    tab: Tab,
-}
-
-impl eframe::App for ColosseumApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("tab_bar").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading(DISPLAY_NAME);
-                ui.separator();
-                ui.selectable_value(&mut self.tab, Tab::Tournament, "Tournament");
-                ui.selectable_value(&mut self.tab, Tab::Engines, "Engines");
-            });
-        });
-
-        egui::CentralPanel::default().show(ctx, |ui| match self.tab {
-            Tab::Tournament => {
-                ui.heading("Tournament");
-                ui.label("Scaffold — the tournament tab is implemented in Step 9.");
-            }
-            Tab::Engines => {
-                ui.heading("Engines");
-                ui.label("Scaffold — engine management is implemented in Step 8.");
-            }
-        });
-    }
-}
+use crate::app::ColosseumApp;
+use crate::backend::Backend;
 
 fn main() -> eframe::Result<()> {
     tracing_subscriber::fmt()
@@ -54,17 +25,39 @@ fn main() -> eframe::Result<()> {
         )
         .init();
 
+    // `--portable` keeps all data (config, database, engines) next to the binary.
+    let portable = std::env::args().any(|a| a == "--portable");
+
+    let backend = match Backend::new(portable) {
+        Ok(backend) => backend,
+        Err(err) => {
+            tracing::error!("failed to initialise backend: {err:#}");
+            // Surface the failure to the user via a native dialog before exiting.
+            rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Error)
+                .set_title("Colosseum — startup error")
+                .set_description(format!("Could not start Colosseum:\n\n{err:#}"))
+                .show();
+            std::process::exit(1);
+        }
+    };
+
+    let viewport = egui::ViewportBuilder::default()
+        .with_title(DISPLAY_NAME)
+        .with_app_id("colosseum")
+        .with_inner_size([backend.config.window_width, backend.config.window_height])
+        .with_min_inner_size([860.0, 560.0])
+        .with_maximized(backend.config.window_maximized)
+        .with_icon(icon::icon());
+
     let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(DISPLAY_NAME)
-            .with_inner_size([1100.0, 720.0])
-            .with_min_inner_size([800.0, 500.0]),
+        viewport,
         ..Default::default()
     };
 
     eframe::run_native(
         DISPLAY_NAME,
         native_options,
-        Box::new(|_cc| Ok(Box::new(ColosseumApp::default()))),
+        Box::new(|cc| Ok(Box::new(ColosseumApp::new(cc, backend)))),
     )
 }
