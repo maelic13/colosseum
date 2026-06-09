@@ -6,6 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+description = "Chess engine testing suite — run tournaments, track Elo, view live results"
+keywords = ["chess", "engine", "tournament", "uci", "gui"]
+categories = ["games"]
+
+[[bin]]
+name = "colosseum"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.102"

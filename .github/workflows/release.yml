@@ -1,0 +1,271 @@
+name: Release
+
+# Triggered by version tags — e.g. git tag v0.1.0 && git push --tags
+on:
+  push:
+    tags: ['v[0-9]*.*.*']
+
+permissions:
+  contents: write   # needed to create GitHub Releases
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Build release binaries and produce platform-specific packages
+  # ────────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows x86-64 → portable ZIP + MSI installer
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows
+            arch: x86_64
+
+          # Linux x86-64 → .tar.gz
+          # (Flatpak is built separately — see flatpak/ directory)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux
+            arch: x86_64
+
+          # macOS Apple Silicon → .dmg + .tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: macos
+            arch: aarch64
+
+          # macOS Intel → .dmg + .tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            platform: macos
+            arch: x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      # eframe/egui needs GTK + XCB headers on Linux
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
+
+      # ── Build ───────────────────────────────────────────────────────────────
+      - name: Build release binary
+        run: cargo build --release --bin colosseum
+
+      # ── Smoke test — verify the binary was produced and is a real binary ───
+      - name: Smoke test (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          bin="target/release/colosseum"
+          test -f "$bin"   || { echo "ERROR: binary missing at $bin"; exit 1; }
+          size=$(wc -c < "$bin")
+          echo "Binary size: ${size} bytes"
+          # A real egui+chess binary should comfortably exceed 2 MB
+          test "$size" -gt 2097152 || { echo "ERROR: binary too small (${size} B)"; exit 1; }
+          file "$bin" || true   # print ELF/Mach-O header for diagnosis
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = "target\release\colosseum.exe"
+          if (-not (Test-Path $bin)) { Write-Error "ERROR: binary missing at $bin"; exit 1 }
+          $size = (Get-Item $bin).Length
+          Write-Host "Binary size: $size bytes"
+          if ($size -lt 2MB) { Write-Error "ERROR: binary too small ($size B)"; exit 1 }
+
+      # ── Windows: portable ZIP ───────────────────────────────────────────────
+      - name: Package ZIP (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tag  = '${{ github.ref_name }}'
+          $name = "colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}"
+          New-Item -ItemType Directory -Path "staging\$name" | Out-Null
+          Copy-Item "target\release\colosseum.exe" "staging\$name\colosseum.exe"
+          Copy-Item "LICENSE"                       "staging\$name\LICENSE"
+          Compress-Archive -Path "staging\$name" -DestinationPath "${name}.zip"
+          "ARTIFACT_ZIP=${name}.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # ── Windows: MSI installer via cargo-wix ───────────────────────────────
+      # WiX Toolset 3.x is pre-installed on GitHub windows-2022 runners.
+      # If building locally: choco install wixtoolset OR install from wixtoolset.org
+      - name: Install cargo-wix (Windows)
+        if: runner.os == 'Windows'
+        run: cargo install cargo-wix --version "0.3.9" --locked
+
+      - name: Locate WiX Toolset (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Find whatever WiX v3 version is installed
+          $wix = Get-ChildItem "C:\Program Files (x86)\WiX Toolset v3*" -Directory -ErrorAction SilentlyContinue |
+                 Sort-Object Name -Descending | Select-Object -First 1
+          if ($null -eq $wix) {
+            Write-Host "WiX not found in Program Files, installing via Chocolatey..."
+            choco install wixtoolset -y --no-progress
+            $wix = Get-ChildItem "C:\Program Files (x86)\WiX Toolset v3*" -Directory |
+                   Sort-Object Name -Descending | Select-Object -First 1
+          }
+          Write-Host "Using WiX at $($wix.FullName)"
+          "$($wix.FullName)\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Build MSI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo wix --package colosseum-gui --nocapture
+          $msi  = Get-ChildItem "target\wix\*.msi" | Select-Object -First 1
+          $dest = "colosseum-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}.msi"
+          Copy-Item $msi.FullName $dest
+          "ARTIFACT_MSI=$dest" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # ── Linux: tar.gz ───────────────────────────────────────────────────────
+      - name: Package tar.gz (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          tag='${{ github.ref_name }}'
+          name="colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}"
+          mkdir -p "staging/${name}"
+          cp target/release/colosseum "staging/${name}/colosseum"
+          cp LICENSE                  "staging/${name}/LICENSE"
+          tar -C staging -czf "${name}.tar.gz" "${name}"
+          echo "ARTIFACT_TGZ=${name}.tar.gz" >> "$GITHUB_ENV"
+
+      # ── macOS: tar.gz ───────────────────────────────────────────────────────
+      - name: Package tar.gz (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          tag='${{ github.ref_name }}'
+          name="colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}"
+          mkdir -p "staging/${name}"
+          cp target/release/colosseum "staging/${name}/colosseum"
+          cp LICENSE                  "staging/${name}/LICENSE"
+          tar -C staging -czf "${name}.tar.gz" "${name}"
+          echo "ARTIFACT_TGZ=${name}.tar.gz" >> "$GITHUB_ENV"
+
+      # ── macOS: .app bundle + DMG via hdiutil ───────────────────────────────
+      # NOTE (signing): v0.1 ships unsigned / ad-hoc.
+      # For Gatekeeper-free distribution, sign with:
+      #   codesign --deep --force --sign "Developer ID Application: ..."
+      #             Colosseum.app
+      # Then notarize:
+      #   xcrun notarytool submit colosseum.dmg --apple-id ... --wait
+      # See docs/macos-signing.md for the full process.
+      - name: Package DMG (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          tag='${{ github.ref_name }}'
+          ver="${tag#v}"
+          app="dmg-staging/Colosseum.app"
+
+          # Build the .app bundle structure
+          mkdir -p "${app}/Contents/MacOS"
+          cp target/release/colosseum "${app}/Contents/MacOS/colosseum"
+
+          cat > "${app}/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>    <string>colosseum</string>
+            <key>CFBundleIdentifier</key>    <string>com.colosseum.Colosseum</string>
+            <key>CFBundleName</key>          <string>Colosseum</string>
+            <key>CFBundleDisplayName</key>   <string>Colosseum</string>
+            <key>CFBundleVersion</key>       <string>${ver}</string>
+            <key>CFBundleShortVersionString</key><string>${ver}</string>
+            <key>CFBundlePackageType</key>   <string>APPL</string>
+            <key>CFBundleSignature</key>     <string>????</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+          </dict>
+          </plist>
+          PLIST
+
+          dmg="colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}.dmg"
+          hdiutil create \
+            -volname "Colosseum ${tag}" \
+            -srcfolder "dmg-staging/" \
+            -ov -format UDZO \
+            "$dmg"
+          echo "ARTIFACT_DMG=${dmg}" >> "$GITHUB_ENV"
+
+      # ── Upload artifacts (separate steps so missing ones are skipped) ───────
+      - name: Upload ZIP
+        if: env.ARTIFACT_ZIP != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: zip-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ env.ARTIFACT_ZIP }}
+
+      - name: Upload MSI
+        if: env.ARTIFACT_MSI != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ env.ARTIFACT_MSI }}
+
+      - name: Upload TGZ
+        if: env.ARTIFACT_TGZ != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: tgz-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ env.ARTIFACT_TGZ }}
+
+      - name: Upload DMG
+        if: env.ARTIFACT_DMG != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ env.ARTIFACT_DMG }}
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Collect all platform artifacts and publish a GitHub Release
+  # ────────────────────────────────────────────────────────────────────────────
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*'
+          merge-multiple: true
+          path: release-artifacts
+
+      - name: List release artifacts
+        run: ls -lh release-artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*
+          generate_release_notes: true
+          draft: false
+          # Mark pre-releases automatically (v0.1.0-rc.1, v0.1.0-beta, etc.)
+          prerelease: ${{ contains(github.ref_name, '-') }}

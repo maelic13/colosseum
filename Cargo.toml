@@ -10,7 +10,26 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/"
 authors = ["Miloslav Macůrek <macurek.m@gmail.com>"]
 
-# Release profile: optimize the shipped binary; engine I/O timing benefits from opt builds.
+# ── cargo-dist release configuration ─────────────────────────────────────────
+# Run `cargo install cargo-dist && cargo dist init` to regenerate the full
+# release CI from this config, or edit .github/workflows/release.yml directly.
+[workspace.metadata.dist]
+cargo-dist-version = "0.28.0"
+ci = ["github"]
+installers = ["msi", "shell", "powershell", "homebrew"]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+]
+# Tag pattern that triggers a release.
+tag-namespace = "v"
+# Don't run the release CI on every PR — only on tags.
+pr-run-mode = "plan"
+
+# ── Release profile ───────────────────────────────────────────────────────────
+# Optimize the shipped binary; engine I/O timing benefits from opt builds.
 [profile.release]
 opt-level = 3
 lto = "thin"

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Colosseum
+GenericName=Chess Engine Tester
+Comment=Run engine-vs-engine tournaments with live results
+Exec=colosseum
+Icon=com.colosseum.Colosseum
+Terminal=false
+Type=Application
+Categories=Game;BoardGame;
+Keywords=chess;engine;tournament;UCI;elo;
+StartupNotify=true
+StartupWMClass=colosseum
