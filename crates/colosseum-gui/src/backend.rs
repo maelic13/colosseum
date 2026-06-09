@@ -18,22 +18,32 @@ use std::time::Duration;
 
 use crossbeam_channel::Receiver;
 
-use colosseum_core::{EngineConfig, TournamentEvent};
+use colosseum_core::{EngineConfig, EngineId, TournamentConfig, TournamentEvent};
 use colosseum_engine::{
     AppConfig, AppDirs, EngineLibrary, Store, Tournament, TournamentSnapshot, TournamentStatus,
+    create_tournament,
 };
 
 /// Target redraw cadence while a tournament is running (~30 Hz).
 pub const LIVE_REPAINT: Duration = Duration::from_millis(33);
 
+/// A participant's display identity, captured at tournament start so the live
+/// results table is independent of later edits to the engine library.
+#[derive(Debug, Clone)]
+pub struct ParticipantInfo {
+    pub id: EngineId,
+    pub name: String,
+    pub version: String,
+}
+
 /// The currently-active tournament: its control handle, the live snapshot the
-/// GUI renders, and the event channel that nudges repaints.
-///
-/// Constructed when a tournament is launched from the Tournament tab (Step 9).
+/// GUI renders, the event channel that nudges repaints, plus display metadata.
 pub struct ActiveTournament {
     pub handle: Tournament,
     pub snapshot: Arc<Mutex<TournamentSnapshot>>,
     pub events: Receiver<TournamentEvent>,
+    pub name: String,
+    pub participants: Vec<ParticipantInfo>,
 }
 
 /// All backend resources owned by the GUI.
@@ -41,10 +51,10 @@ pub struct Backend {
     pub dirs: AppDirs,
     pub config: AppConfig,
     pub engines: Vec<EngineConfig>,
-    /// SQLite connection for tournament history / resume queries.
+    /// SQLite connection for tournament history / resume queries (Step 9+).
     #[expect(
         dead_code,
-        reason = "queried by the Tournament/History flows in Step 9"
+        reason = "queried by the Tournament History flow (deferred post-v1)"
     )]
     pub store: Store,
     /// Runtime that drives engine detection (Step 8) and tournament games (Step 9).
@@ -132,6 +142,57 @@ impl Backend {
         if let Err(e) = EngineLibrary::save(&self.engines, &self.dirs.engines_file()) {
             tracing::warn!("failed to save engines: {e}");
         }
+    }
+
+    /// Create a fresh tournament from `engines` + `config`, spawn its driver on
+    /// the runtime, and immediately begin play. Replaces any previous active
+    /// tournament. The dedicated `Store` connection handed to the driver is
+    /// separate from `self.store` so the background thread owns its own handle.
+    pub fn start_tournament(
+        &mut self,
+        name: &str,
+        config: TournamentConfig,
+        engines: Vec<EngineConfig>,
+    ) -> anyhow::Result<()> {
+        let participants: Vec<ParticipantInfo> = engines
+            .iter()
+            .map(|e| ParticipantInfo {
+                id: e.id,
+                name: if e.meta.name.is_empty() {
+                    e.path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("?")
+                        .to_string()
+                } else {
+                    e.meta.name.clone()
+                },
+                version: e.meta.version.clone(),
+            })
+            .collect();
+
+        let driver_store = Store::open(self.dirs.database_path())?;
+        let (events_tx, events_rx) = crossbeam_channel::unbounded();
+        let (handle, driver) = create_tournament(name, config, engines, driver_store, events_tx)?;
+        let snapshot = handle.snapshot_handle();
+
+        self.runtime.spawn(driver);
+        handle.go(); // begin play immediately
+
+        self.active = Some(ActiveTournament {
+            handle,
+            snapshot,
+            events: events_rx,
+            name: name.to_string(),
+            participants,
+        });
+        Ok(())
+    }
+
+    /// Discard the active tournament (after it has stopped or finished), returning
+    /// to the setup view. Does not delete persisted data.
+    pub fn clear_active(&mut self) {
+        self.active = None;
     }
 }
 

@@ -5,7 +5,7 @@
 //! Tournament = Step 9, openings = Step 10); this module owns the chrome and the
 //! cross-cutting behaviour that all tabs share.
 
-use eframe::egui::{self, Align, Color32, Layout, RichText, ViewportCommand};
+use eframe::egui::{self, Align, Layout, RichText, ViewportCommand};
 
 use colosseum_core::branding::DISPLAY_NAME;
 use colosseum_engine::TournamentStatus;
@@ -13,6 +13,7 @@ use colosseum_engine::TournamentStatus;
 use crate::backend::Backend;
 use crate::engines_tab::EnginesTab;
 use crate::theme;
+use crate::tournament_tab::TournamentTab;
 
 /// Top-level tabs. Tournament is the primary, default tab.
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +50,7 @@ pub struct ColosseumApp {
     tab: Tab,
     close: CloseState,
     engines_tab: EnginesTab,
+    tournament_tab: TournamentTab,
 }
 
 impl ColosseumApp {
@@ -60,6 +62,7 @@ impl ColosseumApp {
             tab: Tab::default(),
             close: CloseState::Open,
             engines_tab: EnginesTab::default(),
+            tournament_tab: TournamentTab::default(),
         }
     }
 
@@ -259,13 +262,9 @@ impl ColosseumApp {
                     .inner_margin(egui::Margin::same(16)),
             )
             .show(ctx, |ui| match self.tab {
-                Tab::Tournament => placeholder(
-                    ui,
-                    "Tournament",
-                    "Configure engines, time control, adjudication and Elo policy, then \
-                     run a tournament with a live results table.",
-                    "Implemented in Step 9.",
-                ),
+                Tab::Tournament => {
+                    self.tournament_tab.show(ui, &mut self.backend);
+                }
                 Tab::Engines => {
                     self.engines_tab.show(ui, &mut self.backend);
                 }
@@ -311,24 +310,4 @@ fn logo(ui: &mut egui::Ui) {
         4.0,
         egui::Stroke::new(1.8, theme::ACCENT.gamma_multiply(0.8)),
     );
-}
-
-/// A centered placeholder for tab bodies not yet implemented.
-fn placeholder(ui: &mut egui::Ui, title: &str, blurb: &str, note: &str) {
-    ui.vertical_centered(|ui| {
-        ui.add_space(60.0);
-        ui.label(RichText::new(title).size(28.0).strong().color(theme::TEXT));
-        ui.add_space(10.0);
-        ui.scope(|ui| {
-            ui.set_max_width(440.0);
-            ui.label(RichText::new(blurb).color(theme::TEXT_WEAK).size(14.5));
-        });
-        ui.add_space(14.0);
-        ui.label(
-            RichText::new(note)
-                .italics()
-                .color(Color32::from_rgb(0x6c, 0x76, 0x86))
-                .size(12.5),
-        );
-    });
 }

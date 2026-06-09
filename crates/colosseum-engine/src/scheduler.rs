@@ -134,7 +134,7 @@ pub fn create_tournament(
     engines: Vec<EngineConfig>,
     store: Store,
     events: Sender<TournamentEvent>,
-) -> Result<(Tournament, impl Future<Output = ()>), EngineError> {
+) -> Result<(Tournament, impl Future<Output = ()> + use<>), EngineError> {
     if engines.len() < 2 {
         return Err(EngineError::Corrupt(
             "a tournament needs at least two engines".into(),
@@ -443,7 +443,7 @@ pub fn resume_tournament(
     row: TournamentRow,
     store: Store,
     events: Sender<TournamentEvent>,
-) -> Result<(Tournament, impl Future<Output = ()>), EngineError> {
+) -> Result<(Tournament, impl Future<Output = ()> + use<>), EngineError> {
     let id = row.id;
     let config = row.config;
 

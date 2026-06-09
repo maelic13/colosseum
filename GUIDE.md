@@ -18,7 +18,7 @@ thinking / GPT-5.5 extra high.
 ## Phase C — GUI
 - [x] **Step 7** — GUI scaffold, modern theme + app icon, backend bridge, close-confirm · _Large/Small_
 - [x] **Step 8** — Engine Management tab (add, add-folder, auto-detect & edit options, metadata) · _Small_
-- [ ] **Step 9** — Tournament tab: options, Go/Stop/Force-Stop, **live sortable results table** · _Large_
+- [x] **Step 9** — Tournament tab: options, Go/Stop/Force-Stop, **live sortable results table** · _Large_
 - [ ] **Step 10** — Starting positions / openings (EPD + PGN, integrated UI) — final feature · _Large_
 
 ## Phase D — Release

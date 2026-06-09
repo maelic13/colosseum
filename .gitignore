@@ -49,3 +49,4 @@ $RECYCLE.BIN/
 
 # Claude Code local tooling state (un-ignore specific shared files if needed)
 .claude/
+/.localtest/
