@@ -394,3 +394,119 @@ async fn resume_across_restart() {
 
     handle2.abort();
 }
+
+/// Opening assignment is engine-independent: one opening per *encounter*, both
+/// colours sharing it, cycling when there are more encounters than openings.
+/// This exercises `create_tournament`'s scheduling/persistence without engines.
+#[test]
+fn openings_assigned_per_encounter_and_persisted() {
+    use colosseum_core::{OpeningBook, StartPosition};
+
+    let dir = tempfile::tempdir().unwrap();
+    let epd = dir.path().join("book.epd");
+    // Two distinct positions (1.e4 and 1.d4 reached as Black-to-move EPDs).
+    std::fs::write(
+        &epd,
+        "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3\n\
+         rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d3\n",
+    )
+    .unwrap();
+
+    let db = dir.path().join("colosseum.sqlite");
+    let store = Store::open(&db).unwrap();
+
+    let mut config = TournamentConfig {
+        format: Format::RoundRobin { cycles: 1 },
+        games_per_pair: 2,
+        ..Default::default()
+    };
+    config.start_position = StartPosition::Book(OpeningBook::new(epd));
+
+    // 3 engines -> 3 encounters; with 2 openings the third encounter cycles back.
+    let engines = vec![
+        EngineConfig::new("/nonexistent/a".into()),
+        EngineConfig::new("/nonexistent/b".into()),
+        EngineConfig::new("/nonexistent/c".into()),
+    ];
+    let (events_tx, _rx) = crossbeam_channel::unbounded();
+    let (tournament, _driver) =
+        create_tournament("Book", config, engines, store, events_tx).unwrap();
+
+    let reopened = Store::open(&db).unwrap();
+    let games = reopened.list_games(tournament.id).unwrap();
+    assert_eq!(games.len(), 6, "3 pairs * 2 games");
+
+    // Every game has an assigned opening FEN.
+    assert!(games.iter().all(|g| g.start_fen.is_some()));
+    // Both games of an encounter share an opening (colours swap, position is the same).
+    assert_eq!(games[0].start_fen, games[1].start_fen);
+    assert_eq!(games[2].start_fen, games[3].start_fen);
+    assert_eq!(games[4].start_fen, games[5].start_fen);
+    // Distinct encounters draw distinct openings...
+    assert_ne!(games[0].start_fen, games[2].start_fen);
+    // ...and the book cycles: encounter 3 reuses opening 1.
+    assert_eq!(games[4].start_fen, games[0].start_fen);
+}
+
+/// Capstone: a full tournament with an EPD opening book, driven by real engines,
+/// runs to completion and every game starts from a book position (FEN-tagged PGN).
+#[tokio::test]
+async fn tournament_with_openings_runs_to_completion() {
+    use colosseum_core::{OpeningBook, StartPosition};
+
+    let Some((_guard, exe)) = common::engine_or_skip() else {
+        eprintln!("skipping tournament_with_openings_runs_to_completion: no engine");
+        return;
+    };
+    let (_dir, store, db_path) = temp_db();
+
+    let book_path = _dir.path().join("book.epd");
+    std::fs::write(
+        &book_path,
+        "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3\n\
+         rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d3\n",
+    )
+    .unwrap();
+
+    let engines = vec![
+        engine_cfg("SF-A", &exe, &[("Hash", "16")]),
+        engine_cfg("SF-B", &exe, &[("Hash", "16"), ("Skill Level", "4")]),
+    ];
+
+    let mut config = fast_config(2, 8, 10);
+    config.start_position = StartPosition::Book(OpeningBook::new(book_path));
+
+    let (events_tx, _rx) = crossbeam_channel::unbounded();
+    let (tournament, driver) =
+        create_tournament("Booked", config, engines, store, events_tx).unwrap();
+    let handle = tokio::spawn(driver);
+
+    tournament.go();
+    let snapshot = tournament.snapshot_handle();
+    assert!(
+        wait_status(
+            &snapshot,
+            TournamentStatus::Finished,
+            Duration::from_secs(120)
+        )
+        .await,
+        "tournament did not finish in time"
+    );
+
+    // 2 engines, double round robin => 1 pair * 2 games.
+    let reopened = Store::open(&db_path).unwrap();
+    let tid = reopened.list_tournaments().unwrap()[0].id;
+    let games = reopened.list_games(tid).unwrap();
+    assert_eq!(games.len(), 2);
+    assert!(games.iter().all(|g| g.status == store::GAME_FINISHED));
+    // Both games started from a book position and recorded it in the PGN.
+    for g in &games {
+        assert!(g.start_fen.is_some(), "game missing opening FEN");
+        assert!(
+            g.pgn.as_deref().unwrap().contains("[FEN \""),
+            "PGN should carry the opening FEN tag"
+        );
+    }
+
+    handle.abort();
+}

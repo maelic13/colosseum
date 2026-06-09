@@ -15,9 +15,10 @@ use egui_extras::{Column, TableBuilder};
 
 use colosseum_core::{
     AdjudicationConfig, CommonEngineOptions, DrawAdjudication, EloPolicy, EngineConfig, EngineId,
-    Format, ResignAdjudication, Standings, StartPosition, TimeControl, TimeUnit, TournamentConfig,
+    Format, OpeningBook, OpeningFormat, OpeningOrder, ResignAdjudication, Standings, StartPosition,
+    TimeControl, TimeUnit, TournamentConfig,
 };
-use colosseum_engine::{EloEntry, TournamentStatus};
+use colosseum_engine::{EloEntry, TournamentStatus, summarize};
 
 use crate::backend::{Backend, ParticipantInfo};
 use crate::theme;
@@ -88,6 +89,19 @@ struct TournamentForm {
     elo_policy: EloPolicy,
     k_factor: f64,
 
+    // Openings
+    openings_on: bool,
+    openings_path: String,
+    openings_format: OpeningFormat,
+    openings_order: OpeningOrder,
+    openings_plies: u32,
+    openings_count_on: bool,
+    openings_count: u32,
+    openings_seed: u64,
+    /// Cached preview of the currently-selected book (count + sample), recomputed
+    /// when the path/format changes.
+    openings_preview: Option<Result<(usize, Option<String>), String>>,
+
     // Output
     pgn_path: String,
 }
@@ -121,6 +135,15 @@ impl Default for TournamentForm {
             resign_score_cp: 800,
             elo_policy: EloPolicy::PerGame,
             k_factor: 32.0,
+            openings_on: false,
+            openings_path: String::new(),
+            openings_format: OpeningFormat::Epd,
+            openings_order: OpeningOrder::Sequential,
+            openings_plies: 8,
+            openings_count_on: false,
+            openings_count: 100,
+            openings_seed: 0,
+            openings_preview: None,
             pgn_path: String::new(),
         }
     }
@@ -160,10 +183,38 @@ impl TournamentForm {
             },
             elo_policy: self.elo_policy,
             k_factor: self.k_factor.max(1.0),
-            start_position: StartPosition::Startpos,
+            start_position: match self.opening_book() {
+                Some(book) => StartPosition::Book(book),
+                None => StartPosition::Startpos,
+            },
             pgn_output: (!self.pgn_path.trim().is_empty())
                 .then(|| PathBuf::from(self.pgn_path.trim())),
         }
+    }
+
+    /// The configured [`OpeningBook`], or `None` when openings are disabled or no
+    /// file is chosen.
+    fn opening_book(&self) -> Option<OpeningBook> {
+        if !self.openings_on || self.openings_path.trim().is_empty() {
+            return None;
+        }
+        Some(OpeningBook {
+            path: PathBuf::from(self.openings_path.trim()),
+            format: self.openings_format,
+            order: self.openings_order,
+            plies: self.openings_plies.max(1),
+            count: self.openings_count_on.then_some(self.openings_count.max(1)),
+            seed: self.openings_seed,
+        })
+    }
+
+    /// Recompute the opening-book preview (count + first label) for the GUI.
+    fn refresh_openings_preview(&mut self) {
+        self.openings_preview = self.opening_book().map(|book| {
+            summarize(&book)
+                .map(|s| (s.count, s.first_label))
+                .map_err(|e| e.to_string())
+        });
     }
 
     /// Resolve the selected engine ids to their library configs, in seed order.
@@ -647,6 +698,168 @@ impl TournamentTab {
                 );
                 ui.end_row();
             });
+        ui.add_space(10.0);
+
+        // ── Openings ──
+        section(ui, "Openings");
+        if ui
+            .checkbox(&mut f.openings_on, "Use an opening book")
+            .on_hover_text(
+                "Draw one starting position per engine pair (both colours share it). \
+                 Without a book, every game starts from the standard position.",
+            )
+            .changed()
+        {
+            f.refresh_openings_preview();
+        }
+
+        if f.openings_on {
+            ui.add_enabled_ui(true, |ui| {
+                // File + browse + format.
+                ui.horizontal(|ui| {
+                    field_label(ui, "File");
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut f.openings_path)
+                                .desired_width(240.0)
+                                .hint_text("EPD or PGN file"),
+                        )
+                        .changed()
+                    {
+                        f.refresh_openings_preview();
+                    }
+                    if ui
+                        .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
+                        .clicked()
+                        && let Some(path) = rfd::FileDialog::new()
+                            .set_title("Choose opening book")
+                            .add_filter("Openings", &["epd", "pgn"])
+                            .add_filter("All files", &["*"])
+                            .pick_file()
+                    {
+                        // Guess the format from the extension.
+                        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                            f.openings_format = OpeningFormat::from_extension(ext);
+                        }
+                        f.openings_path = path.to_string_lossy().to_string();
+                        f.refresh_openings_preview();
+                    }
+                });
+
+                egui::Grid::new("tc_openings_grid")
+                    .num_columns(2)
+                    .spacing([10.0, 6.0])
+                    .show(ui, |ui| {
+                        field_label(ui, "Format");
+                        ui.horizontal(|ui| {
+                            let mut changed = ui
+                                .selectable_value(&mut f.openings_format, OpeningFormat::Epd, "EPD")
+                                .changed();
+                            changed |= ui
+                                .selectable_value(&mut f.openings_format, OpeningFormat::Pgn, "PGN")
+                                .changed();
+                            if changed {
+                                f.refresh_openings_preview();
+                            }
+                        });
+                        ui.end_row();
+
+                        field_label(ui, "Order");
+                        ui.horizontal(|ui| {
+                            let mut changed = ui
+                                .selectable_value(
+                                    &mut f.openings_order,
+                                    OpeningOrder::Sequential,
+                                    "Sequential",
+                                )
+                                .changed();
+                            changed |= ui
+                                .selectable_value(
+                                    &mut f.openings_order,
+                                    OpeningOrder::Random,
+                                    "Random",
+                                )
+                                .changed();
+                            if f.openings_order == OpeningOrder::Random {
+                                ui.add_space(6.0);
+                                field_label(ui, "seed");
+                                changed |= ui
+                                    .add(DragValue::new(&mut f.openings_seed).speed(1.0))
+                                    .changed();
+                            }
+                            if changed {
+                                f.refresh_openings_preview();
+                            }
+                        });
+                        ui.end_row();
+
+                        if f.openings_format == OpeningFormat::Pgn {
+                            field_label(ui, "Plies from PGN");
+                            if ui
+                                .add(
+                                    DragValue::new(&mut f.openings_plies)
+                                        .range(1..=60)
+                                        .speed(0.2),
+                                )
+                                .on_hover_text("Half-moves to play out from each PGN game.")
+                                .changed()
+                            {
+                                f.refresh_openings_preview();
+                            }
+                            ui.end_row();
+                        }
+
+                        field_label(ui, "Limit count");
+                        ui.horizontal(|ui| {
+                            let mut changed = ui.checkbox(&mut f.openings_count_on, "").changed();
+                            changed |= ui
+                                .add_enabled(
+                                    f.openings_count_on,
+                                    DragValue::new(&mut f.openings_count)
+                                        .range(1..=100_000)
+                                        .speed(1.0),
+                                )
+                                .changed();
+                            if changed {
+                                f.refresh_openings_preview();
+                            }
+                        });
+                        ui.end_row();
+                    });
+
+                // Preview / status line.
+                match &f.openings_preview {
+                    Some(Ok((count, sample))) => {
+                        ui.label(
+                            RichText::new(format!("✓ {count} openings loaded"))
+                                .color(theme::SUCCESS)
+                                .size(12.0),
+                        );
+                        if let Some(label) = sample {
+                            ui.label(
+                                RichText::new(format!("e.g. {}", truncate(label, 60)))
+                                    .color(theme::TEXT_WEAK)
+                                    .size(11.5),
+                            );
+                        }
+                    }
+                    Some(Err(e)) => {
+                        ui.label(
+                            RichText::new(format!("⚠ {e}"))
+                                .color(theme::DANGER)
+                                .size(12.0),
+                        );
+                    }
+                    None => {
+                        ui.label(
+                            RichText::new("Choose a file to preview its openings.")
+                                .color(theme::TEXT_WEAK)
+                                .size(11.5),
+                        );
+                    }
+                }
+            });
+        }
         ui.add_space(10.0);
 
         // ── Output ──
@@ -1271,6 +1484,16 @@ fn format_nps(nps: Option<u64>) -> String {
     }
 }
 
+/// Truncate `s` to at most `max` characters, appending an ellipsis if cut.
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let head: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{head}…")
+    }
+}
+
 /// Truncate a name for compact matrix headers.
 fn short_name(name: &str) -> String {
     if name.chars().count() <= 10 {
@@ -1319,6 +1542,36 @@ mod tests {
         assert!(cfg.adjudication.draw.is_none());
         assert!(cfg.adjudication.resign.is_none());
         assert!(cfg.pgn_output.is_none());
+        // Openings off by default => standard start position.
+        assert_eq!(cfg.start_position, colosseum_core::StartPosition::Startpos);
+    }
+
+    #[test]
+    fn opening_book_maps_into_config() {
+        // Disabled, or enabled without a path => no book.
+        let mut form = TournamentForm {
+            openings_on: true,
+            ..TournamentForm::default()
+        };
+        assert!(form.opening_book().is_none());
+
+        form.openings_path = "C:/books/silver.epd".to_string();
+        form.openings_format = OpeningFormat::Epd;
+        form.openings_order = OpeningOrder::Random;
+        form.openings_seed = 7;
+        form.openings_count_on = true;
+        form.openings_count = 50;
+        let book = form.opening_book().expect("a book");
+        assert_eq!(book.format, OpeningFormat::Epd);
+        assert_eq!(book.order, OpeningOrder::Random);
+        assert_eq!(book.seed, 7);
+        assert_eq!(book.count, Some(50));
+
+        // It flows into the built config.
+        match form.build_config().start_position {
+            colosseum_core::StartPosition::Book(b) => assert_eq!(b.count, Some(50)),
+            colosseum_core::StartPosition::Startpos => panic!("expected a book"),
+        }
     }
 
     #[test]

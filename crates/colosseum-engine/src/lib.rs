@@ -9,6 +9,7 @@
 pub mod config;
 pub mod detect;
 pub mod error;
+pub mod openings;
 pub mod paths;
 pub mod pgn;
 pub mod runner;
@@ -18,6 +19,7 @@ pub mod store;
 pub use config::{AppConfig, AppDirs, EngineLibrary};
 pub use detect::{DetectResult, detect_engine};
 pub use error::EngineError;
+pub use openings::{ResolvedOpening, load_openings, summarize};
 pub use runner::{EngineGameSpec, GameReport, GameSpec, run_game};
 pub use scheduler::{
     Command, EloEntry, Tournament, TournamentSnapshot, TournamentStatus, create_tournament,

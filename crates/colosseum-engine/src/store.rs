@@ -54,6 +54,10 @@ pub struct GameRow {
     pub plies: Option<u32>,
     pub pgn: Option<String>,
     pub status: String,
+    /// Opening start FEN; `None` means the standard start position.
+    pub start_fen: Option<String>,
+    /// Opening moves (UCI) pre-played before the engines move.
+    pub opening_moves: Vec<String>,
 }
 
 /// One participating engine's seed, starting Elo, and config snapshot within a tournament.
@@ -104,6 +108,21 @@ impl Store {
             conn.execute_batch(
                 "ALTER TABLE tournament_engines ADD COLUMN engine_config_json TEXT;",
             )?;
+        }
+        // Migration: per-game opening columns, introduced in Step 10.
+        for column in ["start_fen TEXT", "opening_moves TEXT"] {
+            let name = column.split_whitespace().next().unwrap();
+            let exists: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('games') WHERE name = ?1",
+                    params![name],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 0;
+            if !exists {
+                conn.execute_batch(&format!("ALTER TABLE games ADD COLUMN {column};"))?;
+            }
         }
         Ok(Self { conn })
     }
@@ -339,7 +358,8 @@ impl Store {
 
     // ---- games ---------------------------------------------------------------
 
-    /// Insert a pending game.
+    /// Insert a pending game with its assigned opening (start FEN + pre-moves).
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_pending_game(
         &self,
         id: GameId,
@@ -347,10 +367,18 @@ impl Store {
         round: u32,
         white: EngineId,
         black: EngineId,
+        start_fen: Option<&str>,
+        opening_moves: &[String],
     ) -> Result<()> {
+        let moves_json = if opening_moves.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(opening_moves)?)
+        };
         self.conn.execute(
-            "INSERT INTO games (id, tournament_id, round, white_id, black_id, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO games
+               (id, tournament_id, round, white_id, black_id, status, start_fen, opening_moves)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 id.to_string(),
                 tournament.to_string(),
@@ -358,6 +386,8 @@ impl Store {
                 white.to_string(),
                 black.to_string(),
                 GAME_PENDING,
+                start_fen,
+                moves_json,
             ],
         )?;
         Ok(())
@@ -433,7 +463,7 @@ impl Store {
     pub fn list_games(&self, tournament: TournamentId) -> Result<Vec<GameRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, round, white_id, black_id, result, termination,
-                    white_nps, black_nps, plies, pgn, status
+                    white_nps, black_nps, plies, pgn, status, start_fen, opening_moves
              FROM games WHERE tournament_id = ?1 ORDER BY round, rowid",
         )?;
         let rows = stmt.query_map(params![tournament.to_string()], |row| {
@@ -449,6 +479,8 @@ impl Store {
                 plies: row.get(8)?,
                 pgn: row.get(9)?,
                 status: row.get(10)?,
+                start_fen: row.get(11)?,
+                opening_moves: row.get(12)?,
             })
         })?;
         let mut games = Vec::new();
@@ -472,10 +504,17 @@ struct RawGame {
     plies: Option<u32>,
     pgn: Option<String>,
     status: String,
+    start_fen: Option<String>,
+    opening_moves: Option<String>,
 }
 
 impl RawGame {
     fn into_game(self) -> Result<GameRow> {
+        let opening_moves = self
+            .opening_moves
+            .map(|s| serde_json::from_str::<Vec<String>>(&s))
+            .transpose()?
+            .unwrap_or_default();
         Ok(GameRow {
             id: GameId(parse_uuid(&self.id)?),
             round: self.round,
@@ -491,6 +530,8 @@ impl RawGame {
             plies: self.plies,
             pgn: self.pgn,
             status: self.status,
+            start_fen: self.start_fen,
+            opening_moves,
         })
     }
 }
@@ -556,7 +597,9 @@ CREATE TABLE IF NOT EXISTS games (
   pgn           TEXT,
   started_at    TEXT,
   finished_at   TEXT,
-  status        TEXT NOT NULL
+  status        TEXT NOT NULL,
+  start_fen     TEXT,
+  opening_moves TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_games_tournament ON games(tournament_id);
@@ -589,7 +632,7 @@ mod tests {
         let other = EngineId::new();
         let gid = GameId::new();
         store
-            .insert_pending_game(gid, tid, 1, engine.id, other)
+            .insert_pending_game(gid, tid, 1, engine.id, other, None, &[])
             .unwrap();
         store.mark_game_running(gid).unwrap();
         store
@@ -604,12 +647,34 @@ mod tests {
             )
             .unwrap();
 
+        // A second game carrying an assigned opening (start FEN + pre-moves).
+        let gid2 = GameId::new();
+        let fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
+        store
+            .insert_pending_game(
+                gid2,
+                tid,
+                1,
+                other,
+                engine.id,
+                Some(fen),
+                &["e2e4".to_string(), "e7e5".to_string()],
+            )
+            .unwrap();
+
         let games = store.list_games(tid).unwrap();
-        assert_eq!(games.len(), 1);
-        assert_eq!(games[0].result, Some(GameResult::WhiteWin));
-        assert_eq!(games[0].termination, Some(Termination::Checkmate));
-        assert_eq!(games[0].plies, Some(42));
-        assert_eq!(games[0].status, GAME_FINISHED);
+        assert_eq!(games.len(), 2);
+        let g1 = games.iter().find(|g| g.id == gid).unwrap();
+        assert_eq!(g1.result, Some(GameResult::WhiteWin));
+        assert_eq!(g1.termination, Some(Termination::Checkmate));
+        assert_eq!(g1.plies, Some(42));
+        assert_eq!(g1.status, GAME_FINISHED);
+        assert_eq!(g1.start_fen, None);
+        assert!(g1.opening_moves.is_empty());
+
+        let g2 = games.iter().find(|g| g.id == gid2).unwrap();
+        assert_eq!(g2.start_fen.as_deref(), Some(fen));
+        assert_eq!(g2.opening_moves, vec!["e2e4", "e7e5"]);
 
         store.set_tournament_status(tid, STATUS_FINISHED).unwrap();
         let row = store.load_tournament(tid).unwrap().unwrap();

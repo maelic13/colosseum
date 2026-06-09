@@ -1,6 +1,7 @@
 //! Minimal PGN writer: a seven-tag roster (plus a few useful extras) and SAN
-//! movetext wrapped to a sensible width. v1 numbers from the standard start position;
-//! FEN-start numbering is refined when opening books arrive (Step 10).
+//! movetext wrapped to a sensible width. Movetext numbering honours a FEN start
+//! (its fullmove number and side to move), so openings that begin mid-game or with
+//! Black to move are numbered correctly.
 
 use colosseum_core::{GameResult, Termination};
 
@@ -48,21 +49,54 @@ pub fn build_pgn(tags: &PgnTags, san_moves: &[String]) -> String {
         tag("FEN", fen);
     }
 
+    let (start_move, black_first) = fen_move_context(tags.fen.as_deref());
+
     out.push('\n');
-    out.push_str(&movetext(san_moves, tags.result));
+    out.push_str(&movetext(san_moves, tags.result, start_move, black_first));
     out.push('\n');
     out
 }
 
-/// Build wrapped movetext ending with the result token.
-fn movetext(san_moves: &[String], result: GameResult) -> String {
+/// Derive `(starting fullmove number, black-to-move-first)` from a start FEN.
+/// Defaults to `(1, false)` for the standard start position or an unparsable FEN.
+fn fen_move_context(fen: Option<&str>) -> (u32, bool) {
+    let Some(fen) = fen else {
+        return (1, false);
+    };
+    let fields: Vec<&str> = fen.split_whitespace().collect();
+    let black_first = fields.get(1).is_some_and(|s| *s == "b");
+    let start_move = fields
+        .get(5)
+        .and_then(|s| s.parse::<u32>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(1);
+    (start_move, black_first)
+}
+
+/// Build wrapped movetext ending with the result token, numbering from
+/// `start_move` and accounting for whether Black moves first.
+fn movetext(
+    san_moves: &[String],
+    result: GameResult,
+    start_move: u32,
+    black_first: bool,
+) -> String {
     const WRAP: usize = 80;
     let mut tokens: Vec<String> = Vec::with_capacity(san_moves.len() + san_moves.len() / 2);
+    let mut move_no = start_move;
+    let mut white_to_move = !black_first;
     for (ply, san) in san_moves.iter().enumerate() {
-        if ply % 2 == 0 {
-            tokens.push(format!("{}.", ply / 2 + 1));
+        if white_to_move {
+            tokens.push(format!("{move_no}."));
+        } else if ply == 0 {
+            // Black moves first from this start position: "N..." prefix.
+            tokens.push(format!("{move_no}..."));
         }
         tokens.push(san.clone());
+        if !white_to_move {
+            move_no += 1;
+        }
+        white_to_move = !white_to_move;
     }
     tokens.push(result.pgn().to_string());
 
@@ -125,6 +159,28 @@ mod tests {
         assert!(pgn.contains("[Termination \"normal\"]"));
         assert!(pgn.contains("1. e4 e5 2. Qh5"));
         assert!(pgn.trim_end().ends_with("1-0"));
+    }
+
+    #[test]
+    fn fen_start_numbers_from_fullmove_and_black_first() {
+        // Position after 1.e4 e5 2.Nf3 — Black to move, fullmove 2.
+        let tags = PgnTags {
+            event: "E".into(),
+            site: "S".into(),
+            date: "2026.01.01".into(),
+            round: 1,
+            white: "W".into(),
+            black: "B".into(),
+            result: GameResult::Draw,
+            time_control: String::new(),
+            termination: None,
+            fen: Some("rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2".into()),
+        };
+        let pgn = build_pgn(&tags, &["Nc6".into(), "Bb5".into(), "a6".into()]);
+        // Black moves first at move 2, then White's move 3, then Black's move 3.
+        assert!(pgn.contains("2... Nc6 3. Bb5 a6"));
+        assert!(pgn.contains("[FEN \""));
+        assert!(pgn.contains("[SetUp \"1\"]"));
     }
 
     #[test]

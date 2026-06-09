@@ -47,6 +47,8 @@ pub struct GameSpec {
     pub black: EngineGameSpec,
     /// `None` => standard start position.
     pub start_fen: Option<String>,
+    /// Opening moves (UCI) to pre-play from `start_fen` before the engines move.
+    pub opening_moves: Vec<String>,
     pub time_control: TimeControl,
     pub time_control_label: String,
     pub adjudication: AdjudicationConfig,
@@ -143,6 +145,24 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
     let mut white_nps = NpsAccumulator::default();
     let mut black_nps = NpsAccumulator::default();
 
+    // Pre-play the assigned opening moves before the engines take over. These
+    // were validated when the book was loaded, but we re-validate defensively.
+    for uci in &spec.opening_moves {
+        let Some(legal) = uci
+            .parse::<UciMove>()
+            .ok()
+            .and_then(|m| m.to_move(&pos).ok())
+        else {
+            break;
+        };
+        san_moves.push(SanPlus::from_move(pos.clone(), &legal).to_string());
+        uci_moves.push(uci.clone());
+        white_pov.push(last_white_pov); // no engine eval for opening plies
+        pos.play_unchecked(&legal);
+        let key = pos.zobrist_hash::<Zobrist64>(EnPassantMode::Legal);
+        *repetitions.entry(key).or_insert(0) += 1;
+    }
+
     let outcome = loop {
         if san_moves.len() >= MAX_PLIES {
             break Outcome::natural(GameResult::Draw, Termination::MaxMoves);
@@ -154,9 +174,7 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         } else {
             &mut black
         };
-        let position = UciPosition::StartPos {
-            moves: uci_moves.clone(),
-        };
+        let position = build_uci_position(spec.start_fen.as_deref(), &uci_moves);
 
         let search = engine
             .search(&position, &GoLimits::MoveTime(movetime), deadline)
@@ -298,6 +316,20 @@ impl Outcome {
             termination,
             error,
         }
+    }
+}
+
+/// Build the UCI `position` payload: from a FEN when the opening sets one,
+/// otherwise from the standard start, in both cases followed by the moves so far.
+fn build_uci_position(start_fen: Option<&str>, moves: &[String]) -> UciPosition {
+    match start_fen {
+        Some(fen) => UciPosition::Fen {
+            fen: fen.to_string(),
+            moves: moves.to_vec(),
+        },
+        None => UciPosition::StartPos {
+            moves: moves.to_vec(),
+        },
     }
 }
 

@@ -32,4 +32,7 @@ pub use pairing::{generate_schedule, round_robin};
 pub use rating::{IncrementalElo, Rating, RatingDelta};
 pub use standings::{EngineStanding, GameOutcome, HeadToHead, Standings};
 pub use time::{TimeControl, TimeUnit};
-pub use tournament::{CommonEngineOptions, EloPolicy, Format, StartPosition, TournamentConfig};
+pub use tournament::{
+    CommonEngineOptions, EloPolicy, Format, OpeningBook, OpeningFormat, OpeningOrder,
+    StartPosition, TournamentConfig,
+};

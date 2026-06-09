@@ -22,12 +22,13 @@ use tokio::task::JoinSet;
 
 use colosseum_core::{
     CommonEngineOptions, EloPolicy, EngineConfig, EngineId, GameId, GameResult, IncrementalElo,
-    Pairing, Rating, Standings, TournamentConfig, TournamentEvent, TournamentId, generate_schedule,
-    standings::GameOutcome,
+    Pairing, Rating, Standings, StartPosition, TournamentConfig, TournamentEvent, TournamentId,
+    generate_schedule, standings::GameOutcome,
 };
 use colosseum_uci::SpawnOptions;
 
 use crate::error::EngineError;
+use crate::openings::{ResolvedOpening, load_openings};
 use crate::runner::{EngineGameSpec, GameSpec, run_game};
 use crate::store::{self, Store, TournamentRow};
 
@@ -117,11 +118,15 @@ struct EngineTemplate {
     start_elo: f64,
 }
 
-/// A scheduled game (id + pairing).
-#[derive(Clone, Copy)]
+/// A scheduled game: id, pairing, and the opening assigned to it.
+#[derive(Clone)]
 struct ScheduledGame {
     game_id: GameId,
     pairing: Pairing,
+    /// Opening start FEN (`None` = standard start position).
+    start_fen: Option<String>,
+    /// Opening moves (UCI) to pre-play before the engines move.
+    opening_moves: Vec<String>,
 }
 
 /// Create a fresh tournament: persist it, its participants and pending games, and
@@ -175,13 +180,42 @@ pub fn create_tournament(
     let init_standings = Standings::with_engines(&ids);
     let init_elo = IncrementalElo::with_seed(config.k_factor, seeds.iter().copied());
 
+    // Resolve the opening book once (if any). One opening is drawn per *encounter*
+    // (a run of `games_per_pair` consecutive games), so both colours are played
+    // from the same position; the book cycles if there are more encounters than
+    // openings.
+    let openings: Vec<ResolvedOpening> = match &config.start_position {
+        StartPosition::Startpos => Vec::new(),
+        StartPosition::Book(book) => load_openings(book)?,
+    };
+    let games_per_pair = config.games_per_pair.max(1) as usize;
+
     // Build and persist the schedule.
     let pairings = generate_schedule(&ids, &config);
     let mut schedule = Vec::with_capacity(pairings.len());
-    for pairing in pairings {
+    for (i, pairing) in pairings.into_iter().enumerate() {
         let game_id = GameId::new();
-        store.insert_pending_game(game_id, id, pairing.round, pairing.white, pairing.black)?;
-        schedule.push(ScheduledGame { game_id, pairing });
+        let (start_fen, opening_moves) = if openings.is_empty() {
+            (None, Vec::new())
+        } else {
+            let opening = &openings[(i / games_per_pair) % openings.len()];
+            (opening.start_fen.clone(), opening.moves.clone())
+        };
+        store.insert_pending_game(
+            game_id,
+            id,
+            pairing.round,
+            pairing.white,
+            pairing.black,
+            start_fen.as_deref(),
+            &opening_moves,
+        )?;
+        schedule.push(ScheduledGame {
+            game_id,
+            pairing,
+            start_fen,
+            opening_moves,
+        });
     }
 
     let total_games = schedule.len();
@@ -283,7 +317,7 @@ async fn drive(mut driver: Driver) {
     loop {
         // Launch while running, with spare capacity and pending games.
         while running && games.len() < concurrency && next_index < driver.schedule.len() {
-            let scheduled = driver.schedule[next_index];
+            let scheduled = driver.schedule[next_index].clone();
             next_index += 1;
             let _ = driver.store.mark_game_running(scheduled.game_id);
             let _ = driver.events.send(TournamentEvent::GameStarted {
@@ -529,6 +563,8 @@ pub fn resume_tournament(
                     white: game.white,
                     black: game.black,
                 },
+                start_fen: game.start_fen.clone(),
+                opening_moves: game.opening_moves.clone(),
             });
         }
     }
@@ -600,7 +636,8 @@ fn build_game_spec(driver: &Driver, scheduled: &ScheduledGame) -> GameSpec {
         round: scheduled.pairing.round,
         white: to_game_spec(white),
         black: to_game_spec(black),
-        start_fen: None,
+        start_fen: scheduled.start_fen.clone(),
+        opening_moves: scheduled.opening_moves.clone(),
         time_control: driver.config.time_control,
         time_control_label: time_control_label(&driver.config),
         adjudication: driver.config.adjudication,
