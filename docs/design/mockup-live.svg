@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 660" font-family="Inter, Segoe UI, sans-serif">
+  <!-- App background -->
+  <rect width="1100" height="660" rx="10" fill="#1a1e26"/>
+
+  <!-- ── Header ── -->
+  <rect width="1100" height="48" fill="#12151b"/>
+  <line x1="0" y1="48" x2="1100" y2="48" stroke="#323a47"/>
+  <circle cx="30" cy="24" r="8.5" fill="none" stroke="#e0a93b" stroke-width="2.2"/>
+  <circle cx="30" cy="24" r="4" fill="none" stroke="#b8882f" stroke-width="1.8"/>
+  <text x="48" y="30" fill="#e7eaf0" font-size="17" font-weight="600">Colosseum</text>
+  <rect x="170" y="10" width="106" height="28" rx="14" fill="#e0a93b" fill-opacity="0.18"/>
+  <text x="223" y="28" fill="#f2c15e" font-size="14" font-weight="600" text-anchor="middle">Tournament</text>
+  <text x="324" y="28" fill="#97a1b1" font-size="14" text-anchor="middle">Engines</text>
+  <rect x="978" y="12" width="90" height="24" rx="12" fill="#5fb873" fill-opacity="0.16" stroke="#5fb873" stroke-opacity="0.45"/>
+  <circle cx="996" cy="24" r="3.5" fill="#5fb873"/>
+  <text x="1006" y="28" fill="#5fb873" font-size="12" font-weight="600">Running</text>
+
+  <!-- ── Live control bar ── -->
+  <rect x="0" y="48" width="1100" height="56" fill="#12151b" fill-opacity="0.6"/>
+  <rect x="20" y="64" width="90" height="24" rx="12" fill="#5fb873" fill-opacity="0.16" stroke="#5fb873" stroke-opacity="0.45"/>
+  <circle cx="38" cy="76" r="3.5" fill="#5fb873"/>
+  <text x="48" y="80" fill="#5fb873" font-size="12" font-weight="600">Running</text>
+  <text x="124" y="81" fill="#e7eaf0" font-size="15" font-weight="600">Round Robin — blitz gauntlet</text>
+
+  <g font-size="13.5" font-weight="600">
+    <rect x="368" y="60" width="62" height="32" rx="6" fill="#5fb873" fill-opacity="0.07" stroke="#5fb873" stroke-opacity="0.2"/>
+    <text x="399" y="80" fill="#5fb873" fill-opacity="0.45" text-anchor="middle">▶ Go</text>
+    <rect x="440" y="60" width="72" height="32" rx="6" fill="#d9a54f" fill-opacity="0.16" stroke="#d9a54f" stroke-opacity="0.45"/>
+    <text x="476" y="80" fill="#d9a54f" text-anchor="middle">⏸ Stop</text>
+    <rect x="522" y="60" width="110" height="32" rx="6" fill="#db5d52" fill-opacity="0.16" stroke="#db5d52" stroke-opacity="0.45"/>
+    <text x="577" y="80" fill="#db5d52" text-anchor="middle">⏹ Force-Stop</text>
+  </g>
+
+  <text x="660" y="81" fill="#97a1b1" font-size="13">128 / 240 games</text>
+  <rect x="768" y="73" width="160" height="6" rx="3" fill="#0e1116"/>
+  <rect x="768" y="73" width="85" height="6" rx="3" fill="#e0a93b"/>
+
+  <rect x="948" y="62" width="108" height="28" rx="6" fill="#232934" stroke="#323a47"/>
+  <text x="1002" y="80" fill="#e7eaf0" font-size="12.5" text-anchor="middle">Head-to-head</text>
+  <line x1="0" y1="104" x2="1100" y2="104" stroke="#323a47"/>
+
+  <!-- ── Results table ── -->
+  <!-- header -->
+  <rect x="20" y="120" width="1060" height="30" rx="6" fill="#232934"/>
+  <g font-size="12" font-weight="600" fill="#97a1b1">
+    <text x="40" y="139">#</text>
+    <text x="80" y="139">Engine</text>
+    <text x="330" y="139">Ver</text>
+    <text x="430" y="139" fill="#e0a93b">Elo ▼</text>
+    <text x="540" y="139">Δ</text>
+    <text x="640" y="139">Pts</text>
+    <text x="730" y="139">Gms</text>
+    <text x="820" y="139">W-D-L</text>
+    <text x="960" y="139">Avg nps</text>
+  </g>
+
+  <!-- rows -->
+  <g font-size="13">
+    <!-- row 1 -->
+    <rect x="20" y="150" width="1060" height="30" fill="#1f242d"/>
+    <circle cx="46" cy="165" r="9" fill="#e0a93b" fill-opacity="0.2" stroke="#e0a93b" stroke-opacity="0.5"/>
+    <text x="46" y="169" fill="#e0a93b" font-size="11" font-weight="600" text-anchor="middle">1</text>
+    <text x="80" y="169" fill="#e7eaf0" font-weight="600">Stockfish 17</text>
+    <text x="330" y="169" fill="#97a1b1" font-size="12.5">17.0</text>
+    <text x="430" y="169" fill="#e7eaf0" font-family="JetBrains Mono, monospace">2148</text>
+    <rect x="528" y="155" width="44" height="20" rx="4" fill="#5fb873" fill-opacity="0.16"/>
+    <text x="550" y="169" fill="#5fb873" font-family="JetBrains Mono, monospace" font-size="12" text-anchor="middle">+48</text>
+    <text x="640" y="169" fill="#e0a93b" font-weight="600" font-family="JetBrains Mono, monospace">38.5</text>
+    <text x="730" y="169" fill="#97a1b1" font-family="JetBrains Mono, monospace">48</text>
+    <text x="820" y="169" fill="#e7eaf0" font-family="JetBrains Mono, monospace">31-15-2</text>
+    <text x="960" y="169" fill="#97a1b1" font-family="JetBrains Mono, monospace">1.8M</text>
+
+    <!-- row 2 -->
+    <circle cx="46" cy="195" r="9" fill="#aab4c4" fill-opacity="0.2" stroke="#aab4c4" stroke-opacity="0.5"/>
+    <text x="46" y="199" fill="#aab4c4" font-size="11" font-weight="600" text-anchor="middle">2</text>
+    <text x="80" y="199" fill="#e7eaf0" font-weight="600">Berserk 13</text>
+    <text x="330" y="199" fill="#97a1b1" font-size="12.5">13.0</text>
+    <text x="430" y="199" fill="#e7eaf0" font-family="JetBrains Mono, monospace">2071</text>
+    <rect x="528" y="185" width="44" height="20" rx="4" fill="#5fb873" fill-opacity="0.16"/>
+    <text x="550" y="199" fill="#5fb873" font-family="JetBrains Mono, monospace" font-size="12" text-anchor="middle">+11</text>
+    <text x="640" y="199" fill="#e0a93b" font-weight="600" font-family="JetBrains Mono, monospace">29.0</text>
+    <text x="730" y="199" fill="#97a1b1" font-family="JetBrains Mono, monospace">48</text>
+    <text x="820" y="199" fill="#e7eaf0" font-family="JetBrains Mono, monospace">22-14-12</text>
+    <text x="960" y="199" fill="#97a1b1" font-family="JetBrains Mono, monospace">2.4M</text>
+
+    <!-- row 3 -->
+    <rect x="20" y="210" width="1060" height="30" fill="#1f242d"/>
+    <circle cx="46" cy="225" r="9" fill="#c08255" fill-opacity="0.2" stroke="#c08255" stroke-opacity="0.5"/>
+    <text x="46" y="229" fill="#c08255" font-size="11" font-weight="600" text-anchor="middle">3</text>
+    <text x="80" y="229" fill="#e7eaf0" font-weight="600">Ethereal 14</text>
+    <text x="330" y="229" fill="#97a1b1" font-size="12.5">14.25</text>
+    <text x="430" y="229" fill="#e7eaf0" font-family="JetBrains Mono, monospace">1994</text>
+    <text x="550" y="229" fill="#6c7686" font-family="JetBrains Mono, monospace" font-size="12" text-anchor="middle">0</text>
+    <text x="640" y="229" fill="#e0a93b" font-weight="600" font-family="JetBrains Mono, monospace">21.5</text>
+    <text x="730" y="229" fill="#97a1b1" font-family="JetBrains Mono, monospace">47</text>
+    <text x="820" y="229" fill="#e7eaf0" font-family="JetBrains Mono, monospace">15-13-19</text>
+    <text x="960" y="229" fill="#97a1b1" font-family="JetBrains Mono, monospace">1.1M</text>
+
+    <!-- row 4 -->
+    <text x="46" y="259" fill="#6c7686" font-family="JetBrains Mono, monospace" font-size="12" text-anchor="middle">4</text>
+    <text x="80" y="259" fill="#e7eaf0" font-weight="600">Rustic Alpha</text>
+    <text x="330" y="259" fill="#97a1b1" font-size="12.5">3.0</text>
+    <text x="430" y="259" fill="#e7eaf0" font-family="JetBrains Mono, monospace">1822</text>
+    <rect x="528" y="245" width="44" height="20" rx="4" fill="#db5d52" fill-opacity="0.16"/>
+    <text x="550" y="259" fill="#db5d52" font-family="JetBrains Mono, monospace" font-size="12" text-anchor="middle">−59</text>
+    <text x="640" y="259" fill="#e0a93b" font-weight="600" font-family="JetBrains Mono, monospace">9.0</text>
+    <text x="730" y="259" fill="#97a1b1" font-family="JetBrains Mono, monospace">47</text>
+    <text x="820" y="259" fill="#e7eaf0" font-family="JetBrains Mono, monospace">5-8-34</text>
+    <text x="960" y="259" fill="#97a1b1" font-family="JetBrains Mono, monospace">640k</text>
+  </g>
+
+  <!-- ── Head-to-head card ── -->
+  <rect x="20" y="296" width="520" height="160" rx="8" fill="#232934" stroke="#323a47"/>
+  <text x="36" y="322" fill="#e7eaf0" font-size="14" font-weight="600">Head-to-head</text>
+  <text x="36" y="338" fill="#97a1b1" font-size="11.5">Row engine's W–D–L against each column engine.</text>
+  <g font-size="11.5" font-family="JetBrains Mono, monospace">
+    <text x="200" y="362" fill="#97a1b1" text-anchor="middle" font-family="Inter">Stockf…</text>
+    <text x="300" y="362" fill="#97a1b1" text-anchor="middle" font-family="Inter">Berserk</text>
+    <text x="400" y="362" fill="#97a1b1" text-anchor="middle" font-family="Inter">Ethereal</text>
+    <text x="36" y="386" fill="#e7eaf0" font-family="Inter" font-size="12" font-weight="600">Stockfish 17</text>
+    <text x="200" y="386" fill="#6c7686" text-anchor="middle">—</text>
+    <rect x="270" y="371" width="60" height="20" rx="4" fill="#5fb873" fill-opacity="0.20"/>
+    <text x="300" y="386" fill="#e7eaf0" text-anchor="middle">10-4-2</text>
+    <rect x="370" y="371" width="60" height="20" rx="4" fill="#5fb873" fill-opacity="0.24"/>
+    <text x="400" y="386" fill="#e7eaf0" text-anchor="middle">12-3-1</text>
+    <text x="36" y="414" fill="#e7eaf0" font-family="Inter" font-size="12" font-weight="600">Berserk 13</text>
+    <rect x="170" y="399" width="60" height="20" rx="4" fill="#db5d52" fill-opacity="0.20"/>
+    <text x="200" y="414" fill="#e7eaf0" text-anchor="middle">2-4-10</text>
+    <text x="300" y="414" fill="#6c7686" text-anchor="middle">—</text>
+    <rect x="370" y="399" width="60" height="20" rx="4" fill="#5fb873" fill-opacity="0.10"/>
+    <text x="400" y="414" fill="#e7eaf0" text-anchor="middle">7-5-4</text>
+    <text x="36" y="442" fill="#e7eaf0" font-family="Inter" font-size="12" font-weight="600">Ethereal 14</text>
+    <rect x="170" y="427" width="60" height="20" rx="4" fill="#db5d52" fill-opacity="0.24"/>
+    <text x="200" y="442" fill="#e7eaf0" text-anchor="middle">1-3-12</text>
+    <rect x="270" y="427" width="60" height="20" rx="4" fill="#db5d52" fill-opacity="0.10"/>
+    <text x="300" y="442" fill="#e7eaf0" text-anchor="middle">4-5-7</text>
+    <text x="400" y="442" fill="#6c7686" text-anchor="middle">—</text>
+  </g>
+
+  <!-- ── Engine errors card ── -->
+  <rect x="560" y="296" width="520" height="92" rx="8" fill="#db5d52" fill-opacity="0.08" stroke="#db5d52" stroke-opacity="0.35"/>
+  <text x="576" y="322" fill="#db5d52" font-size="12.5" font-weight="600">Engine errors (2)</text>
+  <text x="576" y="344" fill="#97a1b1" font-size="12">Rustic Alpha: bestmove timeout after 5000 ms (game 117)</text>
+  <text x="576" y="362" fill="#97a1b1" font-size="12">Rustic Alpha: process exited unexpectedly (game 96)</text>
+
+  <!-- ── Status bar ── -->
+  <line x1="0" y1="624" x2="1100" y2="624" stroke="#323a47"/>
+  <rect x="0" y="624" width="1100" height="36" fill="#12151b"/>
+  <rect x="14" y="631" width="86" height="22" rx="11" fill="#5fb873" fill-opacity="0.16" stroke="#5fb873" stroke-opacity="0.45"/>
+  <circle cx="30" cy="642" r="3" fill="#5fb873"/>
+  <text x="40" y="646" fill="#5fb873" font-size="11.5" font-weight="600">Running</text>
+  <text x="1086" y="646" fill="#6c7686" font-size="12" text-anchor="end">4 engines · v0.1.0</text>
+</svg>

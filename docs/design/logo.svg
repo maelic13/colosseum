@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Colosseum logo mark v1.1 — amphitheatre rings on slate.
+       Source of truth for the procedural icon in crates/colosseum-gui/src/icon.rs:
+       bg #1a1e26, rounded square corner 48/256, outer ring r=0.34*s stroke=0.104*s
+       with vertical gold gradient #f2c15e → #cf942c, inner ring r=0.185*s
+       stroke=0.080*s flat #b8882f. -->
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f2c15e"/>
+      <stop offset="1" stop-color="#cf942c"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="244" height="244" rx="48" fill="#1a1e26"/>
+  <circle cx="128" cy="128" r="87" fill="none" stroke="url(#gold)" stroke-width="26.6"/>
+  <circle cx="128" cy="128" r="47.4" fill="none" stroke="#b8882f" stroke-width="20.5"/>
+</svg>
