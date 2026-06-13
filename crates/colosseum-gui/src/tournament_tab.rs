@@ -22,6 +22,7 @@ use colosseum_engine::{EloEntry, TournamentStatus, summarize};
 
 use crate::backend::{Backend, ParticipantInfo};
 use crate::theme;
+use crate::widgets;
 
 // ── Tab state ─────────────────────────────────────────────────────────────────
 
@@ -407,45 +408,102 @@ impl TournamentTab {
                 ui.set_min_width(ui.available_width());
 
                 if backend.engines.is_empty() {
-                    ui.add_space(16.0);
-                    ui.label(
-                        RichText::new("No engines in your library yet.")
-                            .color(theme::TEXT_WEAK)
-                            .size(13.0),
-                    );
-                    ui.label(
-                        RichText::new("Add some in the Engines tab.")
-                            .color(Color32::from_rgb(0x6c, 0x76, 0x86))
-                            .size(12.5),
-                    );
+                    ui.add_space(24.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new("♟").color(theme::TEXT_FAINT).size(40.0));
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new("No engines yet")
+                                .color(theme::TEXT_WEAK)
+                                .size(15.0)
+                                .strong(),
+                        );
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new("Add engines in the Engines tab to get started.")
+                                .color(theme::TEXT_FAINT)
+                                .size(12.5),
+                        );
+                    });
                     return;
                 }
 
                 for engine in &backend.engines {
-                    let mut checked = self.form.is_selected(engine.id);
+                    let selected = self.form.is_selected(engine.id);
                     let name = engine_display_name(engine);
-                    ui.horizontal(|ui| {
-                        if ui.checkbox(&mut checked, "").changed() {
-                            self.form.toggle(engine.id);
-                        }
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(&name).color(theme::TEXT).size(13.5));
-                            let sub = if engine.meta.version.is_empty() {
-                                engine
-                                    .path
-                                    .file_name()
-                                    .and_then(|s| s.to_str())
-                                    .unwrap_or("")
-                                    .to_string()
-                            } else {
-                                format!("v{}", engine.meta.version)
-                            };
-                            if !sub.is_empty() {
-                                ui.label(RichText::new(sub).color(theme::TEXT_WEAK).size(11.5));
-                            }
-                        });
-                    });
-                    ui.add_space(2.0);
+                    let sub = if engine.meta.version.is_empty() {
+                        engine
+                            .path
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("")
+                            .to_string()
+                    } else {
+                        format!("v{}", engine.meta.version)
+                    };
+
+                    let (fill, stroke) = if selected {
+                        (
+                            theme::tint(theme::ACCENT, 0.12),
+                            egui::Stroke::new(1.0, theme::tint(theme::ACCENT, 0.4)),
+                        )
+                    } else {
+                        (Color32::TRANSPARENT, egui::Stroke::NONE)
+                    };
+
+                    let row_resp = egui::Frame::new()
+                        .fill(fill)
+                        .stroke(stroke)
+                        .corner_radius(egui::CornerRadius::same(6))
+                        .inner_margin(egui::Margin::symmetric(10, 8))
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                let mut checked = selected;
+                                if ui.checkbox(&mut checked, "").changed() {
+                                    self.form.toggle(engine.id);
+                                }
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        RichText::new(&name)
+                                            .color(if selected {
+                                                theme::ACCENT_BRIGHT
+                                            } else {
+                                                theme::TEXT
+                                            })
+                                            .size(13.5),
+                                    );
+                                    if !sub.is_empty() {
+                                        ui.label(
+                                            RichText::new(&sub)
+                                                .color(theme::TEXT_WEAK)
+                                                .size(11.5),
+                                        );
+                                    }
+                                });
+                            });
+                        })
+                        .response;
+
+                    let interact = ui.interact(
+                        row_resp.rect,
+                        egui::Id::new("sel_engine_row").with(engine.id),
+                        egui::Sense::click(),
+                    );
+
+                    if interact.hovered() && !selected {
+                        ui.painter().rect_filled(
+                            row_resp.rect,
+                            egui::CornerRadius::same(6),
+                            theme::BG_HOVER,
+                        );
+                    }
+
+                    if interact.clicked() {
+                        self.form.toggle(engine.id);
+                    }
+
+                    ui.add_space(4.0);
                 }
             });
     }
@@ -453,275 +511,264 @@ impl TournamentTab {
     fn settings_form(&mut self, ui: &mut Ui) {
         let f = &mut self.form;
 
-        // Name
-        ui.horizontal(|ui| {
-            field_label(ui, "Name");
-            ui.add(
-                egui::TextEdit::singleline(&mut f.name)
-                    .desired_width(260.0)
-                    .hint_text("Tournament name"),
-            );
-        });
-        ui.add_space(10.0);
+        // ── Tournament (Name + Format + Concurrency) ──
+        widgets::section_card(ui, "Tournament", None, |ui| {
+            egui::Grid::new("tc_tournament_grid")
+                .num_columns(2)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    field_label(ui, "Name");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut f.name)
+                            .desired_width(260.0)
+                            .hint_text("Tournament name"),
+                    );
+                    ui.end_row();
 
-        // ── Format ──
-        section(ui, "Format");
-        egui::Grid::new("tc_format_grid")
-            .num_columns(2)
-            .spacing([10.0, 6.0])
-            .show(ui, |ui| {
-                field_label(ui, "Type");
-                ui.label(RichText::new("Round Robin").color(theme::TEXT));
-                ui.end_row();
+                    field_label(ui, "Format");
+                    ui.label(RichText::new("Round Robin").color(theme::TEXT));
+                    ui.end_row();
 
-                field_label(ui, "Cycles");
-                ui.add(DragValue::new(&mut f.cycles).range(1..=20).speed(0.1))
-                    .on_hover_text("How many times the full schedule repeats.");
-                ui.end_row();
+                    field_label(ui, "Cycles");
+                    ui.add(DragValue::new(&mut f.cycles).range(1..=20).speed(0.1))
+                        .on_hover_text("How many times the full schedule repeats.");
+                    ui.end_row();
 
-                field_label(ui, "Games / pair");
-                ui.add(
-                    DragValue::new(&mut f.games_per_pair)
-                        .range(1..=20)
-                        .speed(0.1),
-                )
-                .on_hover_text("Games each pair plays per cycle (2 = both colours).");
-                ui.end_row();
-            });
-        ui.add_space(10.0);
+                    field_label(ui, "Games / pair");
+                    ui.add(
+                        DragValue::new(&mut f.games_per_pair)
+                            .range(1..=20)
+                            .speed(0.1),
+                    )
+                    .on_hover_text("Games each pair plays per cycle (2 = both colours).");
+                    ui.end_row();
 
-        // ── Time control ──
-        section(ui, "Time Control");
-        ui.horizontal(|ui| {
-            field_label(ui, "Per move");
-            ui.add(
-                DragValue::new(&mut f.tc_value)
-                    .range(1.0..=600_000.0)
-                    .speed(1.0),
-            );
-            egui::ComboBox::from_id_salt("tc_unit")
-                .selected_text(f.tc_unit.label())
-                .width(64.0)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut f.tc_unit, TimeUnit::Milliseconds, "ms");
-                    ui.selectable_value(&mut f.tc_unit, TimeUnit::Seconds, "s");
-                    ui.selectable_value(&mut f.tc_unit, TimeUnit::Minutes, "min");
+                    field_label(ui, "Parallel games");
+                    let mut c = f.concurrency as u32;
+                    if ui
+                        .add(DragValue::new(&mut c).range(1..=256).speed(0.1))
+                        .changed()
+                    {
+                        f.concurrency = c as usize;
+                    }
+                    ui.end_row();
                 });
-            let ms = f.tc_unit.to_millis(f.tc_value).max(1);
-            ui.label(
-                RichText::new(format!("= {ms} ms"))
-                    .color(theme::TEXT_WEAK)
-                    .size(12.0),
-            );
         });
-        ui.add_space(10.0);
 
-        // ── Concurrency ──
-        section(ui, "Concurrency");
-        ui.horizontal(|ui| {
-            field_label(ui, "Parallel games");
-            let mut c = f.concurrency as u32;
-            if ui
-                .add(DragValue::new(&mut c).range(1..=256).speed(0.1))
-                .changed()
-            {
-                f.concurrency = c as usize;
-            }
-        });
-        ui.add_space(10.0);
-
-        // ── Common engine options ──
-        section(ui, "Common Engine Options");
-        ui.label(
-            RichText::new("Forwarded to every engine as UCI options.")
-                .color(theme::TEXT_WEAK)
-                .size(11.5),
-        );
-        ui.add_space(4.0);
-        egui::Grid::new("tc_common_grid")
-            .num_columns(3)
-            .spacing([8.0, 6.0])
-            .show(ui, |ui| {
-                ui.checkbox(&mut f.threads_on, "");
-                field_label(ui, "Threads");
-                ui.add_enabled(
-                    f.threads_on,
-                    DragValue::new(&mut f.threads).range(1..=1024).speed(0.1),
-                );
-                ui.end_row();
-
-                ui.checkbox(&mut f.hash_on, "");
-                field_label(ui, "Hash (MB)");
-                ui.add_enabled(
-                    f.hash_on,
-                    DragValue::new(&mut f.hash_mb)
-                        .range(1..=1_048_576)
+        // ── Time Control ──
+        widgets::section_card(ui, "Time Control", None, |ui| {
+            ui.horizontal(|ui| {
+                field_label(ui, "Per move");
+                ui.add(
+                    DragValue::new(&mut f.tc_value)
+                        .range(1.0..=600_000.0)
                         .speed(1.0),
                 );
-                ui.end_row();
-
-                ui.checkbox(&mut f.syzygy50_on, "");
-                field_label(ui, "Syzygy50MoveRule");
-                ui.add_enabled_ui(f.syzygy50_on, |ui| {
-                    ui.checkbox(&mut f.syzygy50, "on");
-                });
-                ui.end_row();
+                egui::ComboBox::from_id_salt("tc_unit")
+                    .selected_text(f.tc_unit.label())
+                    .width(64.0)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut f.tc_unit, TimeUnit::Milliseconds, "ms");
+                        ui.selectable_value(&mut f.tc_unit, TimeUnit::Seconds, "s");
+                        ui.selectable_value(&mut f.tc_unit, TimeUnit::Minutes, "min");
+                    });
+                let ms = f.tc_unit.to_millis(f.tc_value).max(1);
+                ui.label(
+                    RichText::new(format!("= {ms} ms"))
+                        .color(theme::TEXT_WEAK)
+                        .size(12.0),
+                );
             });
-
-        ui.horizontal(|ui| {
-            field_label(ui, "SyzygyPath");
-            ui.add(
-                egui::TextEdit::singleline(&mut f.syzygy_path)
-                    .desired_width(260.0)
-                    .hint_text("tablebase folder (optional)"),
-            );
-            if ui
-                .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
-                .clicked()
-                && let Some(dir) = rfd::FileDialog::new()
-                    .set_title("Select Syzygy tablebase folder")
-                    .pick_folder()
-            {
-                f.syzygy_path = dir.to_string_lossy().to_string();
-            }
         });
-        ui.add_space(4.0);
-        ui.checkbox(&mut f.ponder, "Ponder")
-            .on_hover_text("Let engines think on the opponent's time. Off keeps fast games fair.");
-        ui.add_space(10.0);
+
+        // ── Engine Options (Common + Syzygy + Ponder) ──
+        widgets::section_card(
+            ui,
+            "Engine Options",
+            Some("Forwarded to every engine as UCI options."),
+            |ui| {
+                egui::Grid::new("tc_common_grid")
+                    .num_columns(3)
+                    .spacing([8.0, 6.0])
+                    .show(ui, |ui| {
+                        ui.checkbox(&mut f.threads_on, "");
+                        field_label(ui, "Threads");
+                        ui.add_enabled(
+                            f.threads_on,
+                            DragValue::new(&mut f.threads).range(1..=1024).speed(0.1),
+                        );
+                        ui.end_row();
+
+                        ui.checkbox(&mut f.hash_on, "");
+                        field_label(ui, "Hash (MB)");
+                        ui.add_enabled(
+                            f.hash_on,
+                            DragValue::new(&mut f.hash_mb)
+                                .range(1..=1_048_576)
+                                .speed(1.0),
+                        );
+                        ui.end_row();
+
+                        ui.checkbox(&mut f.syzygy50_on, "");
+                        field_label(ui, "Syzygy50MoveRule");
+                        ui.add_enabled_ui(f.syzygy50_on, |ui| {
+                            ui.checkbox(&mut f.syzygy50, "on");
+                        });
+                        ui.end_row();
+                    });
+
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    field_label(ui, "SyzygyPath");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut f.syzygy_path)
+                            .desired_width(240.0)
+                            .hint_text("tablebase folder (optional)"),
+                    );
+                    if ui
+                        .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
+                        .clicked()
+                        && let Some(dir) = rfd::FileDialog::new()
+                            .set_title("Select Syzygy tablebase folder")
+                            .pick_folder()
+                    {
+                        f.syzygy_path = dir.to_string_lossy().to_string();
+                    }
+                });
+                ui.add_space(4.0);
+                ui.checkbox(&mut f.ponder, "Ponder").on_hover_text(
+                    "Let engines think on the opponent's time. Off keeps fast games fair.",
+                );
+            },
+        );
 
         // ── Adjudication ──
-        section(ui, "Adjudication");
-        ui.label(
-            RichText::new(
-                "Natural endings (mate, stalemate, 50-move, repetition) are always detected.",
-            )
-            .color(theme::TEXT_WEAK)
-            .size(11.5),
+        widgets::section_card(
+            ui,
+            "Adjudication",
+            Some("Natural endings (mate, stalemate, 50-move, repetition) are always detected."),
+            |ui| {
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut f.max_moves_on, "Max moves");
+                    ui.add_enabled(
+                        f.max_moves_on,
+                        DragValue::new(&mut f.max_moves).range(1..=2000).speed(1.0),
+                    )
+                    .on_hover_text("Declare a draw after this many full moves.");
+                });
+
+                ui.checkbox(&mut f.draw_on, "Draw adjudication");
+                ui.add_enabled_ui(f.draw_on, |ui| {
+                    egui::Grid::new("tc_draw_grid")
+                        .num_columns(2)
+                        .spacing([10.0, 4.0])
+                        .show(ui, |ui| {
+                            field_label(ui, "Min ply");
+                            ui.add(
+                                DragValue::new(&mut f.draw_min_ply)
+                                    .range(0..=400)
+                                    .speed(1.0),
+                            );
+                            ui.end_row();
+                            field_label(ui, "Moves");
+                            ui.add(
+                                DragValue::new(&mut f.draw_move_count)
+                                    .range(1..=50)
+                                    .speed(0.1),
+                            );
+                            ui.end_row();
+                            field_label(ui, "Score ≤ (cp)");
+                            ui.add(
+                                DragValue::new(&mut f.draw_score_cp)
+                                    .range(0..=200)
+                                    .speed(0.5),
+                            );
+                            ui.end_row();
+                        });
+                });
+
+                ui.checkbox(&mut f.resign_on, "Resign (win/loss) adjudication");
+                ui.add_enabled_ui(f.resign_on, |ui| {
+                    egui::Grid::new("tc_resign_grid")
+                        .num_columns(2)
+                        .spacing([10.0, 4.0])
+                        .show(ui, |ui| {
+                            field_label(ui, "Moves");
+                            ui.add(
+                                DragValue::new(&mut f.resign_move_count)
+                                    .range(1..=50)
+                                    .speed(0.1),
+                            );
+                            ui.end_row();
+                            field_label(ui, "Score ≥ (cp)");
+                            ui.add(
+                                DragValue::new(&mut f.resign_score_cp)
+                                    .range(0..=10_000)
+                                    .speed(5.0),
+                            );
+                            ui.end_row();
+                        });
+                });
+            },
         );
-        ui.add_space(4.0);
 
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut f.max_moves_on, "Max moves");
-            ui.add_enabled(
-                f.max_moves_on,
-                DragValue::new(&mut f.max_moves).range(1..=2000).speed(1.0),
-            )
-            .on_hover_text("Declare a draw after this many full moves.");
-        });
-
-        ui.checkbox(&mut f.draw_on, "Draw adjudication");
-        ui.add_enabled_ui(f.draw_on, |ui| {
-            egui::Grid::new("tc_draw_grid")
+        // ── Elo ──
+        widgets::section_card(ui, "Elo", None, |ui| {
+            egui::Grid::new("tc_elo_grid")
                 .num_columns(2)
-                .spacing([10.0, 4.0])
+                .spacing([12.0, 8.0])
                 .show(ui, |ui| {
-                    field_label(ui, "Min ply");
-                    ui.add(
-                        DragValue::new(&mut f.draw_min_ply)
-                            .range(0..=400)
-                            .speed(1.0),
-                    );
+                    field_label(ui, "Update policy");
+                    egui::ComboBox::from_id_salt("elo_policy")
+                        .selected_text(elo_policy_label(f.elo_policy))
+                        .width(180.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut f.elo_policy,
+                                EloPolicy::PerGame,
+                                "After every game",
+                            );
+                            ui.selectable_value(
+                                &mut f.elo_policy,
+                                EloPolicy::EndOfTournament,
+                                "At end of tournament",
+                            );
+                            ui.selectable_value(&mut f.elo_policy, EloPolicy::Never, "Never");
+                        });
                     ui.end_row();
-                    field_label(ui, "Moves");
-                    ui.add(
-                        DragValue::new(&mut f.draw_move_count)
-                            .range(1..=50)
-                            .speed(0.1),
-                    );
-                    ui.end_row();
-                    field_label(ui, "Score ≤ (cp)");
-                    ui.add(
-                        DragValue::new(&mut f.draw_score_cp)
-                            .range(0..=200)
+
+                    field_label(ui, "K-factor");
+                    ui.add_enabled(
+                        f.elo_policy != EloPolicy::Never,
+                        DragValue::new(&mut f.k_factor)
+                            .range(1.0..=100.0)
                             .speed(0.5),
                     );
                     ui.end_row();
                 });
         });
 
-        ui.checkbox(&mut f.resign_on, "Resign (win/loss) adjudication");
-        ui.add_enabled_ui(f.resign_on, |ui| {
-            egui::Grid::new("tc_resign_grid")
-                .num_columns(2)
-                .spacing([10.0, 4.0])
-                .show(ui, |ui| {
-                    field_label(ui, "Moves");
-                    ui.add(
-                        DragValue::new(&mut f.resign_move_count)
-                            .range(1..=50)
-                            .speed(0.1),
-                    );
-                    ui.end_row();
-                    field_label(ui, "Score ≥ (cp)");
-                    ui.add(
-                        DragValue::new(&mut f.resign_score_cp)
-                            .range(0..=10_000)
-                            .speed(5.0),
-                    );
-                    ui.end_row();
-                });
-        });
-        ui.add_space(10.0);
-
-        // ── Elo ──
-        section(ui, "Elo");
-        egui::Grid::new("tc_elo_grid")
-            .num_columns(2)
-            .spacing([10.0, 6.0])
-            .show(ui, |ui| {
-                field_label(ui, "Update policy");
-                egui::ComboBox::from_id_salt("elo_policy")
-                    .selected_text(elo_policy_label(f.elo_policy))
-                    .width(180.0)
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut f.elo_policy,
-                            EloPolicy::PerGame,
-                            "After every game",
-                        );
-                        ui.selectable_value(
-                            &mut f.elo_policy,
-                            EloPolicy::EndOfTournament,
-                            "At end of tournament",
-                        );
-                        ui.selectable_value(&mut f.elo_policy, EloPolicy::Never, "Never");
-                    });
-                ui.end_row();
-
-                field_label(ui, "K-factor");
-                ui.add_enabled(
-                    f.elo_policy != EloPolicy::Never,
-                    DragValue::new(&mut f.k_factor)
-                        .range(1.0..=100.0)
-                        .speed(0.5),
-                );
-                ui.end_row();
-            });
-        ui.add_space(10.0);
-
         // ── Openings ──
-        section(ui, "Openings");
-        if ui
-            .checkbox(&mut f.openings_on, "Use an opening book")
-            .on_hover_text(
-                "Draw one starting position per engine pair (both colours share it). \
-                 Without a book, every game starts from the standard position.",
-            )
-            .changed()
-        {
-            f.refresh_openings_preview();
-        }
+        widgets::section_card(ui, "Openings", None, |ui| {
+            if ui
+                .checkbox(&mut f.openings_on, "Use an opening book")
+                .on_hover_text(
+                    "Draw one starting position per engine pair (both colours share it). \
+                     Without a book, every game starts from the standard position.",
+                )
+                .changed()
+            {
+                f.refresh_openings_preview();
+            }
 
-        if f.openings_on {
-            ui.add_enabled_ui(true, |ui| {
-                // File + browse + format.
+            if f.openings_on {
+                ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     field_label(ui, "File");
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut f.openings_path)
-                                .desired_width(240.0)
+                                .desired_width(220.0)
                                 .hint_text("EPD or PGN file"),
                         )
                         .changed()
@@ -737,7 +784,6 @@ impl TournamentTab {
                             .add_filter("All files", &["*"])
                             .pick_file()
                     {
-                        // Guess the format from the extension.
                         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                             f.openings_format = OpeningFormat::from_extension(ext);
                         }
@@ -748,15 +794,23 @@ impl TournamentTab {
 
                 egui::Grid::new("tc_openings_grid")
                     .num_columns(2)
-                    .spacing([10.0, 6.0])
+                    .spacing([12.0, 6.0])
                     .show(ui, |ui| {
                         field_label(ui, "Format");
                         ui.horizontal(|ui| {
                             let mut changed = ui
-                                .selectable_value(&mut f.openings_format, OpeningFormat::Epd, "EPD")
+                                .selectable_value(
+                                    &mut f.openings_format,
+                                    OpeningFormat::Epd,
+                                    "EPD",
+                                )
                                 .changed();
                             changed |= ui
-                                .selectable_value(&mut f.openings_format, OpeningFormat::Pgn, "PGN")
+                                .selectable_value(
+                                    &mut f.openings_format,
+                                    OpeningFormat::Pgn,
+                                    "PGN",
+                                )
                                 .changed();
                             if changed {
                                 f.refresh_openings_preview();
@@ -811,7 +865,8 @@ impl TournamentTab {
 
                         field_label(ui, "Limit count");
                         ui.horizontal(|ui| {
-                            let mut changed = ui.checkbox(&mut f.openings_count_on, "").changed();
+                            let mut changed =
+                                ui.checkbox(&mut f.openings_count_on, "").changed();
                             changed |= ui
                                 .add_enabled(
                                     f.openings_count_on,
@@ -827,7 +882,6 @@ impl TournamentTab {
                         ui.end_row();
                     });
 
-                // Preview / status line.
                 match &f.openings_preview {
                     Some(Ok((count, sample))) => {
                         ui.label(
@@ -858,31 +912,32 @@ impl TournamentTab {
                         );
                     }
                 }
-            });
-        }
-        ui.add_space(10.0);
-
-        // ── Output ──
-        section(ui, "Output");
-        ui.horizontal(|ui| {
-            field_label(ui, "PGN file");
-            ui.add(
-                egui::TextEdit::singleline(&mut f.pgn_path)
-                    .desired_width(260.0)
-                    .hint_text("append finished games here (optional)"),
-            );
-            if ui
-                .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
-                .clicked()
-                && let Some(path) = rfd::FileDialog::new()
-                    .set_title("Choose PGN output file")
-                    .add_filter("PGN", &["pgn"])
-                    .save_file()
-            {
-                f.pgn_path = path.to_string_lossy().to_string();
             }
         });
-        ui.add_space(16.0);
+
+        // ── Output ──
+        widgets::section_card(ui, "Output", None, |ui| {
+            ui.horizontal(|ui| {
+                field_label(ui, "PGN file");
+                ui.add(
+                    egui::TextEdit::singleline(&mut f.pgn_path)
+                        .desired_width(240.0)
+                        .hint_text("append finished games here (optional)"),
+                );
+                if ui
+                    .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
+                    .clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .set_title("Choose PGN output file")
+                        .add_filter("PGN", &["pgn"])
+                        .save_file()
+                {
+                    f.pgn_path = path.to_string_lossy().to_string();
+                }
+            });
+        });
+
+        ui.add_space(4.0);
     }
 }
 
@@ -907,25 +962,31 @@ impl TournamentTab {
         // Errors panel (bottom), only when there are errors.
         if !live.errors.is_empty() {
             egui::TopBottomPanel::bottom("tournament_errors")
-                .frame(
-                    egui::Frame::new()
-                        .fill(theme::BG_PANEL)
-                        .inner_margin(egui::Margin::symmetric(14, 8)),
-                )
+                .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(14, 8)))
                 .show_inside(ui, |ui| {
-                    ui.label(
-                        RichText::new(format!("Engine errors ({})", live.errors.len()))
-                            .color(theme::DANGER)
-                            .size(12.5)
-                            .strong(),
-                    );
-                    ScrollArea::vertical()
-                        .id_salt("tournament_errors_scroll")
-                        .max_height(80.0)
+                    egui::Frame::new()
+                        .fill(theme::tint(theme::DANGER, 0.08))
+                        .stroke(egui::Stroke::new(1.0, theme::tint(theme::DANGER, 0.35)))
+                        .corner_radius(egui::CornerRadius::same(8))
+                        .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
-                            for err in live.errors.iter().rev().take(20) {
-                                ui.label(RichText::new(err).color(theme::TEXT_WEAK).size(12.0));
-                            }
+                            ui.set_width(ui.available_width());
+                            ui.label(
+                                RichText::new(format!("Engine errors ({})", live.errors.len()))
+                                    .color(theme::DANGER)
+                                    .size(12.5)
+                                    .strong(),
+                            );
+                            ScrollArea::vertical()
+                                .id_salt("tournament_errors_scroll")
+                                .max_height(80.0)
+                                .show(ui, |ui| {
+                                    for err in live.errors.iter().rev().take(20) {
+                                        ui.label(
+                                            RichText::new(err).color(theme::TEXT_WEAK).size(12.0),
+                                        );
+                                    }
+                                });
                         });
                 });
         }
@@ -951,9 +1012,10 @@ impl TournamentTab {
 
     fn live_control_bar(&mut self, ui: &mut Ui, backend: &mut Backend, live: &LiveData) {
         ui.horizontal(|ui| {
-            // Status dot + name.
-            let (dot, color) = status_badge(live.status);
-            ui.label(RichText::new(dot).color(color).size(13.0));
+            // Status pill + tournament name.
+            let (label, dot, color) = status_pill_parts(live.status);
+            widgets::status_pill(ui, label, dot, color);
+            ui.add_space(8.0);
             ui.label(
                 RichText::new(&live.name)
                     .color(theme::TEXT)
@@ -961,11 +1023,9 @@ impl TournamentTab {
                     .strong(),
             );
 
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(10.0);
+            ui.add_space(12.0);
 
-            // Controls.
+            // Tinted action buttons.
             let status = live.status;
             let go_enabled = matches!(status, TournamentStatus::Stopped | TournamentStatus::Idle);
             let stop_enabled = matches!(status, TournamentStatus::Running);
@@ -974,11 +1034,7 @@ impl TournamentTab {
                 TournamentStatus::Running | TournamentStatus::Stopping
             );
 
-            if ui
-                .add_enabled(
-                    go_enabled,
-                    egui::Button::new(RichText::new("▶ Go").color(theme::SUCCESS).size(14.0)),
-                )
+            if widgets::tinted_button(ui, "▶ Go", theme::SUCCESS, go_enabled)
                 .on_hover_text("Resume the tournament.")
                 .clicked()
                 && let Some(active) = &backend.active
@@ -986,11 +1042,7 @@ impl TournamentTab {
                 active.handle.go();
             }
 
-            if ui
-                .add_enabled(
-                    stop_enabled,
-                    egui::Button::new(RichText::new("⏸ Stop").color(theme::WARN).size(14.0)),
-                )
+            if widgets::tinted_button(ui, "⏸ Stop", theme::WARN, stop_enabled)
                 .on_hover_text("Stop launching new games; let in-flight games finish.")
                 .clicked()
                 && let Some(active) = &backend.active
@@ -998,15 +1050,7 @@ impl TournamentTab {
                 active.handle.stop();
             }
 
-            if ui
-                .add_enabled(
-                    force_enabled,
-                    egui::Button::new(
-                        RichText::new("⏹ Force-Stop")
-                            .color(theme::DANGER)
-                            .size(14.0),
-                    ),
-                )
+            if widgets::tinted_button(ui, "⏹ Force-Stop", theme::DANGER, force_enabled)
                 .on_hover_text("Abort in-flight games immediately (discarding them).")
                 .clicked()
                 && let Some(active) = &backend.active
@@ -1016,7 +1060,7 @@ impl TournamentTab {
 
             ui.add_space(14.0);
 
-            // Progress.
+            // Progress: caption + slim bar.
             ui.label(
                 RichText::new(format!("{} / {} games", live.finished, live.total))
                     .color(theme::TEXT_WEAK)
@@ -1030,7 +1074,9 @@ impl TournamentTab {
             ui.add(
                 egui::ProgressBar::new(frac)
                     .desired_width(160.0)
-                    .corner_radius(4.0),
+                    .desired_height(6.0)
+                    .corner_radius(4.0)
+                    .fill(theme::ACCENT),
             );
 
             // Right side: h2h toggle + New Tournament.
@@ -1039,7 +1085,9 @@ impl TournamentTab {
                 if ui
                     .add_enabled(
                         new_enabled,
-                        egui::Button::new(RichText::new("New Tournament").size(13.0)),
+                        egui::Button::new(RichText::new("New Tournament").size(13.0))
+                            .fill(theme::BG_ELEVATED)
+                            .stroke(egui::Stroke::new(1.0, theme::STROKE)),
                     )
                     .on_hover_text(if new_enabled {
                         "Return to setup to configure another tournament."
@@ -1050,7 +1098,11 @@ impl TournamentTab {
                 {
                     backend.clear_active();
                 }
-                ui.toggle_value(&mut self.show_h2h, "Head-to-head");
+                ui.add_space(6.0);
+                ui.toggle_value(
+                    &mut self.show_h2h,
+                    RichText::new("Head-to-head").size(13.0),
+                );
             });
         });
     }
@@ -1069,8 +1121,8 @@ impl TournamentTab {
         let mut rows = live.rows.clone();
         sort_rows(&mut rows, self.sort);
 
-        let header_h = 26.0;
-        let row_h = 24.0;
+        let header_h = 30.0;
+        let row_h = 30.0;
 
         TableBuilder::new(ui)
             .striped(true)
@@ -1079,7 +1131,7 @@ impl TournamentTab {
             .column(Column::initial(170.0).at_least(110.0).clip(true)) // name
             .column(Column::auto().at_least(54.0)) // version
             .column(Column::auto().at_least(56.0)) // elo
-            .column(Column::auto().at_least(56.0)) // elo delta
+            .column(Column::auto().at_least(72.0)) // elo delta chip
             .column(Column::auto().at_least(54.0)) // points
             .column(Column::auto().at_least(48.0)) // games
             .column(Column::auto().at_least(82.0)) // w-d-l
@@ -1117,11 +1169,7 @@ impl TournamentTab {
                 for row in &rows {
                     body.row(row_h, |mut tr| {
                         tr.col(|ui| {
-                            ui.label(
-                                RichText::new(row.rank.to_string())
-                                    .color(theme::TEXT_WEAK)
-                                    .monospace(),
-                            );
+                            widgets::rank_badge(ui, row.rank);
                         });
                         tr.col(|ui| {
                             ui.label(RichText::new(&row.name).color(theme::TEXT).strong());
@@ -1141,7 +1189,7 @@ impl TournamentTab {
                             );
                         });
                         tr.col(|ui| {
-                            ui.label(elo_delta_text(row.elo_delta));
+                            widgets::elo_delta_chip(ui, row.elo_delta);
                         });
                         tr.col(|ui| {
                             ui.label(
@@ -1231,18 +1279,28 @@ fn head_to_head_matrix(ui: &mut Ui, live: &LiveData) {
                                 ui.label(RichText::new("—").color(theme::TEXT_WEAK));
                             } else {
                                 let h2h = live.standings.head_to_head(row.id, col.id);
-                                let text = if h2h.games() == 0 {
-                                    RichText::new("·").color(theme::TEXT_WEAK)
+                                if h2h.games() == 0 {
+                                    ui.label(RichText::new("·").color(theme::TEXT_WEAK));
                                 } else {
-                                    RichText::new(format!(
-                                        "{}-{}-{}",
-                                        h2h.wins, h2h.draws, h2h.losses
-                                    ))
-                                    .color(theme::TEXT)
-                                    .monospace()
-                                    .size(11.5)
-                                };
-                                ui.label(text);
+                                    let games = h2h.games() as f32;
+                                    let s = (h2h.wins as f32 + 0.5 * h2h.draws as f32) / games;
+                                    let fill = h2h_cell_fill(s);
+                                    egui::Frame::new()
+                                        .fill(fill)
+                                        .corner_radius(egui::CornerRadius::same(4))
+                                        .inner_margin(egui::Margin::symmetric(6, 2))
+                                        .show(ui, |ui| {
+                                            ui.label(
+                                                RichText::new(format!(
+                                                    "{}-{}-{}",
+                                                    h2h.wins, h2h.draws, h2h.losses
+                                                ))
+                                                .color(theme::TEXT)
+                                                .monospace()
+                                                .size(11.5),
+                                            );
+                                        });
+                                }
                             }
                         }
                         ui.end_row();
@@ -1418,16 +1476,6 @@ fn strong_header(label: &str) -> RichText {
 
 // ── Small helpers ───────────────────────────────────────────────────────────────
 
-fn section(ui: &mut Ui, title: &str) {
-    ui.label(
-        RichText::new(title)
-            .color(theme::ACCENT)
-            .size(13.0)
-            .strong(),
-    );
-    ui.add_space(3.0);
-}
-
 fn field_label(ui: &mut Ui, text: &str) {
     ui.label(RichText::new(text).color(theme::TEXT_WEAK).size(13.0));
 }
@@ -1452,27 +1500,25 @@ fn elo_policy_label(p: EloPolicy) -> &'static str {
     }
 }
 
-fn status_badge(status: TournamentStatus) -> (&'static str, Color32) {
+fn status_pill_parts(status: TournamentStatus) -> (&'static str, &'static str, Color32) {
     match status {
-        TournamentStatus::Running => ("●", theme::SUCCESS),
-        TournamentStatus::Stopping => ("●", theme::WARN),
-        TournamentStatus::Stopped => ("●", theme::TEXT_WEAK),
-        TournamentStatus::Finished => ("●", theme::ACCENT),
-        TournamentStatus::Idle => ("○", theme::TEXT_WEAK),
+        TournamentStatus::Running => ("Running", "●", theme::SUCCESS),
+        TournamentStatus::Stopping => ("Stopping", "●", theme::WARN),
+        TournamentStatus::Stopped => ("Stopped", "●", theme::TEXT_WEAK),
+        TournamentStatus::Finished => ("Finished", "●", theme::ACCENT),
+        TournamentStatus::Idle => ("Idle", "○", theme::TEXT_FAINT),
     }
 }
 
-fn elo_delta_text(delta: f64) -> RichText {
-    let (sign, color) = if delta > 0.05 {
-        ("+", theme::SUCCESS)
-    } else if delta < -0.05 {
-        ("", theme::DANGER)
+/// Background fill for a head-to-head cell based on score share `s` (0..=1).
+fn h2h_cell_fill(s: f32) -> Color32 {
+    if s > 0.5 {
+        theme::tint(theme::SUCCESS, (s - 0.5) * 0.5)
+    } else if s < 0.5 {
+        theme::tint(theme::DANGER, (0.5 - s) * 0.5)
     } else {
-        ("", theme::TEXT_WEAK)
-    };
-    RichText::new(format!("{sign}{delta:.0}"))
-        .color(color)
-        .monospace()
+        Color32::TRANSPARENT
+    }
 }
 
 fn format_nps(nps: Option<u64>) -> String {

@@ -12,6 +12,7 @@ mod engines_tab;
 mod icon;
 mod theme;
 mod tournament_tab;
+mod widgets;
 
 use colosseum_core::branding::DISPLAY_NAME;
 use eframe::egui;

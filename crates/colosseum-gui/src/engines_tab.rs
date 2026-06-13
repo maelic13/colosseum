@@ -17,6 +17,7 @@ use colosseum_engine::{DetectResult, detect_engine};
 
 use crate::backend::Backend;
 use crate::theme;
+use crate::widgets;
 
 // ── Public tab state ─────────────────────────────────────────────────────────
 
@@ -247,14 +248,17 @@ impl EnginesTab {
         ui.horizontal(|ui| {
             let busy = self.pending.is_some();
 
+            // Primary action: Add Engine.
             let add_resp = ui
                 .add_enabled(
                     !busy,
                     egui::Button::new(
                         RichText::new("＋ Add Engine")
-                            .color(theme::ACCENT)
-                            .size(13.5),
-                    ),
+                            .color(theme::BG_DARKEST)
+                            .size(13.5)
+                            .strong(),
+                    )
+                    .fill(theme::ACCENT),
                 )
                 .on_hover_text("Pick an engine executable and auto-detect its UCI options.");
             if add_resp.clicked() {
@@ -272,10 +276,15 @@ impl EnginesTab {
 
             ui.add_space(4.0);
 
+            // Secondary action: Scan Folder.
             let folder_resp = ui
                 .add_enabled(
                     !busy,
-                    egui::Button::new(RichText::new("＋ Add Folder").color(theme::TEXT).size(13.5)),
+                    egui::Button::new(
+                        RichText::new("Scan Folder…").color(theme::TEXT).size(13.5),
+                    )
+                    .fill(theme::BG_ELEVATED)
+                    .stroke(egui::Stroke::new(1.0, theme::STROKE)),
                 )
                 .on_hover_text(
                     "Scan a folder for engine executables and add those that respond to UCI.",
@@ -341,12 +350,21 @@ impl EnginesTab {
                 ui.set_min_width(ui.available_width());
 
                 if engines.is_empty() {
-                    ui.add_space(20.0);
+                    ui.add_space(24.0);
                     ui.vertical_centered(|ui| {
+                        ui.label(RichText::new("♟").color(theme::TEXT_FAINT).size(40.0));
+                        ui.add_space(6.0);
                         ui.label(
                             RichText::new("No engines yet")
                                 .color(theme::TEXT_WEAK)
-                                .size(13.5),
+                                .size(15.0)
+                                .strong(),
+                        );
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new("Add an engine with the button above.")
+                                .color(theme::TEXT_FAINT)
+                                .size(12.5),
                         );
                     });
                     return;
@@ -356,19 +374,22 @@ impl EnginesTab {
 
                 for engine in engines {
                     let selected = self.selected_id.as_ref() == Some(&engine.id);
-
                     let display_name = engine_display_name(engine);
 
-                    let fill = if selected {
-                        theme::BG_ELEVATED
+                    let (fill, stroke) = if selected {
+                        (
+                            theme::tint(theme::ACCENT, 0.12),
+                            egui::Stroke::new(1.0, theme::tint(theme::ACCENT, 0.4)),
+                        )
                     } else {
-                        Color32::TRANSPARENT
+                        (Color32::TRANSPARENT, egui::Stroke::NONE)
                     };
 
                     let row_resp = egui::Frame::new()
                         .fill(fill)
+                        .stroke(stroke)
                         .corner_radius(egui::CornerRadius::same(6))
-                        .inner_margin(egui::Margin::symmetric(8, 5))
+                        .inner_margin(egui::Margin::symmetric(10, 8))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
                             ui.horizontal(|ui| {
@@ -376,12 +397,11 @@ impl EnginesTab {
                                     ui.label(
                                         RichText::new(&display_name)
                                             .color(if selected {
-                                                theme::ACCENT
+                                                theme::ACCENT_BRIGHT
                                             } else {
                                                 theme::TEXT
                                             })
-                                            .size(13.5)
-                                            .strong(),
+                                            .size(13.5),
                                     );
                                     if let Some(stem) =
                                         engine.path.file_name().and_then(|s| s.to_str())
@@ -395,7 +415,7 @@ impl EnginesTab {
                                     if let Some(elo) = engine.meta.elo {
                                         ui.label(
                                             RichText::new(elo.to_string())
-                                                .color(theme::TEXT_WEAK)
+                                                .color(theme::TEXT_FAINT)
                                                 .size(12.0),
                                         );
                                     }
@@ -422,7 +442,7 @@ impl EnginesTab {
                         clicked_id = Some(engine.id);
                     }
 
-                    ui.add_space(2.0);
+                    ui.add_space(4.0);
                 }
 
                 // Apply selection outside the loop (borrow rules).
@@ -556,228 +576,242 @@ impl EnginesTab {
         ui.add_space(8.0);
 
         // ─ Identity ─
-        section_label(ui, "Identity");
-        egui::Grid::new("edit_identity")
-            .num_columns(2)
-            .spacing([8.0, 6.0])
-            .show(ui, |ui| {
-                field_label(ui, "Name");
-                if ui
-                    .add(text_field(&mut edit.name).hint_text("e.g. Stockfish 16"))
-                    .changed()
-                {
-                    edit.dirty = true;
-                }
-                ui.end_row();
+        widgets::section_card(ui, "Identity", None, |ui| {
+            egui::Grid::new("edit_identity")
+                .num_columns(2)
+                .spacing([8.0, 6.0])
+                .show(ui, |ui| {
+                    field_label(ui, "Name");
+                    if ui
+                        .add(text_field(&mut edit.name).hint_text("e.g. Stockfish 16"))
+                        .changed()
+                    {
+                        edit.dirty = true;
+                    }
+                    ui.end_row();
 
-                field_label(ui, "Version");
-                if ui
-                    .add(text_field(&mut edit.version).hint_text("e.g. 16"))
-                    .changed()
-                {
-                    edit.dirty = true;
-                }
-                ui.end_row();
+                    field_label(ui, "Version");
+                    if ui
+                        .add(text_field(&mut edit.version).hint_text("e.g. 16"))
+                        .changed()
+                    {
+                        edit.dirty = true;
+                    }
+                    ui.end_row();
 
-                field_label(ui, "Elo");
-                if ui
-                    .add(
-                        egui::TextEdit::singleline(&mut edit.elo_str)
-                            .desired_width(90.0)
-                            .hint_text("optional"),
-                    )
-                    .changed()
-                {
-                    edit.dirty = true;
-                }
-                ui.end_row();
-            });
-
-        ui.add_space(10.0);
+                    field_label(ui, "Elo");
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut edit.elo_str)
+                                .desired_width(90.0)
+                                .hint_text("optional"),
+                        )
+                        .changed()
+                    {
+                        edit.dirty = true;
+                    }
+                    ui.end_row();
+                });
+        });
 
         // ─ Launch ─
-        section_label(ui, "Launch");
-        egui::Grid::new("edit_launch")
-            .num_columns(2)
-            .spacing([8.0, 6.0])
-            .show(ui, |ui| {
-                field_label(ui, "Path");
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(edit.path.to_string_lossy())
-                            .color(theme::TEXT_WEAK)
-                            .size(12.0)
-                            .monospace(),
-                    )
-                    .truncate(),
-                );
-                ui.end_row();
+        widgets::section_card(ui, "Launch", None, |ui| {
+            egui::Grid::new("edit_launch")
+                .num_columns(2)
+                .spacing([8.0, 6.0])
+                .show(ui, |ui| {
+                    field_label(ui, "Path");
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(edit.path.to_string_lossy())
+                                .color(theme::TEXT_WEAK)
+                                .size(12.0)
+                                .monospace(),
+                        )
+                        .truncate(),
+                    );
+                    ui.end_row();
 
-                field_label(ui, "Args");
-                if ui
-                    .add(
-                        text_field(&mut edit.args_str)
-                            .hint_text("extra arguments (space-separated)"),
-                    )
-                    .changed()
-                {
-                    edit.dirty = true;
-                }
-                ui.end_row();
+                    field_label(ui, "Args");
+                    if ui
+                        .add(
+                            text_field(&mut edit.args_str)
+                                .hint_text("extra arguments (space-separated)"),
+                        )
+                        .changed()
+                    {
+                        edit.dirty = true;
+                    }
+                    ui.end_row();
 
-                field_label(ui, "Work dir");
+                    field_label(ui, "Work dir");
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add(
+                                text_field(&mut edit.working_dir_str)
+                                    .hint_text("defaults to engine directory"),
+                            )
+                            .changed()
+                        {
+                            edit.dirty = true;
+                        }
+                        if ui
+                            .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
+                            .clicked()
+                            && let Some(dir) = rfd::FileDialog::new()
+                                .set_title("Select working directory")
+                                .pick_folder()
+                        {
+                            edit.working_dir_str = dir.to_string_lossy().to_string();
+                            edit.dirty = true;
+                        }
+                    });
+                    ui.end_row();
+                });
+
+            // ─ Environment variables ─
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("Environment Variables")
+                    .color(theme::TEXT_WEAK)
+                    .size(12.0)
+                    .strong(),
+            );
+            ui.add_space(4.0);
+
+            let mut remove_idx: Option<usize> = None;
+            for (i, row) in edit.env_rows.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
                     if ui
                         .add(
-                            text_field(&mut edit.working_dir_str)
-                                .hint_text("defaults to engine directory"),
+                            egui::TextEdit::singleline(&mut row[0])
+                                .desired_width(150.0)
+                                .hint_text("KEY"),
                         )
                         .changed()
                     {
                         edit.dirty = true;
                     }
                     if ui
-                        .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
-                        .clicked()
-                        && let Some(dir) = rfd::FileDialog::new()
-                            .set_title("Select working directory")
-                            .pick_folder()
+                        .add(
+                            egui::TextEdit::singleline(&mut row[1])
+                                .desired_width(f32::INFINITY)
+                                .hint_text("value"),
+                        )
+                        .changed()
                     {
-                        edit.working_dir_str = dir.to_string_lossy().to_string();
                         edit.dirty = true;
                     }
+                    if ui
+                        .small_button(RichText::new("×").color(theme::DANGER))
+                        .clicked()
+                    {
+                        remove_idx = Some(i);
+                    }
                 });
-                ui.end_row();
-            });
-
-        ui.add_space(10.0);
-
-        // ─ Environment variables ─
-        section_label(ui, "Environment Variables");
-
-        let mut remove_idx: Option<usize> = None;
-        for (i, row) in edit.env_rows.iter_mut().enumerate() {
+            }
+            if let Some(i) = remove_idx {
+                edit.env_rows.remove(i);
+                edit.dirty = true;
+            }
             ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut edit.new_env_key)
+                        .desired_width(150.0)
+                        .hint_text("NEW KEY"),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut edit.new_env_val)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("value"),
+                );
                 if ui
-                    .add(
-                        egui::TextEdit::singleline(&mut row[0])
-                            .desired_width(150.0)
-                            .hint_text("KEY"),
+                    .add_enabled(
+                        !edit.new_env_key.trim().is_empty(),
+                        egui::Button::new(RichText::new("＋").color(theme::ACCENT)),
                     )
-                    .changed()
-                {
-                    edit.dirty = true;
-                }
-                if ui
-                    .add(
-                        egui::TextEdit::singleline(&mut row[1])
-                            .desired_width(f32::INFINITY)
-                            .hint_text("value"),
-                    )
-                    .changed()
-                {
-                    edit.dirty = true;
-                }
-                if ui
-                    .small_button(RichText::new("×").color(theme::DANGER))
                     .clicked()
                 {
-                    remove_idx = Some(i);
+                    edit.env_rows.push([
+                        std::mem::take(&mut edit.new_env_key),
+                        std::mem::take(&mut edit.new_env_val),
+                    ]);
+                    edit.dirty = true;
                 }
             });
-        }
-        if let Some(i) = remove_idx {
-            edit.env_rows.remove(i);
-            edit.dirty = true;
-        }
-        // New row.
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut edit.new_env_key)
-                    .desired_width(150.0)
-                    .hint_text("NEW KEY"),
-            );
-            ui.add(
-                egui::TextEdit::singleline(&mut edit.new_env_val)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("value"),
-            );
-            if ui
-                .add_enabled(
-                    !edit.new_env_key.trim().is_empty(),
-                    egui::Button::new(RichText::new("＋").color(theme::ACCENT)),
-                )
-                .clicked()
-            {
-                edit.env_rows.push([
-                    std::mem::take(&mut edit.new_env_key),
-                    std::mem::take(&mut edit.new_env_val),
-                ]);
-                edit.dirty = true;
+        });
+
+        // ─ UCI Options ─
+        let can_redetect = !edit.redetect_pending && self.redetect_rx.is_none();
+        widgets::section_card(ui, "UCI Options", None, |ui| {
+            ui.horizontal(|ui| {
+                if edit.detected_options.is_empty() {
+                    ui.label(
+                        RichText::new(
+                            "No options detected yet — use Re-detect to query the engine.",
+                        )
+                        .color(theme::TEXT_WEAK)
+                        .size(12.5)
+                        .italics(),
+                    );
+                }
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add_enabled(
+                            can_redetect,
+                            egui::Button::new(
+                                RichText::new(if edit.redetect_pending {
+                                    "Detecting…"
+                                } else {
+                                    "Re-detect"
+                                })
+                                .size(12.5)
+                                .color(theme::TEXT_WEAK),
+                            )
+                            .fill(theme::BG_ELEVATED)
+                            .stroke(egui::Stroke::new(1.0, theme::STROKE)),
+                        )
+                        .on_hover_text(
+                            "Re-run the UCI handshake to refresh options and identity.",
+                        )
+                        .clicked()
+                    {
+                        do_redetect = true;
+                    }
+                });
+            });
+
+            if !edit.detected_options.is_empty() {
+                ui.add_space(6.0);
+                egui::Grid::new("uci_opts_grid")
+                    .num_columns(2)
+                    .spacing([8.0, 5.0])
+                    .show(ui, |ui| {
+                        let options = edit.detected_options.clone();
+                        for opt in &options {
+                            show_option_row(
+                                ui,
+                                opt,
+                                &mut edit.option_overrides,
+                                &mut edit.dirty,
+                            );
+                            ui.end_row();
+                        }
+                    });
             }
         });
 
-        ui.add_space(10.0);
-
-        // ─ UCI Options ─
-        ui.horizontal(|ui| {
-            section_label(ui, "UCI Options");
-            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                let can_redetect = !edit.redetect_pending && self.redetect_rx.is_none();
-                if ui
-                    .add_enabled(
-                        can_redetect,
-                        egui::Button::new(
-                            RichText::new(if edit.redetect_pending {
-                                "Detecting…"
-                            } else {
-                                "Re-detect"
-                            })
-                            .size(12.5)
-                            .color(theme::TEXT_WEAK),
-                        ),
-                    )
-                    .on_hover_text("Re-run the UCI handshake to refresh options and identity.")
-                    .clicked()
-                {
-                    do_redetect = true;
-                }
-            });
-        });
-
-        if edit.detected_options.is_empty() {
-            ui.label(
-                RichText::new("No options detected yet — use Re-detect to query the engine.")
-                    .color(theme::TEXT_WEAK)
-                    .size(12.5)
-                    .italics(),
-            );
-        } else {
-            egui::Grid::new("uci_opts_grid")
-                .num_columns(2)
-                .spacing([8.0, 5.0])
-                .show(ui, |ui| {
-                    let options = edit.detected_options.clone();
-                    for opt in &options {
-                        show_option_row(ui, opt, &mut edit.option_overrides, &mut edit.dirty);
-                        ui.end_row();
-                    }
-                });
-        }
-
-        ui.add_space(16.0);
-        ui.separator();
-        ui.add_space(8.0);
-
         // ─ Action row ─
         ui.horizontal(|ui| {
+            // Primary: Save
             if ui
                 .add_enabled(
                     edit.dirty,
                     egui::Button::new(
                         RichText::new("Save Changes")
                             .color(theme::BG_DARKEST)
-                            .size(13.5),
+                            .size(13.5)
+                            .strong(),
                     )
                     .fill(theme::ACCENT),
                 )
@@ -788,29 +822,19 @@ impl EnginesTab {
 
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 if edit.delete_confirm {
+                    if widgets::tinted_button(ui, "Confirm Delete", theme::DANGER, true)
+                        .clicked()
+                    {
+                        do_delete = true;
+                    }
+                    ui.add_space(4.0);
                     if ui
                         .button(RichText::new("Cancel").color(theme::TEXT_WEAK).size(13.0))
                         .clicked()
                     {
                         edit.delete_confirm = false;
                     }
-                    ui.add_space(4.0);
-                    if ui
-                        .button(
-                            RichText::new("Confirm Delete")
-                                .color(theme::DANGER)
-                                .size(13.0),
-                        )
-                        .clicked()
-                    {
-                        do_delete = true;
-                    }
-                } else if ui
-                    .button(
-                        RichText::new("Delete Engine")
-                            .color(theme::DANGER)
-                            .size(13.0),
-                    )
+                } else if widgets::tinted_button(ui, "Delete Engine", theme::DANGER, true)
                     .clicked()
                 {
                     edit.delete_confirm = true;
@@ -916,17 +940,6 @@ fn engine_display_name_from_parts(name: &str, path: &Path) -> String {
     }
 }
 
-/// Section heading with a subtle line underneath.
-fn section_label(ui: &mut Ui, title: &str) {
-    ui.label(
-        RichText::new(title)
-            .color(theme::TEXT_WEAK)
-            .size(11.5)
-            .strong(),
-    );
-    ui.add_space(3.0);
-}
-
 /// Dim label for a grid row's left column.
 fn field_label(ui: &mut Ui, text: &str) {
     ui.label(RichText::new(text).color(theme::TEXT_WEAK).size(13.0));
@@ -975,7 +988,7 @@ fn show_option_row(
             }
             ui.label(
                 RichText::new(format!("({min}–{max})"))
-                    .color(Color32::from_rgb(0x6c, 0x76, 0x86))
+                    .color(theme::TEXT_FAINT)
                     .size(11.5),
             );
         }
@@ -1043,16 +1056,19 @@ fn show_option_row(
 fn empty_state(ui: &mut Ui) {
     ui.vertical_centered(|ui| {
         ui.add_space(80.0);
+        ui.label(RichText::new("♟").color(theme::TEXT_FAINT).size(40.0));
+        ui.add_space(8.0);
         ui.label(
             RichText::new("No engine selected")
                 .color(theme::TEXT_WEAK)
-                .size(15.0),
+                .size(15.0)
+                .strong(),
         );
-        ui.add_space(6.0);
+        ui.add_space(4.0);
         ui.label(
             RichText::new("Pick an engine from the list, or add one with the buttons above.")
-                .color(Color32::from_rgb(0x6c, 0x76, 0x86))
-                .size(13.0),
+                .color(theme::TEXT_FAINT)
+                .size(12.5),
         );
     });
 }

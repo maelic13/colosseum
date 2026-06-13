@@ -14,6 +14,7 @@ use crate::backend::Backend;
 use crate::engines_tab::EnginesTab;
 use crate::theme;
 use crate::tournament_tab::TournamentTab;
+use crate::widgets;
 
 /// Top-level tabs. Tournament is the primary, default tab.
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -116,18 +117,36 @@ impl ColosseumApp {
         let mut decision: Option<CloseDecision> = None;
 
         let modal = egui::Modal::new(egui::Id::new("close_confirm")).show(ctx, |ui| {
-            ui.set_width(380.0);
-            ui.heading("Quit Colosseum?");
-            ui.add_space(6.0);
+            ui.set_width(400.0);
+            ui.label(RichText::new("Quit Colosseum?").size(18.0).strong().color(theme::TEXT));
+            ui.add_space(8.0);
             ui.label(
-                "A tournament is still running. Choose how to handle the games in \
-                 progress before quitting.",
+                RichText::new(
+                    "A tournament is still running. Choose how to handle the games in \
+                     progress before quitting.",
+                )
+                .color(theme::TEXT_WEAK),
             );
-            ui.add_space(14.0);
+            ui.add_space(16.0);
 
-            ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // Right-to-left: add rightmost item first.
+                if widgets::tinted_button(ui, "Force-stop & quit", theme::DANGER, true)
+                    .on_hover_text("Abort in-flight games (discarding them) and quit immediately.")
+                    .clicked()
+                {
+                    decision = Some(CloseDecision::ForceStopAndQuit);
+                }
+                ui.add_space(4.0);
                 if ui
-                    .button(RichText::new("Stop & quit").color(theme::TEXT))
+                    .add(
+                        egui::Button::new(
+                            RichText::new("Stop & quit")
+                                .color(theme::BG_DARKEST)
+                                .strong(),
+                        )
+                        .fill(theme::ACCENT),
+                    )
                     .on_hover_text(
                         "Let in-flight games finish and record their results, then quit.",
                     )
@@ -135,18 +154,17 @@ impl ColosseumApp {
                 {
                     decision = Some(CloseDecision::StopAndQuit);
                 }
+                ui.add_space(4.0);
                 if ui
-                    .button(RichText::new("Force-stop & quit").color(theme::DANGER))
-                    .on_hover_text("Abort in-flight games (discarding them) and quit immediately.")
+                    .add(
+                        egui::Button::new(RichText::new("Keep running").color(theme::TEXT))
+                            .fill(theme::BG_ELEVATED)
+                            .stroke(egui::Stroke::new(1.0, theme::STROKE)),
+                    )
                     .clicked()
                 {
-                    decision = Some(CloseDecision::ForceStopAndQuit);
+                    decision = Some(CloseDecision::Cancel);
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("Keep running").clicked() {
-                        decision = Some(CloseDecision::Cancel);
-                    }
-                });
             });
         });
 
@@ -180,13 +198,13 @@ impl ColosseumApp {
         ctx.send_viewport_cmd(ViewportCommand::Close);
     }
 
-    /// The top header: app title, primary tabs.
+    /// The top header: app title, primary tabs, live status pill.
     fn header(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("header")
             .frame(
                 egui::Frame::default()
                     .fill(theme::BG_DARKEST)
-                    .inner_margin(egui::Margin::symmetric(14, 10)),
+                    .inner_margin(egui::Margin::symmetric(16, 8)),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
@@ -194,30 +212,36 @@ impl ColosseumApp {
                     ui.add_space(8.0);
                     ui.label(
                         RichText::new(DISPLAY_NAME)
-                            .size(20.0)
+                            .size(17.0)
                             .strong()
                             .color(theme::TEXT),
                     );
-                    ui.add_space(18.0);
-                    ui.separator();
-                    ui.add_space(8.0);
+                    ui.add_space(20.0);
 
                     for tab in [Tab::Tournament, Tab::Engines] {
                         let selected = self.tab == tab;
-                        let text = RichText::new(tab.label()).size(15.0).color(if selected {
-                            theme::ACCENT
-                        } else {
-                            theme::TEXT_WEAK
-                        });
-                        if ui.selectable_label(selected, text).clicked() {
+                        if widgets::pill_tab(ui, tab.label(), selected) {
                             self.tab = tab;
                         }
+                        ui.add_space(4.0);
                     }
+
+                    // Right-aligned: live tournament status pill.
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let (label, dot, color) = match self.backend.status() {
+                            Some(TournamentStatus::Running) => ("Running", "●", theme::SUCCESS),
+                            Some(TournamentStatus::Stopping) => ("Stopping", "●", theme::WARN),
+                            Some(TournamentStatus::Stopped) => ("Stopped", "●", theme::TEXT_WEAK),
+                            Some(TournamentStatus::Finished) => ("Finished", "●", theme::ACCENT),
+                            Some(TournamentStatus::Idle) | None => ("Idle", "○", theme::TEXT_FAINT),
+                        };
+                        widgets::status_pill(ui, label, dot, color);
+                    });
                 });
             });
     }
 
-    /// The bottom status bar: tournament status + storage location.
+    /// The bottom status bar: tournament status pill + engine count + version.
     fn status_bar(&self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("status_bar")
             .frame(
@@ -227,14 +251,14 @@ impl ColosseumApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    let (label, color) = match self.backend.status() {
-                        Some(TournamentStatus::Running) => ("● Running", theme::SUCCESS),
-                        Some(TournamentStatus::Stopping) => ("● Stopping", theme::WARN),
-                        Some(TournamentStatus::Stopped) => ("● Stopped", theme::TEXT_WEAK),
-                        Some(TournamentStatus::Finished) => ("● Finished", theme::ACCENT),
-                        Some(TournamentStatus::Idle) | None => ("○ Idle", theme::TEXT_WEAK),
+                    let (label, dot, color) = match self.backend.status() {
+                        Some(TournamentStatus::Running) => ("Running", "●", theme::SUCCESS),
+                        Some(TournamentStatus::Stopping) => ("Stopping", "●", theme::WARN),
+                        Some(TournamentStatus::Stopped) => ("Stopped", "●", theme::TEXT_WEAK),
+                        Some(TournamentStatus::Finished) => ("Finished", "●", theme::ACCENT),
+                        Some(TournamentStatus::Idle) | None => ("Idle", "○", theme::TEXT_FAINT),
                     };
-                    ui.label(RichText::new(label).color(color).size(12.5));
+                    widgets::status_pill(ui, label, dot, color);
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
@@ -242,7 +266,7 @@ impl ColosseumApp {
                                 .color(theme::TEXT_WEAK)
                                 .size(12.0),
                         );
-                        ui.separator();
+                        ui.label(RichText::new("·").color(theme::TEXT_FAINT).size(12.0));
                         ui.label(
                             RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
                                 .color(theme::TEXT_WEAK)

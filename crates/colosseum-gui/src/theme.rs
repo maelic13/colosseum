@@ -44,6 +44,20 @@ pub const WARN: Color32 = Color32::from_rgb(0xd9, 0xa5, 0x4f);
 /// Negative status (errors, "Force-Stop", losses).
 pub const DANGER: Color32 = Color32::from_rgb(0xdb, 0x5d, 0x52);
 
+/// Tertiary text: hints, disabled-ish captions.
+pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x6c, 0x76, 0x86);
+
+/// Medal colors for ranks 1–3 in results tables.
+pub const MEDAL_GOLD: Color32 = ACCENT;
+pub const MEDAL_SILVER: Color32 = Color32::from_rgb(0xaa, 0xb4, 0xc4);
+pub const MEDAL_BRONZE: Color32 = Color32::from_rgb(0xc0, 0x82, 0x55);
+
+/// Alpha-blend `c` over a dark background at fractional strength.
+/// Use fill = `tint(c, 0.16)`, stroke = `tint(c, 0.45)`, text = `c`.
+pub fn tint(c: Color32, alpha: f32) -> Color32 {
+    c.gamma_multiply(alpha)
+}
+
 // ── Application ──────────────────────────────────────────────────────────
 
 /// Install the Colosseum theme (colors, spacing, rounding, type scale) into the
@@ -56,22 +70,22 @@ pub fn apply(ctx: &egui::Context) {
     // Generous, even spacing for an uncluttered feel.
     let spacing = &mut style.spacing;
     spacing.item_spacing = egui::vec2(8.0, 8.0);
-    spacing.button_padding = egui::vec2(10.0, 6.0);
+    spacing.button_padding = egui::vec2(12.0, 6.0);
     spacing.menu_margin = egui::Margin::same(6);
     spacing.indent = 18.0;
-    spacing.interact_size.y = 26.0;
+    spacing.interact_size.y = 28.0;
     spacing.scroll.bar_width = 10.0;
 
     // A clear, readable type scale.
     style.text_styles = [
         (
             TextStyle::Heading,
-            FontId::new(22.0, FontFamily::Proportional),
+            FontId::new(20.0, FontFamily::Proportional),
         ),
-        (TextStyle::Body, FontId::new(14.5, FontFamily::Proportional)),
+        (TextStyle::Body, FontId::new(14.0, FontFamily::Proportional)),
         (
             TextStyle::Button,
-            FontId::new(14.5, FontFamily::Proportional),
+            FontId::new(14.0, FontFamily::Proportional),
         ),
         (
             TextStyle::Small,
@@ -79,7 +93,7 @@ pub fn apply(ctx: &egui::Context) {
         ),
         (
             TextStyle::Monospace,
-            FontId::new(13.5, FontFamily::Monospace),
+            FontId::new(13.0, FontFamily::Monospace),
         ),
     ]
     .into();
