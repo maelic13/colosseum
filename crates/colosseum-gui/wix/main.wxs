@@ -1,158 +1,141 @@
-<?xml version='1.0' encoding='windows-1252'?>
+<?xml version="1.0" encoding="utf-8"?>
 <!--
-  WiX v3 installer template for Colosseum.
-  Used by: cargo wix --package colosseum-gui
+  WiX v4/v5 installer source for Colosseum.
 
-  To build locally:
-    1. Install WiX Toolset 3.x from https://wixtoolset.org/releases/
-    2. cargo install cargo-wix
-    3. From the workspace root: cargo wix --package colosseum-gui
+  Built in CI with the WiX .NET tool (`dotnet tool install --global wix`):
 
-  The UpgradeCode GUID must NEVER change — it ties upgrade records together.
-  The ProductCode '*' tells WiX to generate a fresh GUID for each build,
-  which is required for major-version upgrades.
+    wix build crates/colosseum-gui/wix/main.wxs ^
+      -arch x64 ^                  (or: -arch arm64)
+      -d Version=0.1.0 ^
+      -d BinDir=<dir containing colosseum.exe> ^
+      -d ProjectRoot=<repository root> ^
+      -ext WixToolset.UI.wixext ^
+      -o colosseum.msi
+
+  ONE source builds BOTH x64 and arm64 — the architecture is selected entirely
+  by the -arch flag, which sets the package platform and makes every component
+  install as 64-bit for that architecture (no per-arch Win64 attributes needed).
+
+  The UpgradeCode GUID must NEVER change — it ties upgrade records together so a
+  newer build (of either architecture) cleanly replaces an older install.
 -->
-<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
-  <Product
-    Id='*'
-    Name='Colosseum'
-    UpgradeCode='7B3A1E9C-4D52-4F88-A2C1-0B5E8D6F3A72'
-    Manufacturer='Miloslav Macurek'
-    Language='1033'
-    Codepage='1252'
-    Version='$(var.Version)'>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
 
-    <Package
-      Id='*'
-      Keywords='Installer'
-      Description='Colosseum Chess Engine Testing Suite'
-      Manufacturer='Miloslav Macurek'
-      InstallerVersion='450'
-      Languages='1033'
-      Compressed='yes'
-      InstallScope='perMachine'
-      SummaryCodepage='1252'/>
+  <Package
+    Name="Colosseum"
+    Manufacturer="Miloslav Macurek"
+    Version="$(var.Version)"
+    UpgradeCode="7B3A1E9C-4D52-4F88-A2C1-0B5E8D6F3A72"
+    Language="1033"
+    Codepage="1252"
+    Scope="perMachine"
+    InstallerVersion="500"
+    Compressed="yes">
+
+    <SummaryInformation
+      Description="Colosseum Chess Engine Testing Suite"
+      Keywords="Installer,Chess,Colosseum"/>
 
     <!-- Prevent downgrading; silently remove old versions on upgrade -->
     <MajorUpgrade
-      Schedule='afterInstallInitialize'
-      DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.'/>
+      Schedule="afterInstallInitialize"
+      DowngradeErrorMessage="A newer version of [ProductName] is already installed. Setup will now exit."/>
 
-    <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
-    <Property Id='DiskPrompt' Value='Colosseum Installation'/>
+    <MediaTemplate EmbedCab="yes"/>
 
-    <!-- Directory layout: C:\Program Files\Colosseum\bin\ -->
-    <Directory Id='TARGETDIR' Name='SourceDir'>
-      <Directory Id='ProgramFiles64Folder' Name='PFiles'>
-        <Directory Id='APPLICATIONFOLDER' Name='Colosseum'>
+    <!-- C:\Program Files\Colosseum\  (64-bit for the selected -arch) -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="APPLICATIONFOLDER" Name="Colosseum">
 
-          <!-- LICENSE file in the install root -->
-          <Component Id='License' Guid='*'>
-            <File Id='LicenseFile'
-              Name='LICENSE'
-              DiskId='1'
-              Source='..\..\..\..\LICENSE'
-              KeyPath='yes'/>
+        <!-- LICENSE in the install root -->
+        <Component Id="License">
+          <File Id="LicenseFile"
+                Name="LICENSE"
+                Source="$(var.ProjectRoot)\LICENSE"
+                KeyPath="yes"/>
+        </Component>
+
+        <Directory Id="Bin" Name="bin">
+          <!-- Main executable -->
+          <Component Id="binary0">
+            <File Id="exe0"
+                  Name="colosseum.exe"
+                  Source="$(var.BinDir)\colosseum.exe"
+                  KeyPath="yes"/>
           </Component>
 
-          <Directory Id='Bin' Name='bin'>
-            <!-- Main executable -->
-            <Component Id='binary0' Guid='*'>
-              <File
-                Id='exe0'
-                Name='colosseum.exe'
-                DiskId='1'
-                Source='$(var.colosseum_gui_BinDir)\colosseum.exe'
-                KeyPath='yes'/>
-            </Component>
-
-            <!-- Optional PATH entry (user can deselect) -->
-            <Component Id='Path' Guid='8C2F4B1D-9E73-4A56-B8D2-1C0F5E7A3B84'>
-              <Environment
-                Id='PATH'
-                Name='PATH'
-                Value='[Bin]'
-                Permanent='no'
-                Part='last'
-                Action='set'
-                System='yes'/>
-              <CreateFolder/>
-              <RegistryValue
-                Root='HKCU'
-                Key='Software\Colosseum'
-                Name='installPath'
-                Type='string'
-                Value='[APPLICATIONFOLDER]'
-                KeyPath='yes'/>
-            </Component>
-          </Directory>
+          <!-- Optional PATH entry (user can deselect) -->
+          <Component Id="Path" Guid="8C2F4B1D-9E73-4A56-B8D2-1C0F5E7A3B84">
+            <Environment Id="PATH"
+                         Name="PATH"
+                         Value="[Bin]"
+                         Permanent="no"
+                         Part="last"
+                         Action="set"
+                         System="yes"/>
+            <CreateFolder/>
+            <RegistryValue Root="HKCU"
+                           Key="Software\Colosseum"
+                           Name="installPath"
+                           Type="string"
+                           Value="[APPLICATIONFOLDER]"
+                           KeyPath="yes"/>
+          </Component>
         </Directory>
       </Directory>
+    </StandardDirectory>
 
-      <!-- Start Menu shortcut -->
-      <Directory Id='ProgramMenuFolder'>
-        <Directory Id='ApplicationProgramsFolder' Name='Colosseum'/>
+    <!-- Start Menu shortcut -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Colosseum">
+        <Component Id="ApplicationShortcut">
+          <Shortcut Id="ApplicationStartMenuShortcut"
+                    Name="Colosseum"
+                    Description="Chess Engine Testing Suite"
+                    Target="[Bin]\colosseum.exe"
+                    WorkingDirectory="APPLICATIONFOLDER"/>
+          <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall"/>
+          <RegistryValue Root="HKCU"
+                         Key="Software\Colosseum"
+                         Name="installed"
+                         Type="integer"
+                         Value="1"
+                         KeyPath="yes"/>
+        </Component>
       </Directory>
-    </Directory>
-
-    <DirectoryRef Id='ApplicationProgramsFolder'>
-      <Component Id='ApplicationShortcut' Guid='*'>
-        <Shortcut
-          Id='ApplicationStartMenuShortcut'
-          Name='Colosseum'
-          Description='Chess Engine Testing Suite'
-          Target='[Bin]\colosseum.exe'
-          WorkingDirectory='APPLICATIONFOLDER'/>
-        <RemoveFolder Id='CleanUpShortCut' Directory='ApplicationProgramsFolder' On='uninstall'/>
-        <RegistryValue
-          Root='HKCU'
-          Key='Software\Colosseum'
-          Name='installed'
-          Type='integer'
-          Value='1'
-          KeyPath='yes'/>
-      </Component>
-    </DirectoryRef>
+    </StandardDirectory>
 
     <!-- Feature tree -->
-    <Feature
-      Id='Binaries'
-      Title='Application'
-      Description='Installs the Colosseum executable and the GPL license.'
-      Level='1'
-      ConfigurableDirectory='APPLICATIONFOLDER'
-      AllowAdvertise='no'
-      Display='expand'
-      Absent='disallow'>
+    <Feature Id="Binaries"
+             Title="Application"
+             Description="Installs the Colosseum executable and the GPL license."
+             Level="1"
+             ConfigurableDirectory="APPLICATIONFOLDER"
+             AllowAdvertise="no"
+             Display="expand"
+             AllowAbsent="no">
 
-      <ComponentRef Id='License'/>
-      <ComponentRef Id='binary0'/>
-      <ComponentRef Id='ApplicationShortcut'/>
+      <ComponentRef Id="License"/>
+      <ComponentRef Id="binary0"/>
+      <ComponentRef Id="ApplicationShortcut"/>
 
-      <Feature
-        Id='Environment'
-        Title='Add to PATH'
-        Description='Add [ProductName] to the system PATH so it can be run from any terminal.'
-        Level='1'
-        Absent='allow'>
-        <ComponentRef Id='Path'/>
+      <Feature Id="Environment"
+               Title="Add to PATH"
+               Description="Add [ProductName] to the system PATH so it can be run from any terminal."
+               Level="1"
+               AllowAbsent="yes">
+        <ComponentRef Id="Path"/>
       </Feature>
     </Feature>
 
-    <!-- ARP (Add/Remove Programs) metadata -->
-    <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
-    <Property Id='ARPHELPLINK'     Value='https://github.com/'/>
-    <Property Id='ARPURLINFOABOUT' Value='https://github.com/'/>
+    <!-- Add/Remove Programs metadata -->
+    <SetProperty Id="ARPINSTALLLOCATION" Value="[APPLICATIONFOLDER]" After="CostFinalize"/>
+    <Property Id="ARPHELPLINK"     Value="https://github.com/maelic13/colosseum"/>
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/maelic13/colosseum"/>
 
-    <!-- Installer UI -->
-    <UI>
-      <UIRef Id='WixUI_FeatureTree'/>
-      <!-- Skip the "Welcome" dialog and go straight to feature selection -->
-      <Publish Dialog='WelcomeDlg'  Control='Next' Event='NewDialog' Value='CustomizeDlg' Order='99'>1</Publish>
-      <Publish Dialog='CustomizeDlg' Control='Back' Event='NewDialog' Value='WelcomeDlg'  Order='99'>1</Publish>
-    </UI>
-
-    <!-- License text shown in the installer -->
-    <WixVariable Id='WixUILicenseRtf' Value='wix\License.rtf'/>
-  </Product>
+    <!-- Installer UI: feature-tree wizard with the GPL license page -->
+    <ui:WixUI Id="WixUI_FeatureTree"/>
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.ProjectRoot)\crates\colosseum-gui\wix\License.rtf"/>
+  </Package>
 </Wix>

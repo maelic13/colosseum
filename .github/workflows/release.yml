@@ -28,6 +28,15 @@ jobs:
             target: x86_64-pc-windows-msvc
             platform: windows
             arch: x86_64
+            wix_arch: x64
+
+          # Windows ARM64 → portable ZIP + MSI installer
+          # Built natively on a GitHub-hosted Arm runner (free for public repos).
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            platform: windows
+            arch: arm64
+            wix_arch: arm64
 
           # Linux x86-64 → .tar.gz
           # (Flatpak is built separately — see flatpak/ directory)
@@ -41,12 +50,6 @@ jobs:
             target: aarch64-apple-darwin
             platform: macos
             arch: aarch64
-
-          # macOS Intel → .dmg + .tar.gz
-          - os: macos-13
-            target: x86_64-apple-darwin
-            platform: macos
-            arch: x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -70,14 +73,16 @@ jobs:
             libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
 
       # ── Build ───────────────────────────────────────────────────────────────
+      # Every target builds with an explicit --target, so the output is always at
+      # target/<target>/release/ regardless of the host (native or cross).
       - name: Build release binary
-        run: cargo build --release --bin colosseum
+        run: cargo build --release --bin colosseum --target ${{ matrix.target }}
 
       # ── Smoke test — verify the binary was produced and is a real binary ───
       - name: Smoke test (Unix)
         if: runner.os != 'Windows'
         run: |
-          bin="target/release/colosseum"
+          bin="target/${{ matrix.target }}/release/colosseum"
           test -f "$bin"   || { echo "ERROR: binary missing at $bin"; exit 1; }
           size=$(wc -c < "$bin")
           echo "Binary size: ${size} bytes"
@@ -89,7 +94,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $bin = "target\release\colosseum.exe"
+          $bin = "target\${{ matrix.target }}\release\colosseum.exe"
           if (-not (Test-Path $bin)) { Write-Error "ERROR: binary missing at $bin"; exit 1 }
           $size = (Get-Item $bin).Length
           Write-Host "Binary size: $size bytes"
@@ -103,42 +108,47 @@ jobs:
           $tag  = '${{ github.ref_name }}'
           $name = "colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}"
           New-Item -ItemType Directory -Path "staging\$name" | Out-Null
-          Copy-Item "target\release\colosseum.exe" "staging\$name\colosseum.exe"
-          Copy-Item "LICENSE"                       "staging\$name\LICENSE"
+          Copy-Item "target\${{ matrix.target }}\release\colosseum.exe" "staging\$name\colosseum.exe"
+          Copy-Item "LICENSE"                                            "staging\$name\LICENSE"
           Compress-Archive -Path "staging\$name" -DestinationPath "${name}.zip"
           "ARTIFACT_ZIP=${name}.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      # ── Windows: MSI installer via cargo-wix ───────────────────────────────
-      # WiX Toolset 3.x is pre-installed on GitHub windows-2022 runners.
-      # If building locally: choco install wixtoolset OR install from wixtoolset.org
-      - name: Install cargo-wix (Windows)
+      # ── Windows: MSI installer via WiX 5 ───────────────────────────────────
+      # WiX is a cross-platform .NET tool; a single main.wxs builds both x64 and
+      # arm64 — the architecture is chosen by the -arch flag below. .NET SDK is
+      # preinstalled on the GitHub Windows images; setup-dotnet pins a known good
+      # version on both x64 and Arm runners.
+      - name: Install .NET SDK (Windows)
         if: runner.os == 'Windows'
-        run: cargo install cargo-wix --version "0.3.9" --locked
-
-      - name: Locate WiX Toolset (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # Find whatever WiX v3 version is installed
-          $wix = Get-ChildItem "C:\Program Files (x86)\WiX Toolset v3*" -Directory -ErrorAction SilentlyContinue |
-                 Sort-Object Name -Descending | Select-Object -First 1
-          if ($null -eq $wix) {
-            Write-Host "WiX not found in Program Files, installing via Chocolatey..."
-            choco install wixtoolset -y --no-progress
-            $wix = Get-ChildItem "C:\Program Files (x86)\WiX Toolset v3*" -Directory |
-                   Sort-Object Name -Descending | Select-Object -First 1
-          }
-          Write-Host "Using WiX at $($wix.FullName)"
-          "$($wix.FullName)\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
 
       - name: Build MSI (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cargo wix --package colosseum-gui --nocapture
-          $msi  = Get-ChildItem "target\wix\*.msi" | Select-Object -First 1
-          $dest = "colosseum-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}.msi"
-          Copy-Item $msi.FullName $dest
+          dotnet tool install --global wix
+          # Ensure the global tools dir is on PATH for this step.
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          wix extension add -g WixToolset.UI.wixext
+
+          $tag    = '${{ github.ref_name }}'
+          # MSI ProductVersion must be numeric x.y.z — strip the leading 'v' and
+          # any pre-release suffix (e.g. v0.1.0-rc.1 -> 0.1.0).
+          $ver    = ($tag.TrimStart('v') -split '-')[0]
+          $binDir = (Resolve-Path "target\${{ matrix.target }}\release").Path
+          $dest   = "colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}.msi"
+
+          wix build "crates\colosseum-gui\wix\main.wxs" `
+            -arch ${{ matrix.wix_arch }} `
+            -d Version="$ver" `
+            -d BinDir="$binDir" `
+            -d ProjectRoot="${{ github.workspace }}" `
+            -ext WixToolset.UI.wixext `
+            -o "$dest"
+
+          if (-not (Test-Path $dest)) { Write-Error "ERROR: MSI not produced"; exit 1 }
           "ARTIFACT_MSI=$dest" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       # ── Linux: tar.gz ───────────────────────────────────────────────────────
@@ -148,8 +158,8 @@ jobs:
           tag='${{ github.ref_name }}'
           name="colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}"
           mkdir -p "staging/${name}"
-          cp target/release/colosseum "staging/${name}/colosseum"
-          cp LICENSE                  "staging/${name}/LICENSE"
+          cp "target/${{ matrix.target }}/release/colosseum" "staging/${name}/colosseum"
+          cp LICENSE                                          "staging/${name}/LICENSE"
           tar -C staging -czf "${name}.tar.gz" "${name}"
           echo "ARTIFACT_TGZ=${name}.tar.gz" >> "$GITHUB_ENV"
 
@@ -160,8 +170,8 @@ jobs:
           tag='${{ github.ref_name }}'
           name="colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}"
           mkdir -p "staging/${name}"
-          cp target/release/colosseum "staging/${name}/colosseum"
-          cp LICENSE                  "staging/${name}/LICENSE"
+          cp "target/${{ matrix.target }}/release/colosseum" "staging/${name}/colosseum"
+          cp LICENSE                                          "staging/${name}/LICENSE"
           tar -C staging -czf "${name}.tar.gz" "${name}"
           echo "ARTIFACT_TGZ=${name}.tar.gz" >> "$GITHUB_ENV"
 
@@ -182,7 +192,7 @@ jobs:
 
           # Build the .app bundle structure
           mkdir -p "${app}/Contents/MacOS"
-          cp target/release/colosseum "${app}/Contents/MacOS/colosseum"
+          cp "target/${{ matrix.target }}/release/colosseum" "${app}/Contents/MacOS/colosseum"
 
           cat > "${app}/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>

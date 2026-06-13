@@ -35,9 +35,9 @@ Pre-built binaries for every release are on the
 | Platform | Download |
 |---|---|
 | Windows x86-64 | `colosseum-vX.Y.Z-windows-x86_64.msi` (installer) or `.zip` (portable) |
+| Windows ARM64 | `colosseum-vX.Y.Z-windows-arm64.msi` (installer) or `.zip` (portable) |
 | Linux x86-64 | `colosseum-vX.Y.Z-linux-x86_64.tar.gz` |
 | macOS Apple Silicon | `colosseum-vX.Y.Z-macos-aarch64.dmg` or `.tar.gz` |
-| macOS Intel | `colosseum-vX.Y.Z-macos-x86_64.dmg` or `.tar.gz` |
 
 > **macOS note:** v0.1 is unsigned. On first launch Gatekeeper may block it.
 > Open **System Settings → Privacy & Security → Open Anyway**, or run:
@@ -136,7 +136,7 @@ colosseum/
 │  └─ colosseum-gui/      eframe/egui GUI — the shipped binary
 ├─ flatpak/               Flatpak manifest + desktop/AppStream metadata
 ├─ docs/                  macOS signing guide
-└─ .github/workflows/     CI (build+test on Windows/Linux/macOS) + release
+└─ .github/workflows/     release (tag-triggered cross-platform packaging)
 ```
 
 The GUI never blocks on engine I/O: a tokio runtime drives all engine processes;
