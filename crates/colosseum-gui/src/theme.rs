@@ -63,7 +63,7 @@ pub fn tint(c: Color32, alpha: f32) -> Color32 {
 /// Install the Colosseum theme (colors, spacing, rounding, type scale) into the
 /// given egui context. Call once at startup.
 pub fn apply(ctx: &egui::Context) {
-    let mut style = (*ctx.style()).clone();
+    let mut style = (*ctx.global_style()).clone();
 
     style.visuals = visuals();
 
@@ -98,7 +98,7 @@ pub fn apply(ctx: &egui::Context) {
     ]
     .into();
 
-    ctx.set_style(style);
+    ctx.set_global_style(style);
 }
 
 /// The Colosseum dark [`Visuals`].

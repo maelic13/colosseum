@@ -255,7 +255,7 @@ impl TournamentForm {
 impl TournamentTab {
     fn show_setup(&mut self, ui: &mut Ui, backend: &mut Backend) {
         // Bottom action bar (pinned).
-        egui::TopBottomPanel::bottom("tournament_setup_actions")
+        egui::Panel::bottom("tournament_setup_actions")
             .frame(
                 egui::Frame::new()
                     .fill(theme::BG_DARKEST)
@@ -266,9 +266,9 @@ impl TournamentTab {
             });
 
         // Engine selection (left).
-        egui::SidePanel::left("tournament_engine_select")
-            .default_width(280.0)
-            .width_range(200.0..=440.0)
+        egui::Panel::left("tournament_engine_select")
+            .default_size(280.0)
+            .size_range(200.0..=440.0)
             .resizable(true)
             .frame(egui::Frame::new().inner_margin(egui::Margin {
                 right: 12,
@@ -949,7 +949,7 @@ impl TournamentTab {
         let live = LiveData::capture(backend);
 
         // Control bar (top).
-        egui::TopBottomPanel::top("tournament_live_controls")
+        egui::Panel::top("tournament_live_controls")
             .frame(
                 egui::Frame::new()
                     .fill(theme::BG_DARKEST)
@@ -961,7 +961,7 @@ impl TournamentTab {
 
         // Errors panel (bottom), only when there are errors.
         if !live.errors.is_empty() {
-            egui::TopBottomPanel::bottom("tournament_errors")
+            egui::Panel::bottom("tournament_errors")
                 .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(14, 8)))
                 .show_inside(ui, |ui| {
                     egui::Frame::new()

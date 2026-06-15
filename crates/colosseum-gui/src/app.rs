@@ -5,7 +5,7 @@
 //! Tournament = Step 9, openings = Step 10); this module owns the chrome and the
 //! cross-cutting behaviour that all tabs share.
 
-use eframe::egui::{self, Align, Layout, RichText, ViewportCommand};
+use eframe::egui::{self, Align, Layout, RichText, Ui, ViewportCommand};
 
 use colosseum_core::branding::DISPLAY_NAME;
 use colosseum_engine::TournamentStatus;
@@ -199,14 +199,14 @@ impl ColosseumApp {
     }
 
     /// The top header: app title, primary tabs, live status pill.
-    fn header(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("header")
+    fn header(&mut self, ui: &mut Ui) {
+        egui::Panel::top("header")
             .frame(
                 egui::Frame::default()
                     .fill(theme::BG_DARKEST)
                     .inner_margin(egui::Margin::symmetric(16, 8)),
             )
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     logo(ui);
                     ui.add_space(8.0);
@@ -242,14 +242,14 @@ impl ColosseumApp {
     }
 
     /// The bottom status bar: tournament status pill + engine count + version.
-    fn status_bar(&self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("status_bar")
+    fn status_bar(&self, ui: &mut Ui) {
+        egui::Panel::bottom("status_bar")
             .frame(
                 egui::Frame::default()
                     .fill(theme::BG_DARKEST)
                     .inner_margin(egui::Margin::symmetric(14, 6)),
             )
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     let (label, dot, color) = match self.backend.status() {
                         Some(TournamentStatus::Running) => ("Running", "●", theme::SUCCESS),
@@ -278,14 +278,11 @@ impl ColosseumApp {
     }
 
     /// The central tab body.
-    fn body(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default()
-            .frame(
-                egui::Frame::default()
-                    .fill(theme::BG_PANEL)
-                    .inner_margin(egui::Margin::same(16)),
-            )
-            .show(ctx, |ui| match self.tab {
+    fn body(&mut self, ui: &mut Ui) {
+        egui::Frame::default()
+            .fill(theme::BG_PANEL)
+            .inner_margin(egui::Margin::same(16))
+            .show(ui, |ui| match self.tab {
                 Tab::Tournament => {
                     self.tournament_tab.show(ui, &mut self.backend);
                 }
@@ -297,19 +294,20 @@ impl ColosseumApp {
 }
 
 impl eframe::App for ColosseumApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Drain backend events and keep the UI live while a tournament runs.
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+
         if let Some(interval) = self.backend.poll() {
             ctx.request_repaint_after(interval);
         }
 
-        self.capture_window_state(ctx);
+        self.capture_window_state(&ctx);
 
-        self.header(ctx);
-        self.status_bar(ctx);
-        self.body(ctx);
+        self.header(ui);
+        self.status_bar(ui);
+        self.body(ui);
 
-        self.handle_close(ctx);
+        self.handle_close(&ctx);
     }
 }
 

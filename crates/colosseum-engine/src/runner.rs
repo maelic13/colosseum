@@ -15,7 +15,7 @@ use colosseum_core::{
 use colosseum_uci::{EngineProcess, GoLimits, SpawnOptions, UciError, UciPosition};
 use shakmaty::san::SanPlus;
 use shakmaty::uci::UciMove;
-use shakmaty::zobrist::{Zobrist64, ZobristHash};
+use shakmaty::zobrist::Zobrist64;
 use shakmaty::{CastlingMode, Chess, Color, EnPassantMode, Position};
 
 use crate::pgn::{PgnTags, build_pgn};
@@ -155,10 +155,10 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         else {
             break;
         };
-        san_moves.push(SanPlus::from_move(pos.clone(), &legal).to_string());
+        san_moves.push(SanPlus::from_move(pos.clone(), legal.clone()).to_string());
         uci_moves.push(uci.clone());
         white_pov.push(last_white_pov); // no engine eval for opening plies
-        pos.play_unchecked(&legal);
+        pos.play_unchecked(legal);
         let key = pos.zobrist_hash::<Zobrist64>(EnPassantMode::Legal);
         *repetitions.entry(key).or_insert(0) += 1;
     }
@@ -210,7 +210,7 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
             );
         };
 
-        san_moves.push(SanPlus::from_move(pos.clone(), &legal_move).to_string());
+        san_moves.push(SanPlus::from_move(pos.clone(), legal_move.clone()).to_string());
         uci_moves.push(output.best_move.clone());
 
         // Score normalized to White's point of view.
@@ -224,7 +224,7 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         last_white_pov = white_pov_cp;
         white_pov.push(white_pov_cp);
 
-        pos.play_unchecked(&legal_move);
+        pos.play_unchecked(legal_move);
 
         // Natural endings take precedence over adjudication.
         if pos.is_checkmate() {

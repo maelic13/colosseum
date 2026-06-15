@@ -183,7 +183,7 @@ fn parse_pgn_game(game: &str, plies: usize) -> Option<ResolvedOpening> {
             break; // illegal in this line; stop here
         };
         let uci = mv.to_uci(CastlingMode::Standard).to_string();
-        pos.play_unchecked(&mv);
+        pos.play_unchecked(mv);
         sans.push(token.to_string());
         moves.push(uci);
     }
@@ -326,9 +326,9 @@ pub fn fen_after(start_fen: Option<&str>, moves: &[String]) -> Option<String> {
     for m in moves {
         let uci = m.parse::<UciMove>().ok()?;
         let mv = uci.to_move(&pos).ok()?;
-        pos.play_unchecked(&mv);
+        pos.play_unchecked(mv);
     }
-    Some(Fen::from_position(pos, EnPassantMode::Legal).to_string())
+    Some(Fen::from_position(&pos, EnPassantMode::Legal).to_string())
 }
 
 #[cfg(test)]

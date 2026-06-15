@@ -50,9 +50,9 @@ impl EnginesTab {
         ui.add_space(2.0);
 
         // Two-pane layout: resizable list | edit panel.
-        egui::SidePanel::left("engines_list_panel")
-            .default_width(270.0)
-            .width_range(160.0..=440.0)
+        egui::Panel::left("engines_list_panel")
+            .default_size(270.0)
+            .size_range(160.0..=440.0)
             .resizable(true)
             .frame(egui::Frame::new().inner_margin(egui::Margin {
                 right: 10,

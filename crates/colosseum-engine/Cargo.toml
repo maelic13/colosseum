@@ -9,7 +9,7 @@ authors.workspace = true
 
 [dependencies]
 anyhow = "1.0.102"
-toml = "0.8"
+toml = "1.1.2"
 colosseum-core = { version = "0.1.0", path = "../colosseum-core" }
 colosseum-uci = { version = "0.1.0", path = "../colosseum-uci" }
 crossbeam-channel = "0.5.15"
@@ -17,7 +17,7 @@ directories = "6.0.0"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
-shakmaty = "0.27.3"
+shakmaty = "0.30.0"
 thiserror = "2.0.18"
 time = "0.3.47"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
