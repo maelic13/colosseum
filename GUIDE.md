@@ -44,9 +44,9 @@ Ordered by value/effort; see [PLAN.md §11](PLAN.md) for detail.
 - [x] **Step 15** — Per-game timing → live **avg game time / elapsed / throughput / ETA**; set `games.started_at` · _Small_
 - [x] **Step 16** — Wire **Resume** into the GUI (`resume_tournament` already exists) · _Small_
 - [x] **Step 17** — **Tournament History** tab (`list`/`load`/`delete`/`resume`) · _Large_
-- [ ] **Step 18** — Live **"currently playing"** panel (in-flight games) · _Small_
-- [ ] **Step 19** — **Termination breakdown** summary in live view · _Small_
-- [ ] **Step 20** — Engines-tab usability: broken-path indicator, clone, search/filter+sort, per-option reset, open-folder, Button-option handling · _Small_
+- [x] **Step 18** — Live **"currently playing"** panel (in-flight games) · _Small_
+- [x] **Step 19** — **Termination breakdown** summary in live view · _Small_
+- [x] **Step 20** — Engines-tab usability: broken-path indicator, clone, search/filter+sort, per-option reset, open-folder, Button-option handling · _Small_
 - [ ] **Step 21** — Time controls: increment / sudden-death / nodes / depth · _Large_
 - [ ] **Step 22** — Tournament formats: gauntlet / knockout / SPRT + honest Format control · _Large_
 - [ ] **Step 23** — Config presets + remember last-used config · _Small_

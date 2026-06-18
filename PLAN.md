@@ -283,9 +283,9 @@ re-scheduled; `discarded` (from Force-Stop) are ignored. Schema also backs a fut
 | 15 | Per-game timing → live **avg game time / elapsed / throughput / ETA**; set `games.started_at` | Small (medium for core plumbing) |
 | 16 | Wire **Resume** into the GUI (backend `resume_tournament` already exists) | Small |
 | 17 | **Tournament History** tab (`list`/`load`/`delete`/`resume`) ✅ | **Large** |
-| 18 | Live **"currently playing"** panel (consume `GameStarted`/in-flight set) | Small |
-| 19 | **Termination breakdown** (mate/timeout/crash/adjudication) summary in live view | Small |
-| 20 | Engines-tab usability: broken-path indicator, clone engine, search/filter+sort, per-option reset, open-folder, Button-option handling | Small |
+| 18 | Live **"currently playing"** panel (consume `GameStarted`/in-flight set) ✅ | Small |
+| 19 | **Termination breakdown** (mate/timeout/crash/adjudication) summary in live view ✅ | Small |
+| 20 | Engines-tab usability: broken-path indicator, clone engine, search/filter+sort, per-option reset, open-folder, Button-option handling ✅ | Small |
 | 21 | Time controls: `Increment`/sudden-death/`Nodes`/`Depth` (extend `TimeControl` + UI) | **Large** |
 | 22 | Tournament formats: gauntlet/knockout/SPRT + make the dead "Format" control honest | **Large** |
 | 23 | Config presets (save/load tournament settings) + remember last-used config | Small |
