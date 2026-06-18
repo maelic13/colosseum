@@ -17,7 +17,7 @@ pub mod scheduler;
 pub mod store;
 
 pub use config::{AppConfig, AppDirs, EngineLibrary};
-pub use detect::{DetectResult, detect_engine};
+pub use detect::{DetectResult, detect_engine, split_name_version};
 pub use error::EngineError;
 pub use openings::{ResolvedOpening, load_openings, summarize};
 pub use runner::{EngineGameSpec, GameReport, GameSpec, run_game};

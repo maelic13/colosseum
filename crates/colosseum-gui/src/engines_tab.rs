@@ -13,7 +13,7 @@ use crossbeam_channel::Receiver;
 use eframe::egui::{self, Color32, DragValue, Layout, RichText, ScrollArea, Ui};
 
 use colosseum_core::{EngineConfig, EngineId, UciOption, UciOptionValue};
-use colosseum_engine::{DetectResult, detect_engine};
+use colosseum_engine::{DetectResult, detect_engine, split_name_version};
 
 use crate::backend::Backend;
 use crate::theme;
@@ -152,16 +152,22 @@ impl EnginesTab {
                     && &edit.engine_id == for_id
                 {
                     edit.detected_options = result.options;
-                    // Offer detected name/author only when the user hasn't typed one.
-                    if let Some(n) = result.name
-                        && edit.name.trim().is_empty()
-                    {
-                        edit.name = n;
+                    // Offer detected identity only for fields the user hasn't filled.
+                    if let Some(id_name) = result.name {
+                        let (name, version) = split_name_version(&id_name);
+                        if edit.name.trim().is_empty() {
+                            edit.name = name;
+                        }
+                        if let Some(version) = version
+                            && edit.version.trim().is_empty()
+                        {
+                            edit.version = version;
+                        }
                     }
-                    if let Some(a) = result.author
-                        && edit.version.trim().is_empty()
+                    if let Some(author) = result.author
+                        && edit.author.trim().is_empty()
                     {
-                        edit.version = a;
+                        edit.author = author;
                     }
                     edit.redetect_pending = false;
                     edit.dirty = true;
@@ -462,6 +468,7 @@ struct EngineEditBuf {
     // Identity
     name: String,
     version: String,
+    author: String,
     elo_str: String,
 
     // Launch
@@ -490,6 +497,7 @@ impl EngineEditBuf {
             engine_id: e.id,
             name: e.meta.name.clone(),
             version: e.meta.version.clone(),
+            author: e.meta.extra.get("author").cloned().unwrap_or_default(),
             elo_str: e.meta.elo.map(|v| v.to_string()).unwrap_or_default(),
             path: e.path.clone(),
             args_str: e.args.join(" "),
@@ -517,6 +525,14 @@ impl EngineEditBuf {
         };
         engine.meta.name = self.name.clone();
         engine.meta.version = self.version.clone();
+        if self.author.trim().is_empty() {
+            engine.meta.extra.remove("author");
+        } else {
+            engine
+                .meta
+                .extra
+                .insert("author".to_string(), self.author.trim().to_string());
+        }
         engine.meta.elo = self.elo_str.trim().parse::<i32>().ok();
         engine.args = self
             .args_str
@@ -593,6 +609,18 @@ impl EnginesTab {
                     field_label(ui, "Version");
                     if ui
                         .add(text_field(&mut edit.version).hint_text("e.g. 16"))
+                        .changed()
+                    {
+                        edit.dirty = true;
+                    }
+                    ui.end_row();
+
+                    field_label(ui, "Author");
+                    if ui
+                        .add(
+                            text_field(&mut edit.author)
+                                .hint_text("detected from the engine's UCI id"),
+                        )
                         .changed()
                     {
                         edit.dirty = true;
@@ -869,15 +897,25 @@ impl EnginesTab {
 /// Returns the new engine's `EngineId`.
 fn add_engine_from_detect(path: PathBuf, result: DetectResult, backend: &mut Backend) -> EngineId {
     let mut cfg = EngineConfig::new(path);
-    cfg.meta.name = result.name.unwrap_or_else(|| {
-        cfg.path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("Unknown")
-            .to_string()
-    });
+    match result.name {
+        Some(id_name) => {
+            let (name, version) = split_name_version(&id_name);
+            cfg.meta.name = name;
+            if let Some(version) = version {
+                cfg.meta.version = version;
+            }
+        }
+        None => {
+            cfg.meta.name = cfg
+                .path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Unknown")
+                .to_string();
+        }
+    }
     if let Some(author) = result.author {
-        cfg.meta.version = author;
+        cfg.meta.extra.insert("author".to_string(), author);
     }
     cfg.detected_options = result.options;
     let id = cfg.id;

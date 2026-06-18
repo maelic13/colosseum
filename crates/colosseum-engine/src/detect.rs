@@ -45,3 +45,96 @@ pub async fn detect_engine(path: &Path) -> Result<DetectResult, EngineError> {
     let _ = proc.quit(Duration::from_secs(2)).await;
     Ok(result)
 }
+
+/// Split a UCI `id name` into a display name and an optional version.
+///
+/// Many engines report their version as the trailing token of `id name`
+/// (`"Stockfish 16.1"`, `"lc0 v0.30.0"`, `"Stockfish dev-20231041"`). When the
+/// last whitespace-separated token contains a digit it is treated as the
+/// version — a single leading `v`/`V` before a digit is dropped — and the
+/// remaining tokens become the name. Otherwise the whole string is the name and
+/// the version is `None` (e.g. `"Fire"`, `"Stash Bot"`).
+#[must_use]
+pub fn split_name_version(id_name: &str) -> (String, Option<String>) {
+    let trimmed = id_name.trim();
+    let mut tokens: Vec<&str> = trimmed.split_whitespace().collect();
+    if tokens.len() >= 2 {
+        let last = tokens[tokens.len() - 1];
+        if last.chars().any(|c| c.is_ascii_digit()) {
+            tokens.pop();
+            return (tokens.join(" "), Some(strip_version_prefix(last).to_string()));
+        }
+    }
+    (trimmed.to_string(), None)
+}
+
+/// Drop a single leading `v`/`V` when it immediately precedes a digit
+/// (`"v0.30.0"` → `"0.30.0"`); otherwise return the token unchanged.
+fn strip_version_prefix(token: &str) -> &str {
+    if let Some(rest) = token.strip_prefix(['v', 'V'])
+        && rest.starts_with(|c: char| c.is_ascii_digit())
+    {
+        rest
+    } else {
+        token
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_name_version;
+
+    #[test]
+    fn splits_trailing_numeric_version() {
+        assert_eq!(
+            split_name_version("Stockfish 16.1"),
+            ("Stockfish".to_string(), Some("16.1".to_string()))
+        );
+        assert_eq!(
+            split_name_version("Komodo 14"),
+            ("Komodo".to_string(), Some("14".to_string()))
+        );
+    }
+
+    #[test]
+    fn strips_leading_v_prefix() {
+        assert_eq!(
+            split_name_version("lc0 v0.30.0"),
+            ("lc0".to_string(), Some("0.30.0".to_string()))
+        );
+    }
+
+    #[test]
+    fn keeps_non_numeric_trailing_token_as_name() {
+        assert_eq!(
+            split_name_version("Stash Bot"),
+            ("Stash Bot".to_string(), None)
+        );
+        assert_eq!(split_name_version("Fire"), ("Fire".to_string(), None));
+    }
+
+    #[test]
+    fn treats_mixed_trailing_token_as_version() {
+        assert_eq!(
+            split_name_version("Stockfish dev-20231041"),
+            ("Stockfish".to_string(), Some("dev-20231041".to_string()))
+        );
+    }
+
+    #[test]
+    fn multi_word_name_with_version() {
+        assert_eq!(
+            split_name_version("Mr Bob 1.0.0"),
+            ("Mr Bob".to_string(), Some("1.0.0".to_string()))
+        );
+    }
+
+    #[test]
+    fn handles_empty_and_whitespace() {
+        assert_eq!(split_name_version("   "), (String::new(), None));
+        assert_eq!(
+            split_name_version("  Stockfish 16  "),
+            ("Stockfish".to_string(), Some("16".to_string()))
+        );
+    }
+}
