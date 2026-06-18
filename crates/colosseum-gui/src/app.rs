@@ -62,12 +62,13 @@ impl ColosseumApp {
     /// Construct the app, applying the theme to the egui context.
     pub fn new(cc: &eframe::CreationContext<'_>, backend: Backend) -> Self {
         theme::apply(&cc.egui_ctx);
+        let tournament_tab = TournamentTab::new(&backend.dirs.config_dir);
         Self {
             backend,
             tab: Tab::default(),
             close: CloseState::Open,
             engines_tab: EnginesTab::default(),
-            tournament_tab: TournamentTab::default(),
+            tournament_tab,
             history_tab: HistoryTab::default(),
         }
     }

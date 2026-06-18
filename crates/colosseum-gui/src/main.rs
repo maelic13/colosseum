@@ -11,6 +11,7 @@ mod backend;
 mod engines_tab;
 mod history_tab;
 mod icon;
+mod presets;
 mod theme;
 mod tournament_tab;
 mod widgets;

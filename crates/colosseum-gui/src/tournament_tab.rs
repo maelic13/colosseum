@@ -9,7 +9,7 @@
 //!   engine-error panel.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, DragValue, Layout, RichText, ScrollArea, Ui};
 use egui_extras::{Column, TableBuilder};
@@ -22,13 +22,13 @@ use colosseum_core::{
 use colosseum_engine::{EloEntry, InFlightGame, TournamentRow, TournamentStatus, summarize};
 
 use crate::backend::{Backend, ParticipantInfo};
+use crate::presets::{PresetData, PresetFormatKind, PresetManager, PresetTcKind};
 use crate::theme;
 use crate::widgets;
 
 // ── Tab state ─────────────────────────────────────────────────────────────────
 
 /// All persistent state for the Tournament tab.
-#[derive(Default)]
 pub struct TournamentTab {
     form: TournamentForm,
     sort: SortState,
@@ -36,9 +36,36 @@ pub struct TournamentTab {
     start_error: Option<String>,
     elo_note: Option<String>,
     resume_dismissed: bool,
+    /// Manages preset files on disk.
+    preset_manager: PresetManager,
+    /// Cached list of named presets (refreshed after save/delete).
+    presets_cache: Vec<PresetData>,
+    /// The name typed into the "Save preset" field.
+    preset_save_name: String,
 }
 
 impl TournamentTab {
+    /// Initialise the tab, loading the last-used config (if any) from disk.
+    pub fn new(config_dir: &Path) -> Self {
+        let preset_manager = PresetManager::new(config_dir);
+        let presets_cache = preset_manager.load_all();
+        let mut form = TournamentForm::default();
+        if let Some(last) = preset_manager.load_last_used() {
+            form.apply_preset(&last);
+        }
+        Self {
+            form,
+            sort: SortState::default(),
+            show_h2h: false,
+            start_error: None,
+            elo_note: None,
+            resume_dismissed: false,
+            preset_manager,
+            presets_cache,
+            preset_save_name: String::new(),
+        }
+    }
+
     /// Draw the tab body. Call every frame.
     pub fn show(&mut self, ui: &mut Ui, backend: &mut Backend) {
         if backend.active.is_some() {
@@ -339,6 +366,124 @@ impl TournamentForm {
         }
     }
 
+    /// Capture the current form state as a named [`PresetData`].
+    fn to_preset(&self, preset_name: String) -> PresetData {
+        PresetData {
+            preset_name,
+            tournament_name: self.name.clone(),
+            format_kind: match self.format_kind {
+                FormatKind::RoundRobin => PresetFormatKind::RoundRobin,
+                FormatKind::Gauntlet => PresetFormatKind::Gauntlet,
+                FormatKind::Knockout => PresetFormatKind::Knockout,
+                FormatKind::Sprt => PresetFormatKind::Sprt,
+            },
+            cycles: self.cycles,
+            games_per_pair: self.games_per_pair,
+            gauntlet_seeds: self.gauntlet_seeds,
+            tc_kind: match self.tc_kind {
+                TcKind::PerMove => PresetTcKind::PerMove,
+                TcKind::SuddenDeath => PresetTcKind::SuddenDeath,
+                TcKind::Increment => PresetTcKind::Increment,
+                TcKind::Nodes => PresetTcKind::Nodes,
+                TcKind::Depth => PresetTcKind::Depth,
+            },
+            tc_value: self.tc_value,
+            tc_unit: self.tc_unit,
+            tc_inc_value: self.tc_inc_value,
+            tc_inc_unit: self.tc_inc_unit,
+            tc_nodes: self.tc_nodes,
+            tc_depth: self.tc_depth,
+            concurrency: self.concurrency,
+            threads_on: self.threads_on,
+            threads: self.threads,
+            hash_on: self.hash_on,
+            hash_mb: self.hash_mb,
+            syzygy_path: self.syzygy_path.clone(),
+            syzygy50_on: self.syzygy50_on,
+            syzygy50: self.syzygy50,
+            ponder: self.ponder,
+            max_moves_on: self.max_moves_on,
+            max_moves: self.max_moves,
+            draw_on: self.draw_on,
+            draw_min_ply: self.draw_min_ply,
+            draw_move_count: self.draw_move_count,
+            draw_score_cp: self.draw_score_cp,
+            resign_on: self.resign_on,
+            resign_move_count: self.resign_move_count,
+            resign_score_cp: self.resign_score_cp,
+            elo_policy: self.elo_policy,
+            k_factor: self.k_factor,
+            openings_on: self.openings_on,
+            openings_path: self.openings_path.clone(),
+            openings_format: self.openings_format,
+            openings_order: self.openings_order,
+            openings_plies: self.openings_plies,
+            openings_count_on: self.openings_count_on,
+            openings_count: self.openings_count,
+            openings_seed: self.openings_seed,
+            pgn_path: self.pgn_path.clone(),
+        }
+    }
+
+    /// Apply a preset's settings to this form.  Engine selection and the
+    /// openings preview cache are not touched; the preview is re-derived from
+    /// the new openings settings.
+    fn apply_preset(&mut self, p: &PresetData) {
+        self.name = p.tournament_name.clone();
+        self.format_kind = match p.format_kind {
+            PresetFormatKind::RoundRobin => FormatKind::RoundRobin,
+            PresetFormatKind::Gauntlet => FormatKind::Gauntlet,
+            PresetFormatKind::Knockout => FormatKind::Knockout,
+            PresetFormatKind::Sprt => FormatKind::Sprt,
+        };
+        self.cycles = p.cycles;
+        self.games_per_pair = p.games_per_pair;
+        self.gauntlet_seeds = p.gauntlet_seeds;
+        self.tc_kind = match p.tc_kind {
+            PresetTcKind::PerMove => TcKind::PerMove,
+            PresetTcKind::SuddenDeath => TcKind::SuddenDeath,
+            PresetTcKind::Increment => TcKind::Increment,
+            PresetTcKind::Nodes => TcKind::Nodes,
+            PresetTcKind::Depth => TcKind::Depth,
+        };
+        self.tc_value = p.tc_value;
+        self.tc_unit = p.tc_unit;
+        self.tc_inc_value = p.tc_inc_value;
+        self.tc_inc_unit = p.tc_inc_unit;
+        self.tc_nodes = p.tc_nodes;
+        self.tc_depth = p.tc_depth;
+        self.concurrency = p.concurrency;
+        self.threads_on = p.threads_on;
+        self.threads = p.threads;
+        self.hash_on = p.hash_on;
+        self.hash_mb = p.hash_mb;
+        self.syzygy_path = p.syzygy_path.clone();
+        self.syzygy50_on = p.syzygy50_on;
+        self.syzygy50 = p.syzygy50;
+        self.ponder = p.ponder;
+        self.max_moves_on = p.max_moves_on;
+        self.max_moves = p.max_moves;
+        self.draw_on = p.draw_on;
+        self.draw_min_ply = p.draw_min_ply;
+        self.draw_move_count = p.draw_move_count;
+        self.draw_score_cp = p.draw_score_cp;
+        self.resign_on = p.resign_on;
+        self.resign_move_count = p.resign_move_count;
+        self.resign_score_cp = p.resign_score_cp;
+        self.elo_policy = p.elo_policy;
+        self.k_factor = p.k_factor;
+        self.openings_on = p.openings_on;
+        self.openings_path = p.openings_path.clone();
+        self.openings_format = p.openings_format;
+        self.openings_order = p.openings_order;
+        self.openings_plies = p.openings_plies;
+        self.openings_count_on = p.openings_count_on;
+        self.openings_count = p.openings_count;
+        self.openings_seed = p.openings_seed;
+        self.pgn_path = p.pgn_path.clone();
+        self.refresh_openings_preview();
+    }
+
     /// Number of games the configured tournament will schedule.
     fn estimated_games(&self) -> usize {
         let n = self.selected.len();
@@ -448,6 +593,8 @@ impl TournamentTab {
                 self.try_start(backend);
             }
 
+            ui.add_space(8.0);
+            self.presets_menu(ui);
             ui.add_space(12.0);
 
             if ready {
@@ -482,6 +629,122 @@ impl TournamentTab {
         });
     }
 
+    /// Dropdown menu for saving/loading/deleting named presets.
+    fn presets_menu(&mut self, ui: &mut Ui) {
+        // Collect actions from inside the closure so we can act after it returns.
+        let mut load_idx: Option<usize> = None;
+        let mut delete_name: Option<String> = None;
+        let mut saved = false;
+
+        ui.menu_button(RichText::new("Presets ▾").size(13.0), |ui| {
+                ui.set_min_width(240.0);
+
+                // ── Save section ──────────────────────────────────────────
+                ui.label(
+                    RichText::new("Save current config as:")
+                        .color(theme::TEXT_WEAK)
+                        .size(11.5),
+                );
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.preset_save_name)
+                            .desired_width(152.0)
+                            .hint_text(if self.form.name.is_empty() {
+                                "Preset name"
+                            } else {
+                                &self.form.name
+                            }),
+                    );
+                    let effective = if self.preset_save_name.trim().is_empty() {
+                        self.form.name.trim().to_string()
+                    } else {
+                        self.preset_save_name.trim().to_string()
+                    };
+                    if ui
+                        .add_enabled(!effective.is_empty(), egui::Button::new("Save"))
+                        .clicked()
+                    {
+                        let data = self.form.to_preset(effective);
+                        if let Err(e) = self.preset_manager.save_preset(&data) {
+                            tracing::warn!("failed to save preset: {e}");
+                        } else {
+                            self.presets_cache = self.preset_manager.load_all();
+                            self.preset_save_name.clear();
+                            saved = true;
+                        }
+                    }
+                });
+
+                // ── Saved presets list ────────────────────────────────────
+                ui.separator();
+
+                let cache: Vec<PresetData> = self.presets_cache.clone();
+                if cache.is_empty() {
+                    ui.label(
+                        RichText::new("No presets saved yet.")
+                            .color(theme::TEXT_FAINT)
+                            .size(12.0),
+                    );
+                } else {
+                    ScrollArea::vertical()
+                        .id_salt("preset_list_scroll")
+                        .max_height(200.0)
+                        .show(ui, |ui| {
+                            for (i, preset) in cache.iter().enumerate() {
+                                ui.horizontal(|ui| {
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                RichText::new(&preset.preset_name).size(12.5),
+                                            )
+                                            .min_size(egui::vec2(160.0, 0.0))
+                                            .frame(false),
+                                        )
+                                        .on_hover_text("Load this preset")
+                                        .clicked()
+                                    {
+                                        load_idx = Some(i);
+                                    }
+                                    ui.with_layout(
+                                        Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui
+                                                .small_button(
+                                                    RichText::new("×").color(theme::TEXT_WEAK),
+                                                )
+                                                .on_hover_text("Delete preset")
+                                                .clicked()
+                                            {
+                                                delete_name =
+                                                    Some(preset.preset_name.clone());
+                                            }
+                                        },
+                                    );
+                                });
+                            }
+                        });
+                }
+
+                if saved {
+                    ui.close();
+                }
+            },
+        );
+
+        // Apply deferred actions.
+        if let Some(i) = load_idx {
+            if let Some(preset) = self.presets_cache.get(i).cloned() {
+                self.form.apply_preset(&preset);
+            }
+        }
+        if let Some(name) = delete_name {
+            if let Err(e) = self.preset_manager.delete_preset(&name) {
+                tracing::warn!("failed to delete preset '{name}': {e}");
+            }
+            self.presets_cache = self.preset_manager.load_all();
+        }
+    }
+
     fn try_start(&mut self, backend: &mut Backend) {
         let engines = self.form.selected_engines(&backend.engines);
         if engines.len() < 2 {
@@ -499,6 +762,10 @@ impl TournamentTab {
                 self.start_error = None;
                 self.sort = SortState::default();
                 self.elo_note = None;
+                // Persist the current form so the next session starts with the
+                // same settings.
+                let last = self.form.to_preset(String::new());
+                self.preset_manager.save_last_used(&last);
             }
             Err(e) => self.start_error = Some(e.to_string()),
         }
