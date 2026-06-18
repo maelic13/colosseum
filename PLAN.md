@@ -286,8 +286,8 @@ re-scheduled; `discarded` (from Force-Stop) are ignored. Schema also backs a fut
 | 18 | Live **"currently playing"** panel (consume `GameStarted`/in-flight set) ✅ | Small |
 | 19 | **Termination breakdown** (mate/timeout/crash/adjudication) summary in live view ✅ | Small |
 | 20 | Engines-tab usability: broken-path indicator, clone engine, search/filter+sort, per-option reset, open-folder, Button-option handling ✅ | Small |
-| 21 | Time controls: `Increment`/sudden-death/`Nodes`/`Depth` (extend `TimeControl` + UI) | **Large** |
-| 22 | Tournament formats: gauntlet/knockout/SPRT + make the dead "Format" control honest | **Large** |
+| 21 | Time controls: `Increment`/sudden-death/`Nodes`/`Depth` (extend `TimeControl` + UI) ✅ | **Large** |
+| 22 | Tournament formats: gauntlet ✅ + honest Format control (knockout/SPRT deferred — need a dynamic scheduler) | **Large** |
 | 23 | Config presets (save/load tournament settings) + remember last-used config | Small |
 | 24 | Output & analysis: CSV standings/crosstable export, export-PGN-now, SPRT/LOS/Elo error bars, PGN/board viewer | **Large** |
 | 25 | Cleanup: remove the unused SQLite `engines` table + dead `Store` engine methods | Small |
@@ -358,10 +358,26 @@ primary touch points. Tiered by priority.
 
 ### Tier 4 — Tournament setup (steps 21–23)
 
-- **21 · Time controls** beyond per-move: base+increment, sudden death, fixed nodes,
-  fixed depth. `TimeControl` is explicitly designed to grow here.
-- **22 · Formats.** The setup "Format" row is a dead `Round Robin` label; either add
-  gauntlet/knockout/SPRT or make it an honest disabled control.
+- ✅ **21 · Time controls** beyond per-move. `TimeControl` now carries
+  `SuddenDeath{base_ms}`, `Increment{base_ms,inc_ms}`, `Nodes{nodes}`, and
+  `Depth{depth}` alongside `PerMove`; `GoLimits` grew matching `Clock`/`Nodes`/`Depth`
+  variants. The runner runs per-side game clocks for the clock-based controls
+  (deduct elapsed, credit increment, flag via the search deadline) and applies a fixed
+  safety deadline to node/depth searches. The setup UI has a time-control **Type**
+  selector with per-kind inputs and live resolved hints. New unit tests cover the
+  clock math and `go` command rendering.
+- ✅ **22 · Formats (gauntlet) + honest Format control.** Added
+  `Format::Gauntlet{seeds,cycles}` and a `gauntlet()` pairing generator (each of the
+  first `seeds` engines plays every non-seed, color-balanced, per cycle);
+  `generate_schedule` dispatches it. The setup "Format" row is now a real combo —
+  **Round Robin** and **Gauntlet** work; **Knockout** and **SPRT** are shown as
+  *disabled* "planned" options with a tooltip explaining they need a result-dependent
+  (dynamic) scheduler, which the current static-schedule architecture doesn't yet
+  provide. Game-count estimate and history config summaries are format-aware.
+  **Deferred:** Knockout (result-dependent bracket) and SPRT (sequential stopping
+  rule) — both require the scheduler to extend/stop the schedule mid-tournament based
+  on results, plus persistence/resume support; SPRT additionally needs the LLR math
+  and a live readout (overlaps Step 24).
 - **23 · Presets.** Save/load tournament settings; remember the last-used config.
 
 ### Tier 5 — output & analysis (step 24)
