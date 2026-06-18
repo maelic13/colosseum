@@ -480,6 +480,10 @@ impl TournamentTab {
                         (Color32::TRANSPARENT, egui::Stroke::NONE)
                     };
 
+                    // Reserve a background slot so the hover fill paints behind the
+                    // frame content rather than on top of it.
+                    let bg_slot = ui.painter().add(egui::Shape::Noop);
+
                     let row_resp = egui::Frame::new()
                         .fill(fill)
                         .stroke(stroke)
@@ -521,10 +525,13 @@ impl TournamentTab {
                     );
 
                     if interact.hovered() && !selected {
-                        ui.painter().rect_filled(
-                            row_resp.rect,
-                            egui::CornerRadius::same(6),
-                            theme::BG_HOVER,
+                        ui.painter().set(
+                            bg_slot,
+                            egui::Shape::rect_filled(
+                                row_resp.rect,
+                                egui::CornerRadius::same(6),
+                                theme::BG_HOVER,
+                            ),
                         );
                     }
 
