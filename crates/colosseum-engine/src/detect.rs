@@ -49,15 +49,25 @@ pub async fn detect_engine(path: &Path) -> Result<DetectResult, EngineError> {
 /// Split a UCI `id name` into a display name and an optional version.
 ///
 /// Many engines report their version as the trailing token of `id name`
-/// (`"Stockfish 16.1"`, `"lc0 v0.30.0"`, `"Stockfish dev-20231041"`). When the
-/// last whitespace-separated token contains a digit it is treated as the
-/// version — a single leading `v`/`V` before a digit is dropped — and the
-/// remaining tokens become the name. Otherwise the whole string is the name and
-/// the version is `None` (e.g. `"Fire"`, `"Stash Bot"`).
+/// (`"Stockfish 16.1"`, `"lc0 v0.30.0"`, `"Stockfish dev-20231041"`). Trailing
+/// architecture/platform descriptors (`"64-bit"`, `"x86-64"`, `"avx2"`, …) are
+/// noise and are dropped first. Then, when the last remaining token contains a
+/// digit it is treated as the version — a single leading `v`/`V` before a digit
+/// is dropped — and the rest become the name. Otherwise the whole string (minus
+/// noise) is the name and the version is `None` (e.g. `"Fire"`, `"Stash Bot"`).
+///
+/// Example: `"Critter 1.6a 64-bit"` → name `"Critter"`, version `"1.6a"`.
 #[must_use]
 pub fn split_name_version(id_name: &str) -> (String, Option<String>) {
     let trimmed = id_name.trim();
     let mut tokens: Vec<&str> = trimmed.split_whitespace().collect();
+
+    // Drop trailing architecture/platform descriptors — they are never the
+    // version. Keep at least one token so a bare "x64" engine isn't erased.
+    while tokens.len() > 1 && is_arch_noise(tokens[tokens.len() - 1]) {
+        tokens.pop();
+    }
+
     if tokens.len() >= 2 {
         let last = tokens[tokens.len() - 1];
         if last.chars().any(|c| c.is_ascii_digit()) {
@@ -65,7 +75,52 @@ pub fn split_name_version(id_name: &str) -> (String, Option<String>) {
             return (tokens.join(" "), Some(strip_version_prefix(last).to_string()));
         }
     }
-    (trimmed.to_string(), None)
+    (tokens.join(" "), None)
+}
+
+/// True when a token is an architecture/platform/build descriptor rather than a
+/// version or part of the engine name. Matched case-insensitively after
+/// stripping surrounding brackets.
+fn is_arch_noise(token: &str) -> bool {
+    let t = token
+        .trim_matches(|c| matches!(c, '(' | ')' | '[' | ']'))
+        .to_ascii_lowercase();
+    matches!(
+        t.as_str(),
+        "64-bit"
+            | "32-bit"
+            | "64bit"
+            | "32bit"
+            | "64"
+            | "x64"
+            | "x86"
+            | "x86-64"
+            | "x86_64"
+            | "amd64"
+            | "arm64"
+            | "aarch64"
+            | "win"
+            | "win64"
+            | "win32"
+            | "windows"
+            | "linux"
+            | "macos"
+            | "osx"
+            | "avx"
+            | "avx2"
+            | "avx512"
+            | "bmi"
+            | "bmi2"
+            | "pext"
+            | "popcnt"
+            | "sse2"
+            | "sse3"
+            | "ssse3"
+            | "sse4"
+            | "sse41"
+            | "vnni"
+            | "modern"
+    )
 }
 
 /// Drop a single leading `v`/`V` when it immediately precedes a digit
@@ -127,6 +182,31 @@ mod tests {
             split_name_version("Mr Bob 1.0.0"),
             ("Mr Bob".to_string(), Some("1.0.0".to_string()))
         );
+    }
+
+    #[test]
+    fn strips_trailing_architecture_noise() {
+        // The reported case: "64-bit" is noise, "1.6a" is the real version.
+        assert_eq!(
+            split_name_version("Critter 1.6a 64-bit"),
+            ("Critter".to_string(), Some("1.6a".to_string()))
+        );
+        // Multiple trailing noise tokens are all dropped.
+        assert_eq!(
+            split_name_version("Stockfish 16 avx2 x86-64"),
+            ("Stockfish".to_string(), Some("16".to_string()))
+        );
+        // Noise with no version leaves just the name.
+        assert_eq!(
+            split_name_version("Fire x64"),
+            ("Fire".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn keeps_a_bare_architecture_only_name() {
+        // Don't erase everything if the whole name looks like noise.
+        assert_eq!(split_name_version("x64"), ("x64".to_string(), None));
     }
 
     #[test]

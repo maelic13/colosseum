@@ -265,7 +265,7 @@ impl EnginesTab {
                 .add_enabled(
                     !busy,
                     egui::Button::new(
-                        RichText::new("＋ Add Engine")
+                        RichText::new("+ Add Engine")
                             .color(theme::BG_DARKEST)
                             .size(13.5)
                             .strong(),
@@ -518,9 +518,23 @@ impl EnginesTab {
                     let bg_slot = ui.painter().add(egui::Shape::Noop);
 
                     ui.horizontal(|ui| {
-                        // Checkbox for multi-select.
+                        // Checkbox for multi-select. The theme draws idle widgets
+                        // borderless, which makes a bare checkbox nearly invisible
+                        // at rest — give it a sunken fill + visible border locally.
                         let mut checked = is_checked;
-                        if ui.checkbox(&mut checked, "").changed() {
+                        let toggled = ui
+                            .scope(|ui| {
+                                let w = &mut ui.visuals_mut().widgets;
+                                w.inactive.bg_fill = theme::BG_INPUT;
+                                w.inactive.weak_bg_fill = theme::BG_INPUT;
+                                w.inactive.bg_stroke =
+                                    egui::Stroke::new(1.0, theme::TEXT_FAINT);
+                                w.hovered.bg_stroke =
+                                    egui::Stroke::new(1.0, theme::ACCENT);
+                                ui.checkbox(&mut checked, "").changed()
+                            })
+                            .inner;
+                        if toggled {
                             toggle_check = Some((engine_id, checked));
                         }
 
@@ -809,7 +823,8 @@ impl EnginesTab {
                 .spacing([8.0, 6.0])
                 .show(ui, |ui| {
                     field_label(ui, "Path");
-                    // RTL: "Open folder" anchors right, path label fills remaining space.
+                    // RTL: "Open folder" anchors right; the path label then fills the
+                    // remaining width, left-aligned and truncating so it never overflows.
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                         if let Some(folder) = edit.path.parent() {
                             let folder = folder.to_path_buf();
@@ -822,22 +837,29 @@ impl EnginesTab {
                             }
                         }
                         let path_missing = !edit.path.exists();
-                        if path_missing {
-                            ui.label(RichText::new("⚠").color(theme::WARN).size(13.0))
-                                .on_hover_text("Executable not found at this path.");
-                        }
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(edit.path.to_string_lossy())
-                                    .color(if path_missing {
-                                        theme::WARN
-                                    } else {
-                                        theme::TEXT_WEAK
-                                    })
-                                    .size(12.0)
-                                    .monospace(),
-                            )
-                            .truncate(),
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
+                            Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                if path_missing {
+                                    ui.label(RichText::new("⚠").color(theme::WARN).size(13.0))
+                                        .on_hover_text("Executable not found at this path.");
+                                }
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(edit.path.to_string_lossy())
+                                            .color(if path_missing {
+                                                theme::WARN
+                                            } else {
+                                                theme::TEXT_WEAK
+                                            })
+                                            .size(12.0)
+                                            .monospace(),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(edit.path.to_string_lossy());
+                            },
                         );
                     });
                     ui.end_row();
@@ -935,14 +957,14 @@ impl EnginesTab {
                         .desired_width(150.0)
                         .hint_text("NEW KEY"),
                 );
-                // RTL: ＋ button anchors right, value field fills the rest.
+                // RTL: + button anchors right, value field fills the rest.
                 let key_nonempty = !edit.new_env_key.trim().is_empty();
                 let mut do_add = false;
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add_enabled(
                             key_nonempty,
-                            egui::Button::new(RichText::new("＋").color(theme::ACCENT)),
+                            egui::Button::new(RichText::new("+").color(theme::ACCENT)),
                         )
                         .clicked()
                     {
