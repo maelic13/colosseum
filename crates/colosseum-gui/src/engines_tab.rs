@@ -6,7 +6,7 @@
 //! spawns a background detection task on the tokio runtime so the GUI thread
 //! never blocks.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crossbeam_channel::Receiver;
@@ -25,6 +25,8 @@ use crate::widgets;
 #[derive(Default)]
 pub struct EnginesTab {
     selected_id: Option<EngineId>,
+    /// Engines checked for bulk delete.
+    selected_ids: HashSet<EngineId>,
     /// Edit buffer for the selected engine; `None` when nothing is selected.
     edit: Option<EngineEditBuf>,
     /// A running add-single / folder-scan job.
@@ -36,6 +38,8 @@ pub struct EnginesTab {
     detect_error: Option<String>,
     /// Search/filter text for the engine list.
     filter_text: String,
+    /// Pending two-step "Delete All" confirmation.
+    delete_all_confirm: bool,
 }
 
 impl EnginesTab {
@@ -61,12 +65,13 @@ impl EnginesTab {
                 ..Default::default()
             }))
             .show_inside(ui, |ui| {
-                self.show_list(ui, &backend.engines);
+                self.show_list(ui, backend);
             });
 
-        ScrollArea::vertical()
+        ScrollArea::both()
             .id_salt("engines_edit_scroll")
             .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
                 if self.edit.is_some() {
                     self.show_edit(ui, backend);
                 } else {
@@ -340,21 +345,61 @@ impl EnginesTab {
 // ── Engine list ───────────────────────────────────────────────────────────────
 
 impl EnginesTab {
-    fn show_list(&mut self, ui: &mut Ui, engines: &[EngineConfig]) {
+    fn show_list(&mut self, ui: &mut Ui, backend: &mut Backend) {
+        // ── Header: count + Delete All ────────────────────────────────────────
+        let engine_count = backend.engines.len();
+        let mut do_delete_all = false;
+        let mut cancel_delete_all = false;
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(format!(
-                    "{} engine{}",
-                    engines.len(),
-                    if engines.len() == 1 { "" } else { "s" }
+                    "{engine_count} engine{}",
+                    if engine_count == 1 { "" } else { "s" }
                 ))
                 .color(theme::TEXT_WEAK)
                 .size(12.0),
             );
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if engine_count > 0 {
+                    if self.delete_all_confirm {
+                        if widgets::tinted_button(ui, "Confirm", theme::DANGER, true)
+                            .on_hover_text("Permanently remove every engine from the library.")
+                            .clicked()
+                        {
+                            do_delete_all = true;
+                        }
+                        ui.add_space(2.0);
+                        if ui
+                            .small_button(RichText::new("Cancel").color(theme::TEXT_WEAK))
+                            .clicked()
+                        {
+                            cancel_delete_all = true;
+                        }
+                    } else if widgets::tinted_button(ui, "Delete All", theme::DANGER, true)
+                        .on_hover_text("Remove all engines from the library.")
+                        .clicked()
+                    {
+                        self.delete_all_confirm = true;
+                    }
+                }
+            });
         });
+
+        if do_delete_all {
+            backend.engines.clear();
+            backend.save_engines();
+            self.selected_id = None;
+            self.selected_ids.clear();
+            self.edit = None;
+            self.delete_all_confirm = false;
+        }
+        if cancel_delete_all {
+            self.delete_all_confirm = false;
+        }
+
         ui.add_space(4.0);
 
-        // Search/filter box.
+        // ── Filter ────────────────────────────────────────────────────────────
         ui.add(
             egui::TextEdit::singleline(&mut self.filter_text)
                 .desired_width(f32::INFINITY)
@@ -362,14 +407,58 @@ impl EnginesTab {
         );
         ui.add_space(4.0);
 
+        // ── Bulk-selection action bar ─────────────────────────────────────────
+        if !self.selected_ids.is_empty() {
+            let n = self.selected_ids.len();
+            let mut do_delete_selected = false;
+            let mut do_deselect_all = false;
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!("{n} selected"))
+                        .color(theme::ACCENT)
+                        .size(12.0),
+                );
+                ui.add_space(4.0);
+                if widgets::tinted_button(ui, &format!("Delete {n}"), theme::DANGER, true)
+                    .clicked()
+                {
+                    do_delete_selected = true;
+                }
+                ui.add_space(4.0);
+                if ui
+                    .small_button(RichText::new("Deselect all").color(theme::TEXT_WEAK))
+                    .clicked()
+                {
+                    do_deselect_all = true;
+                }
+            });
+            if do_delete_selected {
+                let del_ids = self.selected_ids.clone();
+                backend.engines.retain(|e| !del_ids.contains(&e.id));
+                backend.save_engines();
+                if let Some(id) = self.selected_id
+                    && del_ids.contains(&id)
+                {
+                    self.selected_id = None;
+                    self.edit = None;
+                }
+                self.selected_ids.clear();
+            }
+            if do_deselect_all {
+                self.selected_ids.clear();
+            }
+            ui.add_space(2.0);
+        }
+
         let filter = self.filter_text.to_lowercase();
 
+        // ── Engine list ───────────────────────────────────────────────────────
         ScrollArea::vertical()
             .id_salt("engines_list_scroll")
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
 
-                if engines.is_empty() {
+                if backend.engines.is_empty() {
                     ui.add_space(24.0);
                     ui.vertical_centered(|ui| {
                         ui.label(RichText::new("♟").color(theme::TEXT_FAINT).size(40.0));
@@ -391,8 +480,9 @@ impl EnginesTab {
                 }
 
                 let mut clicked_id: Option<EngineId> = None;
+                let mut toggle_check: Option<(EngineId, bool)> = None;
 
-                for engine in engines {
+                for engine in &backend.engines {
                     let display_name = engine_display_name(engine);
                     let stem = engine
                         .path
@@ -400,7 +490,6 @@ impl EnginesTab {
                         .and_then(|s| s.to_str())
                         .unwrap_or("");
 
-                    // Apply filter.
                     if !filter.is_empty()
                         && !display_name.to_lowercase().contains(&filter)
                         && !stem.to_lowercase().contains(&filter)
@@ -408,96 +497,124 @@ impl EnginesTab {
                         continue;
                     }
 
-                    let selected = self.selected_id.as_ref() == Some(&engine.id);
+                    let is_primary = self.selected_id.as_ref() == Some(&engine.id);
+                    let is_checked = self.selected_ids.contains(&engine.id);
                     let path_missing = !engine.path.exists();
+                    let engine_id = engine.id;
 
-                    let (fill, stroke) = if selected {
+                    let (fill, stroke) = if is_primary {
                         (
                             theme::tint(theme::ACCENT, 0.12),
                             egui::Stroke::new(1.0, theme::tint(theme::ACCENT, 0.4)),
+                        )
+                    } else if is_checked {
+                        (
+                            theme::tint(theme::DANGER, 0.10),
+                            egui::Stroke::new(1.0, theme::tint(theme::DANGER, 0.35)),
                         )
                     } else {
                         (Color32::TRANSPARENT, egui::Stroke::NONE)
                     };
 
-                    // Reserve bg slot so hover fill paints behind the frame content.
                     let bg_slot = ui.painter().add(egui::Shape::Noop);
 
-                    let row_resp = egui::Frame::new()
-                        .fill(fill)
-                        .stroke(stroke)
-                        .corner_radius(egui::CornerRadius::same(6))
-                        .inner_margin(egui::Margin::symmetric(10, 8))
-                        .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.vertical(|ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            RichText::new(&display_name)
-                                                .color(if selected {
-                                                    theme::ACCENT_BRIGHT
-                                                } else {
-                                                    theme::TEXT
-                                                })
-                                                .size(13.5),
-                                        );
-                                        if path_missing {
+                    ui.horizontal(|ui| {
+                        // Checkbox for multi-select.
+                        let mut checked = is_checked;
+                        if ui.checkbox(&mut checked, "").changed() {
+                            toggle_check = Some((engine_id, checked));
+                        }
+
+                        let row_resp = egui::Frame::new()
+                            .fill(fill)
+                            .stroke(stroke)
+                            .corner_radius(egui::CornerRadius::same(6))
+                            .inner_margin(egui::Margin::symmetric(10, 8))
+                            .show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.vertical(|ui| {
+                                        ui.horizontal(|ui| {
                                             ui.label(
-                                                RichText::new("⚠")
-                                                    .color(theme::WARN)
-                                                    .size(12.0),
-                                            )
-                                            .on_hover_text("Executable not found at this path.");
+                                                RichText::new(&display_name)
+                                                    .color(if is_primary {
+                                                        theme::ACCENT_BRIGHT
+                                                    } else {
+                                                        theme::TEXT
+                                                    })
+                                                    .size(13.5),
+                                            );
+                                            if path_missing {
+                                                ui.label(
+                                                    RichText::new("⚠")
+                                                        .color(theme::WARN)
+                                                        .size(12.0),
+                                                )
+                                                .on_hover_text(
+                                                    "Executable not found at this path.",
+                                                );
+                                            }
+                                        });
+                                        if !stem.is_empty() {
+                                            ui.label(
+                                                RichText::new(stem)
+                                                    .color(theme::TEXT_WEAK)
+                                                    .size(11.5),
+                                            );
                                         }
                                     });
-                                    if !stem.is_empty() {
-                                        ui.label(
-                                            RichText::new(stem).color(theme::TEXT_WEAK).size(11.5),
-                                        );
-                                    }
+                                    ui.with_layout(
+                                        Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if let Some(elo) = engine.meta.elo {
+                                                ui.label(
+                                                    RichText::new(elo.to_string())
+                                                        .color(theme::TEXT_FAINT)
+                                                        .size(12.0),
+                                                );
+                                            }
+                                        },
+                                    );
                                 });
-                                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if let Some(elo) = engine.meta.elo {
-                                        ui.label(
-                                            RichText::new(elo.to_string())
-                                                .color(theme::TEXT_FAINT)
-                                                .size(12.0),
-                                        );
-                                    }
-                                });
-                            });
-                        })
-                        .response;
+                            })
+                            .response;
 
-                    let interact = ui.interact(
-                        row_resp.rect,
-                        egui::Id::new("engine_row").with(engine.id),
-                        egui::Sense::click(),
-                    );
-
-                    if interact.hovered() && !selected {
-                        ui.painter().set(
-                            bg_slot,
-                            egui::Shape::rect_filled(
-                                row_resp.rect,
-                                egui::CornerRadius::same(6),
-                                theme::BG_HOVER,
-                            ),
+                        let interact = ui.interact(
+                            row_resp.rect,
+                            egui::Id::new("engine_row").with(engine_id),
+                            egui::Sense::click(),
                         );
-                    }
 
-                    if interact.clicked() {
-                        clicked_id = Some(engine.id);
-                    }
+                        if interact.hovered() && !is_primary {
+                            ui.painter().set(
+                                bg_slot,
+                                egui::Shape::rect_filled(
+                                    row_resp.rect,
+                                    egui::CornerRadius::same(6),
+                                    theme::BG_HOVER,
+                                ),
+                            );
+                        }
+
+                        if interact.clicked() {
+                            clicked_id = Some(engine_id);
+                        }
+                    });
 
                     ui.add_space(4.0);
                 }
 
-                // Apply selection outside the loop (borrow rules).
+                // Apply mutations outside the loop (borrow rules).
+                if let Some((id, add)) = toggle_check {
+                    if add {
+                        self.selected_ids.insert(id);
+                    } else {
+                        self.selected_ids.remove(&id);
+                    }
+                }
                 if let Some(id) = clicked_id {
-                    let engines_snapshot: Vec<EngineConfig> = engines.to_vec();
-                    self.select_engine(&id, &engines_snapshot);
+                    let snap: Vec<EngineConfig> = backend.engines.clone();
+                    self.select_engine(&id, &snap);
                 }
             });
     }
@@ -734,7 +851,11 @@ impl EnginesTab {
                     ui.end_row();
 
                     field_label(ui, "Work dir");
-                    ui.horizontal(|ui| {
+                    // RTL so the Browse button anchors right and the text field fills remaining space.
+                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                        let browse_clicked = ui
+                            .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
+                            .clicked();
                         if ui
                             .add(
                                 text_field(&mut edit.working_dir_str)
@@ -744,9 +865,7 @@ impl EnginesTab {
                         {
                             edit.dirty = true;
                         }
-                        if ui
-                            .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
-                            .clicked()
+                        if browse_clicked
                             && let Some(dir) = rfd::FileDialog::new()
                                 .set_title("Select working directory")
                                 .pick_folder()
