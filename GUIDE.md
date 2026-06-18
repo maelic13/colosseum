@@ -35,11 +35,28 @@ full architecture reference.
 
 ---
 
-### Deferred (post-v1, architecture-ready)
-- [ ] Tournament History tab UI (`list`/`load`/`delete`/`resume`)
-- [ ] Game / board viewer (PGN replay)
-- [ ] More formats: gauntlet, SPRT, knockout
-- [ ] Error-bar / Ordo rating recompute
+## Phase E — Post-v1 enhancements (v0.2+)
+
+Ordered by value/effort; see [PLAN.md §11](PLAN.md) for detail.
+
+- [x] **Step 13** — Engine identity: detect `author` into `meta.extra`, parse version from `id name`, show Author field · _Small_
+- [x] **Step 14** — Apply/sync resulting Elo from a tournament back to the engine library · _Small_
+- [x] **Step 15** — Per-game timing → live **avg game time / elapsed / throughput / ETA**; set `games.started_at` · _Small_
+- [x] **Step 16** — Wire **Resume** into the GUI (`resume_tournament` already exists) · _Small_
+- [ ] **Step 17** — **Tournament History** tab (`list`/`load`/`delete`/`resume`) · _Large_
+- [ ] **Step 18** — Live **"currently playing"** panel (in-flight games) · _Small_
+- [ ] **Step 19** — **Termination breakdown** summary in live view · _Small_
+- [ ] **Step 20** — Engines-tab usability: broken-path indicator, clone, search/filter+sort, per-option reset, open-folder, Button-option handling · _Small_
+- [ ] **Step 21** — Time controls: increment / sudden-death / nodes / depth · _Large_
+- [ ] **Step 22** — Tournament formats: gauntlet / knockout / SPRT + honest Format control · _Large_
+- [ ] **Step 23** — Config presets + remember last-used config · _Small_
+- [ ] **Step 24** — Output & analysis: CSV export, export-PGN-now, SPRT/LOS/error bars, PGN/board viewer · _Large_
+- [ ] **Step 25** — Cleanup: remove the unused SQLite `engines` table + dead `Store` engine methods · _Small_
+
+---
+
+### Deferred (architecture-ready)
+- [ ] Error-bar / Ordo rating recompute (see Step 24)
 - [ ] Engine process pool
 - [ ] Tablebase-based adjudication (optional feature, off by default)
 - [ ] macOS notarization · UCI_Chess960 · localization

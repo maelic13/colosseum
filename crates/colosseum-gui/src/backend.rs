@@ -20,8 +20,8 @@ use crossbeam_channel::Receiver;
 
 use colosseum_core::{EngineConfig, EngineId, TournamentConfig, TournamentEvent};
 use colosseum_engine::{
-    AppConfig, AppDirs, EngineLibrary, Store, Tournament, TournamentSnapshot, TournamentStatus,
-    create_tournament,
+    AppConfig, AppDirs, EngineLibrary, Store, Tournament, TournamentRow, TournamentSnapshot,
+    TournamentStatus, create_tournament, resume_tournament,
 };
 
 /// Target redraw cadence while a tournament is running (~30 Hz).
@@ -51,11 +51,7 @@ pub struct Backend {
     pub dirs: AppDirs,
     pub config: AppConfig,
     pub engines: Vec<EngineConfig>,
-    /// SQLite connection for tournament history / resume queries (Step 9+).
-    #[expect(
-        dead_code,
-        reason = "queried by the Tournament History flow (deferred post-v1)"
-    )]
+    /// SQLite connection for tournament history / resume queries.
     pub store: Store,
     /// Runtime that drives engine detection (Step 8) and tournament games (Step 9).
     pub runtime: tokio::runtime::Runtime,
@@ -193,6 +189,64 @@ impl Backend {
     /// to the setup view. Does not delete persisted data.
     pub fn clear_active(&mut self) {
         self.active = None;
+    }
+
+    /// Return the most recent tournament that has not yet finished, if any.
+    /// Used to offer a resume prompt at startup.
+    pub fn find_resumable(&self) -> Option<TournamentRow> {
+        let Ok(list) = self.store.list_tournaments() else {
+            return None;
+        };
+        list.into_iter()
+            .find(|t| t.status != colosseum_engine::store::STATUS_FINISHED)
+    }
+
+    /// Wire a previously-persisted tournament back up as the active tournament
+    /// (in Stopped/Idle state — the user must press Go to begin play).
+    pub fn try_resume(&mut self, row: TournamentRow) -> anyhow::Result<()> {
+        let name = row.name.clone();
+        let id = row.id;
+
+        let driver_store = Store::open(self.dirs.database_path())?;
+        let participants_raw = driver_store.list_tournament_engines(id)?;
+
+        let participants: Vec<ParticipantInfo> = participants_raw
+            .iter()
+            .filter_map(|p| {
+                let cfg = p.config.as_ref()?;
+                let name = if cfg.meta.name.is_empty() {
+                    cfg.path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("?")
+                        .to_string()
+                } else {
+                    cfg.meta.name.clone()
+                };
+                Some(ParticipantInfo {
+                    id: p.engine,
+                    name,
+                    version: cfg.meta.version.clone(),
+                })
+            })
+            .collect();
+
+        let resume_store = Store::open(self.dirs.database_path())?;
+        let (events_tx, events_rx) = crossbeam_channel::unbounded();
+        let (handle, driver) = resume_tournament(row, resume_store, events_tx)?;
+        let snapshot = handle.snapshot_handle();
+
+        self.runtime.spawn(driver);
+        // Do NOT call handle.go() — leave in Stopped state; user presses Go.
+
+        self.active = Some(ActiveTournament {
+            handle,
+            snapshot,
+            events: events_rx,
+            name,
+            participants,
+        });
+        Ok(())
     }
 
     /// Copy the active tournament's final Elo ratings into the in-memory engine

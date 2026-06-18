@@ -269,10 +269,107 @@ re-scheduled; `discarded` (from Force-Stop) are ignored. Schema also backs a fut
 | 9 | Tournament tab (centerpiece): options, Go/Stop/Force-Stop, live sortable table | **Large** |
 | 10 | Starting positions / openings (EPD + PGN, UI) — final feature | **Large** |
 | 11 | Cross-platform packaging & release (cargo-dist, Flatpak/MSI/DMG) | Small |
-| 12 | README, CHANGELOG, docs polish | Small |
+| 12 | README, CHANGELOG, docs polish — **v0.1.0** | Small |
 
-## 11. Deferred (architecture-ready)
+### v0.2+ — post-v1 enhancements (detail in §11)
 
-Tournament History tab UI; game/board viewer; non-RR formats (gauntlet/SPRT/knockout);
-error-bar/Ordo rating recompute; engine process pool; tablebase-based adjudication (optional
-feature, off by default); macOS notarization; UCI_Chess960; localization.
+> These continue the "one step = one commit, report + pause" cadence. Ordered by
+> value/effort; earlier steps unblock later ones (e.g. per-game timing in 15 feeds 18).
+
+| # | Step | Model |
+|---|---|---|
+| 13 | Engine identity: detect `author` into `meta.extra`, parse version from `id name`, show Author field | Small |
+| 14 | Apply/sync resulting Elo from a tournament back to the engine library | Small |
+| 15 | Per-game timing → live **avg game time / elapsed / throughput / ETA**; set `games.started_at` | Small (medium for core plumbing) |
+| 16 | Wire **Resume** into the GUI (backend `resume_tournament` already exists) | Small |
+| 17 | **Tournament History** tab (`list`/`load`/`delete`/`resume`) | **Large** |
+| 18 | Live **"currently playing"** panel (consume `GameStarted`/in-flight set) | Small |
+| 19 | **Termination breakdown** (mate/timeout/crash/adjudication) summary in live view | Small |
+| 20 | Engines-tab usability: broken-path indicator, clone engine, search/filter+sort, per-option reset, open-folder, Button-option handling | Small |
+| 21 | Time controls: `Increment`/sudden-death/`Nodes`/`Depth` (extend `TimeControl` + UI) | **Large** |
+| 22 | Tournament formats: gauntlet/knockout/SPRT + make the dead "Format" control honest | **Large** |
+| 23 | Config presets (save/load tournament settings) + remember last-used config | Small |
+| 24 | Output & analysis: CSV standings/crosstable export, export-PGN-now, SPRT/LOS/Elo error bars, PGN/board viewer | **Large** |
+| 25 | Cleanup: remove the unused SQLite `engines` table + dead `Store` engine methods | Small |
+
+## 11. Post-v1 enhancement backlog (v0.2+)
+
+Detail for steps 13–25 above. Grounded in the v0.1.0 code; file references are the
+primary touch points. Tiered by priority.
+
+### Tier 1 — correctness fixes + the explicitly-requested features
+
+- ✅ **13 · Engine identity (author + version).** Detection currently stores the UCI
+  `id author` into `meta.version` (`engines_tab.rs::add_engine_from_detect` and the
+  re-detect merge in `poll_redetect`), and never parses a real version. Fix: put
+  `author` in `meta.extra["author"]`, parse the trailing version token out of
+  `id name` (e.g. `Stockfish 16.1` → name `Stockfish`, version `16.1`), and add an
+  **Author** row to the Identity card in the edit panel. `EngineMeta.extra` already
+  exists for exactly this (see §6 / `engine.rs`).
+- **14 · Apply Elo to library.** ✅ The scheduler computes Elo only into the live
+  snapshot (`EloEntry.current`); nothing wrote it back to `meta.elo` in
+  `engines.json`. Implemented as an explicit **"Apply Elo → Library"** button in the
+  live control bar (`Backend::apply_active_elo_to_library` rounds each participant's
+  current Elo into `backend.engines` and calls `save_engines()`). Manual-only by
+  design — automatic write-back on finish is intentionally not done to avoid
+  surprising library mutation; revisit if a per-`EloPolicy` auto-apply is wanted.
+- ✅ **15 · Live timing.** Added `duration_ms: Option<u64>` to `GameStats`; `run_game`
+  records wall-clock time via `Instant` (including setup, shared across the three early-return
+  paths). The scheduler accumulates `total_game_ms`/`games_timed` + captures `started_at`
+  (set when first game launches) into `TournamentSnapshot`. The live control bar now shows
+  **⏱ elapsed**, **avg N/game**, and **ETA N** (once ≥1 game finishes). Fixed
+  `mark_game_running` to write `started_at = now` in the DB.
+
+### Tier 2 — high-impact gaps found in the v0.1.0 GUI
+
+- ✅ **16 · Resume wiring.** Added `Backend::find_resumable()` (queries the DB for the
+  most recent non-finished tournament) and `Backend::try_resume(row)` (calls the existing
+  `resume_tournament` scheduler function, builds `ParticipantInfo` from stored engine-config
+  snapshots, sets `backend.active`). The setup view now shows a compact accent-colored banner
+  when a resumable tournament exists; "↩ Resume" loads it in `Stopped` state (user presses
+  Go to continue); "×" dismisses for the session. Removed the `#[expect(dead_code)]` on
+  `Backend.store` since it is now actively queried.
+- **17 · Tournament History tab.** `Store` is `#[expect(dead_code)]` "deferred
+  post-v1" in `backend.rs`; persistence is already written every game. Add a tab over
+  `list_tournaments()` / `load_tournament()` with load / delete / resume.
+- **18 · "Currently playing" panel.** The scheduler emits `GameStarted` with the
+  pairing/round, but the live view only renders finished standings. Show in-flight
+  games (which engines, which round) to make a running tournament legible.
+- **19 · Termination breakdown.** Win-by-mate vs. timeout vs. crash vs. adjudication
+  is stored per game (`games.termination`) but never surfaced; add a compact summary
+  (or column) so flaky engines are easy to spot.
+
+### Tier 3 — Engines-tab usability (bundled into step 20)
+
+- Broken/missing **path indicator** when `EngineConfig.path` no longer exists.
+- **Clone/duplicate** an engine config (same binary, different Hash/Threads/options).
+- **Search/filter + sort** the engine list (currently insertion-ordered).
+- Per-option **"Reset to default" / "Reset all"** (overrides only accumulate today),
+  and real handling for UCI **Button** options (currently a no-op placeholder).
+- **Open containing folder** for an engine path.
+
+### Tier 4 — Tournament setup (steps 21–23)
+
+- **21 · Time controls** beyond per-move: base+increment, sudden death, fixed nodes,
+  fixed depth. `TimeControl` is explicitly designed to grow here.
+- **22 · Formats.** The setup "Format" row is a dead `Round Robin` label; either add
+  gauntlet/knockout/SPRT or make it an honest disabled control.
+- **23 · Presets.** Save/load tournament settings; remember the last-used config.
+
+### Tier 5 — output & analysis (step 24)
+
+- CSV standings/crosstable export; "export PGN now" (today PGN is only append-to-path).
+- SPRT / LOS / Elo error bars (statistical stopping that engine testers want).
+- Built-in PGN/board game viewer (PGN is already retained per game in the DB).
+
+### Non-feature cleanup (step 25)
+
+- The SQLite `engines` table and `Store::{upsert_engine,list_engines,delete_engine}`
+  are **dead code** — the GUI uses the JSON library exclusively. Remove them (or wire
+  them in). Deleting an engine in the GUI already never touched this table.
+
+## 12. Deferred (architecture-ready)
+
+Error-bar/Ordo rating recompute (see step 24); engine process pool; tablebase-based
+adjudication (optional feature, off by default); macOS notarization; UCI_Chess960;
+localization.

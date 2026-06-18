@@ -18,7 +18,7 @@ use colosseum_core::{
     Format, OpeningBook, OpeningFormat, OpeningOrder, ResignAdjudication, Standings, StartPosition,
     TimeControl, TimeUnit, TournamentConfig,
 };
-use colosseum_engine::{EloEntry, TournamentStatus, summarize};
+use colosseum_engine::{EloEntry, TournamentRow, TournamentStatus, summarize};
 
 use crate::backend::{Backend, ParticipantInfo};
 use crate::theme;
@@ -34,6 +34,7 @@ pub struct TournamentTab {
     show_h2h: bool,
     start_error: Option<String>,
     elo_note: Option<String>,
+    resume_dismissed: bool,
 }
 
 impl TournamentTab {
@@ -255,6 +256,32 @@ impl TournamentForm {
 
 impl TournamentTab {
     fn show_setup(&mut self, ui: &mut Ui, backend: &mut Backend) {
+        // Resume banner (top), shown when an unfinished tournament exists.
+        let resumable = if self.resume_dismissed {
+            None
+        } else {
+            backend.find_resumable()
+        };
+        if let Some(row) = resumable {
+            let action = egui::Panel::top("resume_banner")
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::tint(theme::ACCENT, 0.07))
+                        .stroke(egui::Stroke::new(1.0, theme::tint(theme::ACCENT, 0.20)))
+                        .inner_margin(egui::Margin::symmetric(14, 8)),
+                )
+                .show_inside(ui, |ui| resume_banner(ui, &row))
+                .inner;
+            match action {
+                BannerAction::Dismiss => self.resume_dismissed = true,
+                BannerAction::Resume => match backend.try_resume(row) {
+                    Ok(()) => {}
+                    Err(e) => self.start_error = Some(format!("Resume failed: {e}")),
+                },
+                BannerAction::None => {}
+            }
+        }
+
         // Bottom action bar (pinned).
         egui::Panel::bottom("tournament_setup_actions")
             .frame(
@@ -1593,6 +1620,52 @@ fn format_nps(nps: Option<u64>) -> String {
         Some(n) if n >= 1_000 => format!("{:.0}k", n as f64 / 1_000.0),
         Some(n) => n.to_string(),
     }
+}
+
+// ── Resume banner ───────────────────────────────────────────────────────────────
+
+enum BannerAction {
+    None,
+    Resume,
+    Dismiss,
+}
+
+fn resume_banner(ui: &mut Ui, row: &TournamentRow) -> BannerAction {
+    let mut action = BannerAction::None;
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("Unfinished tournament found:")
+                .color(theme::ACCENT_BRIGHT)
+                .size(13.0)
+                .strong(),
+        );
+        ui.label(
+            RichText::new(format!(
+                "\"{}\"  ·  {}",
+                row.name,
+                &row.created_at[..10.min(row.created_at.len())]
+            ))
+            .color(theme::TEXT)
+            .size(13.0),
+        );
+        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .small_button(RichText::new("×").color(theme::TEXT_WEAK))
+                .on_hover_text("Dismiss for this session.")
+                .clicked()
+            {
+                action = BannerAction::Dismiss;
+            }
+            ui.add_space(4.0);
+            if widgets::tinted_button(ui, "Resume", theme::ACCENT, true)
+                .on_hover_text("Reload this tournament and continue from where it stopped.")
+                .clicked()
+            {
+                action = BannerAction::Resume;
+            }
+        });
+    });
+    action
 }
 
 /// Truncate `s` to at most `max` characters, appending an ellipsis if cut.
