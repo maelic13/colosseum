@@ -34,6 +34,8 @@ pub struct EnginesTab {
     redetect_for: Option<EngineId>,
     /// Error message from the last detection, shown until dismissed.
     detect_error: Option<String>,
+    /// Search/filter text for the engine list.
+    filter_text: String,
 }
 
 impl EnginesTab {
@@ -339,16 +341,28 @@ impl EnginesTab {
 
 impl EnginesTab {
     fn show_list(&mut self, ui: &mut Ui, engines: &[EngineConfig]) {
-        ui.label(
-            RichText::new(format!(
-                "{} engine{}",
-                engines.len(),
-                if engines.len() == 1 { "" } else { "s" }
-            ))
-            .color(theme::TEXT_WEAK)
-            .size(12.0),
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "{} engine{}",
+                    engines.len(),
+                    if engines.len() == 1 { "" } else { "s" }
+                ))
+                .color(theme::TEXT_WEAK)
+                .size(12.0),
+            );
+        });
+        ui.add_space(4.0);
+
+        // Search/filter box.
+        ui.add(
+            egui::TextEdit::singleline(&mut self.filter_text)
+                .desired_width(f32::INFINITY)
+                .hint_text("🔍 Filter engines…"),
         );
         ui.add_space(4.0);
+
+        let filter = self.filter_text.to_lowercase();
 
         ScrollArea::vertical()
             .id_salt("engines_list_scroll")
@@ -379,8 +393,23 @@ impl EnginesTab {
                 let mut clicked_id: Option<EngineId> = None;
 
                 for engine in engines {
-                    let selected = self.selected_id.as_ref() == Some(&engine.id);
                     let display_name = engine_display_name(engine);
+                    let stem = engine
+                        .path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("");
+
+                    // Apply filter.
+                    if !filter.is_empty()
+                        && !display_name.to_lowercase().contains(&filter)
+                        && !stem.to_lowercase().contains(&filter)
+                    {
+                        continue;
+                    }
+
+                    let selected = self.selected_id.as_ref() == Some(&engine.id);
+                    let path_missing = !engine.path.exists();
 
                     let (fill, stroke) = if selected {
                         (
@@ -391,6 +420,9 @@ impl EnginesTab {
                         (Color32::TRANSPARENT, egui::Stroke::NONE)
                     };
 
+                    // Reserve bg slot so hover fill paints behind the frame content.
+                    let bg_slot = ui.painter().add(egui::Shape::Noop);
+
                     let row_resp = egui::Frame::new()
                         .fill(fill)
                         .stroke(stroke)
@@ -400,18 +432,26 @@ impl EnginesTab {
                             ui.set_min_width(ui.available_width());
                             ui.horizontal(|ui| {
                                 ui.vertical(|ui| {
-                                    ui.label(
-                                        RichText::new(&display_name)
-                                            .color(if selected {
-                                                theme::ACCENT_BRIGHT
-                                            } else {
-                                                theme::TEXT
-                                            })
-                                            .size(13.5),
-                                    );
-                                    if let Some(stem) =
-                                        engine.path.file_name().and_then(|s| s.to_str())
-                                    {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(&display_name)
+                                                .color(if selected {
+                                                    theme::ACCENT_BRIGHT
+                                                } else {
+                                                    theme::TEXT
+                                                })
+                                                .size(13.5),
+                                        );
+                                        if path_missing {
+                                            ui.label(
+                                                RichText::new("⚠")
+                                                    .color(theme::WARN)
+                                                    .size(12.0),
+                                            )
+                                            .on_hover_text("Executable not found at this path.");
+                                        }
+                                    });
+                                    if !stem.is_empty() {
                                         ui.label(
                                             RichText::new(stem).color(theme::TEXT_WEAK).size(11.5),
                                         );
@@ -437,10 +477,13 @@ impl EnginesTab {
                     );
 
                     if interact.hovered() && !selected {
-                        ui.painter().rect_filled(
-                            row_resp.rect,
-                            egui::CornerRadius::same(6),
-                            theme::BG_HOVER,
+                        ui.painter().set(
+                            bg_slot,
+                            egui::Shape::rect_filled(
+                                row_resp.rect,
+                                egui::CornerRadius::same(6),
+                                theme::BG_HOVER,
+                            ),
                         );
                     }
 
@@ -568,6 +611,7 @@ impl EnginesTab {
 
         let mut do_delete = false;
         let mut do_redetect = false;
+        let mut do_clone = false;
 
         // ─ Heading ─
         ui.horizontal(|ui| {
@@ -649,15 +693,32 @@ impl EnginesTab {
                 .spacing([8.0, 6.0])
                 .show(ui, |ui| {
                     field_label(ui, "Path");
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(edit.path.to_string_lossy())
-                                .color(theme::TEXT_WEAK)
-                                .size(12.0)
-                                .monospace(),
-                        )
-                        .truncate(),
-                    );
+                    ui.horizontal(|ui| {
+                        let path_missing = !edit.path.exists();
+                        if path_missing {
+                            ui.label(RichText::new("⚠").color(theme::WARN).size(13.0))
+                                .on_hover_text("Executable not found at this path.");
+                        }
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(edit.path.to_string_lossy())
+                                    .color(if path_missing { theme::WARN } else { theme::TEXT_WEAK })
+                                    .size(12.0)
+                                    .monospace(),
+                            )
+                            .truncate(),
+                        );
+                        if let Some(folder) = edit.path.parent() {
+                            let folder = folder.to_path_buf();
+                            if ui
+                                .small_button(RichText::new("Open folder").color(theme::TEXT_WEAK))
+                                .on_hover_text("Open the folder containing this engine.")
+                                .clicked()
+                            {
+                                open_folder(&folder);
+                            }
+                        }
+                    });
                     ui.end_row();
 
                     field_label(ui, "Args");
@@ -806,13 +867,24 @@ impl EnginesTab {
                     {
                         do_redetect = true;
                     }
+                    if !edit.option_overrides.is_empty() {
+                        ui.add_space(4.0);
+                        if ui
+                            .small_button(RichText::new("Reset all").color(theme::TEXT_WEAK))
+                            .on_hover_text("Remove all option overrides, reverting to engine defaults.")
+                            .clicked()
+                        {
+                            edit.option_overrides.clear();
+                            edit.dirty = true;
+                        }
+                    }
                 });
             });
 
             if !edit.detected_options.is_empty() {
                 ui.add_space(6.0);
                 egui::Grid::new("uci_opts_grid")
-                    .num_columns(2)
+                    .num_columns(3)
                     .spacing([8.0, 5.0])
                     .show(ui, |ui| {
                         let options = edit.detected_options.clone();
@@ -823,6 +895,20 @@ impl EnginesTab {
                                 &mut edit.option_overrides,
                                 &mut edit.dirty,
                             );
+                            // Per-option reset button (×) — only when overridden.
+                            let has_override = edit.option_overrides.contains_key(opt.name());
+                            if has_override {
+                                if ui
+                                    .small_button(RichText::new("×").color(theme::TEXT_FAINT))
+                                    .on_hover_text("Reset to engine default.")
+                                    .clicked()
+                                {
+                                    edit.option_overrides.remove(opt.name());
+                                    edit.dirty = true;
+                                }
+                            } else {
+                                ui.label(""); // keep grid columns aligned
+                            }
                             ui.end_row();
                         }
                     });
@@ -846,6 +932,16 @@ impl EnginesTab {
                 .clicked()
             {
                 edit.commit(backend);
+            }
+
+            ui.add_space(4.0);
+
+            if ui
+                .button(RichText::new("Clone").color(theme::TEXT_WEAK).size(13.0))
+                .on_hover_text("Duplicate this engine entry with a new identity.")
+                .clicked()
+            {
+                do_clone = true;
             }
 
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
@@ -878,6 +974,22 @@ impl EnginesTab {
             self.selected_id = None;
             // edit is dropped; don't restore it
             return;
+        }
+
+        if do_clone {
+            if let Some(src) = backend.engines.iter().find(|e| e.id == edit.engine_id) {
+                let mut cloned = src.clone();
+                cloned.id = colosseum_core::EngineId::new();
+                let suffix = " (copy)";
+                if !cloned.meta.name.ends_with(suffix) {
+                    cloned.meta.name.push_str(suffix);
+                }
+                let new_id = cloned.id;
+                backend.engines.push(cloned);
+                backend.save_engines();
+                let snap = backend.engines.clone();
+                self.select_engine(&new_id, &snap);
+            }
         }
 
         if do_redetect {
@@ -1074,19 +1186,42 @@ fn show_option_row(
         }
 
         UciOption::Button { name } => {
-            // Buttons are informational in the editor; they trigger UCI setoption
-            // at search time if the user sets them.
+            let armed = matches!(overrides.get(name), Some(UciOptionValue::Button));
+            let label = if armed { "✓ armed" } else { "arm" };
+            let color = if armed { theme::SUCCESS } else { theme::TEXT_WEAK };
             if ui
-                .small_button(RichText::new("trigger").color(theme::TEXT_WEAK))
-                .on_hover_text(format!(
-                    "Sends 'setoption name {name}' to the engine at game start."
-                ))
+                .small_button(RichText::new(label).color(color))
+                .on_hover_text(if armed {
+                    format!("Will send 'setoption name {name}' at game start. Click to disarm.")
+                } else {
+                    format!("Arm to send 'setoption name {name}' to the engine at game start.")
+                })
                 .clicked()
             {
-                // No stored value for buttons; just note the intent in overrides
-                // as a placeholder (button values are never serialised as a value).
+                if armed {
+                    overrides.remove(name);
+                } else {
+                    overrides.insert(name.clone(), UciOptionValue::Button);
+                }
+                *dirty = true;
             }
         }
+    }
+}
+
+/// Open the system file manager to the given folder.
+fn open_folder(path: &std::path::Path) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer").arg(path).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(path).spawn();
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(path).spawn();
     }
 }
 
