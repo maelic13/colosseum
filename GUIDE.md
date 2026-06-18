@@ -49,7 +49,7 @@ Ordered by value/effort; see [PLAN.md §11](PLAN.md) for detail.
 - [x] **Step 20** — Engines-tab usability: broken-path indicator, clone, search/filter+sort, per-option reset, open-folder, Button-option handling · _Small_
 - [x] **Step 21** — Time controls: increment / sudden-death / nodes / depth · _Large_
 - [x] **Step 22** — Gauntlet format + honest Format control (knockout / SPRT deferred — need a dynamic scheduler) · _Large_
-- [ ] **Step 23** — Config presets + remember last-used config · _Small_
+- [x] **Step 23** — Config presets + remember last-used config · _Small_
 - [ ] **Step 24** — Output & analysis: CSV export, export-PGN-now, SPRT/LOS/error bars, PGN/board viewer · _Large_
 - [ ] **Step 25** — Cleanup: remove the unused SQLite `engines` table + dead `Store` engine methods · _Small_
 

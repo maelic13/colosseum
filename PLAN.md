@@ -378,7 +378,14 @@ primary touch points. Tiered by priority.
   rule) — both require the scheduler to extend/stop the schedule mid-tournament based
   on results, plus persistence/resume support; SPRT additionally needs the LLR math
   and a live readout (overlaps Step 24).
-- **23 · Presets.** Save/load tournament settings; remember the last-used config.
+- ✅ **23 · Presets.** Named tournament configs are saved as JSON files in
+  `<config_dir>/presets/`; the "Presets ▾" menu in the setup action bar lists them
+  with load and delete per entry, plus a name field to save the current form.
+  The last-used config is auto-saved to `last_used_config.json` whenever a
+  tournament starts, and loaded back on next launch so the form reopens with the
+  previous settings. All preset I/O is in a new `presets.rs` module
+  (`PresetManager` + `PresetData`); the form's `to_preset`/`apply_preset` helpers
+  handle the round-trip without touching engine selection or the openings preview cache.
 
 ### Tier 5 — output & analysis (step 24)
 
