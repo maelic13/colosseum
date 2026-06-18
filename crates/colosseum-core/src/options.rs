@@ -60,16 +60,20 @@ pub enum UciOptionValue {
     Spin(i64),
     Combo(String),
     Str(String),
+    /// Marks a Button option as triggered; sends `setoption name X` (no value) at game start.
+    Button,
 }
 
 impl UciOptionValue {
     /// Render as the string the engine expects after `setoption name <n> value `.
+    /// Panics if called on `Button` — callers should special-case that variant.
     #[must_use]
     pub fn as_uci_string(&self) -> String {
         match self {
             Self::Check(b) => b.to_string(),
             Self::Spin(i) => i.to_string(),
             Self::Combo(s) | Self::Str(s) => s.clone(),
+            Self::Button => panic!("Button options have no value string"),
         }
     }
 }

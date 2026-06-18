@@ -11,7 +11,7 @@
 //! - **Stop**: launch no new games; let in-flight games finish and count as results.
 //! - **Force-Stop**: abort in-flight games (kill engines via drop), discard them.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -22,8 +22,8 @@ use tokio::task::JoinSet;
 
 use colosseum_core::{
     CommonEngineOptions, EloPolicy, EngineConfig, EngineId, GameId, GameResult, IncrementalElo,
-    Pairing, Rating, Standings, StartPosition, TournamentConfig, TournamentEvent, TournamentId,
-    generate_schedule, standings::GameOutcome,
+    Pairing, Rating, Standings, StartPosition, Termination, TournamentConfig, TournamentEvent,
+    TournamentId, UciOptionValue, generate_schedule, standings::GameOutcome,
 };
 use colosseum_uci::SpawnOptions;
 
@@ -67,6 +67,15 @@ pub struct EloEntry {
     pub delta: f64,
 }
 
+/// A game currently being played (in-flight).
+#[derive(Debug, Clone)]
+pub struct InFlightGame {
+    pub game_id: GameId,
+    pub white: EngineId,
+    pub black: EngineId,
+    pub round: u32,
+}
+
 /// A consistent snapshot of tournament state for the GUI to render.
 #[derive(Debug, Clone)]
 pub struct TournamentSnapshot {
@@ -82,6 +91,10 @@ pub struct TournamentSnapshot {
     pub total_game_ms: u64,
     /// Count of finished games that have a measured duration (denominator for avg).
     pub games_timed: usize,
+    /// Games currently in flight (launched but not yet finished).
+    pub in_flight_games: Vec<InFlightGame>,
+    /// How many finished games ended with each termination reason.
+    pub termination_counts: HashMap<Termination, usize>,
 }
 
 /// A handle to a running tournament: send commands, read the live snapshot.
@@ -247,6 +260,8 @@ pub fn create_tournament(
         started_at: None,
         total_game_ms: 0,
         games_timed: 0,
+        in_flight_games: Vec::new(),
+        termination_counts: HashMap::new(),
     }));
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
@@ -318,13 +333,14 @@ async fn drive(mut driver: Driver) {
     let mut recent_errors: Vec<String> = Vec::new();
 
     let mut games: JoinSet<crate::runner::GameReport> = JoinSet::new();
-    let mut in_flight: HashSet<GameId> = HashSet::new();
+    let mut in_flight: HashMap<GameId, InFlightGame> = HashMap::new();
     let mut next_index = 0usize;
     let mut running = false;
     let mut finished = false;
     let mut tournament_started_at: Option<std::time::Instant> = None;
     let mut total_game_ms: u64 = 0;
     let mut games_timed: usize = 0;
+    let mut termination_counts: HashMap<Termination, usize> = HashMap::new();
 
     loop {
         // Launch while running, with spare capacity and pending games.
@@ -341,7 +357,15 @@ async fn drive(mut driver: Driver) {
                 black: scheduled.pairing.black,
                 round: scheduled.pairing.round,
             });
-            in_flight.insert(scheduled.game_id);
+            in_flight.insert(
+                scheduled.game_id,
+                InFlightGame {
+                    game_id: scheduled.game_id,
+                    white: scheduled.pairing.white,
+                    black: scheduled.pairing.black,
+                    round: scheduled.pairing.round,
+                },
+            );
             let spec = build_game_spec(&driver, &scheduled);
             games.spawn(run_game(spec));
         }
@@ -373,6 +397,8 @@ async fn drive(mut driver: Driver) {
                 tournament_started_at,
                 total_game_ms,
                 games_timed,
+                &[],
+                &termination_counts,
             );
             let _ = driver.events.send(TournamentEvent::StandingsUpdated);
             let _ = driver.events.send(TournamentEvent::TournamentFinished);
@@ -399,7 +425,7 @@ async fn drive(mut driver: Driver) {
                 }
                 Some(Command::ForceStop) => {
                     games.shutdown().await; // abort tasks -> drop engines -> kill_on_drop
-                    for game_id in in_flight.drain() {
+                    for (game_id, _) in in_flight.drain() {
                         let _ = driver.store.discard_game(game_id);
                     }
                     running = false;
@@ -413,6 +439,7 @@ async fn drive(mut driver: Driver) {
                 match joined {
                     Ok(report) => {
                         in_flight.remove(&report.game_id);
+                        *termination_counts.entry(report.termination).or_insert(0) += 1;
                         if let Some(dur_ms) = report.stats.duration_ms {
                             total_game_ms += dur_ms;
                             games_timed += 1;
@@ -462,6 +489,8 @@ async fn drive(mut driver: Driver) {
                         } else {
                             TournamentStatus::Stopping
                         };
+                        let in_flight_snap: Vec<InFlightGame> =
+                            in_flight.values().cloned().collect();
                         publish(
                             &driver.snapshot,
                             &standings,
@@ -474,6 +503,8 @@ async fn drive(mut driver: Driver) {
                             tournament_started_at,
                             total_game_ms,
                             games_timed,
+                            &in_flight_snap,
+                            &termination_counts,
                         );
                         let _ = driver.events.send(TournamentEvent::StandingsUpdated);
                     }
@@ -620,6 +651,8 @@ pub fn resume_tournament(
         started_at: None,
         total_game_ms: 0,
         games_timed: 0,
+        in_flight_games: Vec::new(),
+        termination_counts: HashMap::new(),
     }));
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -798,33 +831,38 @@ fn resolve_options(
     engine: &EngineConfig,
     common: &CommonEngineOptions,
 ) -> Vec<(String, Option<String>)> {
-    let mut values: std::collections::BTreeMap<String, String> = engine
+    // Button options map to (name, None) — they send `setoption name X` with no value.
+    // All other options map to (name, Some(value_string)).
+    let mut values: std::collections::BTreeMap<String, Option<String>> = engine
         .options
         .iter()
-        .map(|(name, value)| (name.clone(), value.as_uci_string()))
+        .map(|(name, value)| {
+            let v = match value {
+                UciOptionValue::Button => None,
+                other => Some(other.as_uci_string()),
+            };
+            (name.clone(), v)
+        })
         .collect();
 
     if let Some(threads) = common.threads {
-        values.insert("Threads".into(), threads.to_string());
+        values.insert("Threads".into(), Some(threads.to_string()));
     }
     if let Some(hash) = common.hash_mb {
-        values.insert("Hash".into(), hash.to_string());
+        values.insert("Hash".into(), Some(hash.to_string()));
     }
     if let Some(path) = &common.syzygy_path
         && !path.is_empty()
     {
-        values.insert("SyzygyPath".into(), path.clone());
+        values.insert("SyzygyPath".into(), Some(path.clone()));
     }
     if let Some(rule) = common.syzygy_50_move_rule {
-        values.insert("Syzygy50MoveRule".into(), rule.to_string());
+        values.insert("Syzygy50MoveRule".into(), Some(rule.to_string()));
     }
     // Ponder is always forwarded (default off keeps fast games fair).
-    values.insert("Ponder".into(), common.ponder.to_string());
+    values.insert("Ponder".into(), Some(common.ponder.to_string()));
 
-    values
-        .into_iter()
-        .map(|(name, value)| (name, Some(value)))
-        .collect()
+    values.into_iter().collect()
 }
 
 fn display_name(engine: &EngineConfig) -> String {
@@ -895,6 +933,8 @@ fn publish(
     started_at: Option<std::time::Instant>,
     total_game_ms: u64,
     games_timed: usize,
+    in_flight_games: &[InFlightGame],
+    termination_counts: &HashMap<Termination, usize>,
 ) {
     let elo_map = ids
         .iter()
@@ -918,6 +958,8 @@ fn publish(
         snap.started_at = started_at;
         snap.total_game_ms = total_game_ms;
         snap.games_timed = games_timed;
+        snap.in_flight_games = in_flight_games.to_vec();
+        snap.termination_counts = termination_counts.clone();
     }
 }
 

@@ -35,7 +35,7 @@ impl GameResult {
 }
 
 /// Why a game ended. Natural endings plus adjudication and error terminations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Termination {
     Checkmate,
     Stalemate,

@@ -8,6 +8,7 @@
 //!   readout, a sortable results table, an optional head-to-head matrix, and an
 //!   engine-error panel.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use eframe::egui::{self, Color32, DragValue, Layout, RichText, ScrollArea, Ui};
@@ -16,9 +17,9 @@ use egui_extras::{Column, TableBuilder};
 use colosseum_core::{
     AdjudicationConfig, CommonEngineOptions, DrawAdjudication, EloPolicy, EngineConfig, EngineId,
     Format, OpeningBook, OpeningFormat, OpeningOrder, ResignAdjudication, Standings, StartPosition,
-    TimeControl, TimeUnit, TournamentConfig,
+    Termination, TimeControl, TimeUnit, TournamentConfig,
 };
-use colosseum_engine::{EloEntry, TournamentRow, TournamentStatus, summarize};
+use colosseum_engine::{EloEntry, InFlightGame, TournamentRow, TournamentStatus, summarize};
 
 use crate::backend::{Backend, ParticipantInfo};
 use crate::theme;
@@ -1027,6 +1028,22 @@ impl TournamentTab {
                 });
         }
 
+        // Side panel: in-flight games + termination breakdown.
+        if !live.in_flight_games.is_empty() || !live.termination_counts.is_empty() {
+            egui::Panel::right("tournament_live_side")
+                .default_size(210.0)
+                .resizable(false)
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::BG_DARKEST)
+                        .stroke(egui::Stroke::new(1.0, theme::STROKE))
+                        .inner_margin(egui::Margin::same(10)),
+                )
+                .show_inside(ui, |ui| {
+                    live_side_panel(ui, &live);
+                });
+        }
+
         // Results table (centre).
         egui::CentralPanel::default()
             .frame(egui::Frame::new().inner_margin(egui::Margin {
@@ -1416,6 +1433,8 @@ struct LiveData {
     started_at: Option<std::time::Instant>,
     total_game_ms: u64,
     games_timed: usize,
+    in_flight_games: Vec<InFlightGame>,
+    termination_counts: HashMap<Termination, usize>,
 }
 
 impl LiveData {
@@ -1425,7 +1444,7 @@ impl LiveData {
             .as_ref()
             .expect("capture called with an active tournament");
 
-        let (status, standings, elo, finished, total, errors, started_at, total_game_ms, games_timed) = {
+        let (status, standings, elo, finished, total, errors, started_at, total_game_ms, games_timed, in_flight_games, termination_counts) = {
             let snap = active.snapshot.lock().unwrap();
             (
                 snap.status,
@@ -1437,6 +1456,8 @@ impl LiveData {
                 snap.started_at,
                 snap.total_game_ms,
                 snap.games_timed,
+                snap.in_flight_games.clone(),
+                snap.termination_counts.clone(),
             )
         };
 
@@ -1481,7 +1502,17 @@ impl LiveData {
             started_at,
             total_game_ms,
             games_timed,
+            in_flight_games,
+            termination_counts,
         }
+    }
+
+    fn participant_name(&self, id: EngineId) -> &str {
+        self.rows
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| r.name.as_str())
+            .unwrap_or("?")
     }
 }
 
@@ -1557,6 +1588,147 @@ fn sortable_header(ui: &mut Ui, label: &str, key: SortKey, sort: &mut SortState)
 
 fn strong_header(label: &str) -> RichText {
     RichText::new(label).color(theme::TEXT).size(12.5).strong()
+}
+
+// ── Live side panel (currently playing + termination breakdown) ─────────────────
+
+fn live_side_panel(ui: &mut Ui, live: &LiveData) {
+    ScrollArea::vertical()
+        .id_salt("live_side_scroll")
+        .show(ui, |ui| {
+            if !live.in_flight_games.is_empty() {
+                ui.label(
+                    RichText::new(format!("▶ Playing ({})", live.in_flight_games.len()))
+                        .color(theme::TEXT)
+                        .size(12.5)
+                        .strong(),
+                );
+                ui.add_space(4.0);
+                for game in &live.in_flight_games {
+                    let white = live.participant_name(game.white);
+                    let black = live.participant_name(game.black);
+                    egui::Frame::new()
+                        .fill(theme::BG_ELEVATED)
+                        .corner_radius(egui::CornerRadius::same(4))
+                        .inner_margin(egui::Margin::symmetric(6, 4))
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.label(
+                                RichText::new(format!("Round {}", game.round))
+                                    .color(theme::TEXT_FAINT)
+                                    .size(10.5),
+                            );
+                            ui.label(
+                                RichText::new(format!("⬜ {}", short_name(white)))
+                                    .color(theme::TEXT)
+                                    .size(11.5),
+                            );
+                            ui.label(
+                                RichText::new(format!("⬛ {}", short_name(black)))
+                                    .color(theme::TEXT_WEAK)
+                                    .size(11.5),
+                            );
+                        });
+                    ui.add_space(3.0);
+                }
+            }
+
+            if !live.termination_counts.is_empty() {
+                if !live.in_flight_games.is_empty() {
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(6.0);
+                }
+                ui.label(
+                    RichText::new("Terminations")
+                        .color(theme::TEXT)
+                        .size(12.5)
+                        .strong(),
+                );
+                ui.add_space(4.0);
+                termination_breakdown(ui, &live.termination_counts);
+            }
+        });
+}
+
+fn termination_breakdown(ui: &mut Ui, counts: &HashMap<Termination, usize>) {
+    let groups: &[(&str, &[Termination])] = &[
+        (
+            "Natural",
+            &[
+                Termination::Checkmate,
+                Termination::Stalemate,
+                Termination::FiftyMove,
+                Termination::Threefold,
+                Termination::InsufficientMaterial,
+                Termination::MaxMoves,
+            ],
+        ),
+        (
+            "Adjudicated",
+            &[Termination::AdjudicatedDraw, Termination::AdjudicatedResign],
+        ),
+        (
+            "Errors",
+            &[
+                Termination::TimeForfeit,
+                Termination::EngineCrash,
+                Termination::IllegalMove,
+                Termination::Aborted,
+            ],
+        ),
+    ];
+
+    for (group_label, terms) in groups {
+        let relevant: Vec<(Termination, usize)> = terms
+            .iter()
+            .filter_map(|t| counts.get(t).map(|&n| (*t, n)))
+            .collect();
+        if relevant.is_empty() {
+            continue;
+        }
+        ui.label(
+            RichText::new(*group_label)
+                .color(theme::TEXT_FAINT)
+                .size(11.0)
+                .italics(),
+        );
+        for (term, count) in relevant {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(termination_label(term))
+                        .color(theme::TEXT_WEAK)
+                        .size(12.0),
+                );
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(count.to_string())
+                            .color(theme::TEXT)
+                            .size(12.0)
+                            .monospace(),
+                    );
+                });
+            });
+        }
+        ui.add_space(3.0);
+    }
+}
+
+fn termination_label(t: Termination) -> &'static str {
+    match t {
+        Termination::Checkmate => "Checkmate",
+        Termination::Stalemate => "Stalemate",
+        Termination::FiftyMove => "50-move rule",
+        Termination::Threefold => "Threefold rep.",
+        Termination::InsufficientMaterial => "Insuff. mat.",
+        Termination::AdjudicatedDraw => "Adj. draw",
+        Termination::AdjudicatedResign => "Adj. resign",
+        Termination::MaxMoves => "Max moves",
+        Termination::TimeForfeit => "Time forfeit",
+        Termination::EngineCrash => "Crash",
+        Termination::IllegalMove => "Illegal move",
+        Termination::Aborted => "Aborted",
+    }
 }
 
 // ── Small helpers ───────────────────────────────────────────────────────────────
