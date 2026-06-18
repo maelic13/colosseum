@@ -194,6 +194,27 @@ impl Backend {
     pub fn clear_active(&mut self) {
         self.active = None;
     }
+
+    /// Copy the active tournament's final Elo ratings into the in-memory engine
+    /// library and persist it to disk. Returns the number of engines updated.
+    pub fn apply_active_elo_to_library(&mut self) -> usize {
+        let Some(active) = &self.active else { return 0 };
+        let elo_map = {
+            let snap = active.snapshot.lock().unwrap();
+            snap.elo.clone()
+        };
+        let mut count = 0;
+        for engine in &mut self.engines {
+            if let Some(entry) = elo_map.get(&engine.id) {
+                engine.meta.elo = Some(entry.current.round() as i32);
+                count += 1;
+            }
+        }
+        if count > 0 {
+            self.save_engines();
+        }
+        count
+    }
 }
 
 /// The repaint interval for a given tournament status: a steady ~30 Hz while

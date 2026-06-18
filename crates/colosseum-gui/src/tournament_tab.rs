@@ -33,6 +33,7 @@ pub struct TournamentTab {
     sort: SortState,
     show_h2h: bool,
     start_error: Option<String>,
+    elo_note: Option<String>,
 }
 
 impl TournamentTab {
@@ -362,6 +363,7 @@ impl TournamentTab {
             Ok(()) => {
                 self.start_error = None;
                 self.sort = SortState::default();
+                self.elo_note = None;
             }
             Err(e) => self.start_error = Some(e.to_string()),
         }
@@ -1079,7 +1081,7 @@ impl TournamentTab {
                     .fill(theme::ACCENT),
             );
 
-            // Right side: h2h toggle + New Tournament.
+            // Right side: apply-elo + h2h toggle + New Tournament.
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 let new_enabled = !crate::backend::is_busy(status);
                 if ui
@@ -1103,6 +1105,17 @@ impl TournamentTab {
                     &mut self.show_h2h,
                     RichText::new("Head-to-head").size(13.0),
                 );
+                ui.add_space(6.0);
+                if widgets::tinted_button(ui, "Apply Elo → Library", theme::ACCENT, new_enabled)
+                    .on_hover_text("Write tournament Elo ratings back to the engine library.")
+                    .clicked()
+                {
+                    let n = backend.apply_active_elo_to_library();
+                    self.elo_note = Some(format!("Elo applied ({n} engines updated)"));
+                }
+                if let Some(note) = &self.elo_note {
+                    ui.label(RichText::new(note).color(theme::SUCCESS).size(12.0));
+                }
             });
         });
     }
