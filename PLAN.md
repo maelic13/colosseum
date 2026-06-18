@@ -282,7 +282,7 @@ re-scheduled; `discarded` (from Force-Stop) are ignored. Schema also backs a fut
 | 14 | Apply/sync resulting Elo from a tournament back to the engine library | Small |
 | 15 | Per-game timing → live **avg game time / elapsed / throughput / ETA**; set `games.started_at` | Small (medium for core plumbing) |
 | 16 | Wire **Resume** into the GUI (backend `resume_tournament` already exists) | Small |
-| 17 | **Tournament History** tab (`list`/`load`/`delete`/`resume`) | **Large** |
+| 17 | **Tournament History** tab (`list`/`load`/`delete`/`resume`) ✅ | **Large** |
 | 18 | Live **"currently playing"** panel (consume `GameStarted`/in-flight set) | Small |
 | 19 | **Termination breakdown** (mate/timeout/crash/adjudication) summary in live view | Small |
 | 20 | Engines-tab usability: broken-path indicator, clone engine, search/filter+sort, per-option reset, open-folder, Button-option handling | Small |
@@ -329,9 +329,17 @@ primary touch points. Tiered by priority.
   when a resumable tournament exists; "↩ Resume" loads it in `Stopped` state (user presses
   Go to continue); "×" dismisses for the session. Removed the `#[expect(dead_code)]` on
   `Backend.store` since it is now actively queried.
-- **17 · Tournament History tab.** `Store` is `#[expect(dead_code)]` "deferred
-  post-v1" in `backend.rs`; persistence is already written every game. Add a tab over
-  `list_tournaments()` / `load_tournament()` with load / delete / resume.
+- ✅ **17 · Tournament History tab.** New `History` top-level tab. Added a read-only
+  `load_tournament_results(store, row)` to the engine crate (`scheduler.rs`) that
+  replays finished games to rebuild `Standings` + Elo (`TournamentResults`/
+  `ResultParticipant`), matching the live end-state for all Elo policies. `Backend`
+  gained `list_tournaments()`, `tournament_results(row)`, and `delete_tournament(id)`.
+  The tab (`history_tab.rs`) shows a selectable list (name/status/date) on the left and
+  a detail pane on the right: config summary, decisive/drawn counts, a final-standings
+  table (rank/Elo/Δ/points/W-D-L/nps), **↩ Resume** (when unfinished and nothing busy —
+  reuses `Backend::try_resume`, then switches to the Tournament tab via `HistoryAction`),
+  a two-step **Delete** confirm, and a copy-PGN-path button. List is cached and refreshed
+  on open / after actions / via Refresh, never per-frame.
 - **18 · "Currently playing" panel.** The scheduler emits `GameStarted` with the
   pairing/round, but the live view only renders finished standings. Show in-flight
   games (which engines, which round) to make a running tournament legible.

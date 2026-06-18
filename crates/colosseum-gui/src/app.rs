@@ -12,6 +12,7 @@ use colosseum_engine::TournamentStatus;
 
 use crate::backend::Backend;
 use crate::engines_tab::EnginesTab;
+use crate::history_tab::{HistoryAction, HistoryTab};
 use crate::theme;
 use crate::tournament_tab::TournamentTab;
 use crate::widgets;
@@ -22,6 +23,7 @@ enum Tab {
     #[default]
     Tournament,
     Engines,
+    History,
 }
 
 impl Tab {
@@ -29,6 +31,7 @@ impl Tab {
         match self {
             Tab::Tournament => "Tournament",
             Tab::Engines => "Engines",
+            Tab::History => "History",
         }
     }
 }
@@ -52,6 +55,7 @@ pub struct ColosseumApp {
     close: CloseState,
     engines_tab: EnginesTab,
     tournament_tab: TournamentTab,
+    history_tab: HistoryTab,
 }
 
 impl ColosseumApp {
@@ -64,6 +68,7 @@ impl ColosseumApp {
             close: CloseState::Open,
             engines_tab: EnginesTab::default(),
             tournament_tab: TournamentTab::default(),
+            history_tab: HistoryTab::default(),
         }
     }
 
@@ -218,7 +223,7 @@ impl ColosseumApp {
                     );
                     ui.add_space(20.0);
 
-                    for tab in [Tab::Tournament, Tab::Engines] {
+                    for tab in [Tab::Tournament, Tab::Engines, Tab::History] {
                         let selected = self.tab == tab;
                         if widgets::pill_tab(ui, tab.label(), selected) {
                             self.tab = tab;
@@ -288,6 +293,13 @@ impl ColosseumApp {
                 }
                 Tab::Engines => {
                     self.engines_tab.show(ui, &mut self.backend);
+                }
+                Tab::History => {
+                    if self.history_tab.show(ui, &mut self.backend)
+                        == HistoryAction::SwitchToTournament
+                    {
+                        self.tab = Tab::Tournament;
+                    }
                 }
             });
     }

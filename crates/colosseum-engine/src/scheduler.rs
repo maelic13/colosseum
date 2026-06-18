@@ -652,6 +652,116 @@ pub fn resume_tournament(
     ))
 }
 
+/// One participant's identity within a stored tournament summary.
+#[derive(Debug, Clone)]
+pub struct ResultParticipant {
+    pub id: EngineId,
+    pub name: String,
+    pub version: String,
+}
+
+/// A read-only reconstruction of a stored tournament's outcome: final standings,
+/// Elo, participant identities, and game counts. Built by replaying the finished
+/// games in order — no engine processes are spawned. Backs the History tab.
+#[derive(Debug, Clone)]
+pub struct TournamentResults {
+    pub standings: Standings,
+    pub elo: HashMap<EngineId, EloEntry>,
+    pub participants: Vec<ResultParticipant>,
+    pub games_finished: usize,
+    pub games_total: usize,
+    /// Finished games with a decisive (non-draw) result.
+    pub decisive: usize,
+    /// Finished games drawn.
+    pub draws: usize,
+}
+
+/// Reconstruct a stored tournament's results without spawning any engines.
+///
+/// Finished games are replayed in DB order to rebuild standings and Elo; the Elo
+/// reconstruction matches the live end-of-tournament state for both `PerGame` and
+/// `EndOfTournament` policies (and leaves ratings at their seeds for `Never`).
+pub fn load_tournament_results(
+    store: &Store,
+    row: &TournamentRow,
+) -> Result<TournamentResults, EngineError> {
+    let id = row.id;
+    let config = &row.config;
+
+    let participants_raw = store.list_tournament_engines(id)?;
+    let mut ids = Vec::with_capacity(participants_raw.len());
+    let mut seeds = Vec::with_capacity(participants_raw.len());
+    let mut participants = Vec::with_capacity(participants_raw.len());
+    for p in &participants_raw {
+        ids.push(p.engine);
+        seeds.push((p.engine, p.start_elo));
+        let (name, version) = match &p.config {
+            Some(cfg) => (display_name(cfg), cfg.meta.version.clone()),
+            None => (p.engine.to_string(), String::new()),
+        };
+        participants.push(ResultParticipant {
+            id: p.engine,
+            name,
+            version,
+        });
+    }
+
+    let all_games = store.list_games(id)?;
+    let total_games = all_games.len();
+
+    let mut elo = IncrementalElo::with_seed(config.k_factor, seeds.iter().copied());
+    let mut standings = Standings::with_engines(&ids);
+    let mut finished = 0usize;
+    let mut decisive = 0usize;
+    let mut draws = 0usize;
+
+    for game in &all_games {
+        if game.status != store::GAME_FINISHED {
+            continue;
+        }
+        let Some(result) = game.result else { continue };
+        standings.record(GameOutcome {
+            white: game.white,
+            black: game.black,
+            result,
+            white_nps: game.white_nps,
+            black_nps: game.black_nps,
+        });
+        if config.elo_policy != EloPolicy::Never {
+            elo.update(game.white, game.black, result);
+        }
+        finished += 1;
+        if result == GameResult::Draw {
+            draws += 1;
+        } else {
+            decisive += 1;
+        }
+    }
+
+    let elo_map = ids
+        .iter()
+        .map(|eid| {
+            (
+                *eid,
+                EloEntry {
+                    current: elo.current(*eid),
+                    delta: elo.delta_since_start(*eid),
+                },
+            )
+        })
+        .collect();
+
+    Ok(TournamentResults {
+        standings,
+        elo: elo_map,
+        participants,
+        games_finished: finished,
+        games_total: total_games,
+        decisive,
+        draws,
+    })
+}
+
 /// Build the full [`GameSpec`] for a scheduled game.
 fn build_game_spec(driver: &Driver, scheduled: &ScheduledGame) -> GameSpec {
     let white = &driver.templates[&scheduled.pairing.white];

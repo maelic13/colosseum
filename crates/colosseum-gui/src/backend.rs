@@ -18,10 +18,11 @@ use std::time::Duration;
 
 use crossbeam_channel::Receiver;
 
-use colosseum_core::{EngineConfig, EngineId, TournamentConfig, TournamentEvent};
+use colosseum_core::{EngineConfig, EngineId, TournamentConfig, TournamentEvent, TournamentId};
 use colosseum_engine::{
-    AppConfig, AppDirs, EngineLibrary, Store, Tournament, TournamentRow, TournamentSnapshot,
-    TournamentStatus, create_tournament, resume_tournament,
+    AppConfig, AppDirs, EngineLibrary, Store, Tournament, TournamentResults, TournamentRow,
+    TournamentSnapshot, TournamentStatus, create_tournament, load_tournament_results,
+    resume_tournament,
 };
 
 /// Target redraw cadence while a tournament is running (~30 Hz).
@@ -189,6 +190,25 @@ impl Backend {
     /// to the setup view. Does not delete persisted data.
     pub fn clear_active(&mut self) {
         self.active = None;
+    }
+
+    /// List all stored tournaments, most recent first, for the History tab.
+    pub fn list_tournaments(&self) -> Vec<TournamentRow> {
+        self.store.list_tournaments().unwrap_or_else(|e| {
+            tracing::warn!("failed to list tournaments: {e}");
+            Vec::new()
+        })
+    }
+
+    /// Reconstruct a stored tournament's results read-only (no engines spawned).
+    pub fn tournament_results(&self, row: &TournamentRow) -> anyhow::Result<TournamentResults> {
+        Ok(load_tournament_results(&self.store, row)?)
+    }
+
+    /// Delete a tournament and all of its games from the database.
+    pub fn delete_tournament(&self, id: TournamentId) -> anyhow::Result<()> {
+        self.store.delete_tournament(id)?;
+        Ok(())
     }
 
     /// Return the most recent tournament that has not yet finished, if any.

@@ -22,7 +22,7 @@ pub use error::EngineError;
 pub use openings::{ResolvedOpening, load_openings, summarize};
 pub use runner::{EngineGameSpec, GameReport, GameSpec, run_game};
 pub use scheduler::{
-    Command, EloEntry, Tournament, TournamentSnapshot, TournamentStatus, create_tournament,
-    resume_tournament,
+    Command, EloEntry, ResultParticipant, Tournament, TournamentResults, TournamentSnapshot,
+    TournamentStatus, create_tournament, load_tournament_results, resume_tournament,
 };
 pub use store::{GameRow, Store, TournamentEngineRow, TournamentRow};

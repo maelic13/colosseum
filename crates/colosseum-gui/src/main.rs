@@ -9,6 +9,7 @@
 mod app;
 mod backend;
 mod engines_tab;
+mod history_tab;
 mod icon;
 mod theme;
 mod tournament_tab;
