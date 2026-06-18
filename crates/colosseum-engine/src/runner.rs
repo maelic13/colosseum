@@ -24,6 +24,9 @@ use crate::pgn::{PgnTags, build_pgn};
 const ADJ_MATE_CP: i32 = 100_000;
 /// Hard safety cap on plies (natural draw rules normally end games far sooner).
 const MAX_PLIES: usize = 6000;
+/// Wall-clock safety cutoff for node-/depth-limited searches, which carry no clock
+/// of their own. A search that blows past this is treated as a crash-class hang.
+const FIXED_SEARCH_DEADLINE: Duration = Duration::from_secs(600);
 
 /// How to launch and configure one side.
 #[derive(Debug, Clone)]
@@ -141,11 +144,7 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
     };
 
     let mut pos = initial_position(spec.start_fen.as_deref());
-    let movetime = spec
-        .time_control
-        .movetime()
-        .unwrap_or(Duration::from_millis(100));
-    let deadline = movetime + spec.timeout_tolerance;
+    let mut clocks = Clocks::new(&spec.time_control);
 
     let mut san_moves: Vec<String> = Vec::new();
     let mut uci_moves: Vec<String> = Vec::new();
@@ -165,7 +164,7 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         else {
             break;
         };
-        san_moves.push(SanPlus::from_move(pos.clone(), legal.clone()).to_string());
+        san_moves.push(SanPlus::from_move(pos.clone(), legal).to_string());
         uci_moves.push(uci.clone());
         white_pov.push(last_white_pov); // no engine eval for opening plies
         pos.play_unchecked(legal);
@@ -186,9 +185,9 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         };
         let position = build_uci_position(spec.start_fen.as_deref(), &uci_moves);
 
-        let search = engine
-            .search(&position, &GoLimits::MoveTime(movetime), deadline)
-            .await;
+        let (limits, deadline) =
+            move_limits(&spec.time_control, &clocks, mover, spec.timeout_tolerance);
+        let search = engine.search(&position, &limits, deadline).await;
 
         let output = match search {
             Ok(output) => output,
@@ -206,6 +205,11 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
             black_nps.add(output.nps);
         }
 
+        // Deduct the time used from the mover's clock (clock-based controls only)
+        // and credit the increment. Flagging is enforced by the search deadline
+        // above: an engine that runs out is cut off and loses on TimeForfeit.
+        clocks.consume(&spec.time_control, mover, output.elapsed);
+
         // Parse and validate the move.
         let parsed = output
             .best_move
@@ -220,7 +224,7 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
             );
         };
 
-        san_moves.push(SanPlus::from_move(pos.clone(), legal_move.clone()).to_string());
+        san_moves.push(SanPlus::from_move(pos.clone(), legal_move).to_string());
         uci_moves.push(output.best_move.clone());
 
         // Score normalized to White's point of view.
@@ -284,6 +288,72 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         uci_moves,
         pgn,
         error: outcome.error,
+    }
+}
+
+/// Per-side game clocks for clock-based time controls. Both sides start at the
+/// configured base; for fixed-time / nodes / depth controls the clocks are unused.
+struct Clocks {
+    white: Duration,
+    black: Duration,
+}
+
+impl Clocks {
+    fn new(tc: &TimeControl) -> Self {
+        let base = tc.initial_clock().unwrap_or(Duration::ZERO);
+        Self {
+            white: base,
+            black: base,
+        }
+    }
+
+    fn remaining(&self, side: Color) -> Duration {
+        match side {
+            Color::White => self.white,
+            Color::Black => self.black,
+        }
+    }
+
+    /// Subtract the time spent and credit the increment for the side that moved.
+    /// A no-op for non-clock controls.
+    fn consume(&mut self, tc: &TimeControl, side: Color, used: Duration) {
+        if !tc.is_clock() {
+            return;
+        }
+        let inc = tc.increment();
+        let clock = match side {
+            Color::White => &mut self.white,
+            Color::Black => &mut self.black,
+        };
+        *clock = clock.saturating_sub(used) + inc;
+    }
+}
+
+/// Build the `go` limits and the hard wall-clock deadline for the side to move.
+fn move_limits(
+    tc: &TimeControl,
+    clocks: &Clocks,
+    mover: Color,
+    tolerance: Duration,
+) -> (GoLimits, Duration) {
+    match tc {
+        TimeControl::PerMove { ms } => {
+            let mt = Duration::from_millis(*ms);
+            (GoLimits::MoveTime(mt), mt + tolerance)
+        }
+        TimeControl::SuddenDeath { .. } | TimeControl::Increment { .. } => {
+            let inc = tc.increment();
+            let limits = GoLimits::Clock {
+                wtime: clocks.white,
+                btime: clocks.black,
+                winc: inc,
+                binc: inc,
+            };
+            // The mover must answer within their remaining time (plus IO grace).
+            (limits, clocks.remaining(mover) + tolerance)
+        }
+        TimeControl::Nodes { nodes } => (GoLimits::Nodes(*nodes), FIXED_SEARCH_DEADLINE),
+        TimeControl::Depth { depth } => (GoLimits::Depth(*depth), FIXED_SEARCH_DEADLINE),
     }
 }
 
@@ -392,4 +462,82 @@ fn render_pgn(
         fen: spec.start_fen.clone(),
     };
     build_pgn(&tags, san_moves)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TOL: Duration = Duration::from_millis(50);
+
+    #[test]
+    fn per_move_limits_are_constant_per_move() {
+        let tc = TimeControl::PerMove { ms: 200 };
+        let clocks = Clocks::new(&tc);
+        let (limits, deadline) = move_limits(&tc, &clocks, Color::White, TOL);
+        assert_eq!(limits, GoLimits::MoveTime(Duration::from_millis(200)));
+        assert_eq!(deadline, Duration::from_millis(250));
+    }
+
+    #[test]
+    fn sudden_death_clock_decrements_without_increment() {
+        let tc = TimeControl::SuddenDeath { base_ms: 1000 };
+        let mut clocks = Clocks::new(&tc);
+        assert_eq!(clocks.white, Duration::from_millis(1000));
+
+        let (limits, deadline) = move_limits(&tc, &clocks, Color::White, TOL);
+        assert_eq!(
+            limits,
+            GoLimits::Clock {
+                wtime: Duration::from_millis(1000),
+                btime: Duration::from_millis(1000),
+                winc: Duration::ZERO,
+                binc: Duration::ZERO,
+            }
+        );
+        assert_eq!(deadline, Duration::from_millis(1050));
+
+        clocks.consume(&tc, Color::White, Duration::from_millis(300));
+        assert_eq!(clocks.white, Duration::from_millis(700));
+        assert_eq!(clocks.black, Duration::from_millis(1000));
+    }
+
+    #[test]
+    fn increment_is_credited_after_each_move() {
+        let tc = TimeControl::Increment {
+            base_ms: 1000,
+            inc_ms: 100,
+        };
+        let mut clocks = Clocks::new(&tc);
+        clocks.consume(&tc, Color::Black, Duration::from_millis(400));
+        // 1000 - 400 + 100 = 700
+        assert_eq!(clocks.black, Duration::from_millis(700));
+
+        // Overrunning the remaining time floors at zero before the increment.
+        clocks.consume(&tc, Color::Black, Duration::from_millis(5000));
+        assert_eq!(clocks.black, Duration::from_millis(100));
+    }
+
+    #[test]
+    fn nodes_and_depth_use_fixed_limits_and_safety_deadline() {
+        let nodes = TimeControl::Nodes { nodes: 50_000 };
+        let clocks = Clocks::new(&nodes);
+        let (limits, deadline) = move_limits(&nodes, &clocks, Color::White, TOL);
+        assert_eq!(limits, GoLimits::Nodes(50_000));
+        assert_eq!(deadline, FIXED_SEARCH_DEADLINE);
+
+        let depth = TimeControl::Depth { depth: 12 };
+        let (limits, deadline) = move_limits(&depth, &clocks, Color::Black, TOL);
+        assert_eq!(limits, GoLimits::Depth(12));
+        assert_eq!(deadline, FIXED_SEARCH_DEADLINE);
+    }
+
+    #[test]
+    fn consume_is_a_noop_for_non_clock_controls() {
+        let tc = TimeControl::PerMove { ms: 100 };
+        let mut clocks = Clocks::new(&tc);
+        clocks.consume(&tc, Color::White, Duration::from_millis(50));
+        assert_eq!(clocks.white, Duration::ZERO);
+        assert_eq!(clocks.black, Duration::ZERO);
+    }
 }

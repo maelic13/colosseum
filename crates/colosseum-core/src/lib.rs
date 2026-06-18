@@ -28,7 +28,7 @@ pub use event::TournamentEvent;
 pub use game::{GameResult, GameStats, Pairing, Termination};
 pub use ids::{EngineId, GameId, TournamentId};
 pub use options::{UciOption, UciOptionValue};
-pub use pairing::{generate_schedule, round_robin};
+pub use pairing::{gauntlet, generate_schedule, round_robin};
 pub use rating::{IncrementalElo, Rating, RatingDelta};
 pub use standings::{EngineStanding, GameOutcome, HeadToHead, Standings};
 pub use time::{TimeControl, TimeUnit};

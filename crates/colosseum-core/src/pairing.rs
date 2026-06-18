@@ -13,6 +13,9 @@ use crate::{game::Pairing, ids::EngineId, tournament::Format, tournament::Tourna
 pub fn generate_schedule(engines: &[EngineId], config: &TournamentConfig) -> Vec<Pairing> {
     match config.format {
         Format::RoundRobin { cycles } => round_robin(engines, cycles, config.games_per_pair),
+        Format::Gauntlet { seeds, cycles } => {
+            gauntlet(engines, seeds, cycles, config.games_per_pair)
+        }
     }
 }
 
@@ -38,6 +41,45 @@ pub fn round_robin(engines: &[EngineId], cycles: u32, games_per_pair: u32) -> Ve
                 for game in 0..games_per_pair {
                     // Alternate colors per game so each pair plays both colors evenly.
                     let (white_idx, black_idx) = if game % 2 == 0 { (a, b) } else { (b, a) };
+                    pairings.push(Pairing {
+                        white: engines[white_idx],
+                        black: engines[black_idx],
+                        round: round_no,
+                    });
+                }
+            }
+        }
+    }
+
+    pairings
+}
+
+/// Generate gauntlet pairings: each of the first `seeds` engines plays every engine
+/// that is *not* a seed, `games_per_pair` games per encounter (colors alternating),
+/// repeated `cycles` times. Each cycle is one round.
+///
+/// Returns an empty schedule if there are fewer than two engines, if `seeds` is zero
+/// or leaves no opponents (`seeds >= n`), or if `cycles`/`games_per_pair` is zero.
+#[must_use]
+pub fn gauntlet(engines: &[EngineId], seeds: u32, cycles: u32, games_per_pair: u32) -> Vec<Pairing> {
+    let n = engines.len();
+    let seeds = seeds as usize;
+    if n < 2 || cycles == 0 || games_per_pair == 0 || seeds == 0 || seeds >= n {
+        return Vec::new();
+    }
+
+    let mut pairings = Vec::new();
+    for cycle in 0..cycles {
+        let round_no = cycle + 1;
+        for seed in 0..seeds {
+            for opponent in seeds..n {
+                for game in 0..games_per_pair {
+                    // Alternate colors per game so each pairing is color-balanced.
+                    let (white_idx, black_idx) = if game % 2 == 0 {
+                        (seed, opponent)
+                    } else {
+                        (opponent, seed)
+                    };
                     pairings.push(Pairing {
                         white: engines[white_idx],
                         black: engines[black_idx],
@@ -160,6 +202,71 @@ mod tests {
         for (_, counts) in white_counts {
             assert_eq!(counts, [1, 1]);
         }
+    }
+
+    #[test]
+    fn gauntlet_empty_and_trivial_cases() {
+        assert!(gauntlet(&[], 1, 1, 2).is_empty());
+        assert!(gauntlet(&ids(1), 1, 1, 2).is_empty());
+        assert!(gauntlet(&ids(4), 0, 1, 2).is_empty()); // no seeds
+        assert!(gauntlet(&ids(4), 4, 1, 2).is_empty()); // no opponents left
+        assert!(gauntlet(&ids(4), 1, 0, 2).is_empty()); // no cycles
+        assert!(gauntlet(&ids(4), 1, 1, 0).is_empty()); // no games
+    }
+
+    #[test]
+    fn gauntlet_seed_plays_every_opponent_only() {
+        // 1 seed vs 3 opponents, 2 games each, 1 cycle => 3 * 2 = 6 games.
+        let engines = ids(4);
+        let idx = index_of(&engines);
+        let schedule = gauntlet(&engines, 1, 1, 2);
+        assert_eq!(schedule.len(), 6);
+
+        // The seed (index 0) is in every game; opponents (1..4) never face each other.
+        for p in &schedule {
+            let (w, b) = (idx[&p.white], idx[&p.black]);
+            assert!(w == 0 || b == 0, "every gauntlet game involves the seed");
+            assert!(w != b);
+        }
+
+        // Each opponent meets the seed exactly twice (once each color).
+        let mut counts: HashMap<usize, [u32; 2]> = HashMap::new();
+        for p in &schedule {
+            let (w, b) = (idx[&p.white], idx[&p.black]);
+            let opp = if w == 0 { b } else { w };
+            let slot = counts.entry(opp).or_default();
+            if w == 0 {
+                slot[0] += 1; // seed white
+            } else {
+                slot[1] += 1; // seed black
+            }
+        }
+        assert_eq!(counts.len(), 3);
+        for (_opp, c) in counts {
+            assert_eq!(c, [1, 1]);
+        }
+    }
+
+    #[test]
+    fn gauntlet_multiple_seeds_and_cycles() {
+        // 2 seeds vs 2 opponents, 1 game each, 2 cycles.
+        // Per cycle: 2 seeds * 2 opponents * 1 game = 4. Two cycles => 8.
+        let engines = ids(4);
+        let idx = index_of(&engines);
+        let schedule = gauntlet(&engines, 2, 2, 1);
+        assert_eq!(schedule.len(), 8);
+
+        // Seeds (0,1) never play each other; opponents (2,3) never play each other.
+        for p in &schedule {
+            let (w, b) = (idx[&p.white], idx[&p.black]);
+            let both_seeds = w < 2 && b < 2;
+            let both_opponents = w >= 2 && b >= 2;
+            assert!(!both_seeds && !both_opponents);
+        }
+
+        // Each cycle is its own round.
+        let rounds: HashSet<u32> = schedule.iter().map(|p| p.round).collect();
+        assert_eq!(rounds, HashSet::from([1, 2]));
     }
 
     #[test]

@@ -878,8 +878,24 @@ fn display_name(engine: &EngineConfig) -> String {
 }
 
 fn time_control_label(config: &TournamentConfig) -> String {
+    use colosseum_core::TimeControl;
+    // Render seconds compactly: whole numbers without a trailing ".0".
+    fn secs(ms: u64) -> String {
+        let s = ms as f64 / 1000.0;
+        if (s.fract()).abs() < f64::EPSILON {
+            format!("{s:.0}")
+        } else {
+            format!("{s:.1}")
+        }
+    }
     match config.time_control {
-        colosseum_core::TimeControl::PerMove { ms } => format!("movetime/{ms}ms"),
+        TimeControl::PerMove { ms } => format!("movetime/{ms}ms"),
+        TimeControl::SuddenDeath { base_ms } => format!("{}s", secs(base_ms)),
+        TimeControl::Increment { base_ms, inc_ms } => {
+            format!("{}+{}", secs(base_ms), secs(inc_ms))
+        }
+        TimeControl::Nodes { nodes } => format!("nodes/{nodes}"),
+        TimeControl::Depth { depth } => format!("depth/{depth}"),
     }
 }
 

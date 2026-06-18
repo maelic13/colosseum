@@ -6,11 +6,16 @@ use std::path::PathBuf;
 
 use crate::{adjudication::AdjudicationConfig, time::TimeControl};
 
-/// Tournament format. v1 = Round Robin; more formats slot in later.
+/// Tournament format: how the schedule of encounters is generated. Both variants
+/// produce a *static* schedule known upfront (result-independent pairing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Format {
     /// Every engine plays every other; `cycles` repeats the whole schedule.
     RoundRobin { cycles: u32 },
+    /// The first `seeds` engines (in selection order) each play every *other*
+    /// engine; seeds do not play each other and non-seeds do not play each other.
+    /// `cycles` repeats the whole gauntlet.
+    Gauntlet { seeds: u32, cycles: u32 },
 }
 
 impl Default for Format {

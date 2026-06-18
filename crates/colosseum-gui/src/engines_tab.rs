@@ -976,20 +976,20 @@ impl EnginesTab {
             return;
         }
 
-        if do_clone {
-            if let Some(src) = backend.engines.iter().find(|e| e.id == edit.engine_id) {
-                let mut cloned = src.clone();
-                cloned.id = colosseum_core::EngineId::new();
-                let suffix = " (copy)";
-                if !cloned.meta.name.ends_with(suffix) {
-                    cloned.meta.name.push_str(suffix);
-                }
-                let new_id = cloned.id;
-                backend.engines.push(cloned);
-                backend.save_engines();
-                let snap = backend.engines.clone();
-                self.select_engine(&new_id, &snap);
+        if do_clone
+            && let Some(src) = backend.engines.iter().find(|e| e.id == edit.engine_id)
+        {
+            let mut cloned = src.clone();
+            cloned.id = colosseum_core::EngineId::new();
+            let suffix = " (copy)";
+            if !cloned.meta.name.ends_with(suffix) {
+                cloned.meta.name.push_str(suffix);
             }
+            let new_id = cloned.id;
+            backend.engines.push(cloned);
+            backend.save_engines();
+            let snap = backend.engines.clone();
+            self.select_engine(&new_id, &snap);
         }
 
         if do_redetect {

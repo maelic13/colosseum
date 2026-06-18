@@ -51,6 +51,55 @@ impl TournamentTab {
 
 // ── Configuration form ──────────────────────────────────────────────────────────
 
+/// Tournament-format kinds offered in the setup UI. Round Robin and Gauntlet are
+/// fully implemented; Knockout and SPRT require a result-dependent (dynamic)
+/// scheduler and are shown as disabled "planned" options.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FormatKind {
+    RoundRobin,
+    Gauntlet,
+    Knockout,
+    Sprt,
+}
+
+impl FormatKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::RoundRobin => "Round Robin",
+            Self::Gauntlet => "Gauntlet",
+            Self::Knockout => "Knockout (planned)",
+            Self::Sprt => "SPRT (planned)",
+        }
+    }
+
+    /// Whether the format is wired up to a working scheduler.
+    fn is_supported(self) -> bool {
+        matches!(self, Self::RoundRobin | Self::Gauntlet)
+    }
+}
+
+/// Time-control kinds offered in the setup UI, each mapping to a [`TimeControl`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TcKind {
+    PerMove,
+    SuddenDeath,
+    Increment,
+    Nodes,
+    Depth,
+}
+
+impl TcKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::PerMove => "Time per move",
+            Self::SuddenDeath => "Sudden death",
+            Self::Increment => "Base + increment",
+            Self::Nodes => "Fixed nodes",
+            Self::Depth => "Fixed depth",
+        }
+    }
+}
+
 /// GUI-friendly buffer for a [`TournamentConfig`] plus engine selection.
 struct TournamentForm {
     name: String,
@@ -58,12 +107,23 @@ struct TournamentForm {
     selected: Vec<EngineId>,
 
     // Format
+    format_kind: FormatKind,
     cycles: u32,
     games_per_pair: u32,
+    /// Number of leading (seed) engines for the Gauntlet format.
+    gauntlet_seeds: u32,
 
     // Time control
+    tc_kind: TcKind,
     tc_value: f64,
     tc_unit: TimeUnit,
+    /// Increment value/unit for the base+increment control.
+    tc_inc_value: f64,
+    tc_inc_unit: TimeUnit,
+    /// Fixed node count per move.
+    tc_nodes: u64,
+    /// Fixed search depth per move.
+    tc_depth: u32,
 
     // Concurrency
     concurrency: usize,
@@ -115,10 +175,17 @@ impl Default for TournamentForm {
         Self {
             name: "Round Robin".to_string(),
             selected: Vec::new(),
+            format_kind: FormatKind::RoundRobin,
             cycles: 1,
             games_per_pair: 2,
+            gauntlet_seeds: 1,
+            tc_kind: TcKind::PerMove,
             tc_value: 100.0,
             tc_unit: TimeUnit::Milliseconds,
+            tc_inc_value: 1.0,
+            tc_inc_unit: TimeUnit::Seconds,
+            tc_nodes: 100_000,
+            tc_depth: 12,
             concurrency: 1,
             threads_on: true,
             threads: 1,
@@ -157,13 +224,9 @@ impl TournamentForm {
     /// Build the immutable [`TournamentConfig`] from the current form values.
     fn build_config(&self) -> TournamentConfig {
         TournamentConfig {
-            format: Format::RoundRobin {
-                cycles: self.cycles.max(1),
-            },
+            format: self.build_format(),
             games_per_pair: self.games_per_pair.max(1),
-            time_control: TimeControl::PerMove {
-                ms: self.tc_unit.to_millis(self.tc_value).max(1),
-            },
+            time_control: self.build_time_control(),
             concurrency: self.concurrency.max(1),
             common: CommonEngineOptions {
                 threads: self.threads_on.then_some(self.threads.max(1)),
@@ -193,6 +256,41 @@ impl TournamentForm {
             },
             pgn_output: (!self.pgn_path.trim().is_empty())
                 .then(|| PathBuf::from(self.pgn_path.trim())),
+        }
+    }
+
+    /// Map the form's format selection to a core [`Format`]. Unsupported kinds fall
+    /// back to Round Robin (the UI prevents selecting them, but be defensive).
+    fn build_format(&self) -> Format {
+        let cycles = self.cycles.max(1);
+        match self.format_kind {
+            FormatKind::Gauntlet => Format::Gauntlet {
+                seeds: self.gauntlet_seeds.max(1),
+                cycles,
+            },
+            _ => Format::RoundRobin { cycles },
+        }
+    }
+
+    /// Map the form's time-control selection to a core [`TimeControl`].
+    fn build_time_control(&self) -> TimeControl {
+        match self.tc_kind {
+            TcKind::PerMove => TimeControl::PerMove {
+                ms: self.tc_unit.to_millis(self.tc_value).max(1),
+            },
+            TcKind::SuddenDeath => TimeControl::SuddenDeath {
+                base_ms: self.tc_unit.to_millis(self.tc_value).max(1),
+            },
+            TcKind::Increment => TimeControl::Increment {
+                base_ms: self.tc_unit.to_millis(self.tc_value).max(1),
+                inc_ms: self.tc_inc_unit.to_millis(self.tc_inc_value),
+            },
+            TcKind::Nodes => TimeControl::Nodes {
+                nodes: self.tc_nodes.max(1),
+            },
+            TcKind::Depth => TimeControl::Depth {
+                depth: self.tc_depth.max(1),
+            },
         }
     }
 
@@ -247,9 +345,18 @@ impl TournamentForm {
         if n < 2 {
             return 0;
         }
-        // Round-robin: pairs * games_per_pair * cycles.
-        let pairs = n * (n - 1) / 2;
-        pairs * self.games_per_pair.max(1) as usize * self.cycles.max(1) as usize
+        let games_per_pair = self.games_per_pair.max(1) as usize;
+        let cycles = self.cycles.max(1) as usize;
+        let pairs = match self.format_kind {
+            FormatKind::Gauntlet => {
+                // seeds * opponents, with seeds clamped to leave ≥1 opponent.
+                let seeds = (self.gauntlet_seeds.max(1) as usize).min(n - 1);
+                seeds * (n - seeds)
+            }
+            // Round Robin (and the unsupported kinds, which fall back to it).
+            _ => n * (n - 1) / 2,
+        };
+        pairs * games_per_pair * cycles
     }
 }
 
@@ -563,8 +670,45 @@ impl TournamentTab {
                     ui.end_row();
 
                     field_label(ui, "Format");
-                    ui.label(RichText::new("Round Robin").color(theme::TEXT));
+                    egui::ComboBox::from_id_salt("format_kind")
+                        .selected_text(f.format_kind.label())
+                        .width(200.0)
+                        .show_ui(ui, |ui| {
+                            for kind in [
+                                FormatKind::RoundRobin,
+                                FormatKind::Gauntlet,
+                                FormatKind::Knockout,
+                                FormatKind::Sprt,
+                            ] {
+                                if kind.is_supported() {
+                                    ui.selectable_value(&mut f.format_kind, kind, kind.label());
+                                } else {
+                                    ui.add_enabled(
+                                        false,
+                                        egui::Button::selectable(false, kind.label()),
+                                    )
+                                    .on_hover_text(
+                                        "Needs a result-dependent (dynamic) scheduler — \
+                                         planned for a future step.",
+                                    );
+                                }
+                            }
+                        });
                     ui.end_row();
+
+                    if f.format_kind == FormatKind::Gauntlet {
+                        field_label(ui, "Seed engines");
+                        ui.add(
+                            DragValue::new(&mut f.gauntlet_seeds)
+                                .range(1..=64)
+                                .speed(0.1),
+                        )
+                        .on_hover_text(
+                            "The first N selected engines each play every other engine. \
+                             Seeds don't play each other.",
+                        );
+                        ui.end_row();
+                    }
 
                     field_label(ui, "Cycles");
                     ui.add(DragValue::new(&mut f.cycles).range(1..=20).speed(0.1))
@@ -595,27 +739,84 @@ impl TournamentTab {
         // ── Time Control ──
         widgets::section_card(ui, "Time Control", None, |ui| {
             ui.horizontal(|ui| {
-                field_label(ui, "Per move");
-                ui.add(
-                    DragValue::new(&mut f.tc_value)
-                        .range(1.0..=600_000.0)
-                        .speed(1.0),
-                );
-                egui::ComboBox::from_id_salt("tc_unit")
-                    .selected_text(f.tc_unit.label())
-                    .width(64.0)
+                field_label(ui, "Type");
+                egui::ComboBox::from_id_salt("tc_kind")
+                    .selected_text(f.tc_kind.label())
+                    .width(170.0)
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut f.tc_unit, TimeUnit::Milliseconds, "ms");
-                        ui.selectable_value(&mut f.tc_unit, TimeUnit::Seconds, "s");
-                        ui.selectable_value(&mut f.tc_unit, TimeUnit::Minutes, "min");
+                        for kind in [
+                            TcKind::PerMove,
+                            TcKind::SuddenDeath,
+                            TcKind::Increment,
+                            TcKind::Nodes,
+                            TcKind::Depth,
+                        ] {
+                            ui.selectable_value(&mut f.tc_kind, kind, kind.label());
+                        }
                     });
-                let ms = f.tc_unit.to_millis(f.tc_value).max(1);
-                ui.label(
-                    RichText::new(format!("= {ms} ms"))
-                        .color(theme::TEXT_WEAK)
-                        .size(12.0),
-                );
             });
+            ui.add_space(6.0);
+
+            match f.tc_kind {
+                TcKind::PerMove => {
+                    time_value_row(ui, "Per move", &mut f.tc_value, &mut f.tc_unit, "tc_unit");
+                }
+                TcKind::SuddenDeath => {
+                    time_value_row(ui, "Base", &mut f.tc_value, &mut f.tc_unit, "tc_unit");
+                    ui.label(
+                        RichText::new("Whole-game budget per side; running out loses on time.")
+                            .color(theme::TEXT_WEAK)
+                            .size(11.5),
+                    );
+                }
+                TcKind::Increment => {
+                    time_value_row(ui, "Base", &mut f.tc_value, &mut f.tc_unit, "tc_unit");
+                    time_value_row(
+                        ui,
+                        "Increment",
+                        &mut f.tc_inc_value,
+                        &mut f.tc_inc_unit,
+                        "tc_inc_unit",
+                    );
+                    let base_ms = f.tc_unit.to_millis(f.tc_value).max(1);
+                    let inc_ms = f.tc_inc_unit.to_millis(f.tc_inc_value);
+                    ui.label(
+                        RichText::new(format!(
+                            "= {} + {} per move",
+                            format_clock(base_ms),
+                            format_clock(inc_ms)
+                        ))
+                        .color(theme::TEXT_WEAK)
+                        .size(11.5),
+                    );
+                }
+                TcKind::Nodes => {
+                    ui.horizontal(|ui| {
+                        field_label(ui, "Nodes / move");
+                        ui.add(
+                            DragValue::new(&mut f.tc_nodes)
+                                .range(1..=1_000_000_000)
+                                .speed(100.0),
+                        );
+                    });
+                    ui.label(
+                        RichText::new("Deterministic; each move searches a fixed node count.")
+                            .color(theme::TEXT_WEAK)
+                            .size(11.5),
+                    );
+                }
+                TcKind::Depth => {
+                    ui.horizontal(|ui| {
+                        field_label(ui, "Depth / move");
+                        ui.add(DragValue::new(&mut f.tc_depth).range(1..=100).speed(0.1));
+                    });
+                    ui.label(
+                        RichText::new("Each move searches to a fixed depth.")
+                            .color(theme::TEXT_WEAK)
+                            .size(11.5),
+                    );
+                }
+            }
         });
 
         // ── Engine Options (Common + Syzygy + Ponder) ──
@@ -1735,6 +1936,47 @@ fn termination_label(t: Termination) -> &'static str {
 
 fn field_label(ui: &mut Ui, text: &str) {
     ui.label(RichText::new(text).color(theme::TEXT_WEAK).size(13.0));
+}
+
+/// A labelled value + unit row for entering a duration (value DragValue, unit
+/// dropdown, and a resolved "= N ms" hint).
+fn time_value_row(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut f64,
+    unit: &mut TimeUnit,
+    id_salt: &str,
+) {
+    ui.horizontal(|ui| {
+        field_label(ui, label);
+        ui.add(DragValue::new(value).range(0.0..=600_000.0).speed(1.0));
+        egui::ComboBox::from_id_salt(id_salt)
+            .selected_text(unit.label())
+            .width(64.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(unit, TimeUnit::Milliseconds, "ms");
+                ui.selectable_value(unit, TimeUnit::Seconds, "s");
+                ui.selectable_value(unit, TimeUnit::Minutes, "min");
+            });
+        let ms = unit.to_millis(*value);
+        ui.label(
+            RichText::new(format!("= {ms} ms"))
+                .color(theme::TEXT_WEAK)
+                .size(12.0),
+        );
+    });
+}
+
+/// Render a millisecond duration as a friendly clock string.
+fn format_clock(ms: u64) -> String {
+    if ms >= 60_000 {
+        let secs = ms as f64 / 1000.0;
+        format!("{:.0}m{:02.0}s", (secs / 60.0).floor(), secs % 60.0)
+    } else if ms >= 1000 {
+        format!("{:.1}s", ms as f64 / 1000.0)
+    } else {
+        format!("{ms}ms")
+    }
 }
 
 fn engine_display_name(e: &EngineConfig) -> String {

@@ -563,9 +563,19 @@ fn config_summary(row: &TournamentRow) -> String {
     let format = match c.format {
         Format::RoundRobin { cycles } if cycles > 1 => format!("Round Robin ×{cycles}"),
         Format::RoundRobin { .. } => "Round Robin".to_string(),
+        Format::Gauntlet { seeds, cycles } if cycles > 1 => {
+            format!("Gauntlet ({seeds} seed) ×{cycles}")
+        }
+        Format::Gauntlet { seeds, .. } => format!("Gauntlet ({seeds} seed)"),
     };
     let tc = match c.time_control {
         TimeControl::PerMove { ms } => format!("{ms} ms/move"),
+        TimeControl::SuddenDeath { base_ms } => format!("{} sudden death", clock_str(base_ms)),
+        TimeControl::Increment { base_ms, inc_ms } => {
+            format!("{}+{}", clock_str(base_ms), clock_str(inc_ms))
+        }
+        TimeControl::Nodes { nodes } => format!("{nodes} nodes/move"),
+        TimeControl::Depth { depth } => format!("depth {depth}/move"),
     };
     let elo = match c.elo_policy {
         EloPolicy::PerGame => "Elo per-game",
@@ -577,6 +587,20 @@ fn config_summary(row: &TournamentRow) -> String {
         c.games_per_pair,
         format_timestamp(&row.created_at)
     )
+}
+
+/// Render a millisecond clock value compactly (e.g. `60s`, `1.5s`, `500ms`).
+fn clock_str(ms: u64) -> String {
+    if ms >= 1000 {
+        let s = ms as f64 / 1000.0;
+        if (s.fract()).abs() < f64::EPSILON {
+            format!("{s:.0}s")
+        } else {
+            format!("{s:.1}s")
+        }
+    } else {
+        format!("{ms}ms")
+    }
 }
 
 /// Render an ISO-8601 timestamp as `YYYY-MM-DD HH:MM` (best-effort).
