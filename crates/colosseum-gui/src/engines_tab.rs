@@ -68,10 +68,9 @@ impl EnginesTab {
                 self.show_list(ui, backend);
             });
 
-        ScrollArea::both()
+        ScrollArea::vertical()
             .id_salt("engines_edit_scroll")
             .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
                 if self.edit.is_some() {
                     self.show_edit(ui, backend);
                 } else {
@@ -732,7 +731,7 @@ impl EnginesTab {
 
         // ─ Heading ─
         ui.horizontal(|ui| {
-            let name = engine_display_name_from_parts(&edit.name, &edit.path);
+            let name = engine_display_name_from_parts(&edit.name, &edit.version, &edit.path);
             ui.label(RichText::new(&name).size(19.0).strong().color(theme::TEXT));
             if edit.dirty {
                 ui.label(
@@ -810,21 +809,8 @@ impl EnginesTab {
                 .spacing([8.0, 6.0])
                 .show(ui, |ui| {
                     field_label(ui, "Path");
-                    ui.horizontal(|ui| {
-                        let path_missing = !edit.path.exists();
-                        if path_missing {
-                            ui.label(RichText::new("⚠").color(theme::WARN).size(13.0))
-                                .on_hover_text("Executable not found at this path.");
-                        }
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(edit.path.to_string_lossy())
-                                    .color(if path_missing { theme::WARN } else { theme::TEXT_WEAK })
-                                    .size(12.0)
-                                    .monospace(),
-                            )
-                            .truncate(),
-                        );
+                    // RTL: "Open folder" anchors right, path label fills remaining space.
+                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                         if let Some(folder) = edit.path.parent() {
                             let folder = folder.to_path_buf();
                             if ui
@@ -835,6 +821,24 @@ impl EnginesTab {
                                 open_folder(&folder);
                             }
                         }
+                        let path_missing = !edit.path.exists();
+                        if path_missing {
+                            ui.label(RichText::new("⚠").color(theme::WARN).size(13.0))
+                                .on_hover_text("Executable not found at this path.");
+                        }
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(edit.path.to_string_lossy())
+                                    .color(if path_missing {
+                                        theme::WARN
+                                    } else {
+                                        theme::TEXT_WEAK
+                                    })
+                                    .size(12.0)
+                                    .monospace(),
+                            )
+                            .truncate(),
+                        );
                     });
                     ui.end_row();
 
@@ -900,22 +904,25 @@ impl EnginesTab {
                     {
                         edit.dirty = true;
                     }
-                    if ui
-                        .add(
-                            egui::TextEdit::singleline(&mut row[1])
-                                .desired_width(f32::INFINITY)
-                                .hint_text("value"),
-                        )
-                        .changed()
-                    {
-                        edit.dirty = true;
-                    }
-                    if ui
-                        .small_button(RichText::new("×").color(theme::DANGER))
-                        .clicked()
-                    {
-                        remove_idx = Some(i);
-                    }
+                    // RTL: × button anchors right, value field fills the rest.
+                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .small_button(RichText::new("×").color(theme::DANGER))
+                            .clicked()
+                        {
+                            remove_idx = Some(i);
+                        }
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut row[1])
+                                    .desired_width(f32::INFINITY)
+                                    .hint_text("value"),
+                            )
+                            .changed()
+                        {
+                            edit.dirty = true;
+                        }
+                    });
                 });
             }
             if let Some(i) = remove_idx {
@@ -928,18 +935,26 @@ impl EnginesTab {
                         .desired_width(150.0)
                         .hint_text("NEW KEY"),
                 );
-                ui.add(
-                    egui::TextEdit::singleline(&mut edit.new_env_val)
-                        .desired_width(f32::INFINITY)
-                        .hint_text("value"),
-                );
-                if ui
-                    .add_enabled(
-                        !edit.new_env_key.trim().is_empty(),
-                        egui::Button::new(RichText::new("＋").color(theme::ACCENT)),
-                    )
-                    .clicked()
-                {
+                // RTL: ＋ button anchors right, value field fills the rest.
+                let key_nonempty = !edit.new_env_key.trim().is_empty();
+                let mut do_add = false;
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add_enabled(
+                            key_nonempty,
+                            egui::Button::new(RichText::new("＋").color(theme::ACCENT)),
+                        )
+                        .clicked()
+                    {
+                        do_add = true;
+                    }
+                    ui.add(
+                        egui::TextEdit::singleline(&mut edit.new_env_val)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("value"),
+                    );
+                });
+                if do_add {
                     edit.env_rows.push([
                         std::mem::take(&mut edit.new_env_key),
                         std::mem::take(&mut edit.new_env_val),
@@ -1185,9 +1200,9 @@ fn is_executable(path: &Path) -> bool {
     }
 }
 
-/// Display name for an engine: `meta.name` if set, otherwise the executable stem.
+/// Display name shown in the engine list: "Name Version" (or file stem if name empty).
 fn engine_display_name(e: &EngineConfig) -> String {
-    if e.meta.name.is_empty() {
+    let base = if e.meta.name.is_empty() {
         e.path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -1195,17 +1210,27 @@ fn engine_display_name(e: &EngineConfig) -> String {
             .to_string()
     } else {
         e.meta.name.clone()
+    };
+    if !e.meta.version.is_empty() {
+        format!("{base} {}", e.meta.version)
+    } else {
+        base
     }
 }
 
-fn engine_display_name_from_parts(name: &str, path: &Path) -> String {
-    if name.trim().is_empty() {
+fn engine_display_name_from_parts(name: &str, version: &str, path: &Path) -> String {
+    let base = if name.trim().is_empty() {
         path.file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("?")
             .to_string()
     } else {
         name.to_string()
+    };
+    if !version.trim().is_empty() {
+        format!("{base} {version}")
+    } else {
+        base
     }
 }
 
