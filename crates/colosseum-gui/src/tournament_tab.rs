@@ -1081,6 +1081,35 @@ impl TournamentTab {
                     .fill(theme::ACCENT),
             );
 
+            // Timing: elapsed / avg / ETA.
+            if let Some(started) = live.started_at {
+                let elapsed_secs = started.elapsed().as_secs_f64();
+                ui.add_space(10.0);
+                ui.label(
+                    RichText::new(format!("⏱ {}", format_duration(elapsed_secs)))
+                        .color(theme::TEXT_WEAK)
+                        .size(12.5),
+                );
+                if live.games_timed > 0 {
+                    let avg_ms = live.total_game_ms as f64 / live.games_timed as f64;
+                    let avg_secs = avg_ms / 1000.0;
+                    ui.label(
+                        RichText::new(format!("avg {}/game", format_duration(avg_secs)))
+                            .color(theme::TEXT_WEAK)
+                            .size(12.5),
+                    );
+                    let remaining = live.total.saturating_sub(live.finished);
+                    if remaining > 0 {
+                        let eta_secs = avg_secs * remaining as f64;
+                        ui.label(
+                            RichText::new(format!("ETA {}", format_duration(eta_secs)))
+                                .color(theme::TEXT_FAINT)
+                                .size(12.0),
+                        );
+                    }
+                }
+            }
+
             // Right side: apply-elo + h2h toggle + New Tournament.
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 let new_enabled = !crate::backend::is_busy(status);
@@ -1350,6 +1379,9 @@ struct LiveData {
     rows: Vec<Row>,
     standings: Standings,
     errors: Vec<String>,
+    started_at: Option<std::time::Instant>,
+    total_game_ms: u64,
+    games_timed: usize,
 }
 
 impl LiveData {
@@ -1359,7 +1391,7 @@ impl LiveData {
             .as_ref()
             .expect("capture called with an active tournament");
 
-        let (status, standings, elo, finished, total, errors) = {
+        let (status, standings, elo, finished, total, errors, started_at, total_game_ms, games_timed) = {
             let snap = active.snapshot.lock().unwrap();
             (
                 snap.status,
@@ -1368,6 +1400,9 @@ impl LiveData {
                 snap.games_finished,
                 snap.games_total,
                 snap.recent_errors.clone(),
+                snap.started_at,
+                snap.total_game_ms,
+                snap.games_timed,
             )
         };
 
@@ -1409,6 +1444,9 @@ impl LiveData {
             rows,
             standings,
             errors,
+            started_at,
+            total_game_ms,
+            games_timed,
         }
     }
 }
@@ -1531,6 +1569,20 @@ fn h2h_cell_fill(s: f32) -> Color32 {
         theme::tint(theme::DANGER, (0.5 - s) * 0.5)
     } else {
         Color32::TRANSPARENT
+    }
+}
+
+fn format_duration(secs: f64) -> String {
+    if secs < 60.0 {
+        format!("{:.0}s", secs)
+    } else if secs < 3600.0 {
+        format!("{:.0}m{:.0}s", (secs / 60.0).floor(), secs % 60.0)
+    } else {
+        format!(
+            "{:.0}h{:.0}m",
+            (secs / 3600.0).floor(),
+            (secs % 3600.0 / 60.0).floor()
+        )
     }
 }
 

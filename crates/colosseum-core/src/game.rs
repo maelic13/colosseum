@@ -58,6 +58,8 @@ pub struct GameStats {
     pub plies: u32,
     pub white_nps: Option<u64>,
     pub black_nps: Option<u64>,
+    /// Wall-clock duration of the game in milliseconds (None for aborted/setup-failure games).
+    pub duration_ms: Option<u64>,
 }
 
 /// A single scheduled game: who plays which color, in which round.

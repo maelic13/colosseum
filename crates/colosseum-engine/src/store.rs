@@ -393,9 +393,13 @@ impl Store {
         Ok(())
     }
 
-    /// Mark a game as running.
+    /// Mark a game as running, recording the wall-clock start time.
     pub fn mark_game_running(&self, id: GameId) -> Result<()> {
-        self.set_game_status(id, GAME_RUNNING)
+        self.conn.execute(
+            "UPDATE games SET status = ?2, started_at = ?3 WHERE id = ?1",
+            params![id.to_string(), GAME_RUNNING, now_iso8601()],
+        )?;
+        Ok(())
     }
 
     /// Mark a game as discarded (e.g. aborted by Force-Stop).

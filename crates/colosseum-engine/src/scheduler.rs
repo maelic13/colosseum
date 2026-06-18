@@ -76,6 +76,12 @@ pub struct TournamentSnapshot {
     pub games_finished: usize,
     pub games_total: usize,
     pub recent_errors: Vec<String>,
+    /// Wall-clock time when the first game was launched (None before any game starts).
+    pub started_at: Option<std::time::Instant>,
+    /// Sum of `duration_ms` across all finished games with a measured duration.
+    pub total_game_ms: u64,
+    /// Count of finished games that have a measured duration (denominator for avg).
+    pub games_timed: usize,
 }
 
 /// A handle to a running tournament: send commands, read the live snapshot.
@@ -238,6 +244,9 @@ pub fn create_tournament(
         games_finished: 0,
         games_total: total_games,
         recent_errors: Vec::new(),
+        started_at: None,
+        total_game_ms: 0,
+        games_timed: 0,
     }));
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
@@ -313,10 +322,16 @@ async fn drive(mut driver: Driver) {
     let mut next_index = 0usize;
     let mut running = false;
     let mut finished = false;
+    let mut tournament_started_at: Option<std::time::Instant> = None;
+    let mut total_game_ms: u64 = 0;
+    let mut games_timed: usize = 0;
 
     loop {
         // Launch while running, with spare capacity and pending games.
         while running && games.len() < concurrency && next_index < driver.schedule.len() {
+            if tournament_started_at.is_none() {
+                tournament_started_at = Some(std::time::Instant::now());
+            }
             let scheduled = driver.schedule[next_index].clone();
             next_index += 1;
             let _ = driver.store.mark_game_running(scheduled.game_id);
@@ -355,6 +370,9 @@ async fn drive(mut driver: Driver) {
                 total,
                 TournamentStatus::Finished,
                 &recent_errors,
+                tournament_started_at,
+                total_game_ms,
+                games_timed,
             );
             let _ = driver.events.send(TournamentEvent::StandingsUpdated);
             let _ = driver.events.send(TournamentEvent::TournamentFinished);
@@ -395,6 +413,10 @@ async fn drive(mut driver: Driver) {
                 match joined {
                     Ok(report) => {
                         in_flight.remove(&report.game_id);
+                        if let Some(dur_ms) = report.stats.duration_ms {
+                            total_game_ms += dur_ms;
+                            games_timed += 1;
+                        }
                         let _ = driver.store.finish_game(
                             report.game_id,
                             report.result,
@@ -449,6 +471,9 @@ async fn drive(mut driver: Driver) {
                             total,
                             status,
                             &recent_errors,
+                            tournament_started_at,
+                            total_game_ms,
+                            games_timed,
                         );
                         let _ = driver.events.send(TournamentEvent::StandingsUpdated);
                     }
@@ -592,6 +617,9 @@ pub fn resume_tournament(
         games_finished: finished_results.len(),
         games_total: total_games,
         recent_errors: Vec::new(),
+        started_at: None,
+        total_game_ms: 0,
+        games_timed: 0,
     }));
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -754,6 +782,9 @@ fn publish(
     total: usize,
     status: TournamentStatus,
     recent_errors: &[String],
+    started_at: Option<std::time::Instant>,
+    total_game_ms: u64,
+    games_timed: usize,
 ) {
     let elo_map = ids
         .iter()
@@ -774,6 +805,9 @@ fn publish(
         snap.games_finished = finished;
         snap.games_total = total;
         snap.recent_errors = recent_errors.to_vec();
+        snap.started_at = started_at;
+        snap.total_game_ms = total_game_ms;
+        snap.games_timed = games_timed;
     }
 }
 

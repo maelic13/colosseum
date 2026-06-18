@@ -114,6 +114,8 @@ async fn prepare(
 
 /// Play one complete game and return its report. Never panics on engine misbehavior.
 pub async fn run_game(spec: GameSpec) -> GameReport {
+    let game_start = std::time::Instant::now();
+
     let white = prepare(&spec.white, spec.handshake_timeout).await;
     let black = prepare(&spec.black, spec.handshake_timeout).await;
 
@@ -121,13 +123,21 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         (Ok(w), Ok(b)) => (w, b),
         (Err(err), Ok(b)) => {
             let _ = b.quit(Duration::from_millis(500)).await;
-            return setup_failure(&spec, Color::White, &err);
+            let mut report = setup_failure(&spec, Color::White, &err);
+            report.stats.duration_ms = Some(game_start.elapsed().as_millis() as u64);
+            return report;
         }
         (Ok(w), Err(err)) => {
             let _ = w.quit(Duration::from_millis(500)).await;
-            return setup_failure(&spec, Color::Black, &err);
+            let mut report = setup_failure(&spec, Color::Black, &err);
+            report.stats.duration_ms = Some(game_start.elapsed().as_millis() as u64);
+            return report;
         }
-        (Err(err), Err(_)) => return setup_failure(&spec, Color::White, &err),
+        (Err(err), Err(_)) => {
+            let mut report = setup_failure(&spec, Color::White, &err);
+            report.stats.duration_ms = Some(game_start.elapsed().as_millis() as u64);
+            return report;
+        }
     };
 
     let mut pos = initial_position(spec.start_fen.as_deref());
@@ -259,6 +269,7 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         plies: san_moves.len() as u32,
         white_nps: white_nps.average(),
         black_nps: black_nps.average(),
+        duration_ms: Some(game_start.elapsed().as_millis() as u64),
     };
     let pgn = render_pgn(&spec, &san_moves, outcome.result, outcome.termination);
 
