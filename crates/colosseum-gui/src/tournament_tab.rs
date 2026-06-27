@@ -35,6 +35,8 @@ pub struct TournamentTab {
     show_h2h: bool,
     start_error: Option<String>,
     elo_note: Option<String>,
+    /// Transient note shown after an export action (saved / failed / cancelled).
+    export_note: Option<String>,
     resume_dismissed: bool,
     /// Manages preset files on disk.
     preset_manager: PresetManager,
@@ -59,6 +61,7 @@ impl TournamentTab {
             show_h2h: false,
             start_error: None,
             elo_note: None,
+            export_note: None,
             resume_dismissed: false,
             preset_manager,
             presets_cache,
@@ -1653,6 +1656,36 @@ impl TournamentTab {
                     backend.clear_active();
                 }
                 ui.add_space(6.0);
+
+                // Export menu: CSV standings / crosstable / game PGN.
+                let tid = backend.active.as_ref().map(|a| a.handle.id);
+                ui.menu_button(RichText::new("Export ▾").size(13.0), |ui| {
+                    ui.set_min_width(170.0);
+                    if ui.button("Standings (CSV)").clicked() {
+                        self.export_note =
+                            crate::export_ui::export_standings_csv(&live.name, &live.export_rows());
+                        ui.close();
+                    }
+                    if ui.button("Crosstable (CSV)").clicked() {
+                        self.export_note = crate::export_ui::export_crosstable_csv(
+                            &live.name,
+                            &live.crosstable_order(),
+                            &live.standings,
+                        );
+                        ui.close();
+                    }
+                    if ui.button("Game PGN").clicked() {
+                        let pgn = tid
+                            .map(|id| backend.collect_pgn(id).unwrap_or_default())
+                            .unwrap_or_default();
+                        self.export_note = crate::export_ui::export_pgn(&live.name, &pgn);
+                        ui.close();
+                    }
+                });
+                if let Some(note) = &self.export_note {
+                    ui.label(RichText::new(note).color(theme::TEXT_WEAK).size(12.0));
+                }
+                ui.add_space(6.0);
                 ui.toggle_value(
                     &mut self.show_h2h,
                     RichText::new("Head-to-head").size(13.0),
@@ -1988,6 +2021,34 @@ impl LiveData {
             .find(|r| r.id == id)
             .map(|r| r.name.as_str())
             .unwrap_or("?")
+    }
+
+    /// Rows in rank order, shaped for CSV export.
+    fn export_rows(&self) -> Vec<colosseum_core::ExportRow> {
+        let mut rows: Vec<&Row> = self.rows.iter().collect();
+        rows.sort_by_key(|r| r.rank);
+        rows.into_iter()
+            .map(|r| colosseum_core::ExportRow {
+                rank: r.rank,
+                name: r.name.clone(),
+                version: r.version.clone(),
+                elo: r.elo,
+                elo_delta: r.elo_delta,
+                points: r.points,
+                games: r.games,
+                wins: r.wins,
+                draws: r.draws,
+                losses: r.losses,
+                nps: r.nps,
+            })
+            .collect()
+    }
+
+    /// (id, name) pairs in rank order, for the crosstable header/rows.
+    fn crosstable_order(&self) -> Vec<(EngineId, String)> {
+        let mut rows: Vec<&Row> = self.rows.iter().collect();
+        rows.sort_by_key(|r| r.rank);
+        rows.into_iter().map(|r| (r.id, r.name.clone())).collect()
     }
 }
 

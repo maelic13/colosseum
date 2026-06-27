@@ -407,11 +407,18 @@ problems don't recur per-tab:
   which re-measures cell content every frame, so live-updating numbers made the
   columns visibly jump. Numeric columns are now fixed-width (`Column::exact`).
 
-### Tier 5 — output & analysis (step 24)
+### Tier 5 — output & analysis (step 24, split into sub-commits)
 
-- CSV standings/crosstable export; "export PGN now" (today PGN is only append-to-path).
-- SPRT / LOS / Elo error bars (statistical stopping that engine testers want).
-- Built-in PGN/board game viewer (PGN is already retained per game in the DB).
+- ✅ **24a · Exports.** New pure `colosseum-core::export` module builds RFC-4180
+  CSV for the standings table and the head-to-head crosstable (unit-tested).
+  A shared `export_ui` GUI helper opens a native save dialog (`rfd`). Both the
+  live Tournament control bar and the History detail pane gained an
+  **Export ▾** menu: Standings (CSV), Crosstable (CSV), and Game PGN (the
+  per-game PGN stored in the DB, concatenated via `Backend::collect_pgn`) —
+  replacing the previous append-only PGN path.
+- **24b · Statistics.** SPRT (LLR) / LOS / Elo error bars from W-D-L (for
+  two-engine matches especially), surfaced in the live + history views.
+- **24c · PGN/board viewer.** Built-in game viewer (PGN is retained per game).
 
 ### Non-feature cleanup (step 25)
 

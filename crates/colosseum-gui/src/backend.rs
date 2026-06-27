@@ -211,6 +211,22 @@ impl Backend {
         Ok(())
     }
 
+    /// Concatenate the PGN of every finished game in a tournament, in play
+    /// order, separated by blank lines. Empty if no games have finished yet.
+    pub fn collect_pgn(&self, id: TournamentId) -> anyhow::Result<String> {
+        let games = self.store.list_games(id)?;
+        let mut out = String::new();
+        for g in games {
+            if let Some(pgn) = g.pgn.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                if !out.is_empty() {
+                    out.push_str("\n\n");
+                }
+                out.push_str(pgn);
+            }
+        }
+        Ok(out)
+    }
+
     /// Return the most recent tournament that has not yet finished, if any.
     /// Used to offer a resume prompt at startup.
     pub fn find_resumable(&self) -> Option<TournamentRow> {

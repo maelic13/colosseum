@@ -10,7 +10,7 @@ use eframe::egui::{self, Color32, Layout, RichText, ScrollArea, Ui};
 use egui_extras::{Column, TableBuilder};
 
 use colosseum_core::{
-    EloPolicy, Format, Standings, TimeControl, TournamentConfig, TournamentId,
+    EloPolicy, EngineId, Format, Standings, TimeControl, TournamentConfig, TournamentId,
 };
 use colosseum_engine::{
     EloEntry, ResultParticipant, TournamentResults, TournamentRow, store::STATUS_FINISHED,
@@ -42,6 +42,8 @@ pub struct HistoryTab {
     pending_delete: Option<TournamentId>,
     /// Last error message from a DB action.
     error: Option<String>,
+    /// Transient note shown after an export action.
+    export_note: Option<String>,
 }
 
 impl HistoryTab {
@@ -385,6 +387,51 @@ impl HistoryTab {
                     ui.ctx().copy_text(pgn.clone());
                 }
             }
+
+            // Export menu: CSV standings / crosstable / game PGN.
+            ui.add_space(6.0);
+            ui.menu_button(RichText::new("Export ▾").size(13.0), |ui| {
+                ui.set_min_width(170.0);
+                let have_results =
+                    matches!(&self.results, Some((id, _)) if *id == row.id);
+                if ui
+                    .add_enabled(have_results, egui::Button::new("Standings (CSV)"))
+                    .clicked()
+                {
+                    let note = match &self.results {
+                        Some((_, res)) => {
+                            crate::export_ui::export_standings_csv(&row.name, &export_rows(res))
+                        }
+                        None => Some("No results loaded.".to_string()),
+                    };
+                    self.export_note = note;
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(have_results, egui::Button::new("Crosstable (CSV)"))
+                    .clicked()
+                {
+                    let note = match &self.results {
+                        Some((_, res)) => crate::export_ui::export_crosstable_csv(
+                            &row.name,
+                            &crosstable_order(res),
+                            &res.standings,
+                        ),
+                        None => Some("No results loaded.".to_string()),
+                    };
+                    self.export_note = note;
+                    ui.close();
+                }
+                if ui.button("Game PGN").clicked() {
+                    let pgn = backend.collect_pgn(row.id).unwrap_or_default();
+                    self.export_note = crate::export_ui::export_pgn(&row.name, &pgn);
+                    ui.close();
+                }
+            });
+            if let Some(note) = &self.export_note {
+                ui.add_space(6.0);
+                ui.label(RichText::new(note).color(theme::TEXT_WEAK).size(12.0));
+            }
         });
 
         action
@@ -436,6 +483,35 @@ fn build_rows(res: &TournamentResults) -> Vec<ResultRow> {
         .collect();
     rows.sort_by_key(|r| r.rank);
     rows
+}
+
+/// Reconstructed rows shaped for CSV export (rank order).
+fn export_rows(res: &TournamentResults) -> Vec<colosseum_core::ExportRow> {
+    build_rows(res)
+        .into_iter()
+        .map(|r| colosseum_core::ExportRow {
+            rank: r.rank,
+            name: r.name,
+            version: r.version,
+            elo: r.elo,
+            elo_delta: r.elo_delta,
+            points: r.points,
+            games: r.games,
+            wins: r.wins,
+            draws: r.draws,
+            losses: r.losses,
+            nps: r.nps,
+        })
+        .collect()
+}
+
+/// (id, name) pairs in rank order for the crosstable.
+fn crosstable_order(res: &TournamentResults) -> Vec<(EngineId, String)> {
+    let ranked = res.standings.ranked_by_points();
+    let rank_of = |id: EngineId| ranked.iter().position(|x| *x == id).unwrap_or(usize::MAX);
+    let mut ps: Vec<&ResultParticipant> = res.participants.iter().collect();
+    ps.sort_by_key(|p| rank_of(p.id));
+    ps.into_iter().map(|p| (p.id, p.name.clone())).collect()
 }
 
 fn results_summary(ui: &mut Ui, res: &TournamentResults) {

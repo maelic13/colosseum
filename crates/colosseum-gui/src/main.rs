@@ -9,6 +9,7 @@
 mod app;
 mod backend;
 mod engines_tab;
+mod export_ui;
 mod history_tab;
 mod icon;
 mod presets;

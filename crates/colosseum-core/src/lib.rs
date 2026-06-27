@@ -10,6 +10,7 @@ pub mod adjudication;
 pub mod branding;
 pub mod engine;
 pub mod event;
+pub mod export;
 pub mod game;
 pub mod ids;
 pub mod options;
@@ -25,6 +26,7 @@ pub use adjudication::{
 };
 pub use engine::{EngineConfig, EngineMeta};
 pub use event::TournamentEvent;
+pub use export::{ExportRow, crosstable_csv, standings_csv};
 pub use game::{GameResult, GameStats, Pairing, Termination};
 pub use ids::{EngineId, GameId, TournamentId};
 pub use options::{UciOption, UciOptionValue};
