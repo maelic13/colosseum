@@ -387,6 +387,26 @@ primary touch points. Tiered by priority.
   (`PresetManager` + `PresetData`); the form's `to_preset`/`apply_preset` helpers
   handle the round-trip without touching engine selection or the openings preview cache.
 
+### UI hardening (cross-cutting, between steps 23 and 24)
+
+A systemic pass on UI robustness in `colosseum-gui`, so visibility/stability
+problems don't recur per-tab:
+
+- **Control visibility (theme-level).** `inactive.bg_stroke` was `Stroke::NONE`,
+  so resting buttons and unchecked checkboxes had no border and shared the
+  `BG_ELEVATED` fill of the cards they sit on — effectively invisible until
+  hover. Added a dedicated `BORDER_INTERACTIVE` color and gave the `inactive`
+  widget state a 1 px border (`theme.rs`). One change fixes buttons, checkboxes,
+  combo boxes, and text fields everywhere.
+- **Layout stability.** Every `ScrollArea` used the default
+  `auto_shrink([true, true])`, which together with `set_min_width(available_width)`
+  oscillates as the scrollbar toggles. Panel-filling scroll areas now use
+  `auto_shrink([false, false])` (height-capped nested ones `[false, true]`) and
+  the redundant width-setting was removed.
+- **Live-table jitter.** The results + history tables used `Column::auto()`,
+  which re-measures cell content every frame, so live-updating numbers made the
+  columns visibly jump. Numeric columns are now fixed-width (`Column::exact`).
+
 ### Tier 5 — output & analysis (step 24)
 
 - CSV standings/crosstable export; "export PGN now" (today PGN is only append-to-path).

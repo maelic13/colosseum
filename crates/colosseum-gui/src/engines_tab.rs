@@ -70,6 +70,7 @@ impl EnginesTab {
 
         ScrollArea::vertical()
             .id_salt("engines_edit_scroll")
+            .auto_shrink([false, false])
             .show(ui, |ui| {
                 if self.edit.is_some() {
                     self.show_edit(ui, backend);
@@ -454,9 +455,8 @@ impl EnginesTab {
         // ── Engine list ───────────────────────────────────────────────────────
         ScrollArea::vertical()
             .id_salt("engines_list_scroll")
+            .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-
                 if backend.engines.is_empty() {
                     ui.add_space(24.0);
                     ui.vertical_centered(|ui| {

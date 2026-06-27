@@ -565,6 +565,7 @@ impl TournamentTab {
             .show_inside(ui, |ui| {
                 ScrollArea::vertical()
                     .id_salt("tournament_settings_scroll")
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
                         self.settings_form(ui);
                     });
@@ -689,6 +690,7 @@ impl TournamentTab {
                     ScrollArea::vertical()
                         .id_salt("preset_list_scroll")
                         .max_height(200.0)
+                        .auto_shrink([false, true])
                         .show(ui, |ui| {
                             for (i, preset) in cache.iter().enumerate() {
                                 ui.horizontal(|ui| {
@@ -808,8 +810,8 @@ impl TournamentTab {
 
         ScrollArea::vertical()
             .id_salt("tournament_engine_list")
+            .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
 
                 if backend.engines.is_empty() {
                     ui.add_space(24.0);
@@ -1485,6 +1487,7 @@ impl TournamentTab {
                             ScrollArea::vertical()
                                 .id_salt("tournament_errors_scroll")
                                 .max_height(80.0)
+                                .auto_shrink([false, true])
                                 .show(ui, |ui| {
                                     for err in live.errors.iter().rev().take(20) {
                                         ui.label(
@@ -1521,6 +1524,7 @@ impl TournamentTab {
             .show_inside(ui, |ui| {
                 ScrollArea::vertical()
                     .id_salt("tournament_results_scroll")
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
                         self.results_table(ui, &live);
                         if self.show_h2h {
@@ -1688,14 +1692,16 @@ impl TournamentTab {
         TableBuilder::new(ui)
             .striped(true)
             .cell_layout(Layout::left_to_right(egui::Align::Center))
-            .column(Column::auto().at_least(34.0)) // rank
+            // Fixed widths (not Column::auto): auto re-measures cell content every
+            // frame, so live-updating numbers make the columns visibly jump.
+            .column(Column::exact(40.0)) // rank
             .column(Column::initial(170.0).at_least(110.0).clip(true)) // name
-            .column(Column::auto().at_least(54.0)) // version
-            .column(Column::auto().at_least(56.0)) // elo
-            .column(Column::auto().at_least(72.0)) // elo delta chip
-            .column(Column::auto().at_least(54.0)) // points
-            .column(Column::auto().at_least(48.0)) // games
-            .column(Column::auto().at_least(82.0)) // w-d-l
+            .column(Column::exact(64.0)) // version
+            .column(Column::exact(60.0)) // elo
+            .column(Column::exact(76.0)) // elo delta chip
+            .column(Column::exact(60.0)) // points
+            .column(Column::exact(52.0)) // games
+            .column(Column::exact(92.0)) // w-d-l
             .column(Column::remainder().at_least(80.0)) // nps
             .header(header_h, |mut header| {
                 header.col(|ui| {
@@ -1812,6 +1818,7 @@ fn head_to_head_matrix(ui: &mut Ui, live: &LiveData) {
 
     ScrollArea::horizontal()
         .id_salt("h2h_scroll")
+        .auto_shrink([false, false])
         .show(ui, |ui| {
             egui::Grid::new("h2h_matrix")
                 .striped(true)
@@ -2063,6 +2070,7 @@ fn strong_header(label: &str) -> RichText {
 fn live_side_panel(ui: &mut Ui, live: &LiveData) {
     ScrollArea::vertical()
         .id_salt("live_side_scroll")
+        .auto_shrink([false, false])
         .show(ui, |ui| {
             if !live.in_flight_games.is_empty() {
                 ui.label(

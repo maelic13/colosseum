@@ -26,6 +26,10 @@ pub const BG_FAINT: Color32 = Color32::from_rgb(0x1f, 0x24, 0x2d);
 
 /// Hairline borders and separators.
 pub const STROKE: Color32 = Color32::from_rgb(0x32, 0x3a, 0x47);
+/// Brighter border for interactive widgets at rest (buttons, checkboxes, combo
+/// boxes, text fields). Must read clearly even when the widget sits on a card
+/// that shares its fill color — otherwise resting controls look invisible.
+pub const BORDER_INTERACTIVE: Color32 = Color32::from_rgb(0x4a, 0x55, 0x66);
 
 /// Primary text.
 pub const TEXT: Color32 = Color32::from_rgb(0xe7, 0xea, 0xf0);
@@ -144,11 +148,13 @@ fn widgets() -> Widgets {
             corner_radius: radius,
             expansion: 0.0,
         },
-        // Idle interactive widgets (buttons at rest).
+        // Idle interactive widgets (buttons at rest). A visible border is
+        // essential: buttons and checkboxes frequently sit on cards that share
+        // their fill color, so without a stroke they vanish until hovered.
         inactive: WidgetVisuals {
             bg_fill: BG_ELEVATED,
             weak_bg_fill: BG_ELEVATED,
-            bg_stroke: Stroke::NONE,
+            bg_stroke: Stroke::new(1.0, BORDER_INTERACTIVE),
             fg_stroke: text,
             corner_radius: radius,
             expansion: 0.0,

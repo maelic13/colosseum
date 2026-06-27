@@ -165,8 +165,8 @@ impl HistoryTab {
 
         ScrollArea::vertical()
             .id_salt("history_list_scroll")
+            .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
                 for row in &list {
                     let selected = self.selected == Some(row.id);
                     if self.list_row(ui, row, selected) {
@@ -274,6 +274,7 @@ impl HistoryTab {
 
         ScrollArea::vertical()
             .id_salt("history_detail_scroll")
+            .auto_shrink([false, false])
             .show(ui, |ui| {
                 // Header: name + status + actions.
                 ui.horizontal(|ui| {
@@ -473,14 +474,15 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
     TableBuilder::new(ui)
         .striped(true)
         .cell_layout(Layout::left_to_right(egui::Align::Center))
-        .column(Column::auto().at_least(34.0)) // rank
+        // Fixed widths (not Column::auto) so columns don't jump as content varies.
+        .column(Column::exact(40.0)) // rank
         .column(Column::initial(170.0).at_least(110.0).clip(true)) // name
-        .column(Column::auto().at_least(54.0)) // version
-        .column(Column::auto().at_least(56.0)) // elo
-        .column(Column::auto().at_least(72.0)) // elo delta
-        .column(Column::auto().at_least(54.0)) // points
-        .column(Column::auto().at_least(48.0)) // games
-        .column(Column::auto().at_least(82.0)) // w-d-l
+        .column(Column::exact(64.0)) // version
+        .column(Column::exact(60.0)) // elo
+        .column(Column::exact(76.0)) // elo delta
+        .column(Column::exact(60.0)) // points
+        .column(Column::exact(52.0)) // games
+        .column(Column::exact(92.0)) // w-d-l
         .column(Column::remainder().at_least(80.0)) // nps
         .header(header_h, |mut header| {
             for label in ["#", "Engine", "Ver", "Elo", "Δ", "Pts", "Gms", "W-D-L", "Avg nps"] {
