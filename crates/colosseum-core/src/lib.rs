@@ -17,6 +17,7 @@ pub mod options;
 pub mod pairing;
 pub mod rating;
 pub mod standings;
+pub mod stats;
 pub mod time;
 pub mod tournament;
 
@@ -33,6 +34,7 @@ pub use options::{UciOption, UciOptionValue};
 pub use pairing::{gauntlet, generate_schedule, round_robin};
 pub use rating::{IncrementalElo, Rating, RatingDelta};
 pub use standings::{EngineStanding, GameOutcome, HeadToHead, Standings};
+pub use stats::{EloEstimate, SprtDecision, SprtResult, elo_with_error, los, sprt};
 pub use time::{TimeControl, TimeUnit};
 pub use tournament::{
     CommonEngineOptions, EloPolicy, Format, OpeningBook, OpeningFormat, OpeningOrder,

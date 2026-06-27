@@ -13,6 +13,7 @@ mod export_ui;
 mod history_tab;
 mod icon;
 mod presets;
+mod stats_ui;
 mod theme;
 mod tournament_tab;
 mod widgets;

@@ -1530,6 +1530,15 @@ impl TournamentTab {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         self.results_table(ui, &live);
+                        // Pairwise match statistics (Elo±, LOS, SPRT) for a 2-engine match.
+                        if live.rows.len() == 2 {
+                            ui.add_space(12.0);
+                            crate::stats_ui::match_stats_card(
+                                ui,
+                                &live.crosstable_order(),
+                                &live.standings,
+                            );
+                        }
                         if self.show_h2h {
                             ui.add_space(16.0);
                             head_to_head_matrix(ui, &live);

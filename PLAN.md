@@ -416,8 +416,14 @@ problems don't recur per-tab:
   **Export ▾** menu: Standings (CSV), Crosstable (CSV), and Game PGN (the
   per-game PGN stored in the DB, concatenated via `Backend::collect_pgn`) —
   replacing the previous append-only PGN path.
-- **24b · Statistics.** SPRT (LLR) / LOS / Elo error bars from W-D-L (for
-  two-engine matches especially), surfaced in the live + history views.
+- ✅ **24b · Statistics.** New pure `colosseum-core::stats` module: Elo with a
+  95% confidence interval (`elo_with_error`), likelihood-of-superiority (`los`,
+  via a normal-CDF/`erf` approximation), and a trinomial SPRT (`sprt`, draw rate
+  held fixed between hypotheses — the cutechess-cli approach) returning the LLR,
+  decision bounds, and an accept-H0/H1/continue verdict. All unit-tested. The
+  GUI `stats_ui::match_stats_card` surfaces Elo±, LOS, and SPRT (H0 +0 vs H1 +5
+  Elo, α=β=0.05) and is shown above the results in both the live Tournament view
+  and the History detail pane whenever a tournament has exactly two engines.
 - **24c · PGN/board viewer.** Built-in game viewer (PGN is retained per game).
 
 ### Non-feature cleanup (step 25)

@@ -53,7 +53,7 @@ Ordered by value/effort; see [PLAN.md §11](PLAN.md) for detail.
 - [x] **UI hardening** — systemic fixes for poorly-visible controls and layout jitter (see [PLAN.md §11](PLAN.md)) · _Small_
 - [ ] **Step 24** — Output & analysis: CSV export, export-PGN-now, SPRT/LOS/error bars, PGN/board viewer · _Large_
   - [x] **24a** — CSV standings/crosstable export + export-PGN-now (Export ▾ menu in live + history)
-  - [ ] **24b** — SPRT / LOS / Elo error bars
+  - [x] **24b** — SPRT / LOS / Elo error bars (match-stats card for 2-engine tournaments)
   - [ ] **24c** — Built-in PGN/board viewer
 - [ ] **Step 25** — Cleanup: remove the unused SQLite `engines` table + dead `Store` engine methods · _Small_
 

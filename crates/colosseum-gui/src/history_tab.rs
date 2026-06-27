@@ -308,6 +308,15 @@ impl HistoryTab {
                     results_summary(ui, res);
                     ui.add_space(8.0);
                     standings_table(ui, res);
+                    // Pairwise match statistics for a 2-engine tournament.
+                    if res.participants.len() == 2 {
+                        ui.add_space(12.0);
+                        crate::stats_ui::match_stats_card(
+                            ui,
+                            &crosstable_order(res),
+                            &res.standings,
+                        );
+                    }
                 } else {
                     ui.label(
                         RichText::new("No results to show.")
