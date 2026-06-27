@@ -127,49 +127,6 @@ impl Store {
         Ok(Self { conn })
     }
 
-    // ---- engines -------------------------------------------------------------
-
-    /// Insert or replace an engine library entry.
-    pub fn upsert_engine(&self, engine: &EngineConfig) -> Result<()> {
-        let config_json = serde_json::to_string(engine)?;
-        self.conn.execute(
-            "INSERT INTO engines (id, name, version, elo, path, config_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(id) DO UPDATE SET
-               name=excluded.name, version=excluded.version, elo=excluded.elo,
-               path=excluded.path, config_json=excluded.config_json",
-            params![
-                engine.id.to_string(),
-                engine.meta.name,
-                engine.meta.version,
-                engine.meta.elo,
-                engine.path.to_string_lossy(),
-                config_json,
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// Load all engine library entries.
-    pub fn list_engines(&self) -> Result<Vec<EngineConfig>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT config_json FROM engines ORDER BY name")?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        let mut engines = Vec::new();
-        for json in rows {
-            engines.push(serde_json::from_str(&json?)?);
-        }
-        Ok(engines)
-    }
-
-    /// Delete an engine library entry.
-    pub fn delete_engine(&self, id: EngineId) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM engines WHERE id = ?1", params![id.to_string()])?;
-        Ok(())
-    }
-
     // ---- tournaments ---------------------------------------------------------
 
     /// Create a new tournament record (status `running`).
@@ -559,15 +516,6 @@ fn now_iso8601() -> String {
 }
 
 const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS engines (
-  id          TEXT PRIMARY KEY,
-  name        TEXT NOT NULL,
-  version     TEXT,
-  elo         INTEGER,
-  path        TEXT NOT NULL,
-  config_json TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS tournaments (
   id          TEXT PRIMARY KEY,
   name        TEXT,
@@ -615,16 +563,12 @@ mod tests {
     use colosseum_core::{GameResult, Termination, TournamentConfig};
 
     #[test]
-    fn round_trips_engines_tournaments_and_games() {
+    fn round_trips_tournaments_and_games() {
         let store = Store::open_in_memory().unwrap();
 
         let mut engine = EngineConfig::new("stockfish".into());
         engine.meta.name = "Stockfish".into();
         engine.meta.elo = Some(3600);
-        store.upsert_engine(&engine).unwrap();
-        let loaded = store.list_engines().unwrap();
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].meta.name, "Stockfish");
 
         let tid = TournamentId::new();
         let config = TournamentConfig::default();

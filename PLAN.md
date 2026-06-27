@@ -436,9 +436,12 @@ problems don't recur per-tab:
 
 ### Non-feature cleanup (step 25)
 
-- The SQLite `engines` table and `Store::{upsert_engine,list_engines,delete_engine}`
-  are **dead code** — the GUI uses the JSON library exclusively. Remove them (or wire
-  them in). Deleting an engine in the GUI already never touched this table.
+- ✅ Removed the dead SQLite `engines` table from `SCHEMA` and the unused
+  `Store::{upsert_engine,list_engines,delete_engine}` methods — the GUI uses the
+  JSON engine library (`engines.json`) exclusively. The store round-trip test
+  was trimmed to `round_trips_tournaments_and_games`. Existing databases keep an
+  orphan `engines` table (harmless, never written by the app); no migration is
+  needed since the GUI never populated it.
 
 ## 12. Deferred (architecture-ready)
 
