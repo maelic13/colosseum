@@ -424,7 +424,15 @@ problems don't recur per-tab:
   GUI `stats_ui::match_stats_card` surfaces Elo±, LOS, and SPRT (H0 +0 vs H1 +5
   Elo, α=β=0.05) and is shown above the results in both the live Tournament view
   and the History detail pane whenever a tournament has exactly two engines.
-- **24c · PGN/board viewer.** Built-in game viewer (PGN is retained per game).
+- ✅ **24c · PGN/board viewer.** New `colosseum-gui::viewer` module: parses a
+  stored game's PGN movetext (dropping headers, `{}` comments, `()` variations,
+  NAGs, move numbers, result token), replays the SAN with `shakmaty` to
+  reconstruct the board after every ply, and renders a floating window with a
+  painted board (last-move highlight), a clickable move list, and ⏮◀▶⏭ +
+  arrow/Home/End navigation. The History detail pane gained a **Games (N)**
+  list (cached via `Backend::list_games`) with a **View** button per game.
+  Shakmaty added as a GUI dependency; SAN extraction + replay are unit-tested.
+  (Live-view game browsing can reuse the same viewer later.)
 
 ### Non-feature cleanup (step 25)
 

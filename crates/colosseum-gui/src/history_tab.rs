@@ -13,7 +13,8 @@ use colosseum_core::{
     EloPolicy, EngineId, Format, Standings, TimeControl, TournamentConfig, TournamentId,
 };
 use colosseum_engine::{
-    EloEntry, ResultParticipant, TournamentResults, TournamentRow, store::STATUS_FINISHED,
+    EloEntry, GameRow, ResultParticipant, TournamentResults, TournamentRow,
+    store::STATUS_FINISHED,
 };
 
 use crate::backend::Backend;
@@ -44,6 +45,10 @@ pub struct HistoryTab {
     error: Option<String>,
     /// Transient note shown after an export action.
     export_note: Option<String>,
+    /// Cached games for the selected tournament (for the board viewer).
+    games: Option<(TournamentId, Vec<GameRow>)>,
+    /// The floating PGN/board viewer.
+    viewer: crate::viewer::GameViewer,
 }
 
 impl HistoryTab {
@@ -137,6 +142,7 @@ impl HistoryTab {
         }
         self.list = Some(list);
         self.results = None;
+        self.games = None;
         self.pending_delete = None;
     }
 
@@ -174,6 +180,7 @@ impl HistoryTab {
                     if self.list_row(ui, row, selected) {
                         self.selected = Some(row.id);
                         self.results = None;
+                        self.games = None;
                         self.pending_delete = None;
                     }
                     ui.add_space(4.0);
@@ -271,6 +278,10 @@ impl HistoryTab {
                 }
             }
         }
+        // Load (and cache) the game list for the board viewer.
+        if self.games.as_ref().map(|(rid, _)| *rid) != Some(id) {
+            self.games = Some((id, backend.list_games(id)));
+        }
 
         let mut action = HistoryAction::None;
 
@@ -324,9 +335,100 @@ impl HistoryTab {
                             .size(13.0),
                     );
                 }
+                self.games_section(ui);
             });
 
+        // The board viewer floats above everything.
+        self.viewer.ui(ui.ctx());
+
         action
+    }
+
+    /// List the tournament's games with a button to open each in the viewer.
+    fn games_section(&mut self, ui: &mut Ui) {
+        let count = self.games.as_ref().map_or(0, |(_, g)| g.len());
+        if count == 0 {
+            return;
+        }
+
+        // Engine display names, captured from the reconstructed results.
+        let names: Vec<(EngineId, String)> = self
+            .results
+            .as_ref()
+            .map(|(_, res)| res.participants.iter().map(|p| (p.id, p.name.clone())).collect())
+            .unwrap_or_default();
+        let name_of = |id: EngineId| -> String {
+            names
+                .iter()
+                .find(|(pid, _)| *pid == id)
+                .map(|(_, n)| n.clone())
+                .unwrap_or_else(|| "?".to_string())
+        };
+
+        ui.add_space(14.0);
+        ui.separator();
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new(format!("Games ({count})"))
+                .color(theme::TEXT)
+                .size(13.5)
+                .strong(),
+        );
+        ui.add_space(6.0);
+
+        let mut view_idx: Option<usize> = None;
+        if let Some((_, games)) = &self.games {
+            ScrollArea::vertical()
+                .id_salt("history_games_scroll")
+                .auto_shrink([false, true])
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    for (i, g) in games.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(format!("R{}", g.round))
+                                    .color(theme::TEXT_FAINT)
+                                    .monospace()
+                                    .size(12.0),
+                            );
+                            let result = g
+                                .result
+                                .map(|r| r.pgn().to_string())
+                                .unwrap_or_else(|| "…".to_string());
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} vs {}  {}",
+                                    name_of(g.white),
+                                    name_of(g.black),
+                                    result
+                                ))
+                                .color(theme::TEXT_WEAK)
+                                .size(12.5),
+                            );
+                            let has_pgn =
+                                g.pgn.as_deref().is_some_and(|p| !p.trim().is_empty());
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui
+                                    .add_enabled(has_pgn, egui::Button::new("View"))
+                                    .clicked()
+                                {
+                                    view_idx = Some(i);
+                                }
+                            });
+                        });
+                        ui.add_space(2.0);
+                    }
+                });
+        }
+
+        if let Some(i) = view_idx
+            && let Some((_, games)) = &self.games
+        {
+            let g = &games[i];
+            let white = name_of(g.white);
+            let black = name_of(g.black);
+            self.viewer.open_game(g, &white, &black);
+        }
     }
 
     fn action_bar(&mut self, ui: &mut Ui, backend: &mut Backend, row: &TournamentRow) -> HistoryAction {

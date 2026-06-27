@@ -211,6 +211,14 @@ impl Backend {
         Ok(())
     }
 
+    /// List all games (any status) of a tournament, in play order.
+    pub fn list_games(&self, id: TournamentId) -> Vec<colosseum_engine::GameRow> {
+        self.store.list_games(id).unwrap_or_else(|e| {
+            tracing::warn!("failed to list games: {e}");
+            Vec::new()
+        })
+    }
+
     /// Concatenate the PGN of every finished game in a tournament, in play
     /// order, separated by blank lines. Empty if no games have finished yet.
     pub fn collect_pgn(&self, id: TournamentId) -> anyhow::Result<String> {
