@@ -19,7 +19,9 @@ use colosseum_core::{
     Format, OpeningBook, OpeningFormat, OpeningOrder, ResignAdjudication, Standings, StartPosition,
     Termination, TimeControl, TimeUnit, TournamentConfig,
 };
-use colosseum_engine::{EloEntry, InFlightGame, TournamentRow, TournamentStatus, summarize};
+use colosseum_engine::{
+    EloEntry, GameRow, InFlightGame, TournamentRow, TournamentStatus, summarize,
+};
 
 use crate::backend::{Backend, ParticipantInfo};
 use crate::presets::{PresetData, PresetFormatKind, PresetManager, PresetTcKind};
@@ -33,6 +35,12 @@ pub struct TournamentTab {
     form: TournamentForm,
     sort: SortState,
     show_h2h: bool,
+    /// Whether the live game list is expanded.
+    show_games: bool,
+    /// Cached games for the active tournament: (finished-count when captured, rows).
+    games_cache: Option<(usize, Vec<GameRow>)>,
+    /// The floating PGN/board viewer.
+    viewer: crate::viewer::GameViewer,
     start_error: Option<String>,
     elo_note: Option<String>,
     /// Transient note shown after an export action (saved / failed / cancelled).
@@ -59,6 +67,9 @@ impl TournamentTab {
             form,
             sort: SortState::default(),
             show_h2h: false,
+            show_games: false,
+            games_cache: None,
+            viewer: crate::viewer::GameViewer::default(),
             start_error: None,
             elo_note: None,
             export_note: None,
@@ -767,6 +778,7 @@ impl TournamentTab {
                 self.start_error = None;
                 self.sort = SortState::default();
                 self.elo_note = None;
+                self.games_cache = None;
                 // Persist the current form so the next session starts with the
                 // same settings.
                 let last = self.form.to_preset(String::new());
@@ -1458,6 +1470,14 @@ impl TournamentTab {
         // Snapshot the backend state into owned data, releasing the lock quickly.
         let live = LiveData::capture(backend);
 
+        // Refresh the cached game list when expanded and a game has finished.
+        if self.show_games {
+            let stale = self.games_cache.as_ref().map(|(n, _)| *n) != Some(live.finished);
+            if stale && let Some(id) = backend.active.as_ref().map(|a| a.handle.id) {
+                self.games_cache = Some((live.finished, backend.list_games(id)));
+            }
+        }
+
         // Control bar (top).
         egui::Panel::top("tournament_live_controls")
             .frame(
@@ -1543,8 +1563,79 @@ impl TournamentTab {
                             ui.add_space(16.0);
                             head_to_head_matrix(ui, &live);
                         }
+                        if self.show_games {
+                            ui.add_space(16.0);
+                            self.live_games_section(ui, &live);
+                        }
                     });
             });
+
+        // The board viewer floats above everything.
+        self.viewer.ui(ui.ctx());
+    }
+
+    /// Expandable list of the active tournament's games with a View button each.
+    fn live_games_section(&mut self, ui: &mut Ui, live: &LiveData) {
+        let count = self.games_cache.as_ref().map_or(0, |(_, g)| g.len());
+        ui.label(
+            RichText::new(format!("Games ({count})"))
+                .color(theme::TEXT)
+                .size(13.5)
+                .strong(),
+        );
+        if count == 0 {
+            ui.label(
+                RichText::new("No games yet.")
+                    .color(theme::TEXT_WEAK)
+                    .size(12.5),
+            );
+            return;
+        }
+        ui.add_space(6.0);
+
+        let mut view_idx: Option<usize> = None;
+        if let Some((_, games)) = &self.games_cache {
+            for (i, g) in games.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!("R{}", g.round))
+                            .color(theme::TEXT_FAINT)
+                            .monospace()
+                            .size(12.0),
+                    );
+                    let result = g
+                        .result
+                        .map(|r| r.pgn().to_string())
+                        .unwrap_or_else(|| "…".to_string());
+                    ui.label(
+                        RichText::new(format!(
+                            "{} vs {}  {}",
+                            live.participant_name(g.white),
+                            live.participant_name(g.black),
+                            result
+                        ))
+                        .color(theme::TEXT_WEAK)
+                        .size(12.5),
+                    );
+                    let has_pgn = g.pgn.as_deref().is_some_and(|p| !p.trim().is_empty());
+                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add_enabled(has_pgn, egui::Button::new("View")).clicked() {
+                            view_idx = Some(i);
+                        }
+                    });
+                });
+                ui.add_space(2.0);
+            }
+        }
+
+        if let Some(i) = view_idx
+            && let Some((_, games)) = &self.games_cache
+        {
+            let g = &games[i];
+            let white = live.participant_name(g.white).to_string();
+            let black = live.participant_name(g.black).to_string();
+            self.viewer.open_game(g, &white, &black);
+        }
     }
 
     fn live_control_bar(&mut self, ui: &mut Ui, backend: &mut Backend, live: &LiveData) {
@@ -1663,6 +1754,7 @@ impl TournamentTab {
                     .clicked()
                 {
                     backend.clear_active();
+                    self.games_cache = None;
                 }
                 ui.add_space(6.0);
 
@@ -1694,6 +1786,9 @@ impl TournamentTab {
                 if let Some(note) = &self.export_note {
                     ui.label(RichText::new(note).color(theme::TEXT_WEAK).size(12.0));
                 }
+                ui.add_space(6.0);
+                ui.toggle_value(&mut self.show_games, RichText::new("Games").size(13.0))
+                    .on_hover_text("Browse finished games and open them in the board viewer.");
                 ui.add_space(6.0);
                 ui.toggle_value(
                     &mut self.show_h2h,

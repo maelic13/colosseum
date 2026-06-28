@@ -54,7 +54,7 @@ Ordered by value/effort; see [PLAN.md §11](PLAN.md) for detail.
 - [x] **Step 24** — Output & analysis: CSV export, export-PGN-now, SPRT/LOS/error bars, PGN/board viewer · _Large_
   - [x] **24a** — CSV standings/crosstable export + export-PGN-now (Export ▾ menu in live + history)
   - [x] **24b** — SPRT / LOS / Elo error bars (match-stats card for 2-engine tournaments)
-  - [x] **24c** — Built-in PGN/board viewer (History → Games → View)
+  - [x] **24c** — Built-in PGN/board viewer (History → Games → View; live view → Games toggle)
 - [x] **Step 25** — Cleanup: remove the unused SQLite `engines` table + dead `Store` engine methods · _Small_
 
 ---

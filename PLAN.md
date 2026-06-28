@@ -432,7 +432,8 @@ problems don't recur per-tab:
   arrow/Home/End navigation. The History detail pane gained a **Games (N)**
   list (cached via `Backend::list_games`) with a **View** button per game.
   Shakmaty added as a GUI dependency; SAN extraction + replay are unit-tested.
-  (Live-view game browsing can reuse the same viewer later.)
+  The live Tournament view has the same viewer behind a **Games** toggle in the
+  control bar (the game list is cached and refreshed only when a game finishes).
 
 ### Non-feature cleanup (step 25)
 
