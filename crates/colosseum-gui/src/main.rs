@@ -12,6 +12,7 @@ mod engines_tab;
 mod export_ui;
 mod history_tab;
 mod icon;
+mod logo;
 mod presets;
 mod stats_ui;
 mod theme;
@@ -56,6 +57,9 @@ fn main() -> eframe::Result<()> {
         .with_inner_size([backend.config.window_width, backend.config.window_height])
         .with_min_inner_size([860.0, 560.0])
         .with_maximized(backend.config.window_maximized)
+        // Start hidden; the app reveals the window after the first frame is
+        // painted, so startup never flashes an empty/unstyled window.
+        .with_visible(false)
         .with_icon(icon::icon());
 
     let native_options = eframe::NativeOptions {

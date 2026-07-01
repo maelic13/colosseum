@@ -48,13 +48,15 @@ pub async fn detect_engine(path: &Path) -> Result<DetectResult, EngineError> {
 
 /// Split a UCI `id name` into a display name and an optional version.
 ///
-/// Many engines report their version as the trailing token of `id name`
-/// (`"Stockfish 16.1"`, `"lc0 v0.30.0"`, `"Stockfish dev-20231041"`). Trailing
-/// architecture/platform descriptors (`"64-bit"`, `"x86-64"`, `"avx2"`, …) are
-/// noise and are dropped first. Then, when the last remaining token contains a
-/// digit it is treated as the version — a single leading `v`/`V` before a digit
-/// is dropped — and the rest become the name. Otherwise the whole string (minus
-/// noise) is the name and the version is `None` (e.g. `"Fire"`, `"Stash Bot"`).
+/// Many engines report their version as trailing tokens of `id name`
+/// (`"Stockfish 16.1"`, `"lc0 v0.30.0"`, `"Deep HIARCS 14 WCSC"`). Trailing
+/// architecture/platform descriptors (`"64-bit"`, `"x86-64"`, `"SSE42"`, …) are
+/// noise and are dropped first. Then the *last* token containing a digit marks
+/// the start of the version: that token and everything after it become the
+/// version (so suffixes like `"WCSC"` or `"mp"` stay attached), and the tokens
+/// before it become the name. A single leading `v`/`V` before a digit is
+/// dropped. When no token contains a digit, the whole string (minus noise) is
+/// the name and the version is `None` (e.g. `"Fire"`, `"Stash Bot"`).
 ///
 /// Example: `"Critter 1.6a 64-bit"` → name `"Critter"`, version `"1.6a"`.
 #[must_use]
@@ -68,12 +70,16 @@ pub fn split_name_version(id_name: &str) -> (String, Option<String>) {
         tokens.pop();
     }
 
-    if tokens.len() >= 2 {
-        let last = tokens[tokens.len() - 1];
-        if last.chars().any(|c| c.is_ascii_digit()) {
-            tokens.pop();
-            return (tokens.join(" "), Some(strip_version_prefix(last).to_string()));
-        }
+    // The version starts at the last digit-bearing token (never the first
+    // token, which is always part of the name — think "lc0" or "K2").
+    let version_start = tokens
+        .iter()
+        .rposition(|t| t.chars().any(|c| c.is_ascii_digit()))
+        .filter(|&i| i > 0);
+    if let Some(i) = version_start {
+        let mut version_tokens: Vec<&str> = tokens.split_off(i);
+        version_tokens[0] = strip_version_prefix(version_tokens[0]);
+        return (tokens.join(" "), Some(version_tokens.join(" ")));
     }
     (tokens.join(" "), None)
 }
@@ -85,6 +91,17 @@ fn is_arch_noise(token: &str) -> bool {
     let t = token
         .trim_matches(|c| matches!(c, '(' | ')' | '[' | ']'))
         .to_ascii_lowercase();
+    // SIMD families come in many numbered spellings (SSE42, SSE4.2, AVX-512,
+    // avx2, …): an "sse"/"avx" prefix followed only by digits/./-/_ is noise.
+    for prefix in ["sse", "avx"] {
+        if let Some(rest) = t.strip_prefix(prefix)
+            && rest
+                .chars()
+                .all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '_'))
+        {
+            return true;
+        }
+    }
     matches!(
         t.as_str(),
         "64-bit"
@@ -106,18 +123,12 @@ fn is_arch_noise(token: &str) -> bool {
             | "linux"
             | "macos"
             | "osx"
-            | "avx"
-            | "avx2"
-            | "avx512"
             | "bmi"
             | "bmi2"
             | "pext"
             | "popcnt"
-            | "sse2"
-            | "sse3"
             | "ssse3"
-            | "sse4"
-            | "sse41"
+            | "neon"
             | "vnni"
             | "modern"
     )
@@ -200,6 +211,46 @@ mod tests {
         assert_eq!(
             split_name_version("Fire x64"),
             ("Fire".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn strips_numbered_simd_noise() {
+        // "SSE42" is an architecture artifact, not the version.
+        assert_eq!(
+            split_name_version("Deep Rybka 4.1 SSE42"),
+            ("Deep Rybka".to_string(), Some("4.1".to_string()))
+        );
+        assert_eq!(
+            split_name_version("Deep Rybka 4 SSE42"),
+            ("Deep Rybka".to_string(), Some("4".to_string()))
+        );
+        assert_eq!(
+            split_name_version("Engine 3 AVX-512"),
+            ("Engine".to_string(), Some("3".to_string()))
+        );
+    }
+
+    #[test]
+    fn keeps_suffix_words_after_version_number() {
+        // Words after the last digit-bearing token belong to the version.
+        assert_eq!(
+            split_name_version("Deep HIARCS 14 WCSC"),
+            ("Deep HIARCS".to_string(), Some("14 WCSC".to_string()))
+        );
+        assert_eq!(
+            split_name_version("Rybka 2.3.2a mp"),
+            ("Rybka".to_string(), Some("2.3.2a mp".to_string()))
+        );
+    }
+
+    #[test]
+    fn first_token_is_never_the_version() {
+        // Digit-bearing names like "lc0" or "K2" stay names.
+        assert_eq!(split_name_version("K2"), ("K2".to_string(), None));
+        assert_eq!(
+            split_name_version("lc0 v0.30.0"),
+            ("lc0".to_string(), Some("0.30.0".to_string()))
         );
     }
 

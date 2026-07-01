@@ -94,7 +94,8 @@ foreground text `C` itself. Never put saturated semantic colors as large fills.
 
 ### 2.2 Typography
 
-Embed two fonts (both SIL OFL 1.1 — ship the license file next to the fonts):
+**Status: implemented** (see §7.1 for the binding rules). Embed two fonts
+(both SIL OFL 1.1 — ship the license file next to the fonts):
 
 - **Inter** (variable or Regular + SemiBold statics) — all proportional text.
   Source: <https://github.com/rsms/inter/releases> (`Inter-Regular.otf`,
@@ -131,16 +132,19 @@ Spacing scale: **4 / 8 / 12 / 16 / 24**. Concretely:
 - Card inner margin: 14; gap between cards: 12.
 - `spacing.interact_size.y = 28.0` (was 26).
 - `spacing.button_padding = vec2(12.0, 6.0)` (was 10,6).
+- Scrollbars: `ScrollStyle::solid()`, bar width 8 — solid bars reserve their
+  own lane and never float over content.
 
-Radii:
+Radii — **everything is a rectangle with rounded corners at a similar
+radius**; no fully-rounded pills or circles:
 
 | Radius | Use |
 |---|---|
+| 3 | Checkboxes (via `widgets::checkbox` — the widget default of 6 makes a ~16 px box read as a circle) |
 | 4 | Chips, progress bar |
-| 6 | Buttons, inputs (widget default — unchanged) |
-| 8 | Cards, menus |
+| 6 | Buttons, inputs, tabs, status pills (widget default) |
+| 8 | Cards, menus, logo boxes |
 | 10 | Windows/modals (unchanged) |
-| 999 (full) | Pills (tabs, status) |
 
 ---
 
@@ -150,11 +154,12 @@ All snippets assume `use crate::theme;` and egui ≥ 0.31 (`CornerRadius`,
 `Frame::new()`, integer `Margin`). Add the shared helpers to a new
 `crates/colosseum-gui/src/widgets.rs` module so all tabs reuse them.
 
-### 3.1 Pill tab (header navigation)
+### 3.1 Tab (header navigation)
 
 Replaces `selectable_label` tabs in `app.rs::header`.
 
-- Geometry: text padding 14 horizontal / 6 vertical, `CornerRadius::same(14)`.
+- Geometry: text padding 14 horizontal / 6 vertical, `CornerRadius::same(6)`
+  (the app-wide button radius — tabs are rounded rectangles, not pills).
 - Selected: fill `tint(ACCENT, 0.18)`, text `ACCENT_BRIGHT` strong, no stroke.
 - Idle: transparent fill, text `TEXT_WEAK`.
 - Hovered (idle only): fill `BG_HOVER`, text `TEXT`.
@@ -181,8 +186,9 @@ pub fn pill_tab(ui: &mut Ui, label: &str, selected: bool) -> bool {
 
 Replaces plain `● Running` labels (header/status bar/live control bar).
 
-- Rounded-full chip: fill `tint(C, 0.16)`, stroke `tint(C, 0.45)` 1px,
-  inner padding 10×3, dot `●` + label, both colored `C`, size 12.
+- Rounded-rectangle chip (radius 6): fill `tint(C, 0.16)`, stroke
+  `tint(C, 0.45)` 1px, inner padding 10×3, dot `●` + label, both colored `C`,
+  size 12.
 - Status → color: Running `SUCCESS`, Stopping `WARN`, Stopped `TEXT_WEAK`,
   Finished `ACCENT`, Idle `TEXT_FAINT` (hollow dot `○`).
 
@@ -335,7 +341,27 @@ Replace bare checkbox rows with **selectable card rows**, full width:
   card toggles selection (`Sense::click` on the frame response).
 - 4px gap between rows.
 
-### 3.9 Empty states
+### 3.9 Engine library card (Engines tab grid)
+
+The engine library is a card **grid** (not list rows — those are §3.8 and stay
+in tournament setup). Cards are spacious, en-croissant-inspired:
+
+- Size: fixed height **98**; responsive columns targeting ~**360** width
+  (`cols = ((avail + gap) / (360 + gap)).floor().clamp(1, 3)`), gap **12**.
+  Every card in a row is allocated at exactly the same size so the grid aligns.
+- Frame: fill `BG_ELEVATED`, stroke `STROKE`, radius 8, inner margin 12.
+  Hovered: `BG_HOVER`. Selected: fill `tint(ACCENT, 0.12)`, stroke
+  `tint(ACCENT, 0.45)`.
+- Top row: logo/avatar **36** (aspect-fitted, §"logo" module) + engine name
+  15 strong (`TEXT`; selected `ACCENT_BRIGHT`) with ⚠ `WARN` when the
+  executable is missing; directly below the name the subtitle (author, else
+  file name) `TEXT_WEAK` 11.5, truncated.
+- Bottom row: two labeled stat columns, like en-croissant — left `ELO`,
+  right (right-aligned) `VERSION`. Label: `TEXT_FAINT` 11 uppercase; value
+  below it 13.5 strong `TEXT` (`—` in `TEXT_FAINT` when unknown). No chips
+  inside cards.
+
+### 3.10 Empty states
 
 Centered vertically ~30% down, all centered text:
 
@@ -346,7 +372,7 @@ Centered vertically ~30% down, all centered text:
    started.").
 4. Optionally a secondary button (e.g. "Go to Engines").
 
-### 3.10 Modal (close-confirm)
+### 3.11 Modal (close-confirm)
 
 Keep current structure; adjust:
 - Width 400. Heading 18 strong, then 8px space.
@@ -393,12 +419,17 @@ Keep current structure; adjust:
 ### 4.5 Engines tab
 - Toolbar buttons: "Add engine…" = primary, "Scan folder…" = secondary,
   progress text unchanged.
-- List rows per §3.8 (selected = the engine being edited).
-- Edit panel: group into section cards — "Identity" (name, version, Elo),
-  "Launch" (path, args, working dir, env), "UCI Options" (detected options
-  table), action row (Save = primary, Re-detect = secondary,
-  Delete = tinted danger).
-- Empty state per §3.9.
+- Library grid of engine cards per §3.9 (selected = the engine being edited);
+  right-click context menu (clone / re-detect / open folder / copy path /
+  delete-with-modal).
+- Edit panel: identity header (name/version/author/Elo + logo box centered in
+  the space right of the fields, image corners rounded), a collapsible
+  "Launch & environment" section, UCI options in 1–3 width-responsive columns.
+  Changes **autosave** (600 ms debounce — no Save button); pinned bottom row:
+  Clone = secondary, Delete = tinted danger.
+- Global Endgame Tablebases: a collapsible bar pinned under the edit panel,
+  collapsed by default with a per-format ✓/— summary in the header.
+- Empty state per §3.10.
 
 ---
 
@@ -428,7 +459,93 @@ change needed beyond what exists.
 
 ---
 
-## 7. Implementation plan (ordered, independently verifiable)
+## 7. Established implementation decisions (v2 — post Engines-tab modernization)
+
+Decisions locked in while modernizing the Engines tab (steps 26–34). **Apply
+these to every tab** so the app stays cohesive; most are already global via
+`theme.rs` and `widgets.rs`.
+
+### 7.1 Typography & glyphs
+- Fonts are **embedded** (`assets/fonts/`): Inter-Regular (proportional),
+  Inter-SemiBold (family `"semibold"`), JetBrainsMono-Regular (monospace);
+  egui's defaults stay as fallbacks for symbols/emoji. This is the
+  cross-platform guarantee — never rely on OS fonts.
+- **Real bold** = `RichText::font(theme::semibold(size))`. `.strong()` only
+  brightens color (egui has one weight per family) — use it for subtle
+  emphasis only. Semibold is used for: card titles, stat values, panel
+  headers, section titles.
+- **Glyph policy**: only use glyphs verified present in the embedded/fallback
+  fonts — `● ○ × ⚠ ♟ 🔍 ⏳ ▾ …`. Known-missing (render as tofu): `✕ ✓ ▶ ▼`.
+  For arrows/icons beyond the safe set, **paint the shape**
+  (`widgets::disclosure_triangle`) instead of typing a character.
+
+### 7.2 Interaction rules (theme-global)
+- `WidgetVisuals.expansion = 0` for hovered/active — growing widgets on hover
+  shifts layouts and clips outlines at panel edges. Never reintroduce it.
+- `interaction.selectable_labels = false` — labels are chrome, not documents.
+- Scrollbars: `ScrollStyle::solid()` (bar width 8) — bars own a lane, never
+  float over content.
+- Panels whose content carries focus rings or hover outlines need a **2 pt
+  inner margin** on the edge facing the panel boundary.
+- Tab bodies and pinned rows use **panels** (`CentralPanel` /
+  `Panel::bottom`), never bare `Frame`s — bare frames don't clip, so tall
+  content paints over the status bar at small window sizes.
+
+### 7.3 Editing model
+- **Autosave, no Save buttons**: commit a debounced ~600 ms after the last
+  change; flush immediately on selection change, tab switch, and window close.
+  Feedback = brief italic "saved" flash (1.6 s), not a dirty marker.
+- While background work is pending (channels polled per frame), call
+  `request_repaint_after(~150 ms)` — otherwise results stall until the next
+  input event.
+- Destructive actions: **modal confirm** (`egui::Modal`) naming the target;
+  bulk destructive actions may use a two-step inline Confirm/Cancel.
+- Persisted UI preferences (sort orders, panel states worth keeping) live on
+  `AppConfig` with serde defaults; save on change.
+
+### 7.4 Component choices
+- Right-click **context menus** on list/grid items; right-click also selects.
+  Inside menus set item spacing ≥ 4 and button padding (10, 6);
+  `menu_margin = 10` is global.
+- **Dropdowns: always `widgets::select`, never `egui::ComboBox`.** Combo
+  popups wrap their items in a `ScrollArea` that shows a phantom scrollbar
+  even for tiny lists; `select` is a `MenuButton`-based dropdown (painted
+  arrow, menu popup) that never scrolls unless it hits the screen edge.
+  All former combos (UCI combo options, tournament format/TC/Elo-policy/
+  time-unit, engines sort) use it.
+- Rarely-touched global settings pinned to a region: **collapsible bar**,
+  collapsed by default, one-line header with a status summary (`●`/`○`) that
+  hides itself when the bar is too narrow to fit it.
+- Engine/entity images: decode once, cache **per displayed physical-pixel
+  size** with Lanczos3 (never GPU-minify large images), draw as a textured
+  rounded `RectShape` (radius 6 small / 8 large), snap to the pixel grid, and
+  let the *slot* adopt the image's aspect ratio where space allows. Monogram
+  fallbacks match the same rounded-square silhouette
+  (`widgets::draw_avatar_square_in`).
+- Fixed-size allocation for grid cards (`allocate_exact_size` + child `Ui`)
+  so rows align exactly; see §3.9 for the card spec.
+- Multi-column form layouts must derive the column count from the **measured
+  widest row** (layout the label/hint galleys), not a fixed estimate — data
+  varies (e.g. UCI option names range from "Log" to 45-character phrases).
+  Clip each column to its rect as a hard guarantee against paint-over —
+  but **never clip the scroll axis inside a `ScrollArea`** (clip X only in a
+  vertically scrolling area); a vertical clip freezes content at a fixed
+  height and makes it unreachable.
+- Detail-pane headers (identity + image) use **fixed geometry**: one
+  `allocate_exact_size` block with fields at constant positions and the image
+  centered on a constant point (aspect-fitted size may vary; reserve the
+  space of optional controls like Remove so nothing shifts between records).
+- **Checkboxes**: always `widgets::checkbox` (rounded square, radius 3) —
+  never raw `ui.checkbox`, whose default radius reads as a circle.
+- **Clearable fields**: the standard `widgets::clear_button` ("×") placed to
+  the *right of* the field, shown only when there is something to clear —
+  never a glyph floating inside the field.
+
+### 7.5 Startup
+- The window is created `visible(false)` and revealed after the first painted
+  frame (`ViewportCommand::Visible(true)` + `Focus`) — no startup flash.
+
+## 8. Implementation plan (ordered, independently verifiable)
 
 Each step compiles and passes `cargo clippy --workspace` and `cargo test
 --workspace` on its own.

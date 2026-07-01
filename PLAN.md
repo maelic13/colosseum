@@ -444,6 +444,312 @@ problems don't recur per-tab:
   orphan `engines` table (harmless, never written by the app); no migration is
   needed since the GUI never populated it.
 
+### Engines-tab visual refresh (step 26)
+
+- ✅ Reworked the Engine Management tab toward the clean, scannable look of
+  GUIs like en-croissant, while staying inside the Colosseum design tokens
+  (`docs/design/GUIDELINES.md`). The identity shown comes straight from the UCI
+  handshake — `id name` (split into name + version by `split_name_version`) and
+  `id author` — captured on add and on **Re-detect**.
+  - **Monogram avatars.** Each engine gets a circular initial badge tinted by a
+    stable hue (FNV-1a over the display name → `theme::AVATAR_PALETTE`), giving
+    logo-less local engines the at-a-glance identity a logo pipeline would. A
+    30 px badge in list rows, 40 px in the edit header.
+  - **List rows.** Row 1 is now the bold engine name plus a muted **version
+    chip**; row 2 shows the **author** (from `id author`) in place of the former
+    executable file name, falling back to the file name only when no author was
+    detected. Elo (when set) renders as a right-aligned chip. Broken-path ⚠ and
+    the multi-select checkbox are unchanged.
+  - **Edit header.** Avatar + name + gold version chip + a `by {author}`
+    subtitle (`Unknown author` when absent), replacing the bare name line.
+  - New shared `widgets::chip` (tinted static text chip) and the
+    `AVATAR_PALETTE` token; the old `engine_display_name*` helpers were replaced
+    by `engine_base_name` / `engine_subtitle` / avatar helpers. No behavior
+    change to detection, persistence, or the UCI-options editor.
+
+### Live-view fix + cross-tab polish + responsiveness (step 27)
+
+- ✅ **Board live view fixed.** The viewer itself was fine (works from History);
+  the live **Games** toggle lived in a single non-wrapping control-bar row that
+  overflowed and pushed the toggle off the right edge on anything but a very wide
+  window — so it was unreachable. `live_control_bar` is now two
+  `horizontal_wrapped` rows (transport/progress/timing, then view-toggles +
+  actions), so every control stays reachable at any width. The live **Games**
+  list now shows only finished (PGN-bearing) games, newest first, with an
+  always-enabled **View** (it previously listed every pending game as a disabled
+  button).
+- ✅ **Shared engine-row widgets.** `engine_base_name` / `engine_subtitle` /
+  `engine_initial` / `avatar_color` / `engine_avatar` moved into `widgets.rs`;
+  the **tournament-setup engine list** now uses the same monogram-avatar +
+  version-chip + author-subtitle row (and an Elo chip) as the Engines tab.
+- ✅ **Tab + cross-tab polish.** `pill_tab` gained a `BG_HOVER` hover fill and a
+  pointing-hand cursor on idle tabs. The Engines toolbar error and the History
+  detail action bar now truncate / wrap instead of overflowing. Two pre-existing
+  collapsible-`if` clippy nits (`tournament_tab`, `viewer`) fixed.
+- ✅ **Resize / fullscreen.** With the wrapped bars plus the existing
+  `with_min_inner_size([860, 560])` clamp, no control bar can clip; maximize /
+  fullscreen simply gain space (panels + scroll areas already size to available
+  width). *(Note: a live visual pass was blocked by a multi-monitor
+  screenshot-capture quirk in the dev session; verified via build/clippy/tests
+  and the earlier Engines-tab visual confirmation of the shared row widgets.)*
+
+### Engines tab restructure: grid + logos + global tablebases (step 28)
+
+- ✅ **Two-pane layout.** The Engines tab is now an en-croissant-style **card
+  grid** on the left (a fixed ~50% split via `Panel::exact_size`, so it tracks
+  the window instead of persisting an absolute width) and a split right column:
+  the selected engine's panel on top, a **global Endgame Tablebases** panel
+  pinned to the bottom (~25% height). The grid's column count is responsive
+  (1–4 by available width).
+- ✅ **Engine logos.** New `logo` module: a chosen image is copied into the GUI
+  `logos/` data dir under a unique `<id>-<millis>.<ext>` name (survives deletion
+  of the original), its name stored in `meta.extra["logo"]`. Decoded via the
+  `image` crate, cached by path, and drawn **aspect-fitted** (never cropped or
+  squished) into a fixed box; falls back to the monogram avatar. Click the
+  header logo to pick one; "Remove" clears it. Clone copies the logo file;
+  delete removes it. `AppDirs::logos_dir()` added.
+- ✅ **Engine panel.** Header = editable Name/Version/Author/Elo + logo box;
+  a collapsible "Launch & environment" section; then the UCI options in a
+  **scrollable** area; action row (Save/Clone/Delete) wraps so it never clips.
+- ✅ **Option filtering.** `is_globally_managed_option` hides Threads / `Max CPUs`
+  / Hash and tablebase **path** options from the per-engine editor — threads and
+  hash are set in the Tournament tab, paths in the global panel. The header shows
+  "N managed elsewhere".
+- ✅ **Global tablebase paths** (`syzygy_path` / `gaviota_path` / `nalimov_path`
+  on `AppConfig`, persisted in `config.toml`). `apply_global_tablebases` injects
+  them into each engine that declares a matching `*Path` option at tournament
+  start; the Tournament setup's old per-tournament SyzygyPath field was removed
+  (replaced by a pointer to the Engines tab).
+
+### Engines tab polish (step 29)
+
+- ✅ **Aligned grid.** Cards are drawn at an exact fixed size
+  (`allocate_exact_size` + a child `Ui` painted inside), so every card in a row
+  lines up regardless of content; the grid is sorted alphabetically by
+  name/version for display.
+- ✅ **Autosave.** The Save Changes button is gone: the edit buffer commits
+  automatically 600 ms after the last change (debounced, so typing doesn't spam
+  writes), plus an immediate flush on selection change, clone, tab switch, and
+  window close (`EnginesTab::flush_edit`, called from the app shell). A brief
+  "✓ saved" flash in the header replaces the old "● unsaved" marker.
+- ✅ **Card context menu.** Right-click selects the card and offers Clone,
+  Re-detect, Open containing folder, Copy path, and Delete Engine (confirmed
+  via an `egui::Modal`, shared with the panel's Delete button — the old inline
+  two-step confirm is gone). Clone logic is factored into `clone_engine`.
+- ✅ **Pinned actions.** The Clone / Delete row is a bottom `Panel` inside the
+  engine panel, so it can't be clipped away at small window sizes; the detail
+  column got proper left padding (16 pt) off the splitter.
+- ✅ **Sharp logos.** `LogoCache` now keeps the decoded image and uploads a
+  Lanczos3-downscaled texture per distinct physical-pixel display size, with
+  the draw rect snapped to the pixel grid — no more aliased minification of
+  1000+ px logos into 34 pt slots. Identity fields cap at half the panel width
+  and the header logo box grows up to 128 pt in the freed space.
+- ✅ **Better identity detection.** `split_name_version` now treats the *last*
+  digit-bearing token as the version start and keeps suffix words with it
+  ("Deep HIARCS 14 WCSC" → version "14 WCSC"; "Rybka 2.3.2a mp" → "2.3.2a mp"),
+  and numbered SIMD spellings (SSE42, SSE4.2, AVX-512…) are stripped as
+  architecture noise ("Deep Rybka 4.1 SSE42" → version "4.1"). Re-detect now
+  *overwrites* name/version/author (it's an explicit refresh), so stale wrong
+  values can be fixed from the context menu. UCI button options read
+  "run at game start" instead of the cryptic "arm".
+
+### Engines tab en-croissant card redesign (step 30)
+
+- ✅ **Spacious cards** (spec added as GUIDELINES §3.9). The library grid now
+  uses 98-pt-tall cards targeting ~360 pt width (1–3 responsive columns,
+  12-pt gaps): logo/avatar 36 + name 15 strong with the author subtitle under
+  it on top, and two labeled stat columns pinned to the bottom — `ELO` left,
+  `VERSION` right-aligned — with faint 11-pt uppercase labels over 13.5-pt
+  strong values (`—` when unknown). Version/Elo chips inside cards are gone;
+  the identity/UCI grids in the detail panel got the guideline `[12, 8]`
+  spacing. Verified live via screenshots against en-croissant's Engines page.
+- ✅ **Repaint-while-detecting fix** (found during live verification): results
+  from background add/scan/re-detect jobs arrive on a channel that is only
+  polled during a frame, so with no input the GUI never repainted and a
+  finished detection appeared "stuck". `EnginesTab::show` now requests a
+  repaint every 150 ms while a detection job is in flight.
+- GUIDELINES §4.5 updated to describe the current tab (grid cards, context
+  menu, autosave, pinned Clone/Delete) and the old inline "Save = primary"
+  action row was removed from the spec.
+
+### Engines tab polish round 2 (step 31)
+
+- ✅ **Solid scrollbars** — `spacing.scroll = ScrollStyle::solid()` in the theme:
+  scrollbars now reserve their own lane instead of floating over cards/options.
+- ✅ **Rounded logo rendering** — `logo::draw_fitted` takes a corner radius and
+  draws a textured `RectShape`, so square images on opaque backgrounds no
+  longer poke square corners out from under rounded frames (cards: 6, header: 8).
+- ✅ **Header logo centered** in the space right of the identity fields (was
+  pinned to the panel edge); the Remove button is placed via `ui.put` on a
+  fixed rect so it doesn't shift on hover.
+- ✅ **Filter field** — compact (280×28) with an inline ✕ clear button that
+  appears when text is entered (standard search-field affordance).
+- ✅ **Multi-column UCI options** — 1–3 columns depending on panel width
+  (~420 pt per column, min ~5 rows per column) instead of one skinny column.
+- ✅ **Tablebases as a collapsible bottom bar**, collapsed by default: a
+  one-line clickable header with a per-format ✓/— summary that expands to the
+  Browse rows. Rationale: a set-once global setting shouldn't permanently hold
+  ~25 % of the right column; collapsing also removes the small-window clipping.
+  (If more global settings accumulate later, consider a Settings dialog.)
+- ✅ **Small-window fix** — the tab body is now an `egui::CentralPanel` (was a
+  bare `Frame`), so content clips to the space between header and status bar;
+  previously tall content painted over the status bar at small sizes. The
+  pinned action row also gained proper bottom padding.
+
+### Embedded fonts + Engines tab polish round 3 (step 32)
+
+- ✅ **Embedded fonts** (GUIDELINES §2.2, cross-platform consistency):
+  `assets/fonts/` now ships Inter-Regular (proportional), Inter-SemiBold
+  (registered as the `"semibold"` family — egui has one weight per family, so
+  `.strong()` only brightens color; `theme::semibold(size)` gives real bold),
+  and JetBrainsMono-Regular (monospace), each with its license file. egui's
+  default fonts stay as fallbacks so symbols/emoji still resolve.
+- ✅ **Tofu eliminated.** Glyphs missing from the default fonts (`✕ ✓ ▶ ▼`)
+  rendered as squares. Replaced with: `×` on the filter-clear button, a
+  painter-drawn `widgets::disclosure_triangle`, `●`/`○` for the tablebase
+  set/unset summary, a plain italic "saved" flash, and "● runs at game start"
+  for armed UCI buttons. Rule of thumb recorded: only use glyphs verified in
+  egui's built-in fallbacks (`● ○ × ⚠ ♟ 🔍 ⏳ …`) or paint the shape.
+- ✅ **Hover expansion set to 0** in the theme — expanding widgets on hover
+  clipped their outline at panel edges (filter, Clone/Delete, Delete All) and
+  made layout shift; panels also got 2 pt edge margins for focus rings.
+- ✅ **Whole detail column scrolls** (header included) so the smallest window
+  can reach every field; tablebases summary hides below 240 pt header width
+  (it used to overlap the title).
+- ✅ **Monogram avatars are rounded squares** in the Engines tab (same
+  silhouette as uploaded logos; circles remain elsewhere), and the header
+  logo box now **adopts the image's aspect ratio** (wide logos like Rybka4's
+  banner use up to 220×128 pt instead of shrinking into a square);
+  `draw_fitted` may upscale the *draw* rect to fill the slot (texture itself
+  is never upscaled).
+- ✅ **Persisted grid sort** — `AppConfig::engines_sort` ("name" default,
+  "elo" = highest first / unrated last, "author" = alphabetical / unknown
+  last), a `Sort:` combo next to Delete All, saved on change.
+
+### Micro-polish + UCI-defaults audit (step 33)
+
+- ✅ **Sort popup** gets `.height(140.0)` — the default popup height was a hair
+  short of three entries, producing a phantom scrollbar that blinked on hover.
+- ✅ **Context menus** breathe: `spacing.menu_margin` 10 (theme-wide) and the
+  card menu sets item spacing 4 / button padding (10, 6).
+- ✅ **`interaction.selectable_labels = false`** theme-wide: labels are UI
+  chrome, not documents — clicking a card no longer selects its text. Text
+  fields are unaffected.
+- ✅ **UCI defaults audit** — compared `engines.json` stored `detected_options`
+  against a live `uci` dump of Deep Shredder 12: byte-for-byte identical.
+  Shredder's surprising values (Ponder default *true*, OwnBook *true*,
+  UCI_Elo 1400 gated behind UCI_LimitStrength=false) are what the engine
+  actually declares; the parser (`parse_option_line`) is faithful, including
+  multi-word defaults, `<empty>` strings, and negative spin ranges.
+
+### Tablebase probe caches + startup polish (step 34)
+
+- ✅ **Global probe-cache sizes.** `AppConfig` gains `nalimov_cache_mb` /
+  `gaviota_cache_mb` (default **32**). The common UCI option names — verified
+  against the user's engines — are `NalimovCache` (Shredder, Rybka) and
+  `GaviotaTbCache` (Critter); Syzygy has no cache option (memory-mapped).
+  Edited inline in the Endgame Tablebases bar (`Cache [n] MB` on the
+  Gaviota/Nalimov rows); `apply_global_tablebases` forwards them (clamped to
+  the option's declared min/max) to engines that declare a matching
+  `*cache*` option, but only when the corresponding path is set.
+  `is_globally_managed_option` now hides tb-cache options from the
+  per-engine editor.
+- ✅ **Sort selector → `MenuButton` popup.** `ComboBox` popups wrap contents
+  in a `ScrollArea` with menu styling that flashed a needless scrollbar for
+  three entries (a `.height()` bump did not fix it); menu popups don't.
+  Recorded in GUIDELINES §7.4: menu popup for short static lists.
+- ✅ **No startup blink.** The viewport is created `with_visible(false)` and
+  the app sends `ViewportCommand::Visible(true)` + `Focus` after the first
+  painted frame.
+- ✅ **GUIDELINES §7 added** — "Established implementation decisions":
+  typography/glyph policy, interaction rules (expansion 0, solid scrollbars,
+  selectable_labels off, panel margins/clipping), the autosave model,
+  component choices (context menus, menu popups, collapsible bars, image
+  cache), and the hidden-until-first-frame startup. This is the reference
+  for the upcoming Tournament/History redesign.
+
+### UCI options measured layout (step 35)
+
+- ✅ **Width-measured columns.** The 1–3 column split for UCI options was
+  driven by a fixed ~420 pt per-column estimate, which let engines with long
+  option names + wide range hints (Rybka: "Bishops Are Opposite Colored
+  Penalty milipawns" + "(-1000–1000)") overflow into the neighboring column.
+  `option_row_width` now measures each row (label galley at 13 pt + editor
+  width by option type + spin range-hint galley at 11.5 pt + reset/spacing),
+  and the column count is `avail / max_row_width` clamped 1–3 (still ≥ ~5
+  rows per column). Rybka/Shredder get 1–2 columns depending on window
+  width; short-named engines still get 3 on wide screens.
+- ✅ **Hard guarantee:** each column `Ui` clips to its own rect, so even a
+  pathological row truncates instead of painting over the next column.
+- ✅ Tablebases rows and header summary reordered **Syzygy → Nalimov →
+  Gaviota**. (Cache options were already hidden from per-engine editors in
+  step 34 — verified live: Rybka shows only `NalimovProbeFrequency`, which is
+  a probe frequency, not a cache size, and stays per-engine.)
+
+### Scroll/header fixes + word-wise filter (step 36)
+
+- ✅ **Options clip → horizontal only.** Step 35's per-column clip used the
+  column's full `max_rect`, whose *vertical* bounds inside a `ScrollArea` cut
+  the grid at a fixed content height — options were painted half-cut and the
+  rest unreachable at small windows. The clip now constrains X only (that's
+  all that's needed to prevent cross-column paint); Y stays unbounded so the
+  scroll area works. Verified: Rybka's full option list scrolls to the last
+  row at the minimum window size. **Rule: never clip the scroll axis inside
+  a `ScrollArea`.**
+- ✅ **Fixed-geometry engine header.** The header is one `allocate_exact_size`
+  block (176 pt): identity fields (Name/Version/Author/Elo) at identical
+  positions for every engine, and a logo slot right of them whose *center
+  point is constant* — the image inside is aspect-fitted (≤ 220×128) so only
+  its size varies; the Remove row is always reserved so the image doesn't
+  shift when the button appears. Verified pixel-identical between Rybka
+  (wide logo) and Houdini (default avatar).
+- ✅ **Word-wise filter** — every whitespace-separated term must match in
+  name/version/author/filename, so "shredder 12" or "rybka 4.1" work.
+- ✅ **Startup blink** — reveal moved to the third pumped frame
+  (`request_repaint` until then), so frames are actually presented before
+  the window becomes visible.
+
+### Shape-language unification (step 37)
+
+- ✅ **One corner-radius language** (GUIDELINES §2.3 updated): everything is a
+  rectangle with rounded corners — header tabs and status pills dropped from
+  radius 14/10 to the app-wide 6; checkboxes get radius 3 via the new
+  `widgets::checkbox(ui, checked, label)` (egui's default widget radius 6 on
+  a ~16 px checkbox reads as a circle). All `ui.checkbox` call sites
+  converted, including the Tournament tab, so the whole app is uniform.
+- ✅ **One clear-button** — new `widgets::clear_button` ("×", the tablebase-row
+  style): placed to the right of the field, shown only when there is text.
+  The engine filter's inline floating ✕ was replaced with it; rule recorded
+  in GUIDELINES §7.4.
+
+### Scrollbar-free dropdowns app-wide (step 38)
+
+- ✅ **`widgets::select`** — a `MenuButton::from_button`-based dropdown: button
+  shows the current value (trailing spaces reserve room for a painted
+  triangle arrow — font-safe per the glyph policy), the popup is a menu (no
+  `ScrollArea`), items via `selectable_value`/`selectable_label`. Replaces
+  `egui::ComboBox` at every call site: the UCI combo-option editor
+  (engines tab), tournament Format / TC type / time-unit / Elo-policy
+  selectors, and the engines sort selector (which had hand-rolled the same
+  pattern). Root cause: ComboBox popups always wrap contents in
+  `ScrollArea::max_height(combo_height)` which exhibits a phantom scrollbar
+  with our theme even when content fits. Rule in GUIDELINES §7.4: always
+  `widgets::select`, never `egui::ComboBox`.
+
+### Ponder managed per tournament only (step 39)
+
+- ✅ `resolve_options` (scheduler.rs) always inserts `Ponder` from the
+  tournament's common options *after* merging per-engine overrides — a
+  per-engine Ponder value was silently dead. The per-engine editor now hides
+  `Ponder` (exact-name match, so options like `PonderTimeFactor` stay
+  editable) via `is_globally_managed_option`; the "managed elsewhere"
+  tooltip lists the full set: Threads/Hash/Ponder → Tournament tab,
+  tablebase paths + probe caches → Endgame Tablebases panel. Rationale:
+  Ponder is match-play policy, not an engine trait — one authoritative
+  switch in tournament setup, no lying duplicate.
+- ✅ 14 pt bottom padding after the last UCI option row, so the scrolled list
+  doesn't sit flush against the pinned Clone/Delete action-row divider.
+
 ## 12. Deferred (architecture-ready)
 
 Error-bar/Ordo rating recompute (see step 24); engine process pool; tablebase-based

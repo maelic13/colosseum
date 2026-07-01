@@ -232,10 +232,10 @@ impl GameViewer {
 
                 let light = (col + rank) % 2 == 1;
                 let mut fill = if light { SQ_LIGHT } else { SQ_DARK };
-                if let Some((from, to)) = highlight {
-                    if Some(square) == from || square == to {
-                        fill = fill.lerp_to_gamma(LAST_MOVE, 0.45);
-                    }
+                if let Some((from, to)) = highlight
+                    && (Some(square) == from || square == to)
+                {
+                    fill = fill.lerp_to_gamma(LAST_MOVE, 0.45);
                 }
                 painter.rect_filled(cell, 0.0, fill);
 

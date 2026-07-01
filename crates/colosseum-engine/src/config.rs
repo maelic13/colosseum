@@ -88,6 +88,13 @@ impl AppDirs {
         self.config_dir.join("engines.json")
     }
 
+    /// Directory holding copied engine logo images. Kept under `data_dir` so a
+    /// logo survives deletion of the user's original file.
+    #[must_use]
+    pub fn logos_dir(&self) -> PathBuf {
+        self.data_dir.join("logos")
+    }
+
     /// Create both directories if they do not already exist.
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.config_dir)?;
@@ -119,6 +126,22 @@ pub struct AppConfig {
     pub last_pgn_dir: Option<PathBuf>,
     /// Last directory the user browsed for opening book files (EPD/PGN — Step 10).
     pub last_openings_dir: Option<PathBuf>,
+    /// Global Syzygy tablebase directory, forwarded to every engine that declares
+    /// a matching UCI option (`SyzygyPath`). Managed in the Engines tab, not
+    /// per-engine.
+    pub syzygy_path: Option<String>,
+    /// Global Gaviota tablebase directory (engines' `GaviotaTbPath`).
+    pub gaviota_path: Option<String>,
+    /// Global Nalimov tablebase directory (engines' `NalimovPath`).
+    pub nalimov_path: Option<String>,
+    /// Cache size in MB for Nalimov probing (engines' `NalimovCache`),
+    /// applied when `nalimov_path` is set.
+    pub nalimov_cache_mb: u32,
+    /// Cache size in MB for Gaviota probing (engines' `GaviotaTbCache`),
+    /// applied when `gaviota_path` is set.
+    pub gaviota_cache_mb: u32,
+    /// Engines-tab card sort order: `"name"`, `"elo"`, or `"author"`.
+    pub engines_sort: String,
 }
 
 impl Default for AppConfig {
@@ -130,6 +153,12 @@ impl Default for AppConfig {
             last_engine_dir: None,
             last_pgn_dir: None,
             last_openings_dir: None,
+            syzygy_path: None,
+            gaviota_path: None,
+            nalimov_path: None,
+            nalimov_cache_mb: 32,
+            gaviota_cache_mb: 32,
+            engines_sort: "name".to_string(),
         }
     }
 }

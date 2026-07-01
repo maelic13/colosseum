@@ -56,6 +56,20 @@ pub const MEDAL_GOLD: Color32 = ACCENT;
 pub const MEDAL_SILVER: Color32 = Color32::from_rgb(0xaa, 0xb4, 0xc4);
 pub const MEDAL_BRONZE: Color32 = Color32::from_rgb(0xc0, 0x82, 0x55);
 
+/// Muted identity hues for engine monogram avatars. An engine is assigned one by
+/// hashing its name, so it keeps the same color across sessions — giving the list
+/// the at-a-glance scannability that logo-equipped GUIs get from real engine art,
+/// without an asset pipeline. Kept desaturated so they sit calmly on the slate
+/// theme and never compete with the gold accent.
+pub const AVATAR_PALETTE: [Color32; 6] = [
+    ACCENT,                               // gold
+    SUCCESS,                              // green
+    Color32::from_rgb(0x5f, 0x93, 0xd6), // blue
+    Color32::from_rgb(0x4f, 0xb5, 0xb8), // teal
+    Color32::from_rgb(0xa9, 0x8a, 0xd6), // violet
+    Color32::from_rgb(0xd9, 0x8f, 0xa6), // rose
+];
+
 /// Alpha-blend `c` over a dark background at fractional strength.
 /// Use fill = `tint(c, 0.16)`, stroke = `tint(c, 0.45)`, text = `c`.
 pub fn tint(c: Color32, alpha: f32) -> Color32 {
@@ -67,6 +81,7 @@ pub fn tint(c: Color32, alpha: f32) -> Color32 {
 /// Install the Colosseum theme (colors, spacing, rounding, type scale) into the
 /// given egui context. Call once at startup.
 pub fn apply(ctx: &egui::Context) {
+    install_fonts(ctx);
     let mut style = (*ctx.global_style()).clone();
 
     style.visuals = visuals();
@@ -75,10 +90,13 @@ pub fn apply(ctx: &egui::Context) {
     let spacing = &mut style.spacing;
     spacing.item_spacing = egui::vec2(8.0, 8.0);
     spacing.button_padding = egui::vec2(12.0, 6.0);
-    spacing.menu_margin = egui::Margin::same(6);
+    spacing.menu_margin = egui::Margin::same(10);
     spacing.indent = 18.0;
     spacing.interact_size.y = 28.0;
-    spacing.scroll.bar_width = 10.0;
+    // Solid scrollbars reserve their own lane instead of floating over the
+    // content, so they never cover cards or option rows.
+    spacing.scroll = egui::style::ScrollStyle::solid();
+    spacing.scroll.bar_width = 8.0;
 
     // A clear, readable type scale.
     style.text_styles = [
@@ -102,7 +120,63 @@ pub fn apply(ctx: &egui::Context) {
     ]
     .into();
 
+    // Labels are UI chrome, not documents — don't let clicks select their text
+    // (card titles, section headers). Text fields are unaffected.
+    style.interaction.selectable_labels = false;
+
     ctx.set_global_style(style);
+}
+
+/// Embed Inter (UI) and JetBrains Mono (numbers) so text renders identically on
+/// every platform, with egui's default fonts kept as fallbacks for symbols and
+/// emoji. Registers an extra `"semibold"` family because egui ships a single
+/// weight per family — `RichText::strong()` only brightens the color.
+fn install_fonts(ctx: &egui::Context) {
+    use eframe::egui::{FontData, FontDefinitions};
+    use std::sync::Arc;
+
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert(
+        "Inter".into(),
+        Arc::new(FontData::from_static(include_bytes!(
+            "../assets/fonts/Inter-Regular.otf"
+        ))),
+    );
+    fonts.font_data.insert(
+        "Inter-SemiBold".into(),
+        Arc::new(FontData::from_static(include_bytes!(
+            "../assets/fonts/Inter-SemiBold.otf"
+        ))),
+    );
+    fonts.font_data.insert(
+        "JetBrainsMono".into(),
+        Arc::new(FontData::from_static(include_bytes!(
+            "../assets/fonts/JetBrainsMono-Regular.ttf"
+        ))),
+    );
+
+    if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
+        prop.insert(0, "Inter".into());
+    }
+    if let Some(mono) = fonts.families.get_mut(&FontFamily::Monospace) {
+        mono.insert(0, "JetBrainsMono".into());
+    }
+    // Semibold family: Inter-SemiBold first, then the proportional fallbacks
+    // (so symbols inside semibold text still resolve).
+    let mut semibold = vec!["Inter-SemiBold".to_owned()];
+    if let Some(prop) = fonts.families.get(&FontFamily::Proportional) {
+        semibold.extend(prop.iter().skip(1).cloned());
+    }
+    fonts
+        .families
+        .insert(FontFamily::Name("semibold".into()), semibold);
+
+    ctx.set_fonts(fonts);
+}
+
+/// A semibold [`FontId`] at `size` — real bold text (see [`install_fonts`]).
+pub fn semibold(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name("semibold".into()))
 }
 
 /// The Colosseum dark [`Visuals`].
@@ -159,14 +233,15 @@ fn widgets() -> Widgets {
             corner_radius: radius,
             expansion: 0.0,
         },
-        // Hovered.
+        // Hovered. Zero expansion: growing widgets on hover shifts layouts and
+        // lets the extra pixel clip against panel edges.
         hovered: WidgetVisuals {
             bg_fill: BG_HOVER,
             weak_bg_fill: BG_HOVER,
             bg_stroke: Stroke::new(1.0, STROKE),
             fg_stroke: Stroke::new(1.5, TEXT),
             corner_radius: radius,
-            expansion: 1.0,
+            expansion: 0.0,
         },
         // Pressed / active.
         active: WidgetVisuals {
@@ -175,7 +250,7 @@ fn widgets() -> Widgets {
             bg_stroke: Stroke::new(1.0, ACCENT),
             fg_stroke: Stroke::new(1.5, TEXT),
             corner_radius: radius,
-            expansion: 1.0,
+            expansion: 0.0,
         },
         // Open menus / selected.
         open: WidgetVisuals {

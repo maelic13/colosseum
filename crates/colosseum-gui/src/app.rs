@@ -56,6 +56,10 @@ pub struct ColosseumApp {
     engines_tab: EnginesTab,
     tournament_tab: TournamentTab,
     history_tab: HistoryTab,
+    /// Frames painted so far while the window is still hidden. The window is
+    /// revealed only after a couple of frames have actually been presented,
+    /// so no unpainted surface is ever shown (startup flash).
+    frames_before_reveal: u8,
 }
 
 impl ColosseumApp {
@@ -70,6 +74,7 @@ impl ColosseumApp {
             engines_tab: EnginesTab::default(),
             tournament_tab,
             history_tab: HistoryTab::default(),
+            frames_before_reveal: 0,
         }
     }
 
@@ -100,6 +105,7 @@ impl ColosseumApp {
         if close_requested {
             if self.close == CloseState::Closing {
                 // Already confirmed — allow this close to proceed.
+                self.engines_tab.flush_edit(&mut self.backend);
                 self.backend.save_config();
                 return;
             }
@@ -108,6 +114,7 @@ impl ColosseumApp {
                 ctx.send_viewport_cmd(ViewportCommand::CancelClose);
                 self.close = CloseState::Confirming;
             } else {
+                self.engines_tab.flush_edit(&mut self.backend);
                 self.backend.save_config();
                 // Let the close proceed (do not cancel).
             }
@@ -227,6 +234,10 @@ impl ColosseumApp {
                     for tab in [Tab::Tournament, Tab::Engines, Tab::History] {
                         let selected = self.tab == tab;
                         if widgets::pill_tab(ui, tab.label(), selected) {
+                            if self.tab == Tab::Engines && tab != Tab::Engines {
+                                // Commit any debounced engine edit before leaving.
+                                self.engines_tab.flush_edit(&mut self.backend);
+                            }
                             self.tab = tab;
                         }
                         ui.add_space(4.0);
@@ -283,12 +294,17 @@ impl ColosseumApp {
             });
     }
 
-    /// The central tab body.
+    /// The central tab body. A `CentralPanel` (not a bare frame) so content is
+    /// clipped to the space between the header and status bar — a bare frame
+    /// let tall content paint over the status bar at small window sizes.
     fn body(&mut self, ui: &mut Ui) {
-        egui::Frame::default()
-            .fill(theme::BG_PANEL)
-            .inner_margin(egui::Margin::same(16))
-            .show(ui, |ui| match self.tab {
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::default()
+                    .fill(theme::BG_PANEL)
+                    .inner_margin(egui::Margin::same(16)),
+            )
+            .show_inside(ui, |ui| match self.tab {
                 Tab::Tournament => {
                     self.tournament_tab.show(ui, &mut self.backend);
                 }
@@ -321,6 +337,19 @@ impl eframe::App for ColosseumApp {
         self.body(ui);
 
         self.handle_close(&ctx);
+
+        // The window starts hidden (see `main.rs`); keep pumping frames and
+        // reveal only after a couple have been fully painted, so the user
+        // never sees an unpainted surface flash at startup.
+        if self.frames_before_reveal < 3 {
+            self.frames_before_reveal += 1;
+            if self.frames_before_reveal == 3 {
+                ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(ViewportCommand::Focus);
+            } else {
+                ctx.request_repaint();
+            }
+        }
     }
 }
 

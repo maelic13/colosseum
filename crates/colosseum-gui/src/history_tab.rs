@@ -436,7 +436,8 @@ impl HistoryTab {
         let resumable = row.status != STATUS_FINISHED;
         let busy = backend.is_busy();
 
-        ui.horizontal(|ui| {
+        // Wrapped so the action buttons stay reachable on a narrow window.
+        ui.horizontal_wrapped(|ui| {
             if resumable {
                 let enabled = !busy;
                 if widgets::tinted_button(ui, "↩ Resume", theme::SUCCESS, enabled)
