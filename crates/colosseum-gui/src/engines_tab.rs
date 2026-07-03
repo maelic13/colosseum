@@ -68,45 +68,10 @@ enum CardAction {
     Delete,
 }
 
-/// Sort order for the engine card grid, persisted in `AppConfig::engines_sort`.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum EngineSort {
-    Name,
-    Elo,
-    Author,
-}
-
-impl EngineSort {
-    const ALL: [Self; 3] = [Self::Name, Self::Elo, Self::Author];
-
-    fn from_config(s: &str) -> Self {
-        match s {
-            "elo" => Self::Elo,
-            "author" => Self::Author,
-            _ => Self::Name,
-        }
-    }
-
-    fn as_config(self) -> &'static str {
-        match self {
-            Self::Name => "name",
-            Self::Elo => "elo",
-            Self::Author => "author",
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Name => "Name",
-            Self::Elo => "Elo",
-            Self::Author => "Author",
-        }
-    }
-}
-
 impl EnginesTab {
     /// Draw the full tab body.  Call every frame.
     pub fn show(&mut self, ui: &mut Ui, backend: &mut Backend) {
+        self.logos.begin_frame();
         // Poll any background work first so results are visible this frame.
         self.poll_detect(backend);
         self.poll_redetect();
@@ -143,7 +108,7 @@ impl EnginesTab {
 
         // ── Bottom-right: global tablebase paths (collapsible, collapsed by
         // default so the engine panel keeps the vertical space) ──
-        let tb_h = if self.tb_expanded { 172.0 } else { 46.0 };
+        let tb_h = if self.tb_expanded { 182.0 } else { 46.0 };
         egui::Panel::bottom("engines_tablebases_panel")
             .resizable(false)
             .exact_size(tb_h)
@@ -510,7 +475,7 @@ impl EnginesTab {
             if let Some(err) = self.detect_error.clone() {
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .small_button(RichText::new("×").color(theme::TEXT_WEAK))
+                        .add(egui::Button::new(RichText::new("×").color(theme::TEXT_WEAK)))
                         .clicked()
                     {
                         self.detect_error = None;
@@ -549,24 +514,11 @@ impl EnginesTab {
             );
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 // Sort selector (rightmost; persisted across sessions).
-                let mut sort = EngineSort::from_config(&backend.config.engines_sort);
-                let prev = sort;
-                widgets::select(
+                if widgets::engine_sort_select(
                     ui,
                     "engines_sort_select",
-                    &format!("Sort: {}", sort.label()),
-                    110.0,
-                    |ui| {
-                        for s in EngineSort::ALL {
-                            if ui.selectable_label(sort == s, s.label()).clicked() {
-                                sort = s;
-                                ui.close();
-                            }
-                        }
-                    },
-                );
-                if sort != prev {
-                    backend.config.engines_sort = sort.as_config().to_string();
+                    &mut backend.config.engines_sort,
+                ) {
                     backend.save_config();
                 }
                 ui.add_space(8.0);
@@ -581,7 +533,7 @@ impl EnginesTab {
                         }
                         ui.add_space(2.0);
                         if ui
-                            .small_button(RichText::new("Cancel").color(theme::TEXT_WEAK))
+                            .add(egui::Button::new(RichText::new("Cancel").color(theme::TEXT_WEAK)))
                             .clicked()
                         {
                             cancel_delete_all = true;
@@ -615,19 +567,7 @@ impl EnginesTab {
         // Compact search field; the standard "×" clear button appears to its
         // right as soon as there is text (same control as the tablebase rows).
         ui.horizontal(|ui| {
-            ui.add_sized(
-                [280.0, 28.0],
-                egui::TextEdit::singleline(&mut self.filter_text)
-                    .hint_text("🔍 Filter engines…")
-                    .margin(egui::Margin::symmetric(8, 6)),
-            );
-            if !self.filter_text.is_empty()
-                && widgets::clear_button(ui)
-                    .on_hover_text("Clear filter")
-                    .clicked()
-            {
-                self.filter_text.clear();
-            }
+            widgets::filter_field(ui, &mut self.filter_text, 280.0, "🔍 Filter engines…");
         });
         ui.add_space(10.0);
 
@@ -664,43 +604,14 @@ impl EnginesTab {
                     .engines
                     .iter()
                     .enumerate()
-                    .filter(|(_, e)| filter.is_empty() || engine_matches(e, &filter))
+                    .filter(|(_, e)| filter.is_empty() || widgets::engine_matches(e, &filter))
                     .map(|(i, _)| i)
                     .collect();
-                let name_key = |e: &EngineConfig| {
-                    (
-                        widgets::engine_base_name(e).to_lowercase(),
-                        e.meta.version.to_lowercase(),
-                    )
-                };
-                match EngineSort::from_config(&backend.config.engines_sort) {
-                    EngineSort::Name => {
-                        visible.sort_by_key(|&i| name_key(&backend.engines[i]));
-                    }
-                    EngineSort::Elo => {
-                        // Highest Elo first; engines without a rating last.
-                        visible.sort_by_key(|&i| {
-                            let e = &backend.engines[i];
-                            (
-                                std::cmp::Reverse(e.meta.elo.unwrap_or(i32::MIN)),
-                                name_key(e),
-                            )
-                        });
-                    }
-                    EngineSort::Author => {
-                        // Alphabetical by author; engines without one last.
-                        visible.sort_by_key(|&i| {
-                            let e = &backend.engines[i];
-                            let author = e
-                                .meta
-                                .extra
-                                .get("author")
-                                .map(|a| a.trim().to_lowercase())
-                                .unwrap_or_default();
-                            (author.is_empty(), author, name_key(e))
-                        });
-                    }
-                }
+                widgets::sort_engine_indices(
+                    &backend.engines,
+                    &mut visible,
+                    widgets::EngineSort::from_config(&backend.config.engines_sort),
+                );
 
                 if visible.is_empty() {
                     ui.add_space(20.0);
@@ -1415,7 +1326,7 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                         if let Some(folder) = edit.path.parent() {
                             let folder = folder.to_path_buf();
                             if ui
-                                .small_button(RichText::new("Open folder").color(theme::TEXT_WEAK))
+                                .add(egui::Button::new(RichText::new("Open folder").color(theme::TEXT_WEAK)))
                                 .on_hover_text("Open the folder containing this engine.")
                                 .clicked()
                             {
@@ -1465,7 +1376,7 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                     field_label(ui, "Work dir");
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                         let browse_clicked = ui
-                            .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
+                            .add(egui::Button::new(RichText::new("Browse…").color(theme::TEXT_WEAK)))
                             .clicked();
                         if ui
                             .add(
@@ -1513,7 +1424,7 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                     }
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .small_button(RichText::new("×").color(theme::DANGER))
+                            .add(egui::Button::new(RichText::new("×").color(theme::DANGER)))
                             .clicked()
                         {
                             remove_idx = Some(i);
@@ -1629,7 +1540,7 @@ fn uci_options_section(
             }
             if !edit.option_overrides.is_empty()
                 && ui
-                    .small_button(RichText::new("Reset all").color(theme::TEXT_WEAK))
+                    .add(egui::Button::new(RichText::new("Reset all").color(theme::TEXT_WEAK)))
                     .on_hover_text("Remove all option overrides, reverting to engine defaults.")
                     .clicked()
             {
@@ -1732,10 +1643,10 @@ fn options_grid(
         .spacing([10.0, 7.0])
         .show(ui, |ui| {
             for opt in opts {
-                show_option_row(ui, opt, &mut edit.option_overrides, changed);
+                widgets::uci_option_row(ui, opt, &mut edit.option_overrides, changed);
                 if edit.option_overrides.contains_key(opt.name()) {
                     if ui
-                        .small_button(RichText::new("×").color(theme::TEXT_FAINT))
+                        .add(egui::Button::new(RichText::new("×").color(theme::TEXT_FAINT)))
                         .on_hover_text("Reset to engine default.")
                         .clicked()
                     {
@@ -1828,21 +1739,72 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
             let mut changed = false;
             egui::Grid::new("global_tb_grid")
                 .num_columns(2)
-                .spacing([10.0, 6.0])
+                .spacing([10.0, 10.0])
                 .show(ui, |ui| {
-                    changed |= tablebase_row(ui, "Syzygy", &mut backend.config.syzygy_path, None);
-                    changed |= tablebase_row(
-                        ui,
-                        "Nalimov",
-                        &mut backend.config.nalimov_path,
-                        Some(&mut backend.config.nalimov_cache_mb),
-                    );
-                    changed |= tablebase_row(
-                        ui,
-                        "Gaviota",
-                        &mut backend.config.gaviota_path,
-                        Some(&mut backend.config.gaviota_cache_mb),
-                    );
+                    // NB: extras draw inside a right-to-left layout — add
+                    // controls in reverse visual order.
+                    let cfg = &mut backend.config;
+                    changed |= tablebase_row(ui, "Syzygy", &mut cfg.syzygy_path, |ui| {
+                        let mut ch = widgets::checkbox(ui, &mut cfg.syzygy_50_move_rule, "50-move rule")
+                            .on_hover_text(
+                                "Tablebase scores respect the 50-move rule (FIDE-correct). \
+                                 Off counts \"cursed\" wins as wins.",
+                            )
+                            .changed();
+                        ui.add_space(8.0);
+                        ch |= ui
+                            .add(
+                                DragValue::new(&mut cfg.syzygy_probe_limit)
+                                    .range(3..=7)
+                                    .speed(0.1),
+                            )
+                            .on_hover_text(
+                                "Probe positions with up to this many pieces — match the \
+                                 tablebase files you actually have (5/6/7-man).",
+                            )
+                            .changed();
+                        ui.label(
+                            RichText::new("Probe limit").color(theme::TEXT_FAINT).size(11.5),
+                        );
+                        ch
+                    });
+                    changed |= tablebase_row(ui, "Nalimov", &mut cfg.nalimov_path, |ui| {
+                        cache_extra(ui, "Nalimov", &mut cfg.nalimov_cache_mb)
+                    });
+                    changed |= tablebase_row(ui, "Gaviota", &mut cfg.gaviota_path, |ui| {
+                        let mut ch = false;
+                        widgets::select(
+                            ui,
+                            "gaviota_compression",
+                            &cfg.gaviota_compression.clone(),
+                            64.0,
+                            |ui| {
+                                for scheme in ["cp0", "cp1", "cp2", "cp3", "cp4"] {
+                                    if ui
+                                        .selectable_label(
+                                            cfg.gaviota_compression == scheme,
+                                            scheme,
+                                        )
+                                        .clicked()
+                                    {
+                                        cfg.gaviota_compression = scheme.to_string();
+                                        ch = true;
+                                        ui.close();
+                                    }
+                                }
+                            },
+                        );
+                        ui.label(
+                            RichText::new("Compression").color(theme::TEXT_FAINT).size(11.5),
+                        )
+                        .on_hover_text(
+                            "Compression scheme of the Gaviota files on disk (cp4 is the \
+                             common download).",
+                        );
+                        ui.add_space(8.0);
+                        ch |= cache_extra(ui, "Gaviota", &mut cfg.gaviota_cache_mb);
+                        ch
+                    });
                 });
             if changed {
                 backend.save_config();
@@ -1850,21 +1812,22 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
         });
 }
 
-/// One tablebase path row: label + folder field + Browse/clear, plus an
-/// optional probe-cache size in MB (Nalimov/Gaviota — forwarded to engines'
-/// `NalimovCache` / `GaviotaTbCache`). Returns `true` when a value changed.
+/// One tablebase path row: label + folder field + clear + per-format extras +
+/// Browse. `extras` draws the format-specific settings (cache size, probe
+/// limit, 50-move rule, compression) and returns `true` when one changed.
+/// Returns `true` when any value changed.
 fn tablebase_row(
     ui: &mut Ui,
     label: &str,
     value: &mut Option<String>,
-    cache_mb: Option<&mut u32>,
+    extras: impl FnOnce(&mut Ui) -> bool,
 ) -> bool {
     field_label(ui, label);
     let mut s = value.clone().unwrap_or_default();
     let mut changed = false;
     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
         if ui
-            .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
+            .add(egui::Button::new(RichText::new("Browse…").color(theme::TEXT_WEAK)))
             .clicked()
             && let Some(dir) = rfd::FileDialog::new()
                 .set_title(format!("Select {label} tablebase folder"))
@@ -1873,19 +1836,9 @@ fn tablebase_row(
             s = dir.to_string_lossy().to_string();
             changed = true;
         }
-        if let Some(mb) = cache_mb {
-            ui.label(RichText::new("MB").color(theme::TEXT_FAINT).size(11.5));
-            if ui
-                .add(DragValue::new(mb).range(1..=1024).speed(1.0))
-                .on_hover_text(format!(
-                    "Probe-cache size forwarded to engines' {label} cache option."
-                ))
-                .changed()
-            {
-                changed = true;
-            }
-            ui.label(RichText::new("Cache").color(theme::TEXT_FAINT).size(11.5));
-        }
+        ui.add_space(10.0);
+        changed |= extras(ui);
+        ui.add_space(4.0);
         if !s.is_empty()
             && widgets::clear_button(ui)
                 .on_hover_text("Clear this path.")
@@ -1916,6 +1869,21 @@ fn tablebase_row(
     changed
 }
 
+/// A probe-cache size control (label + MB drag), used by the Nalimov and
+/// Gaviota rows. Remember: this draws inside a right-to-left layout, so add
+/// items in reverse visual order.
+fn cache_extra(ui: &mut Ui, label: &str, mb: &mut u32) -> bool {
+    ui.label(RichText::new("MB").color(theme::TEXT_FAINT).size(11.5));
+    let changed = ui
+        .add(DragValue::new(mb).range(1..=1024).speed(1.0))
+        .on_hover_text(format!(
+            "Probe-cache size forwarded to engines' {label} cache option."
+        ))
+        .changed();
+    ui.label(RichText::new("Cache").color(theme::TEXT_FAINT).size(11.5));
+    changed
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Whether a UCI option is managed outside the per-engine editor: thread/CPU
@@ -1928,9 +1896,13 @@ fn is_globally_managed_option(name: &str) -> bool {
     let hash = n == "hash" || n == "hash size" || n == "hashsize" || n == "memory";
     let ponder = n == "ponder";
     let tb = n.contains("syzygy") || n.contains("gaviota") || n.contains("nalimov");
-    let tb_path = tb && n.contains("path");
-    let tb_cache = tb && n.contains("cache");
-    threads || hash || ponder || tb_path || tb_cache
+    let tb_cfg = tb
+        && (n.contains("path")
+            || n.contains("cache")
+            || n.contains("50move")
+            || n.contains("probelimit")
+            || n.contains("compression"));
+    threads || hash || ponder || tb_cfg
 }
 
 /// Insert `value` under `key` (trimmed) or remove the key when empty.
@@ -1940,27 +1912,6 @@ fn set_or_remove(map: &mut BTreeMap<String, String>, key: &str, value: &str) {
     } else {
         map.insert(key.to_string(), value.trim().to_string());
     }
-}
-
-/// True when `engine` matches the (lowercased) filter. Word-wise: every
-/// whitespace-separated term must match somewhere in name/version/author/file,
-/// so "shredder 12" finds Shredder 12 even though no single field contains
-/// the whole phrase.
-fn engine_matches(e: &EngineConfig, filter: &str) -> bool {
-    let haystack = format!(
-        "{}\n{}\n{}\n{}",
-        widgets::engine_base_name(e).to_lowercase(),
-        e.meta.version.to_lowercase(),
-        widgets::engine_subtitle(e).to_lowercase(),
-        e.path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_lowercase(),
-    );
-    filter
-        .split_whitespace()
-        .all(|term| haystack.contains(term))
 }
 
 /// Create an `EngineConfig` from detection results and push it to `backend.engines`.
@@ -2031,125 +1982,6 @@ fn field_label(ui: &mut Ui, text: &str) {
 /// A `TextEdit::singleline` filling available width.
 fn text_field(buf: &mut String) -> egui::TextEdit<'_> {
     egui::TextEdit::singleline(buf).desired_width(f32::INFINITY)
-}
-
-/// Draw one UCI option row (label | editor).  Sets `dirty` if the value changed.
-fn show_option_row(
-    ui: &mut Ui,
-    opt: &UciOption,
-    overrides: &mut BTreeMap<String, UciOptionValue>,
-    dirty: &mut bool,
-) {
-    ui.label(RichText::new(opt.name()).color(theme::TEXT_WEAK).size(13.0));
-
-    match opt {
-        UciOption::Check { name, default } => {
-            let mut val = matches!(overrides.get(name), Some(UciOptionValue::Check(true)))
-                || (overrides.get(name).is_none() && *default);
-
-            if widgets::checkbox(ui, &mut val, "").changed() {
-                overrides.insert(name.clone(), UciOptionValue::Check(val));
-                *dirty = true;
-            }
-        }
-
-        UciOption::Spin {
-            name,
-            default,
-            min,
-            max,
-        } => {
-            let current = match overrides.get(name) {
-                Some(UciOptionValue::Spin(v)) => *v,
-                _ => *default,
-            };
-            let mut val = current;
-            let resp = ui.add(DragValue::new(&mut val).range(*min..=*max).speed(1.0));
-            if resp.changed() {
-                overrides.insert(name.clone(), UciOptionValue::Spin(val));
-                *dirty = true;
-            }
-            ui.label(
-                RichText::new(format!("({min}–{max})"))
-                    .color(theme::TEXT_FAINT)
-                    .size(11.5),
-            );
-        }
-
-        UciOption::Combo {
-            name,
-            default,
-            vars,
-        } => {
-            let current = match overrides.get(name) {
-                Some(UciOptionValue::Combo(s)) => s.clone(),
-                _ => default.clone(),
-            };
-            let mut selected = current.clone();
-            widgets::select(ui, ("opt_combo", name), &current, 200.0, |ui| {
-                for v in vars {
-                    if ui.selectable_value(&mut selected, v.clone(), v).clicked() {
-                        overrides.insert(name.clone(), UciOptionValue::Combo(selected.clone()));
-                        *dirty = true;
-                    }
-                }
-            });
-        }
-
-        UciOption::Str { name, default } => {
-            let current = match overrides.get(name) {
-                Some(UciOptionValue::Str(s)) => s.clone(),
-                _ => default.clone(),
-            };
-            let mut val = current;
-            if ui
-                .add(
-                    egui::TextEdit::singleline(&mut val)
-                        .desired_width(240.0)
-                        .hint_text(default),
-                )
-                .changed()
-            {
-                overrides.insert(name.clone(), UciOptionValue::Str(val));
-                *dirty = true;
-            }
-        }
-
-        UciOption::Button { name } => {
-            // UCI "button" options are one-shot actions with no value. The
-            // GUI can't press one on a dead engine, so the toggle means:
-            // "send this action to the engine at the start of every game".
-            let armed = matches!(overrides.get(name), Some(UciOptionValue::Button));
-            let label = if armed {
-                "● runs at game start"
-            } else {
-                "run at game start"
-            };
-            let color = if armed { theme::SUCCESS } else { theme::TEXT_WEAK };
-            if ui
-                .small_button(RichText::new(label).color(color))
-                .on_hover_text(if armed {
-                    format!(
-                        "'{name}' will be triggered (setoption) at the start of every \
-                         game. Click to turn off."
-                    )
-                } else {
-                    format!(
-                        "'{name}' is an action the engine exposes. Turn this on to \
-                         trigger it (setoption) at the start of every game."
-                    )
-                })
-                .clicked()
-            {
-                if armed {
-                    overrides.remove(name);
-                } else {
-                    overrides.insert(name.clone(), UciOptionValue::Button);
-                }
-                *dirty = true;
-            }
-        }
-    }
 }
 
 /// Open the system file manager to the given folder.

@@ -156,6 +156,21 @@ impl Store {
         Ok(())
     }
 
+    /// Overwrite a tournament's stored config (e.g. a live concurrency change,
+    /// so a later resume uses the new value).
+    pub fn update_tournament_config(
+        &self,
+        id: TournamentId,
+        config: &TournamentConfig,
+    ) -> Result<()> {
+        let config_json = serde_json::to_string(config)?;
+        self.conn.execute(
+            "UPDATE tournaments SET config_json = ?2 WHERE id = ?1",
+            params![id.to_string(), config_json],
+        )?;
+        Ok(())
+    }
+
     /// Update a tournament's status; sets `finished_at` when finishing.
     pub fn set_tournament_status(&self, id: TournamentId, status: &str) -> Result<()> {
         if status == STATUS_FINISHED {

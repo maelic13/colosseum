@@ -18,7 +18,12 @@ use std::time::Duration;
 
 use crossbeam_channel::Receiver;
 
-use colosseum_core::{EngineConfig, EngineId, TournamentConfig, TournamentEvent, TournamentId};
+use std::collections::HashMap;
+
+use colosseum_core::{
+    EngineConfig, EngineId, RatingWriteback, TournamentConfig, TournamentEvent, TournamentId,
+    ml_ratings, performance_rating,
+};
 use colosseum_engine::{
     AppConfig, AppDirs, EngineLibrary, Store, Tournament, TournamentResults, TournamentRow,
     TournamentSnapshot, TournamentStatus, create_tournament, load_tournament_results,
@@ -45,6 +50,18 @@ pub struct ActiveTournament {
     pub events: Receiver<TournamentEvent>,
     pub name: String,
     pub participants: Vec<ParticipantInfo>,
+    /// The tournament's full configuration (format, time control, …), kept
+    /// for the live view (gauntlet layout, ETA fallback, writeback mode).
+    pub config: TournamentConfig,
+    /// Library ratings at start/resume time (1500 for unrated engines) —
+    /// the fixed baseline for the Elo display and the writeback. Pinned here
+    /// so applying the writeback doesn't shift the Δ column to zero.
+    pub priors: Vec<(EngineId, f64)>,
+    /// How library ratings are updated when this tournament finishes.
+    pub rating_writeback: RatingWriteback,
+    /// Set once the writeback has been applied (guards against re-applying
+    /// every frame after the finish).
+    pub writeback_done: bool,
 }
 
 /// All backend resources owned by the GUI.
@@ -56,7 +73,9 @@ pub struct Backend {
     pub store: Store,
     /// Runtime that drives engine detection (Step 8) and tournament games (Step 9).
     pub runtime: tokio::runtime::Runtime,
-    pub active: Option<ActiveTournament>,
+    /// Loaded tournaments (started or resumed this session). Several can be
+    /// loaded — and even running — at once; each owns its driver + snapshot.
+    pub actives: Vec<ActiveTournament>,
 }
 
 impl Backend {
@@ -98,33 +117,139 @@ impl Backend {
             engines,
             store,
             runtime,
-            active: None,
+            actives: Vec::new(),
         })
     }
+
+    /// The loaded tournament with this id, if any.
+    #[must_use]
+    pub fn active(&self, id: TournamentId) -> Option<&ActiveTournament> {
+        self.actives.iter().find(|a| a.handle.id == id)
+    }
+
 
     /// Drain pending tournament events and return the repaint interval the UI
     /// should request this frame (`Some` while live, `None` when idle).
     ///
     /// Events only signal change; the authoritative state is read from the
-    /// snapshot. Draining keeps the channel from growing unbounded.
-    pub fn poll(&self) -> Option<Duration> {
-        let active = self.active.as_ref()?;
-        while active.events.try_recv().is_ok() {}
-        repaint_interval(self.status()?)
+    /// snapshot. Draining keeps the channel from growing unbounded. Also the
+    /// hook that applies the configured rating writeback once, on finish.
+    pub fn poll(&mut self) -> Option<Duration> {
+        if self.actives.is_empty() {
+            return None;
+        }
+        for active in &self.actives {
+            while active.events.try_recv().is_ok() {}
+        }
+        self.apply_rating_writebacks();
+        self.actives
+            .iter()
+            .filter_map(|a| a.snapshot.lock().ok().map(|s| s.status))
+            .filter_map(repaint_interval)
+            .min()
     }
 
-    /// The active tournament's status, if any.
+    /// Apply each finished tournament's configured rating writeback to the
+    /// engine library, exactly once per loaded tournament.
+    fn apply_rating_writebacks(&mut self) {
+        let due: Vec<(TournamentId, RatingWriteback)> = self
+            .actives
+            .iter_mut()
+            .filter(|a| {
+                !a.writeback_done
+                    && a.snapshot
+                        .lock()
+                        .is_ok_and(|s| s.status == TournamentStatus::Finished)
+            })
+            .map(|a| {
+                a.writeback_done = true;
+                (a.handle.id, a.rating_writeback)
+            })
+            .collect();
+        for (id, mode) in due {
+            match mode {
+                RatingWriteback::None => {}
+                RatingWriteback::All => {
+                    let n = self.apply_active_elo_to_library(id);
+                    tracing::info!("rating writeback: updated {n} engines");
+                }
+                RatingWriteback::Estimate(target) => {
+                    match self.apply_estimate_to_library(id, target) {
+                        Some(elo) => {
+                            tracing::info!("rating writeback: estimated {target:?} at {elo}");
+                        }
+                        None => tracing::warn!(
+                            "rating writeback: estimate for {target:?} not applicable"
+                        ),
+                    }
+                }
+            }
+        }
+    }
+
+    /// Set `target`'s library rating to its performance rating from tournament
+    /// `id`, computed against the other participants' pinned prior ratings
+    /// (which stay untouched). Returns the new rating, or `None` when there is
+    /// no data (no finished games, or the engine is unknown).
+    pub fn apply_estimate_to_library(
+        &mut self,
+        id: TournamentId,
+        target: EngineId,
+    ) -> Option<i32> {
+        let standings = {
+            let active = self.active(id)?;
+            let snap = active.snapshot.lock().ok()?;
+            snap.standings.clone()
+        };
+        let results: Vec<(f64, f64, u32)> = self
+            .active_priors(id)
+            .iter()
+            .filter(|(opp, _)| *opp != target)
+            .map(|&(opp, rating)| {
+                let h2h = standings.head_to_head(target, opp);
+                (rating, h2h.points(), h2h.games())
+            })
+            .collect();
+        let perf = performance_rating(&results)?;
+        let engine = self.engines.iter_mut().find(|e| e.id == target)?;
+        let rounded = perf.round() as i32;
+        engine.meta.elo = Some(rounded);
+        self.save_engines();
+        Some(rounded)
+    }
+
+    /// The liveliest status across all loaded tournaments (drives the header
+    /// pill): Running beats Stopping beats everything else.
     #[must_use]
     pub fn status(&self) -> Option<TournamentStatus> {
-        self.active
-            .as_ref()
-            .and_then(|a| a.snapshot.lock().ok().map(|s| s.status))
+        let statuses: Vec<TournamentStatus> = self
+            .actives
+            .iter()
+            .filter_map(|a| a.snapshot.lock().ok().map(|s| s.status))
+            .collect();
+        if statuses.is_empty() {
+            return None;
+        }
+        for pick in [
+            TournamentStatus::Running,
+            TournamentStatus::Stopping,
+            TournamentStatus::Stopped,
+            TournamentStatus::Idle,
+        ] {
+            if statuses.contains(&pick) {
+                return Some(pick);
+            }
+        }
+        Some(TournamentStatus::Finished)
     }
 
-    /// Whether a tournament is currently running or draining (blocks a clean exit).
+    /// Whether any tournament is running or draining (blocks a clean exit).
     #[must_use]
     pub fn is_busy(&self) -> bool {
-        self.status().is_some_and(is_busy)
+        self.actives
+            .iter()
+            .filter_map(|a| a.snapshot.lock().ok().map(|s| s.status))
+            .any(is_busy)
     }
 
     /// Persist the current [`AppConfig`] to disk, logging any failure.
@@ -142,9 +267,10 @@ impl Backend {
     }
 
     /// Create a fresh tournament from `engines` + `config`, spawn its driver on
-    /// the runtime, and immediately begin play. Replaces any previous active
-    /// tournament. The dedicated `Store` connection handed to the driver is
-    /// separate from `self.store` so the background thread owns its own handle.
+    /// the runtime, and immediately begin play. Other loaded tournaments are
+    /// unaffected — several can run at once. The dedicated `Store` connection
+    /// handed to the driver is separate from `self.store` so the background
+    /// thread owns its own handle.
     pub fn start_tournament(
         &mut self,
         name: &str,
@@ -170,26 +296,36 @@ impl Backend {
 
         let driver_store = Store::open(self.dirs.database_path())?;
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
+        let rating_writeback = config.rating_writeback;
+        let config_copy = config.clone();
+        let priors = engines
+            .iter()
+            .map(|e| (e.id, e.meta.elo.map_or(1500.0, f64::from)))
+            .collect();
         let (handle, driver) = create_tournament(name, config, engines, driver_store, events_tx)?;
         let snapshot = handle.snapshot_handle();
 
         self.runtime.spawn(driver);
         handle.go(); // begin play immediately
 
-        self.active = Some(ActiveTournament {
+        self.actives.push(ActiveTournament {
             handle,
             snapshot,
             events: events_rx,
             name: name.to_string(),
             participants,
+            config: config_copy,
+            priors,
+            rating_writeback,
+            writeback_done: false,
         });
         Ok(())
     }
 
-    /// Discard the active tournament (after it has stopped or finished), returning
-    /// to the setup view. Does not delete persisted data.
-    pub fn clear_active(&mut self) {
-        self.active = None;
+    /// Unload a tournament (after it has stopped or finished). Does not delete
+    /// persisted data — it stays in the Results list.
+    pub fn close_tournament(&mut self, id: TournamentId) {
+        self.actives.retain(|a| a.handle.id != id);
     }
 
     /// List all stored tournaments, most recent first, for the History tab.
@@ -235,21 +371,15 @@ impl Backend {
         Ok(out)
     }
 
-    /// Return the most recent tournament that has not yet finished, if any.
-    /// Used to offer a resume prompt at startup.
-    pub fn find_resumable(&self) -> Option<TournamentRow> {
-        let Ok(list) = self.store.list_tournaments() else {
-            return None;
-        };
-        list.into_iter()
-            .find(|t| t.status != colosseum_engine::store::STATUS_FINISHED)
-    }
-
-    /// Wire a previously-persisted tournament back up as the active tournament
-    /// (in Stopped/Idle state — the user must press Go to begin play).
+    /// Wire a previously-persisted tournament back up as a loaded tournament
+    /// (in Stopped/Idle state — the user must press Go to begin play). A no-op
+    /// if it is already loaded.
     pub fn try_resume(&mut self, row: TournamentRow) -> anyhow::Result<()> {
         let name = row.name.clone();
         let id = row.id;
+        if self.active(id).is_some() {
+            return Ok(());
+        }
 
         let driver_store = Store::open(self.dirs.database_path())?;
         let participants_raw = driver_store.list_tournament_engines(id)?;
@@ -277,34 +407,92 @@ impl Backend {
 
         let resume_store = Store::open(self.dirs.database_path())?;
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
+        let rating_writeback = row.config.rating_writeback;
+        let config_copy = row.config.clone();
         let (handle, driver) = resume_tournament(row, resume_store, events_tx)?;
         let snapshot = handle.snapshot_handle();
 
         self.runtime.spawn(driver);
         // Do NOT call handle.go() — leave in Stopped state; user presses Go.
 
-        self.active = Some(ActiveTournament {
+        self.actives.push(ActiveTournament {
             handle,
             snapshot,
             events: events_rx,
             name,
-            participants,
+            participants: participants.clone(),
+            config: config_copy,
+            priors: participants
+                .iter()
+                .map(|p| {
+                    let elo = self
+                        .engines
+                        .iter()
+                        .find(|e| e.id == p.id)
+                        .and_then(|e| e.meta.elo)
+                        .map_or(1500.0, f64::from);
+                    (p.id, elo)
+                })
+                .collect(),
+            rating_writeback,
+            writeback_done: false,
         });
         Ok(())
     }
 
-    /// Copy the active tournament's final Elo ratings into the in-memory engine
-    /// library and persist it to disk. Returns the number of engines updated.
-    pub fn apply_active_elo_to_library(&mut self) -> usize {
-        let Some(active) = &self.active else { return 0 };
-        let elo_map = {
-            let snap = active.snapshot.lock().unwrap();
-            snap.elo.clone()
+    /// Change a loaded tournament's parallel-games limit (running or
+    /// stopped). In-flight games always finish; only the launch rate changes.
+    pub fn set_active_concurrency(&self, id: TournamentId, limit: usize) {
+        if let Some(active) = self.active(id) {
+            active.handle.set_concurrency(limit);
+        }
+    }
+
+    /// Library-rating priors for a loaded tournament's participants, pinned
+    /// at start/resume time (1500 for unrated engines). Shared by the live
+    /// Elo display and the writeback, so the numbers shown are exactly the
+    /// numbers written — and stable even after the writeback runs.
+    #[must_use]
+    pub fn active_priors(&self, id: TournamentId) -> Vec<(EngineId, f64)> {
+        self.active(id)
+            .map(|a| a.priors.clone())
+            .unwrap_or_default()
+    }
+
+    /// Joint maximum-likelihood ratings for a loaded tournament (the exact
+    /// values an "All engines" writeback stores).
+    #[must_use]
+    pub fn active_ml_ratings(&self, id: TournamentId) -> Option<HashMap<EngineId, f64>> {
+        let active = self.active(id)?;
+        let standings = active.snapshot.lock().ok()?.standings.clone();
+        Some(ml_ratings(&standings, &self.active_priors(id)))
+    }
+
+    /// Write a loaded tournament's maximum-likelihood ratings into the
+    /// library (engines that actually played only). Returns the count updated.
+    pub fn apply_active_elo_to_library(&mut self, id: TournamentId) -> usize {
+        let Some(ratings) = self.active_ml_ratings(id) else {
+            return 0;
+        };
+        let played: Vec<EngineId> = {
+            let Some(active) = self.active(id) else {
+                return 0;
+            };
+            let Ok(snap) = active.snapshot.lock() else {
+                return 0;
+            };
+            ratings
+                .keys()
+                .copied()
+                .filter(|eid| snap.standings.standing(*eid).games() > 0)
+                .collect()
         };
         let mut count = 0;
         for engine in &mut self.engines {
-            if let Some(entry) = elo_map.get(&engine.id) {
-                engine.meta.elo = Some(entry.current.round() as i32);
+            if played.contains(&engine.id)
+                && let Some(r) = ratings.get(&engine.id)
+            {
+                engine.meta.elo = Some(r.round() as i32);
                 count += 1;
             }
         }

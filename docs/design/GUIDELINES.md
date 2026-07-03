@@ -400,13 +400,20 @@ Keep current structure; adjust:
 - Replace storage/engine-count separators with `·` middots, `TEXT_FAINT` 12.
 
 ### 4.3 Tournament → Setup
-- Left engine panel: keep header row; rows become selectable cards (§3.8).
-- Center form: every `section(...)` block becomes a `section_card` (§3.4):
-  Name + Format merge into one "Tournament" card; then "Time Control",
-  "Engine Options" (Common options + Syzygy + Ponder), "Adjudication",
-  "Elo", "Openings", "Output".
+- Left engine panel: filter field (with `clear_button`) + Select-all/Clear
+  (Select-all respects the filter); rows are compact single-line selectable
+  cards — checkbox + 24 pt logo/monogram (rounded square) + semibold name +
+  dim version + ⚠ when missing + right-aligned Elo; whole row toggles.
+- Center form: section cards laid out in **two balanced columns** when
+  ≥ 720 pt available (Tournament / Engine Options / Elo / Output left;
+  Time Control / Adjudication / Openings right), stacked when narrow — the
+  goal is the whole form + Start visible without scrolling.
+- Estimates: the **Tournament card** ends with the schedule size ("This will
+  play N games."); the **Time Control card** ends with the wall-clock
+  estimate ("Estimated length ~D (N games, L in parallel)") because duration
+  is a function of the time control. No per-field unit-conversion hints.
 - Bottom action bar: keep `BG_DARKEST`; Start button = primary (§3.3) height
-  32; warning/error text unchanged but error uses a tinted-danger chip.
+  32; shows "N engines · G games · ~D"; error uses a tinted-danger chip.
 
 ### 4.4 Tournament → Live
 - Control bar: status pill + tournament name 15 strong; Go/Stop/Force-Stop as
@@ -482,6 +489,14 @@ these to every tab** so the app stays cohesive; most are already global via
 ### 7.2 Interaction rules (theme-global)
 - `WidgetVisuals.expansion = 0` for hovered/active — growing widgets on hover
   shifts layouts and clips outlines at panel edges. Never reintroduce it.
+- **Never use `selectable_label` / `selectable_value` in a row layout** —
+  egui's selectable label has no frame while idle and *gains frame padding on
+  hover*, widening and shifting everything to its right. Use
+  `widgets::choice_chip` (always framed, constant size) for inline either/or
+  pickers; selectable labels are fine only as popup-menu items, where nothing
+  sits to their right. Same principle generally: a widget's size must not
+  depend on hover/selection state (see also `pill_tab` reserving semibold
+  width and `sortable_header` reserving the arrow).
 - `interaction.selectable_labels = false` — labels are chrome, not documents.
 - Scrollbars: `ScrollStyle::solid()` (bar width 8) — bars own a lane, never
   float over content.
@@ -502,6 +517,10 @@ these to every tab** so the app stays cohesive; most are already global via
   bulk destructive actions may use a two-step inline Confirm/Cancel.
 - Persisted UI preferences (sort orders, panel states worth keeping) live on
   `AppConfig` with serde defaults; save on change.
+- **Option precedence** (engine settings): engine library options (Engines
+  tab) < tournament-wide common options (Tournament tab) < per-engine
+  per-tournament overrides (right-click an engine row in setup). Overrides
+  show an accent ● on the row and are cleared via the row menu.
 
 ### 7.4 Component choices
 - Right-click **context menus** on list/grid items; right-click also selects.

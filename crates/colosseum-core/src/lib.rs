@@ -30,13 +30,13 @@ pub use event::TournamentEvent;
 pub use export::{ExportRow, crosstable_csv, standings_csv};
 pub use game::{GameResult, GameStats, Pairing, Termination};
 pub use ids::{EngineId, GameId, TournamentId};
-pub use options::{UciOption, UciOptionValue};
+pub use options::{UciOption, UciOptionValue, is_hash_option, is_thread_option};
 pub use pairing::{gauntlet, generate_schedule, round_robin};
-pub use rating::{IncrementalElo, Rating, RatingDelta};
-pub use standings::{EngineStanding, GameOutcome, HeadToHead, Standings};
+pub use rating::{IncrementalElo, Rating, RatingDelta, ml_ratings, performance_rating};
+pub use standings::{EngineStanding, GameOutcome, HeadToHead, PairGameResult, Standings};
 pub use stats::{EloEstimate, SprtDecision, SprtResult, elo_with_error, los, sprt};
 pub use time::{TimeControl, TimeUnit};
 pub use tournament::{
     CommonEngineOptions, EloPolicy, Format, OpeningBook, OpeningFormat, OpeningOrder,
-    StartPosition, TournamentConfig,
+    RatingWriteback, StartPosition, TournamentConfig,
 };

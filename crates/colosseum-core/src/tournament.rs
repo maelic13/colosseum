@@ -2,9 +2,12 @@
 //! engine options, adjudication, Elo policy, start position, and PGN output.
 
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
-use crate::{adjudication::AdjudicationConfig, time::TimeControl};
+use crate::{
+    adjudication::AdjudicationConfig, ids::EngineId, options::UciOptionValue, time::TimeControl,
+};
 
 /// Tournament format: how the schedule of encounters is generated. Both variants
 /// produce a *static* schedule known upfront (result-independent pairing).
@@ -46,6 +49,20 @@ pub enum EloPolicy {
     EndOfTournament,
     /// Never modify ratings.
     Never,
+}
+
+/// How engine *library* ratings are updated when the tournament finishes.
+/// Independent of [`EloPolicy`], which controls the live in-tournament model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum RatingWriteback {
+    /// Leave every engine's library rating untouched (default).
+    #[default]
+    None,
+    /// Write every participant's final tournament rating to the library.
+    All,
+    /// Update only this engine, set to its performance rating against the
+    /// other participants' fixed library ratings (they stay anchored).
+    Estimate(EngineId),
 }
 
 /// File format of an opening book.
@@ -150,6 +167,15 @@ pub struct TournamentConfig {
     pub start_position: StartPosition,
     /// Optional path to append finished games as PGN.
     pub pgn_output: Option<PathBuf>,
+    /// Per-engine UCI overrides that apply to this tournament only. Highest
+    /// precedence: they beat both the engine's saved (library) options and
+    /// the tournament's [`CommonEngineOptions`] — e.g. cap one engine's Hash
+    /// below the common value when it can't handle it.
+    #[serde(default)]
+    pub engine_overrides: HashMap<EngineId, BTreeMap<String, UciOptionValue>>,
+    /// How library ratings are updated when the tournament finishes.
+    #[serde(default)]
+    pub rating_writeback: RatingWriteback,
 }
 
 impl Default for TournamentConfig {
@@ -168,6 +194,8 @@ impl Default for TournamentConfig {
             k_factor: 32.0,
             start_position: StartPosition::default(),
             pgn_output: None,
+            engine_overrides: HashMap::new(),
+            rating_writeback: RatingWriteback::default(),
         }
     }
 }

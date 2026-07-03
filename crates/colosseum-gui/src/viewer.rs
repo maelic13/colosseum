@@ -96,8 +96,7 @@ impl GameViewer {
         ui.label(
             RichText::new(&self.header)
                 .color(theme::TEXT)
-                .size(14.0)
-                .strong(),
+                .font(theme::semibold(14.0)),
         );
         ui.label(
             RichText::new(format!("Result: {}", self.result))
@@ -185,18 +184,18 @@ impl GameViewer {
 
     fn nav_bar(&mut self, ui: &mut Ui, last: usize) {
         ui.horizontal(|ui| {
-            if ui.button(RichText::new("⏮").size(15.0)).on_hover_text("Start (Home)").clicked() {
+            if ui.button(RichText::new("«").size(15.0)).on_hover_text("Start (Home)").clicked() {
                 self.ply = 0;
             }
-            if ui.button(RichText::new("◀").size(15.0)).on_hover_text("Previous (←)").clicked() {
+            if ui.button(RichText::new("‹").size(15.0)).on_hover_text("Previous (←)").clicked() {
                 self.ply = self.ply.saturating_sub(1);
             }
-            if ui.button(RichText::new("▶").size(15.0)).on_hover_text("Next (→)").clicked()
+            if ui.button(RichText::new("›").size(15.0)).on_hover_text("Next (→)").clicked()
                 && self.ply < last
             {
                 self.ply += 1;
             }
-            if ui.button(RichText::new("⏭").size(15.0)).on_hover_text("End (End)").clicked() {
+            if ui.button(RichText::new("»").size(15.0)).on_hover_text("End (End)").clicked() {
                 self.ply = last;
             }
             ui.add_space(10.0);

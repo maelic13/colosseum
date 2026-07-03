@@ -12,40 +12,37 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, DragValue, Layout, RichText, ScrollArea, Ui};
-use egui_extras::{Column, TableBuilder};
 
 use colosseum_core::{
     AdjudicationConfig, CommonEngineOptions, DrawAdjudication, EloPolicy, EngineConfig, EngineId,
-    Format, OpeningBook, OpeningFormat, OpeningOrder, ResignAdjudication, Standings, StartPosition,
-    Termination, TimeControl, TimeUnit, TournamentConfig, UciOptionValue,
+    Format, OpeningBook, OpeningFormat, OpeningOrder, RatingWriteback, ResignAdjudication,
+    StartPosition, TimeControl, TimeUnit, TournamentConfig, UciOption, UciOptionValue,
 };
-use colosseum_engine::{
-    AppConfig, EloEntry, GameRow, InFlightGame, TournamentRow, TournamentStatus, summarize,
-};
+use colosseum_engine::{AppConfig, summarize};
 
-use crate::backend::{Backend, ParticipantInfo};
+use crate::backend::Backend;
 use crate::presets::{PresetData, PresetFormatKind, PresetManager, PresetTcKind};
 use crate::theme;
 use crate::widgets;
 
 // ── Tab state ─────────────────────────────────────────────────────────────────
 
-/// All persistent state for the Tournament tab.
+/// All persistent state for the Tournament tab (setup only — the live view
+/// lives in the Results tab).
 pub struct TournamentTab {
     form: TournamentForm,
-    sort: SortState,
-    show_h2h: bool,
-    /// Whether the live game list is expanded.
-    show_games: bool,
-    /// Cached games for the active tournament: (finished-count when captured, rows).
-    games_cache: Option<(usize, Vec<GameRow>)>,
-    /// The floating PGN/board viewer.
-    viewer: crate::viewer::GameViewer,
+    /// Filter text for the engine-selection list.
+    engine_filter: String,
+    /// Engine whose per-tournament UCI overrides are being edited in a modal.
+    override_editor: Option<EngineId>,
+    /// Whether the compatibility-notes modal is open.
+    show_compat_notes: bool,
+    /// Decoded logo textures for the engine-selection list.
+    logos: crate::logo::LogoCache,
     start_error: Option<String>,
-    elo_note: Option<String>,
-    /// Transient note shown after an export action (saved / failed / cancelled).
-    export_note: Option<String>,
-    resume_dismissed: bool,
+    /// Set when a tournament was just started or resumed; the app shell takes
+    /// it (via [`Self::take_started`]) to switch to the Results tab.
+    just_started: bool,
     /// Manages preset files on disk.
     preset_manager: PresetManager,
     /// Cached list of named presets (refreshed after save/delete).
@@ -62,18 +59,19 @@ impl TournamentTab {
         let mut form = TournamentForm::default();
         if let Some(last) = preset_manager.load_last_used() {
             form.apply_preset(&last);
+            // The name identifies one run, not a setting worth restoring —
+            // every fresh setup starts as plain "Tournament". Loading a named
+            // preset from the menu still applies that preset's name.
+            form.name = "Tournament".to_string();
         }
         Self {
             form,
-            sort: SortState::default(),
-            show_h2h: false,
-            show_games: false,
-            games_cache: None,
-            viewer: crate::viewer::GameViewer::default(),
+            engine_filter: String::new(),
+            override_editor: None,
+            show_compat_notes: false,
+            logos: crate::logo::LogoCache::default(),
             start_error: None,
-            elo_note: None,
-            export_note: None,
-            resume_dismissed: false,
+            just_started: false,
             preset_manager,
             presets_cache,
             preset_save_name: String::new(),
@@ -82,11 +80,14 @@ impl TournamentTab {
 
     /// Draw the tab body. Call every frame.
     pub fn show(&mut self, ui: &mut Ui, backend: &mut Backend) {
-        if backend.active.is_some() {
-            self.show_live(ui, backend);
-        } else {
-            self.show_setup(ui, backend);
-        }
+        self.logos.begin_frame();
+        self.show_setup(ui, backend);
+    }
+
+    /// True once, right after a tournament was started or resumed here — the
+    /// app shell switches to the Results tab in response.
+    pub fn take_started(&mut self) -> bool {
+        std::mem::take(&mut self.just_started)
     }
 }
 
@@ -141,6 +142,30 @@ impl TcKind {
     }
 }
 
+/// How library ratings are updated when the tournament finishes (form-side
+/// mirror of [`RatingWriteback`], with the estimate target kept separately).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum WritebackKind {
+    /// Ratings are never written back (default).
+    #[default]
+    Never,
+    /// Every participant's final tournament rating is written back.
+    All,
+    /// Only one engine is updated, to its performance rating against the
+    /// others' fixed library ratings.
+    Estimate,
+}
+
+impl WritebackKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Never => "Never",
+            Self::All => "All engines",
+            Self::Estimate => "Estimate one engine",
+        }
+    }
+}
+
 /// GUI-friendly buffer for a [`TournamentConfig`] plus engine selection.
 struct TournamentForm {
     name: String,
@@ -191,8 +216,19 @@ struct TournamentForm {
     resign_score_cp: i32,
 
     // Elo
+    /// Live in-tournament model cadence; not exposed in the UI (always
+    /// per-game so the standings Elo column ticks), kept for preset compat.
     elo_policy: EloPolicy,
     k_factor: f64,
+    /// How library ratings are updated when the tournament finishes.
+    elo_writeback: WritebackKind,
+    /// Target for [`WritebackKind::Estimate`]; falls back to the first
+    /// selected engine (the gauntlet engine) when unset or deselected.
+    estimate_target: Option<EngineId>,
+
+    /// Per-engine UCI overrides for this tournament only (highest precedence;
+    /// beats library options and the tournament's common options).
+    overrides: HashMap<EngineId, std::collections::BTreeMap<String, UciOptionValue>>,
 
     // Openings
     openings_on: bool,
@@ -214,7 +250,7 @@ struct TournamentForm {
 impl Default for TournamentForm {
     fn default() -> Self {
         Self {
-            name: "Round Robin".to_string(),
+            name: "Tournament".to_string(),
             selected: Vec::new(),
             format_kind: FormatKind::RoundRobin,
             cycles: 1,
@@ -247,6 +283,9 @@ impl Default for TournamentForm {
             resign_score_cp: 800,
             elo_policy: EloPolicy::PerGame,
             k_factor: 32.0,
+            elo_writeback: WritebackKind::Never,
+            estimate_target: None,
+            overrides: HashMap::new(),
             openings_on: false,
             openings_path: String::new(),
             openings_format: OpeningFormat::Epd,
@@ -266,7 +305,7 @@ impl TournamentForm {
     fn build_config(&self) -> TournamentConfig {
         TournamentConfig {
             format: self.build_format(),
-            games_per_pair: self.games_per_pair.max(1),
+            games_per_pair: self.games_per_pair.clamp(1, 2),
             time_control: self.build_time_control(),
             concurrency: self.concurrency.max(1),
             common: CommonEngineOptions {
@@ -274,7 +313,8 @@ impl TournamentForm {
                 hash_mb: self.hash_on.then_some(self.hash_mb),
                 syzygy_path: (!self.syzygy_path.trim().is_empty())
                     .then(|| self.syzygy_path.trim().to_string()),
-                syzygy_50_move_rule: self.syzygy50_on.then_some(self.syzygy50),
+                // Managed globally with the tablebase paths (Engines tab).
+                syzygy_50_move_rule: None,
                 ponder: self.ponder,
             },
             adjudication: AdjudicationConfig {
@@ -289,14 +329,31 @@ impl TournamentForm {
                     score_cp: self.resign_score_cp.max(0),
                 }),
             },
-            elo_policy: self.elo_policy,
+            // Live model always ticks per game so the standings Elo column is
+            // informative; whether anything is *written back* is separate.
+            elo_policy: EloPolicy::PerGame,
             k_factor: self.k_factor.max(1.0),
+            rating_writeback: match self.elo_writeback {
+                WritebackKind::Never => RatingWriteback::None,
+                WritebackKind::All => RatingWriteback::All,
+                WritebackKind::Estimate => match self.estimate_engine() {
+                    Some(id) => RatingWriteback::Estimate(id),
+                    None => RatingWriteback::None,
+                },
+            },
             start_position: match self.opening_book() {
                 Some(book) => StartPosition::Book(book),
                 None => StartPosition::Startpos,
             },
             pgn_output: (!self.pgn_path.trim().is_empty())
                 .then(|| PathBuf::from(self.pgn_path.trim())),
+            // Only overrides for engines actually in the tournament.
+            engine_overrides: self
+                .overrides
+                .iter()
+                .filter(|(id, map)| self.selected.contains(id) && !map.is_empty())
+                .map(|(id, map)| (*id, map.clone()))
+                .collect(),
         }
     }
 
@@ -358,6 +415,15 @@ impl TournamentForm {
                 .map(|s| (s.count, s.first_label))
                 .map_err(|e| e.to_string())
         });
+    }
+
+    /// The engine whose rating the Estimate writeback updates: the explicit
+    /// pick while it stays selected, otherwise the first selected engine
+    /// (which is also the gauntlet engine).
+    fn estimate_engine(&self) -> Option<EngineId> {
+        self.estimate_target
+            .filter(|id| self.selected.contains(id))
+            .or_else(|| self.selected.first().copied())
     }
 
     /// Resolve the selected engine ids to their library configs, in seed order.
@@ -427,6 +493,12 @@ impl TournamentForm {
             resign_score_cp: self.resign_score_cp,
             elo_policy: self.elo_policy,
             k_factor: self.k_factor,
+            elo_writeback: match self.elo_writeback {
+                WritebackKind::Never => "never",
+                WritebackKind::All => "all",
+                WritebackKind::Estimate => "estimate",
+            }
+            .to_string(),
             openings_on: self.openings_on,
             openings_path: self.openings_path.clone(),
             openings_format: self.openings_format,
@@ -451,7 +523,8 @@ impl TournamentForm {
             PresetFormatKind::Sprt => FormatKind::Sprt,
         };
         self.cycles = p.cycles;
-        self.games_per_pair = p.games_per_pair;
+        // Repetition beyond both colours is what Cycles is for.
+        self.games_per_pair = p.games_per_pair.clamp(1, 2);
         self.gauntlet_seeds = p.gauntlet_seeds;
         self.tc_kind = match p.tc_kind {
             PresetTcKind::PerMove => TcKind::PerMove,
@@ -486,6 +559,11 @@ impl TournamentForm {
         self.resign_score_cp = p.resign_score_cp;
         self.elo_policy = p.elo_policy;
         self.k_factor = p.k_factor;
+        self.elo_writeback = match p.elo_writeback.as_str() {
+            "all" => WritebackKind::All,
+            "estimate" => WritebackKind::Estimate,
+            _ => WritebackKind::Never,
+        };
         self.openings_on = p.openings_on;
         self.openings_path = p.openings_path.clone();
         self.openings_format = p.openings_format;
@@ -504,7 +582,7 @@ impl TournamentForm {
         if n < 2 {
             return 0;
         }
-        let games_per_pair = self.games_per_pair.max(1) as usize;
+        let games_per_pair = self.games_per_pair.clamp(1, 2) as usize;
         let cycles = self.cycles.max(1) as usize;
         let pairs = match self.format_kind {
             FormatKind::Gauntlet => {
@@ -517,37 +595,270 @@ impl TournamentForm {
         };
         pairs * games_per_pair * cycles
     }
+
+    /// Rough wall-clock estimate for one game in seconds, from the time
+    /// control alone. `None` for nodes/depth controls (speed depends entirely
+    /// on hardware and engine). Assumes ~[`EST_MOVES_PER_SIDE`] moves per
+    /// side; sudden-death games are costed at the full budget (upper bound).
+    fn estimated_game_secs(&self) -> Option<f64> {
+        let per_side_ms = match self.tc_kind {
+            TcKind::PerMove => {
+                self.tc_unit.to_millis(self.tc_value).max(1) as f64 * EST_MOVES_PER_SIDE
+            }
+            TcKind::SuddenDeath => self.tc_unit.to_millis(self.tc_value).max(1) as f64,
+            TcKind::Increment => {
+                self.tc_unit.to_millis(self.tc_value).max(1) as f64
+                    + self.tc_inc_unit.to_millis(self.tc_inc_value) as f64 * EST_MOVES_PER_SIDE
+            }
+            TcKind::Nodes | TcKind::Depth => return None,
+        };
+        Some(2.0 * per_side_ms / 1000.0)
+    }
+
+    /// Estimated wall-clock duration of the whole tournament in seconds,
+    /// accounting for parallel games plus a little scheduling overhead.
+    fn estimated_duration_secs(&self) -> Option<f64> {
+        let games = self.estimated_games();
+        if games == 0 {
+            return None;
+        }
+        let per_game = self.estimated_game_secs()?;
+        let lanes = self.concurrency.max(1) as f64;
+        Some(per_game * games as f64 / lanes * 1.05)
+    }
+}
+
+/// Assumed average moves per side per game for duration estimates. Fast
+/// engine-vs-engine games typically finish (or get adjudicated) around here.
+const EST_MOVES_PER_SIDE: f64 = 60.0;
+
+/// Render a duration in seconds as a compact human string ("45s", "12m",
+/// "1h 05m", "2d 3h").
+fn format_duration(secs: f64) -> String {
+    let s = secs.round().max(0.0) as u64;
+    if s < 60 {
+        format!("{s}s")
+    } else if s < 3600 {
+        let m = s / 60;
+        let rs = s % 60;
+        if rs == 0 { format!("{m}m") } else { format!("{m}m {rs:02}s") }
+    } else if s < 86_400 {
+        format!("{}h {:02}m", s / 3600, (s % 3600) / 60)
+    } else {
+        format!("{}d {}h", s / 86_400, (s % 86_400) / 3600)
+    }
 }
 
 // ── Setup view ──────────────────────────────────────────────────────────────────
 
 impl TournamentTab {
-    fn show_setup(&mut self, ui: &mut Ui, backend: &mut Backend) {
-        // Resume banner (top), shown when an unfinished tournament exists.
-        let resumable = if self.resume_dismissed {
-            None
-        } else {
-            backend.find_resumable()
+    /// Modal editor for one engine's per-tournament UCI overrides.
+    fn show_override_editor(&mut self, ctx: &egui::Context, backend: &Backend) {
+        let Some(id) = self.override_editor else {
+            return;
         };
-        if let Some(row) = resumable {
-            let action = egui::Panel::top("resume_banner")
-                .frame(
-                    egui::Frame::new()
-                        .fill(theme::tint(theme::ACCENT, 0.07))
-                        .stroke(egui::Stroke::new(1.0, theme::tint(theme::ACCENT, 0.20)))
-                        .inner_margin(egui::Margin::symmetric(14, 8)),
+        let Some(engine) = backend.engines.iter().find(|e| e.id == id) else {
+            self.override_editor = None;
+            return;
+        };
+        let name = widgets::engine_base_name(engine);
+        let version = engine.meta.version.trim();
+        let title = if version.is_empty() {
+            name
+        } else {
+            format!("{name} {version}")
+        };
+
+        // Detected options with the engine's saved (library) values and the
+        // tournament-wide Threads/Hash/Ponder as the displayed defaults, so
+        // an untouched row shows exactly what would apply anyway.
+        let common_threads = self.form.threads_on.then_some(self.form.threads);
+        let common_hash = self.form.hash_on.then_some(self.form.hash_mb);
+        let common_ponder = self.form.ponder;
+        let opts = effective_options(engine, common_threads, common_hash, common_ponder);
+        let overrides = self.form.overrides.entry(id).or_default();
+
+        let mut close = false;
+        let modal = egui::Modal::new(egui::Id::new("tournament_override_editor")).show(ctx, |ui| {
+            ui.set_width(560.0);
+            ui.label(
+                RichText::new(format!("Tournament UCI options — {title}"))
+                    .color(theme::TEXT)
+                    .font(theme::semibold(15.0)),
+            );
+            ui.add_space(2.0);
+            ui.label(
+                RichText::new(
+                    "Apply to this tournament only. Overrides beat both the engine's saved \
+                     options and the tournament-wide Threads / Hash / Ponder.",
                 )
-                .show_inside(ui, |ui| resume_banner(ui, &row))
-                .inner;
-            match action {
-                BannerAction::Dismiss => self.resume_dismissed = true,
-                BannerAction::Resume => match backend.try_resume(row) {
-                    Ok(()) => {}
-                    Err(e) => self.start_error = Some(format!("Resume failed: {e}")),
-                },
-                BannerAction::None => {}
+                .color(theme::TEXT_WEAK)
+                .size(12.0),
+            );
+            ui.add_space(8.0);
+
+            if opts.is_empty() {
+                ui.label(
+                    RichText::new("No UCI options detected for this engine.")
+                        .color(theme::TEXT_FAINT)
+                        .size(12.5),
+                );
+            } else {
+                let mut _dirty = false;
+                ScrollArea::vertical()
+                    .id_salt("override_editor_scroll")
+                    .max_height(360.0)
+                    // Fill the modal's width so the scrollbar sits at its
+                    // right edge instead of hugging the grid content.
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        egui::Grid::new("override_editor_grid")
+                            .num_columns(3)
+                            .spacing([10.0, 7.0])
+                            .show(ui, |ui| {
+                                for opt in &opts {
+                                    widgets::uci_option_row(ui, opt, overrides, &mut _dirty);
+                                    if overrides.contains_key(opt.name()) {
+                                        if ui
+                                            .add(egui::Button::new(RichText::new("×").color(theme::TEXT_FAINT)))
+                                            .on_hover_text("Remove this override.")
+                                            .clicked()
+                                        {
+                                            overrides.remove(opt.name());
+                                        }
+                                    } else {
+                                        ui.label("");
+                                    }
+                                    ui.end_row();
+                                }
+                            });
+                    });
             }
+
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                let n = overrides.len();
+                ui.label(
+                    RichText::new(format!(
+                        "{n} option{} overridden",
+                        if n == 1 { "" } else { "s" }
+                    ))
+                    .color(if n > 0 { theme::ACCENT } else { theme::TEXT_FAINT })
+                    .size(12.0),
+                );
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new("Done")
+                                    .color(theme::BG_DARKEST)
+                                    .font(theme::semibold(13.5)),
+                            )
+                            .fill(theme::ACCENT),
+                        )
+                        .clicked()
+                    {
+                        close = true;
+                    }
+                    ui.add_space(4.0);
+                    if ui
+                        .add_enabled(
+                            n > 0,
+                            egui::Button::new(
+                                RichText::new("Reset all").color(theme::TEXT_WEAK),
+                            ),
+                        )
+                        .on_hover_text("Remove every override — the engine plays with its \
+                             saved options and the tournament-wide settings.")
+                        .clicked()
+                    {
+                        overrides.clear();
+                    }
+                });
+            });
+        });
+
+        if close || modal.should_close() {
+            // Drop empty maps so the row indicator disappears cleanly.
+            if self
+                .form
+                .overrides
+                .get(&id)
+                .is_some_and(std::collections::BTreeMap::is_empty)
+            {
+                self.form.overrides.remove(&id);
+            }
+            self.override_editor = None;
         }
+    }
+
+    /// Modal listing every compatibility note at once (badge click).
+    fn show_compat_notes_modal(&mut self, ctx: &egui::Context, backend: &Backend) {
+        if !self.show_compat_notes {
+            return;
+        }
+        let notes = compatibility_notes(&self.form, &backend.engines);
+        if notes.is_empty() {
+            self.show_compat_notes = false;
+            return;
+        }
+
+        let mut close = false;
+        let modal = egui::Modal::new(egui::Id::new("compat_notes_modal")).show(ctx, |ui| {
+            ui.set_width(480.0);
+            ui.label(
+                RichText::new("Compatibility notes")
+                    .color(theme::TEXT)
+                    .font(theme::semibold(15.0)),
+            );
+            ui.add_space(2.0);
+            ui.label(
+                RichText::new(
+                    "These engines can't fully honour the current tournament settings. \
+                     The tournament will still run — with the adjustments below.",
+                )
+                .color(theme::TEXT_WEAK)
+                .size(12.0),
+            );
+            ui.add_space(8.0);
+            ScrollArea::vertical()
+                .id_salt("compat_notes_scroll")
+                .max_height(320.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    for note in &notes {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("⚠").color(theme::WARN).size(13.0));
+                            ui.label(RichText::new(note).color(theme::TEXT).size(13.0));
+                        });
+                        ui.add_space(4.0);
+                    }
+                });
+            ui.add_space(8.0);
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            RichText::new("Close")
+                                .color(theme::BG_DARKEST)
+                                .font(theme::semibold(13.5)),
+                        )
+                        .fill(theme::ACCENT),
+                    )
+                    .clicked()
+                {
+                    close = true;
+                }
+            });
+        });
+        if close || modal.should_close() {
+            self.show_compat_notes = false;
+        }
+    }
+
+    fn show_setup(&mut self, ui: &mut Ui, backend: &mut Backend) {
+        self.show_override_editor(ui.ctx(), backend);
+        self.show_compat_notes_modal(ui.ctx(), backend);
 
         // Bottom action bar (pinned).
         egui::Panel::bottom("tournament_setup_actions")
@@ -573,15 +884,19 @@ impl TournamentTab {
                 self.engine_selection(ui, backend);
             });
 
-        // Settings (centre, scrollable).
+        // Settings (centre, scrollable). Left margin keeps the section cards
+        // clear of the engine panel's separator line.
         egui::CentralPanel::default()
-            .frame(egui::Frame::new())
+            .frame(egui::Frame::new().inner_margin(egui::Margin {
+                left: 12,
+                ..Default::default()
+            }))
             .show_inside(ui, |ui| {
                 ScrollArea::vertical()
                     .id_salt("tournament_settings_scroll")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        self.settings_form(ui);
+                        self.settings_form(ui, &backend.engines);
                     });
             });
     }
@@ -592,55 +907,83 @@ impl TournamentTab {
             let ready = count >= 2;
             let games = self.form.estimated_games();
 
-            let start = ui.add_enabled(
-                ready,
-                egui::Button::new(
-                    RichText::new("▶  Start Tournament")
-                        .color(theme::BG_DARKEST)
-                        .size(15.0)
-                        .strong(),
-                )
-                .fill(theme::ACCENT)
-                .min_size(egui::vec2(0.0, 32.0)),
-            );
-
-            if start.clicked() {
-                self.try_start(backend);
-            }
-
-            ui.add_space(8.0);
+            // Secondary actions left; the primary commit action sits at the
+            // bottom-right (desktop convention), with its context beside it.
             self.presets_menu(ui);
-            ui.add_space(12.0);
-
-            if ready {
-                ui.label(
-                    RichText::new(format!("{count} engines · {games} games"))
-                        .color(theme::TEXT_WEAK)
-                        .size(13.0),
-                );
-            } else {
-                ui.label(
-                    RichText::new("Select at least two engines to start.")
-                        .color(theme::WARN)
-                        .size(13.0),
-                );
-            }
 
             if let Some(err) = self.start_error.clone() {
-                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .small_button(RichText::new("×").color(theme::TEXT_WEAK))
-                        .clicked()
-                    {
-                        self.start_error = None;
+                ui.add_space(10.0);
+                ui.label(
+                    RichText::new(format!("⚠ {err}"))
+                        .color(theme::DANGER)
+                        .size(13.0),
+                );
+                if ui
+                    .add(egui::Button::new(RichText::new("×").color(theme::TEXT_WEAK)))
+                    .clicked()
+                {
+                    self.start_error = None;
+                }
+            }
+
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                let start = ui.add_enabled(
+                    ready,
+                    egui::Button::new(
+                        RichText::new("Start Tournament")
+                            .color(theme::BG_DARKEST)
+                            .font(theme::semibold(15.0)),
+                    )
+                    .fill(theme::ACCENT)
+                    .min_size(egui::vec2(0.0, 32.0)),
+                );
+                if start.clicked() {
+                    self.try_start(backend);
+                }
+                ui.add_space(12.0);
+
+                if ready {
+                    // Engines that can't fully honour the tournament settings —
+                    // visible before Start, click for the full list, never silent.
+                    let notes = compatibility_notes(&self.form, &backend.engines);
+                    if !notes.is_empty() {
+                        let badge = ui.add(
+                            egui::Button::new(
+                                RichText::new(format!(
+                                    "⚠ {} compatibility note{}",
+                                    notes.len(),
+                                    if notes.len() == 1 { "" } else { "s" }
+                                ))
+                                .color(theme::WARN)
+                                .size(13.0),
+                            )
+                            .fill(theme::tint(theme::WARN, 0.10))
+                            .stroke(egui::Stroke::new(1.0, theme::tint(theme::WARN, 0.30)))
+                            .corner_radius(egui::CornerRadius::same(6)),
+                        );
+                        if badge.on_hover_text("Click for details.").clicked() {
+                            self.show_compat_notes = true;
+                        }
+                        ui.add_space(10.0);
                     }
+                    let duration = self
+                        .form
+                        .estimated_duration_secs()
+                        .map(|d| format!(" · ~{}", format_duration(d)))
+                        .unwrap_or_default();
                     ui.label(
-                        RichText::new(format!("⚠ {err}"))
-                            .color(theme::DANGER)
+                        RichText::new(format!("{count} engines · {games} games{duration}"))
+                            .color(theme::TEXT_WEAK)
                             .size(13.0),
                     );
-                });
-            }
+                } else {
+                    ui.label(
+                        RichText::new("Select at least two engines to start.")
+                            .color(theme::WARN)
+                            .size(13.0),
+                    );
+                }
+            });
         });
     }
 
@@ -651,7 +994,7 @@ impl TournamentTab {
         let mut delete_name: Option<String> = None;
         let mut saved = false;
 
-        ui.menu_button(RichText::new("Presets ▾").size(13.0), |ui| {
+        let menu_resp = ui.menu_button(RichText::new("Presets    ").size(13.0), |ui| {
                 ui.set_min_width(240.0);
 
                 // ── Save section ──────────────────────────────────────────
@@ -725,9 +1068,7 @@ impl TournamentTab {
                                         Layout::right_to_left(egui::Align::Center),
                                         |ui| {
                                             if ui
-                                                .small_button(
-                                                    RichText::new("×").color(theme::TEXT_WEAK),
-                                                )
+                                                .add(egui::Button::new(RichText::new("×").color(theme::TEXT_WEAK)))
                                                 .on_hover_text("Delete preset")
                                                 .clicked()
                                             {
@@ -746,6 +1087,7 @@ impl TournamentTab {
                 }
             },
         );
+        widgets::dropdown_arrow(ui, menu_resp.response.rect);
 
         // Apply deferred actions.
         if let Some(i) = load_idx
@@ -779,9 +1121,7 @@ impl TournamentTab {
         match backend.start_tournament(name, config, engines) {
             Ok(()) => {
                 self.start_error = None;
-                self.sort = SortState::default();
-                self.elo_note = None;
-                self.games_cache = None;
+                self.just_started = true;
                 // Persist the current form so the next session starts with the
                 // same settings.
                 let last = self.form.to_preset(String::new());
@@ -791,13 +1131,12 @@ impl TournamentTab {
         }
     }
 
-    fn engine_selection(&mut self, ui: &mut Ui, backend: &Backend) {
+    fn engine_selection(&mut self, ui: &mut Ui, backend: &mut Backend) {
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new("Engines")
                     .color(theme::TEXT)
-                    .size(15.0)
-                    .strong(),
+                    .font(theme::semibold(15.0)),
             );
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
@@ -807,30 +1146,68 @@ impl TournamentTab {
                 );
             });
         });
-        ui.add_space(2.0);
+        ui.add_space(4.0);
 
+        // Filter + bulk actions. "Select all" respects the active filter so
+        // it can be used to select a filtered family of engines.
         ui.horizontal(|ui| {
+            widgets::filter_field(
+                ui,
+                &mut self.engine_filter,
+                (ui.available_width() - 34.0).max(80.0),
+                "🔍 Filter…",
+            );
+        });
+        let filter = self.engine_filter.to_lowercase();
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            // All three controls share the standard interact height so the
+            // row reads as one consistent group.
+            let h = ui.spacing().interact_size.y;
             if ui
-                .small_button(RichText::new("Select all").color(theme::TEXT_WEAK))
+                .add(
+                    egui::Button::new(RichText::new("Select all").color(theme::TEXT_WEAK))
+                        .min_size(egui::vec2(0.0, h)),
+                )
+                .on_hover_text("Select every engine matching the filter.")
                 .clicked()
             {
-                self.form.selected = backend.engines.iter().map(|e| e.id).collect();
+                for e in &backend.engines {
+                    if (filter.is_empty() || widgets::engine_matches(e, &filter))
+                        && !self.form.is_selected(e.id)
+                    {
+                        self.form.selected.push(e.id);
+                    }
+                }
             }
             if ui
-                .small_button(RichText::new("Clear").color(theme::TEXT_WEAK))
+                .add(
+                    egui::Button::new(RichText::new("Clear").color(theme::TEXT_WEAK))
+                        .min_size(egui::vec2(0.0, h)),
+                )
                 .clicked()
             {
                 self.form.selected.clear();
             }
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                // Sort selector (persisted; independent of the Engines tab).
+                if widgets::engine_sort_select(
+                    ui,
+                    "tournament_engines_sort_select",
+                    &mut backend.config.tournament_engines_sort,
+                ) {
+                    backend.save_config();
+                }
+            });
         });
         ui.add_space(4.0);
         ui.separator();
 
+        let logos_dir = backend.dirs.logos_dir();
         ScrollArea::vertical()
             .id_salt("tournament_engine_list")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-
                 if backend.engines.is_empty() {
                     ui.add_space(24.0);
                     ui.vertical_centered(|ui| {
@@ -839,8 +1216,7 @@ impl TournamentTab {
                         ui.label(
                             RichText::new("No engines yet")
                                 .color(theme::TEXT_WEAK)
-                                .size(15.0)
-                                .strong(),
+                                .font(theme::semibold(15.0)),
                         );
                         ui.add_space(4.0);
                         ui.label(
@@ -852,118 +1228,233 @@ impl TournamentTab {
                     return;
                 }
 
-                for engine in &backend.engines {
-                    let selected = self.form.is_selected(engine.id);
-                    let name = widgets::engine_base_name(engine);
-                    let version = engine.meta.version.trim();
-                    let subtitle = widgets::engine_subtitle(engine);
-                    let path_missing = !engine.path.exists();
+                // Filtered indices, sorted per the persisted order (shared
+                // comparator with the Engines tab).
+                let mut visible: Vec<usize> = (0..backend.engines.len())
+                    .filter(|&i| {
+                        filter.is_empty()
+                            || widgets::engine_matches(&backend.engines[i], &filter)
+                    })
+                    .collect();
+                widgets::sort_engine_indices(
+                    &backend.engines,
+                    &mut visible,
+                    widgets::EngineSort::from_config(&backend.config.tournament_engines_sort),
+                );
 
-                    let (fill, stroke) = if selected {
-                        (
-                            theme::tint(theme::ACCENT, 0.12),
-                            egui::Stroke::new(1.0, theme::tint(theme::ACCENT, 0.4)),
-                        )
-                    } else {
-                        (Color32::TRANSPARENT, egui::Stroke::NONE)
-                    };
-
-                    // Reserve a background slot so the hover fill paints behind the
-                    // frame content rather than on top of it.
-                    let bg_slot = ui.painter().add(egui::Shape::Noop);
-
-                    let row_resp = egui::Frame::new()
-                        .fill(fill)
-                        .stroke(stroke)
-                        .corner_radius(egui::CornerRadius::same(6))
-                        .inner_margin(egui::Margin::symmetric(8, 7))
-                        .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 8.0;
-                                let mut checked = selected;
-                                if widgets::checkbox(ui, &mut checked, "").changed() {
-                                    self.form.toggle(engine.id);
-                                }
-                                widgets::engine_avatar(ui, &name, 28.0, selected);
-                                ui.vertical(|ui| {
-                                    ui.spacing_mut().item_spacing.y = 2.0;
-                                    ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 6.0;
-                                        ui.label(
-                                            RichText::new(&name)
-                                                .color(if selected {
-                                                    theme::ACCENT_BRIGHT
-                                                } else {
-                                                    theme::TEXT
-                                                })
-                                                .size(13.5)
-                                                .strong(),
-                                        );
-                                        if !version.is_empty() {
-                                            widgets::chip(ui, version, theme::TEXT_WEAK);
-                                        }
-                                        if path_missing {
-                                            ui.label(
-                                                RichText::new("⚠").color(theme::WARN).size(12.0),
-                                            )
-                                            .on_hover_text("Executable not found at this path.");
-                                        }
-                                    });
-                                    if !subtitle.is_empty() {
-                                        ui.label(
-                                            RichText::new(&subtitle)
-                                                .color(theme::TEXT_WEAK)
-                                                .size(11.5),
-                                        );
-                                    }
-                                });
-                                ui.with_layout(
-                                    Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if let Some(elo) = engine.meta.elo {
-                                            widgets::chip(
-                                                ui,
-                                                &format!("{elo} Elo"),
-                                                theme::TEXT_FAINT,
-                                            );
-                                        }
-                                    },
-                                );
-                            });
-                        })
-                        .response;
-
-                    let interact = ui.interact(
-                        row_resp.rect,
-                        egui::Id::new("sel_engine_row").with(engine.id),
-                        egui::Sense::click(),
-                    );
-
-                    if interact.hovered() && !selected {
-                        ui.painter().set(
-                            bg_slot,
-                            egui::Shape::rect_filled(
-                                row_resp.rect,
-                                egui::CornerRadius::same(6),
-                                theme::BG_HOVER,
-                            ),
+                let any_shown = !visible.is_empty();
+                for i in visible {
+                    let engine = &backend.engines[i];
+                    if self.engine_row(ui, engine, &logos_dir) {
+                        self.form.toggle(backend.engines[i].id);
+                    }
+                    ui.add_space(3.0);
+                }
+                if !any_shown {
+                    ui.add_space(12.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            RichText::new("No engines match the filter.")
+                                .color(theme::TEXT_WEAK)
+                                .size(12.5),
                         );
-                    }
-
-                    if interact.clicked() {
-                        self.form.toggle(engine.id);
-                    }
-
-                    ui.add_space(4.0);
+                    });
                 }
             });
     }
 
-    fn settings_form(&mut self, ui: &mut Ui) {
+    /// One compact selectable engine row (checkbox + logo + name + Elo).
+    /// Returns `true` when the selection should toggle.
+    fn engine_row(&mut self, ui: &mut Ui, engine: &EngineConfig, logos_dir: &Path) -> bool {
+        let selected = self.form.is_selected(engine.id);
+        let name = widgets::engine_base_name(engine);
+        let version = engine.meta.version.trim().to_string();
+        let path_missing = !engine.path.exists();
+        let logo_file = engine.meta.extra.get("logo").cloned();
+
+        let row_h = 36.0;
+        let (rect, resp) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), row_h),
+            egui::Sense::click(),
+        );
+        if !ui.is_rect_visible(rect) {
+            return resp.clicked();
+        }
+
+        // Geometric containment, not `hovered()`: child widgets (the "…"
+        // button) take hover ownership, which would flicker the row state.
+        let row_hovered = resp.contains_pointer();
+        let fill = if selected {
+            theme::tint(theme::ACCENT, 0.12)
+        } else if row_hovered {
+            theme::BG_HOVER
+        } else {
+            Color32::TRANSPARENT
+        };
+        let stroke = if selected {
+            egui::Stroke::new(1.0, theme::tint(theme::ACCENT, 0.4))
+        } else {
+            egui::Stroke::NONE
+        };
+        ui.painter().rect(
+            rect,
+            egui::CornerRadius::same(6),
+            fill,
+            stroke,
+            egui::StrokeKind::Inside,
+        );
+
+        let content = rect.shrink2(egui::vec2(8.0, 5.0));
+        // Unique id salt per row: child widgets otherwise draw auto-ids from
+        // the shared parent Ui, which can transiently collide during relayout.
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt(("engine_row", engine.id))
+                .max_rect(content)
+                .layout(Layout::left_to_right(egui::Align::Center)),
+        );
+        child.spacing_mut().item_spacing.x = 8.0;
+
+        let mut checked = selected;
+        let check_changed = widgets::checkbox(&mut child, &mut checked, "").changed();
+
+        let (logo_rect, _) = crate::logo::slot(&mut child, 24.0, egui::Sense::hover());
+        let drawn = logo_file.as_ref().is_some_and(|file| {
+            crate::logo::draw_fitted(
+                &mut child,
+                &mut self.logos,
+                &logos_dir.join(file),
+                logo_rect,
+                4,
+            )
+        });
+        if !drawn {
+            widgets::draw_avatar_square_in(&child, logo_rect, &name, selected, 4);
+        }
+
+        // Elo pinned right; name + version take the rest, truncated.
+        let n_overrides = self
+            .form
+            .overrides
+            .get(&engine.id)
+            .map_or(0, std::collections::BTreeMap::len);
+        let mut open_overrides = false;
+        child.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+            // Per-tournament UCI options: bordered dots button revealed on
+            // hover (fixed slot so rows never shift); the right-click menu
+            // stays as the power-user path.
+            let (slot, _) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
+            if row_hovered || n_overrides > 0 {
+                let dots = widgets::dots_button(ui, slot, ("engine_opts", engine.id), n_overrides > 0)
+                    .on_hover_text("Tournament UCI options");
+                if dots.clicked() {
+                    open_overrides = true;
+                }
+            }
+            if let Some(elo) = engine.meta.elo {
+                ui.label(
+                    RichText::new(elo.to_string())
+                        .color(theme::TEXT_FAINT)
+                        .monospace()
+                        .size(12.0),
+                );
+            }
+            if n_overrides > 0 {
+                ui.label(RichText::new("●").color(theme::ACCENT).size(9.0))
+                    .on_hover_text(format!(
+                        "{n_overrides} UCI option{} overridden for this tournament.",
+                        if n_overrides == 1 { "" } else { "s" }
+                    ));
+            }
+            ui.with_layout(Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(&name)
+                            .color(if selected {
+                                theme::ACCENT_BRIGHT
+                            } else {
+                                theme::TEXT
+                            })
+                            .font(theme::semibold(13.0)),
+                    )
+                    .truncate(),
+                );
+                if !version.is_empty() {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(version).color(theme::TEXT_WEAK).size(11.5),
+                        )
+                        .truncate(),
+                    );
+                }
+                if path_missing {
+                    ui.label(RichText::new("⚠").color(theme::WARN).size(12.0))
+                        .on_hover_text("Executable not found at this path.");
+                }
+            });
+        });
+
+        if open_overrides {
+            self.override_editor = Some(engine.id);
+        }
+
+        // Right-click: per-tournament UCI overrides for this engine.
+        resp.context_menu(|ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
+            if ui.button("Tournament UCI options…").clicked() {
+                self.override_editor = Some(engine.id);
+                ui.close();
+            }
+            if ui
+                .add_enabled(
+                    n_overrides > 0,
+                    egui::Button::new("Clear tournament overrides"),
+                )
+                .clicked()
+            {
+                self.form.overrides.remove(&engine.id);
+                ui.close();
+            }
+        });
+
+        if row_hovered {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        resp.clicked() || check_changed
+    }
+
+    fn settings_form(&mut self, ui: &mut Ui, engines: &[EngineConfig]) {
         let f = &mut self.form;
 
-        // ── Tournament (Name + Format + Concurrency) ──
+        // Two balanced card columns when there's room, so the options and the
+        // Start bar fit without scrolling on a normal window; stacked on
+        // narrow panels.
+        if ui.available_width() >= 720.0 {
+            ui.columns(2, |cols| {
+                Self::section_tournament(&mut cols[0], f, engines);
+                Self::section_engine_options(&mut cols[0], f);
+                Self::section_elo(&mut cols[0], f, engines);
+                Self::section_output(&mut cols[0], f);
+                Self::section_time_control(&mut cols[1], f);
+                Self::section_adjudication(&mut cols[1], f);
+                Self::section_openings(&mut cols[1], f);
+            });
+        } else {
+            Self::section_tournament(ui, f, engines);
+            Self::section_time_control(ui, f);
+            Self::section_engine_options(ui, f);
+            Self::section_adjudication(ui, f);
+            Self::section_elo(ui, f, engines);
+            Self::section_openings(ui, f);
+            Self::section_output(ui, f);
+        }
+        ui.add_space(4.0);
+    }
+
+    /// Tournament identity + format + schedule size.
+    fn section_tournament(ui: &mut Ui, f: &mut TournamentForm, engines: &[EngineConfig]) {
         widgets::section_card(ui, "Tournament", None, |ui| {
             egui::Grid::new("tc_tournament_grid")
                 .num_columns(2)
@@ -1002,31 +1493,79 @@ impl TournamentTab {
                     ui.end_row();
 
                     if f.format_kind == FormatKind::Gauntlet {
-                        field_label(ui, "Seed engines");
-                        ui.add(
-                            DragValue::new(&mut f.gauntlet_seeds)
-                                .range(1..=64)
-                                .speed(0.1),
+                        ui.label(
+                            RichText::new("Gauntlet engine")
+                                .color(theme::TEXT_WEAK)
+                                .size(13.0),
                         )
                         .on_hover_text(
-                            "The first N selected engines each play every other engine. \
-                             Seeds don't play each other.",
+                            "Plays every other selected engine; the others don't \
+                             play each other.",
                         );
+                        let current = f
+                            .selected
+                            .first()
+                            .and_then(|id| engines.iter().find(|e| e.id == *id))
+                            .map_or_else(
+                                || "select engines first".to_string(),
+                                engine_display_name,
+                            );
+                        widgets::select(ui, "gauntlet_engine", &current, 200.0, |ui| {
+                            for id in f.selected.clone() {
+                                let Some(engine) = engines.iter().find(|e| e.id == id) else {
+                                    continue;
+                                };
+                                if ui
+                                    .selectable_label(
+                                        f.selected.first() == Some(&id),
+                                        engine_display_name(engine),
+                                    )
+                                    .clicked()
+                                {
+                                    // The gauntlet engine is the first seed:
+                                    // move it to the front of selection order.
+                                    f.selected.retain(|x| *x != id);
+                                    f.selected.insert(0, id);
+                                    f.gauntlet_seeds = 1;
+                                    ui.close();
+                                }
+                            }
+                        });
                         ui.end_row();
                     }
 
                     field_label(ui, "Cycles");
-                    ui.add(DragValue::new(&mut f.cycles).range(1..=20).speed(0.1))
-                        .on_hover_text("How many times the full schedule repeats.");
+                    ui.add(DragValue::new(&mut f.cycles).range(1..=10_000).speed(0.2))
+                        .on_hover_text(
+                            "How many times the full schedule repeats. Large engine-testing \
+                             runs routinely use hundreds or thousands.",
+                        );
                     ui.end_row();
 
                     field_label(ui, "Games / pair");
-                    ui.add(
-                        DragValue::new(&mut f.games_per_pair)
-                            .range(1..=20)
-                            .speed(0.1),
-                    )
-                    .on_hover_text("Games each pair plays per cycle (2 = both colours).");
+                    widgets::select(
+                        ui,
+                        "games_per_pair",
+                        if f.games_per_pair >= 2 {
+                            "2 (both colours)"
+                        } else {
+                            "1"
+                        },
+                        140.0,
+                        |ui| {
+                            if ui.selectable_label(f.games_per_pair == 1, "1").clicked() {
+                                f.games_per_pair = 1;
+                                ui.close();
+                            }
+                            if ui
+                                .selectable_label(f.games_per_pair >= 2, "2 (both colours)")
+                                .clicked()
+                            {
+                                f.games_per_pair = 2;
+                                ui.close();
+                            }
+                        },
+                    );
                     ui.end_row();
 
                     field_label(ui, "Parallel games");
@@ -1039,9 +1578,67 @@ impl TournamentTab {
                     }
                     ui.end_row();
                 });
-        });
 
-        // ── Time Control ──
+            // Live schedule size: how many games this configuration plays.
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(6.0);
+            let games = f.estimated_games();
+            if games == 0 {
+                ui.label(
+                    RichText::new("Select at least two engines to see the schedule.")
+                        .color(theme::TEXT_FAINT)
+                        .size(12.5),
+                );
+            } else {
+                // "8 engines · 120 games · ~1h 32m" — the whole-tournament
+                // summary lives here with the schedule; the per-game figure is
+                // in the Time Control card.
+                let n_engines = f.selected.len();
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    let dot = |ui: &mut Ui| {
+                        ui.label(RichText::new("·").color(theme::TEXT_FAINT).size(12.5));
+                    };
+                    ui.label(
+                        RichText::new(format!(
+                            "{n_engines} engine{}",
+                            if n_engines == 1 { "" } else { "s" }
+                        ))
+                        .color(theme::TEXT)
+                        .font(theme::semibold(12.5)),
+                    );
+                    dot(ui);
+                    ui.label(
+                        RichText::new(format!(
+                            "{games} game{}",
+                            if games == 1 { "" } else { "s" }
+                        ))
+                        .color(theme::TEXT)
+                        .font(theme::semibold(12.5)),
+                    );
+                    if let Some(total) = f.estimated_duration_secs() {
+                        let lanes = f.concurrency.max(1);
+                        dot(ui);
+                        ui.label(
+                            RichText::new(format!("~{}", format_duration(total)))
+                                .color(theme::TEXT_WEAK)
+                                .size(12.5),
+                        )
+                        .on_hover_text(format!(
+                            "Estimated total length: {games} games, {lanes} in parallel. \
+                             Assumes ~{EST_MOVES_PER_SIDE:.0} moves per side per game, \
+                             plus a small scheduling overhead.",
+                        ));
+                    }
+                });
+            }
+        });
+    }
+
+    /// Time control type + values, plus the single-game length estimate (it
+    /// lives here because it is a function of the time control alone).
+    fn section_time_control(ui: &mut Ui, f: &mut TournamentForm) {
         widgets::section_card(ui, "Time Control", None, |ui| {
             ui.horizontal(|ui| {
                 field_label(ui, "Type");
@@ -1062,14 +1659,11 @@ impl TournamentTab {
             match f.tc_kind {
                 TcKind::PerMove => {
                     time_value_row(ui, "Per move", &mut f.tc_value, &mut f.tc_unit, "tc_unit");
+                    tc_hint(ui, "Fixed thinking time for every move.");
                 }
                 TcKind::SuddenDeath => {
                     time_value_row(ui, "Base", &mut f.tc_value, &mut f.tc_unit, "tc_unit");
-                    ui.label(
-                        RichText::new("Whole-game budget per side; running out loses on time.")
-                            .color(theme::TEXT_WEAK)
-                            .size(11.5),
-                    );
+                    tc_hint(ui, "One clock for the whole game; running out loses.");
                 }
                 TcKind::Increment => {
                     time_value_row(ui, "Base", &mut f.tc_value, &mut f.tc_unit, "tc_unit");
@@ -1080,17 +1674,7 @@ impl TournamentTab {
                         &mut f.tc_inc_unit,
                         "tc_inc_unit",
                     );
-                    let base_ms = f.tc_unit.to_millis(f.tc_value).max(1);
-                    let inc_ms = f.tc_inc_unit.to_millis(f.tc_inc_value);
-                    ui.label(
-                        RichText::new(format!(
-                            "= {} + {} per move",
-                            format_clock(base_ms),
-                            format_clock(inc_ms)
-                        ))
-                        .color(theme::TEXT_WEAK)
-                        .size(11.5),
-                    );
+                    tc_hint(ui, "Game clock plus a bonus after every move.");
                 }
                 TcKind::Nodes => {
                     ui.horizontal(|ui| {
@@ -1101,27 +1685,56 @@ impl TournamentTab {
                                 .speed(100.0),
                         );
                     });
-                    ui.label(
-                        RichText::new("Deterministic; each move searches a fixed node count.")
-                            .color(theme::TEXT_WEAK)
-                            .size(11.5),
-                    );
+                    tc_hint(ui, "Fixed node count per move; fully deterministic.");
                 }
                 TcKind::Depth => {
                     ui.horizontal(|ui| {
                         field_label(ui, "Depth / move");
                         ui.add(DragValue::new(&mut f.tc_depth).range(1..=100).speed(0.1));
                     });
+                    tc_hint(ui, "Fixed search depth per move.");
+                }
+            }
+
+            // Single-game estimate — a function of this time control only.
+            // The whole-tournament figure lives in the Tournament card.
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(6.0);
+            match f.estimated_game_secs() {
+                Some(d) => {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui.label(
+                            RichText::new("1 game:")
+                                .color(theme::TEXT_WEAK)
+                                .size(12.5),
+                        );
+                        ui.label(
+                            RichText::new(format!("~{}", format_duration(d)))
+                                .color(theme::TEXT)
+                                .font(theme::semibold(12.5)),
+                        )
+                        .on_hover_text(format!(
+                            "Estimated length of one game with this time control. \
+                             Assumes ~{EST_MOVES_PER_SIDE:.0} moves per side; \
+                             sudden-death games are costed at their full clock budget.",
+                        ));
+                    });
+                }
+                None => {
                     ui.label(
-                        RichText::new("Each move searches to a fixed depth.")
-                            .color(theme::TEXT_WEAK)
-                            .size(11.5),
+                        RichText::new("1 game: depends on engine speed")
+                            .color(theme::TEXT_FAINT)
+                            .size(12.5),
                     );
                 }
             }
         });
+    }
 
-        // ── Engine Options (Common + Syzygy + Ponder) ──
+    /// Common UCI options forwarded to every engine.
+    fn section_engine_options(ui: &mut Ui, f: &mut TournamentForm) {
         widgets::section_card(
             ui,
             "Engine Options",
@@ -1149,31 +1762,27 @@ impl TournamentTab {
                         );
                         ui.end_row();
 
-                        widgets::checkbox(ui, &mut f.syzygy50_on, "");
-                        field_label(ui, "Syzygy50MoveRule");
-                        ui.add_enabled_ui(f.syzygy50_on, |ui| {
-                            widgets::checkbox(ui, &mut f.syzygy50, "on");
-                        });
-                        ui.end_row();
                     });
 
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(
-                        "Tablebase paths (Syzygy · Gaviota · Nalimov) are set globally in the \
-                         Engines tab.",
-                    )
-                    .color(theme::TEXT_FAINT)
-                    .size(11.5),
-                );
                 ui.add_space(4.0);
                 widgets::checkbox(ui, &mut f.ponder, "Ponder").on_hover_text(
                     "Let engines think on the opponent's time. Off keeps fast games fair.",
                 );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(
+                        "Tablebases (paths, caches, Syzygy 50-move rule & probe limit, \
+                         Gaviota compression) are configured globally in the Engines tab.",
+                    )
+                    .color(theme::TEXT_FAINT)
+                    .size(11.5),
+                );
             },
         );
+    }
 
-        // ── Adjudication ──
+    /// Draw/resign/max-moves adjudication rules.
+    fn section_adjudication(ui: &mut Ui, f: &mut TournamentForm) {
         widgets::section_card(
             ui,
             "Adjudication",
@@ -1242,44 +1851,102 @@ impl TournamentTab {
                 });
             },
         );
+    }
 
-        // ── Elo ──
-        widgets::section_card(ui, "Elo", None, |ui| {
-            egui::Grid::new("tc_elo_grid")
-                .num_columns(2)
-                .spacing([12.0, 8.0])
-                .show(ui, |ui| {
-                    field_label(ui, "Update policy");
-                    widgets::select(ui, "elo_policy", elo_policy_label(f.elo_policy), 180.0, |ui| {
-                        ui.selectable_value(
-                            &mut f.elo_policy,
-                            EloPolicy::PerGame,
-                            "After every game",
+    /// Elo update policy for the library ratings.
+    fn section_elo(ui: &mut Ui, f: &mut TournamentForm, engines: &[EngineConfig]) {
+        widgets::section_card(
+            ui,
+            "Elo",
+            Some("Update engine library ratings from this tournament's results."),
+            |ui| {
+                egui::Grid::new("tc_elo_grid")
+                    .num_columns(2)
+                    .spacing([12.0, 8.0])
+                    .show(ui, |ui| {
+                        field_label(ui, "Update ratings");
+                        widgets::select(
+                            ui,
+                            "elo_writeback",
+                            f.elo_writeback.label(),
+                            200.0,
+                            |ui| {
+                                for (kind, hint) in [
+                                    (
+                                        WritebackKind::Never,
+                                        "Library ratings stay untouched (default).",
+                                    ),
+                                    (
+                                        WritebackKind::All,
+                                        "All participants are re-rated jointly from every \
+                                         result (maximum likelihood, anchored to their \
+                                         current average) when the tournament finishes.",
+                                    ),
+                                    (
+                                        WritebackKind::Estimate,
+                                        "Only one engine is rated, from its results \
+                                         against the others' fixed ratings. Ideal for \
+                                         gauntleting a new engine.",
+                                    ),
+                                ] {
+                                    ui.selectable_value(&mut f.elo_writeback, kind, kind.label())
+                                        .on_hover_text(hint);
+                                }
+                            },
                         );
-                        ui.selectable_value(
-                            &mut f.elo_policy,
-                            EloPolicy::EndOfTournament,
-                            "At end of tournament",
-                        );
-                        ui.selectable_value(&mut f.elo_policy, EloPolicy::Never, "Never");
+                        ui.end_row();
+
+                        match f.elo_writeback {
+                            WritebackKind::Never | WritebackKind::All => {}
+                            WritebackKind::Estimate => {
+                                ui.label(
+                                    RichText::new("Engine")
+                                        .color(theme::TEXT_WEAK)
+                                        .size(13.0),
+                                )
+                                .on_hover_text(
+                                    "Gets its performance rating against the other \
+                                     engines' library ratings, which stay unchanged.",
+                                );
+                                let current = f
+                                    .estimate_engine()
+                                    .and_then(|id| engines.iter().find(|e| e.id == id))
+                                    .map_or_else(
+                                        || "select engines first".to_string(),
+                                        engine_display_name,
+                                    );
+                                widgets::select(ui, "estimate_target", &current, 200.0, |ui| {
+                                    let picked = f.estimate_engine();
+                                    for id in f.selected.clone() {
+                                        let Some(engine) =
+                                            engines.iter().find(|e| e.id == id)
+                                        else {
+                                            continue;
+                                        };
+                                        if ui
+                                            .selectable_label(
+                                                picked == Some(id),
+                                                engine_display_name(engine),
+                                            )
+                                            .clicked()
+                                        {
+                                            f.estimate_target = Some(id);
+                                            ui.close();
+                                        }
+                                    }
+                                });
+                                ui.end_row();
+                            }
+                        }
                     });
-                    ui.end_row();
+            },
+        );
+    }
 
-                    field_label(ui, "K-factor");
-                    ui.add_enabled(
-                        f.elo_policy != EloPolicy::Never,
-                        DragValue::new(&mut f.k_factor)
-                            .range(1.0..=100.0)
-                            .speed(0.5),
-                    );
-                    ui.end_row();
-                });
-        });
-
-        // ── Openings ──
+    /// Opening-book configuration + preview.
+    fn section_openings(ui: &mut Ui, f: &mut TournamentForm) {
         widgets::section_card(ui, "Openings", None, |ui| {
-            if ui
-                .checkbox(&mut f.openings_on, "Use an opening book")
+            if widgets::checkbox(ui, &mut f.openings_on, "Use an opening book")
                 .on_hover_text(
                     "Draw one starting position per engine pair (both colours share it). \
                      Without a book, every game starts from the standard position.",
@@ -1304,7 +1971,7 @@ impl TournamentTab {
                         f.refresh_openings_preview();
                     }
                     if ui
-                        .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
+                        .add(egui::Button::new(RichText::new("Browse…").color(theme::TEXT_WEAK)))
                         .clicked()
                         && let Some(path) = rfd::FileDialog::new()
                             .set_title("Choose opening book")
@@ -1326,20 +1993,20 @@ impl TournamentTab {
                     .show(ui, |ui| {
                         field_label(ui, "Format");
                         ui.horizontal(|ui| {
-                            let mut changed = ui
-                                .selectable_value(
-                                    &mut f.openings_format,
-                                    OpeningFormat::Epd,
-                                    "EPD",
-                                )
-                                .changed();
-                            changed |= ui
-                                .selectable_value(
-                                    &mut f.openings_format,
-                                    OpeningFormat::Pgn,
-                                    "PGN",
-                                )
-                                .changed();
+                            let mut changed = widgets::choice_chip(
+                                ui,
+                                &mut f.openings_format,
+                                OpeningFormat::Epd,
+                                "EPD",
+                            )
+                            .changed();
+                            changed |= widgets::choice_chip(
+                                ui,
+                                &mut f.openings_format,
+                                OpeningFormat::Pgn,
+                                "PGN",
+                            )
+                            .changed();
                             if changed {
                                 f.refresh_openings_preview();
                             }
@@ -1348,20 +2015,20 @@ impl TournamentTab {
 
                         field_label(ui, "Order");
                         ui.horizontal(|ui| {
-                            let mut changed = ui
-                                .selectable_value(
-                                    &mut f.openings_order,
-                                    OpeningOrder::Sequential,
-                                    "Sequential",
-                                )
-                                .changed();
-                            changed |= ui
-                                .selectable_value(
-                                    &mut f.openings_order,
-                                    OpeningOrder::Random,
-                                    "Random",
-                                )
-                                .changed();
+                            let mut changed = widgets::choice_chip(
+                                ui,
+                                &mut f.openings_order,
+                                OpeningOrder::Sequential,
+                                "Sequential",
+                            )
+                            .changed();
+                            changed |= widgets::choice_chip(
+                                ui,
+                                &mut f.openings_order,
+                                OpeningOrder::Random,
+                                "Random",
+                            )
+                            .changed();
                             if f.openings_order == OpeningOrder::Random {
                                 ui.add_space(6.0);
                                 field_label(ui, "seed");
@@ -1413,7 +2080,7 @@ impl TournamentTab {
                 match &f.openings_preview {
                     Some(Ok((count, sample))) => {
                         ui.label(
-                            RichText::new(format!("✓ {count} openings loaded"))
+                            RichText::new(format!("{count} openings loaded"))
                                 .color(theme::SUCCESS)
                                 .size(12.0),
                         );
@@ -1442,18 +2109,21 @@ impl TournamentTab {
                 }
             }
         });
+    }
 
-        // ── Output ──
+    /// PGN output configuration.
+    fn section_output(ui: &mut Ui, f: &mut TournamentForm) {
         widgets::section_card(ui, "Output", None, |ui| {
             ui.horizontal(|ui| {
                 field_label(ui, "PGN file");
                 ui.add(
                     egui::TextEdit::singleline(&mut f.pgn_path)
                         .desired_width(240.0)
-                        .hint_text("append finished games here (optional)"),
-                );
+                        .hint_text("optional"),
+                )
+                .on_hover_text("Finished games are appended to this PGN file as they end.");
                 if ui
-                    .small_button(RichText::new("Browse…").color(theme::TEXT_WEAK))
+                    .add(egui::Button::new(RichText::new("Browse…").color(theme::TEXT_WEAK)))
                     .clicked()
                     && let Some(path) = rfd::FileDialog::new()
                         .set_title("Choose PGN output file")
@@ -1464,938 +2134,6 @@ impl TournamentTab {
                 }
             });
         });
-
-        ui.add_space(4.0);
-    }
-}
-
-// ── Live view ───────────────────────────────────────────────────────────────────
-
-impl TournamentTab {
-    fn show_live(&mut self, ui: &mut Ui, backend: &mut Backend) {
-        // Snapshot the backend state into owned data, releasing the lock quickly.
-        let live = LiveData::capture(backend);
-
-        // Refresh the cached game list when expanded and a game has finished.
-        if self.show_games {
-            let stale = self.games_cache.as_ref().map(|(n, _)| *n) != Some(live.finished);
-            if stale && let Some(id) = backend.active.as_ref().map(|a| a.handle.id) {
-                self.games_cache = Some((live.finished, backend.list_games(id)));
-            }
-        }
-
-        // Control bar (top).
-        egui::Panel::top("tournament_live_controls")
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::BG_DARKEST)
-                    .inner_margin(egui::Margin::symmetric(14, 10)),
-            )
-            .show_inside(ui, |ui| {
-                self.live_control_bar(ui, backend, &live);
-            });
-
-        // Errors panel (bottom), only when there are errors.
-        if !live.errors.is_empty() {
-            egui::Panel::bottom("tournament_errors")
-                .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(14, 8)))
-                .show_inside(ui, |ui| {
-                    egui::Frame::new()
-                        .fill(theme::tint(theme::DANGER, 0.08))
-                        .stroke(egui::Stroke::new(1.0, theme::tint(theme::DANGER, 0.35)))
-                        .corner_radius(egui::CornerRadius::same(8))
-                        .inner_margin(egui::Margin::same(10))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.label(
-                                RichText::new(format!("Engine errors ({})", live.errors.len()))
-                                    .color(theme::DANGER)
-                                    .size(12.5)
-                                    .strong(),
-                            );
-                            ScrollArea::vertical()
-                                .id_salt("tournament_errors_scroll")
-                                .max_height(80.0)
-                                .auto_shrink([false, true])
-                                .show(ui, |ui| {
-                                    for err in live.errors.iter().rev().take(20) {
-                                        ui.label(
-                                            RichText::new(err).color(theme::TEXT_WEAK).size(12.0),
-                                        );
-                                    }
-                                });
-                        });
-                });
-        }
-
-        // Side panel: in-flight games + termination breakdown.
-        if !live.in_flight_games.is_empty() || !live.termination_counts.is_empty() {
-            egui::Panel::right("tournament_live_side")
-                .default_size(210.0)
-                .resizable(false)
-                .frame(
-                    egui::Frame::new()
-                        .fill(theme::BG_DARKEST)
-                        .stroke(egui::Stroke::new(1.0, theme::STROKE))
-                        .inner_margin(egui::Margin::same(10)),
-                )
-                .show_inside(ui, |ui| {
-                    live_side_panel(ui, &live);
-                });
-        }
-
-        // Results table (centre).
-        egui::CentralPanel::default()
-            .frame(egui::Frame::new().inner_margin(egui::Margin {
-                top: 8,
-                ..Default::default()
-            }))
-            .show_inside(ui, |ui| {
-                ScrollArea::vertical()
-                    .id_salt("tournament_results_scroll")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        self.results_table(ui, &live);
-                        // Pairwise match statistics (Elo±, LOS, SPRT) for a 2-engine match.
-                        if live.rows.len() == 2 {
-                            ui.add_space(12.0);
-                            crate::stats_ui::match_stats_card(
-                                ui,
-                                &live.crosstable_order(),
-                                &live.standings,
-                            );
-                        }
-                        if self.show_h2h {
-                            ui.add_space(16.0);
-                            head_to_head_matrix(ui, &live);
-                        }
-                        if self.show_games {
-                            ui.add_space(16.0);
-                            self.live_games_section(ui, &live);
-                        }
-                    });
-            });
-
-        // The board viewer floats above everything.
-        self.viewer.ui(ui.ctx());
-    }
-
-    /// Expandable list of the active tournament's games with a View button each.
-    fn live_games_section(&mut self, ui: &mut Ui, live: &LiveData) {
-        // Only finished games carry a PGN and are viewable; show those, newest
-        // first. (The cache also holds pending/running rows, which would just be
-        // a wall of disabled "View" buttons.)
-        let order: Vec<usize> = self
-            .games_cache
-            .as_ref()
-            .map(|(_, games)| {
-                games
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, g)| g.pgn.as_deref().is_some_and(|p| !p.trim().is_empty()))
-                    .map(|(i, _)| i)
-                    .rev()
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        ui.label(
-            RichText::new(format!("Games ({})", order.len()))
-                .color(theme::TEXT)
-                .size(13.5)
-                .strong(),
-        );
-        if order.is_empty() {
-            ui.label(
-                RichText::new("No finished games yet.")
-                    .color(theme::TEXT_WEAK)
-                    .size(12.5),
-            );
-            return;
-        }
-        ui.add_space(6.0);
-
-        let mut view_idx: Option<usize> = None;
-        if let Some((_, games)) = &self.games_cache {
-            for &i in &order {
-                let g = &games[i];
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!("R{}", g.round))
-                            .color(theme::TEXT_FAINT)
-                            .monospace()
-                            .size(12.0),
-                    );
-                    let result = g
-                        .result
-                        .map(|r| r.pgn().to_string())
-                        .unwrap_or_else(|| "…".to_string());
-                    ui.label(
-                        RichText::new(format!(
-                            "{} vs {}  {}",
-                            live.participant_name(g.white),
-                            live.participant_name(g.black),
-                            result
-                        ))
-                        .color(theme::TEXT_WEAK)
-                        .size(12.5),
-                    );
-                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("View").clicked() {
-                            view_idx = Some(i);
-                        }
-                    });
-                });
-                ui.add_space(2.0);
-            }
-        }
-
-        if let Some(i) = view_idx
-            && let Some((_, games)) = &self.games_cache
-        {
-            let g = &games[i];
-            let white = live.participant_name(g.white).to_string();
-            let black = live.participant_name(g.black).to_string();
-            self.viewer.open_game(g, &white, &black);
-        }
-    }
-
-    fn live_control_bar(&mut self, ui: &mut Ui, backend: &mut Backend, live: &LiveData) {
-        let status = live.status;
-
-        // ── Row 1: status + name + transport + progress + timing ──
-        // `horizontal_wrapped` so a narrow window flows the progress/timing onto a
-        // second line instead of pushing controls off the right edge.
-        ui.horizontal_wrapped(|ui| {
-            let (label, dot, color) = status_pill_parts(status);
-            widgets::status_pill(ui, label, dot, color);
-            ui.add_space(6.0);
-            ui.label(
-                RichText::new(&live.name)
-                    .color(theme::TEXT)
-                    .size(15.0)
-                    .strong(),
-            );
-            ui.add_space(10.0);
-
-            let go_enabled = matches!(status, TournamentStatus::Stopped | TournamentStatus::Idle);
-            let stop_enabled = matches!(status, TournamentStatus::Running);
-            let force_enabled = matches!(
-                status,
-                TournamentStatus::Running | TournamentStatus::Stopping
-            );
-
-            if widgets::tinted_button(ui, "▶ Go", theme::SUCCESS, go_enabled)
-                .on_hover_text("Resume the tournament.")
-                .clicked()
-                && let Some(active) = &backend.active
-            {
-                active.handle.go();
-            }
-            if widgets::tinted_button(ui, "⏸ Stop", theme::WARN, stop_enabled)
-                .on_hover_text("Stop launching new games; let in-flight games finish.")
-                .clicked()
-                && let Some(active) = &backend.active
-            {
-                active.handle.stop();
-            }
-            if widgets::tinted_button(ui, "⏹ Force-Stop", theme::DANGER, force_enabled)
-                .on_hover_text("Abort in-flight games immediately (discarding them).")
-                .clicked()
-                && let Some(active) = &backend.active
-            {
-                active.handle.force_stop();
-            }
-
-            ui.add_space(12.0);
-
-            // Progress: caption + slim bar.
-            ui.label(
-                RichText::new(format!("{} / {} games", live.finished, live.total))
-                    .color(theme::TEXT_WEAK)
-                    .size(13.0),
-            );
-            let frac = if live.total == 0 {
-                0.0
-            } else {
-                live.finished as f32 / live.total as f32
-            };
-            ui.add(
-                egui::ProgressBar::new(frac)
-                    .desired_width(150.0)
-                    .desired_height(6.0)
-                    .corner_radius(4.0)
-                    .fill(theme::ACCENT),
-            );
-
-            // Timing: elapsed / avg / ETA.
-            if let Some(started) = live.started_at {
-                let elapsed_secs = started.elapsed().as_secs_f64();
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new(format!("⏱ {}", format_duration(elapsed_secs)))
-                        .color(theme::TEXT_WEAK)
-                        .size(12.5),
-                );
-                if live.games_timed > 0 {
-                    let avg_ms = live.total_game_ms as f64 / live.games_timed as f64;
-                    let avg_secs = avg_ms / 1000.0;
-                    ui.label(
-                        RichText::new(format!("avg {}/game", format_duration(avg_secs)))
-                            .color(theme::TEXT_WEAK)
-                            .size(12.5),
-                    );
-                    let remaining = live.total.saturating_sub(live.finished);
-                    if remaining > 0 {
-                        let eta_secs = avg_secs * remaining as f64;
-                        ui.label(
-                            RichText::new(format!("ETA {}", format_duration(eta_secs)))
-                                .color(theme::TEXT_FAINT)
-                                .size(12.0),
-                        );
-                    }
-                }
-            }
-        });
-
-        ui.add_space(8.0);
-
-        // ── Row 2: view toggles + actions ──
-        // Also wrapped, so every action stays reachable at any window width — the
-        // bug that made the live board viewer unreachable on smaller windows.
-        ui.horizontal_wrapped(|ui| {
-            let new_enabled = !crate::backend::is_busy(status);
-
-            ui.toggle_value(&mut self.show_games, RichText::new("Games").size(13.0))
-                .on_hover_text("Browse finished games and open them in the board viewer.");
-            ui.toggle_value(
-                &mut self.show_h2h,
-                RichText::new("Head-to-head").size(13.0),
-            );
-
-            // Export menu: CSV standings / crosstable / game PGN.
-            let tid = backend.active.as_ref().map(|a| a.handle.id);
-            ui.menu_button(RichText::new("Export ▾").size(13.0), |ui| {
-                ui.set_min_width(170.0);
-                if ui.button("Standings (CSV)").clicked() {
-                    self.export_note =
-                        crate::export_ui::export_standings_csv(&live.name, &live.export_rows());
-                    ui.close();
-                }
-                if ui.button("Crosstable (CSV)").clicked() {
-                    self.export_note = crate::export_ui::export_crosstable_csv(
-                        &live.name,
-                        &live.crosstable_order(),
-                        &live.standings,
-                    );
-                    ui.close();
-                }
-                if ui.button("Game PGN").clicked() {
-                    let pgn = tid
-                        .map(|id| backend.collect_pgn(id).unwrap_or_default())
-                        .unwrap_or_default();
-                    self.export_note = crate::export_ui::export_pgn(&live.name, &pgn);
-                    ui.close();
-                }
-            });
-
-            ui.add_space(16.0);
-
-            if widgets::tinted_button(ui, "Apply Elo → Library", theme::ACCENT, new_enabled)
-                .on_hover_text("Write tournament Elo ratings back to the engine library.")
-                .clicked()
-            {
-                let n = backend.apply_active_elo_to_library();
-                self.elo_note = Some(format!("Elo applied ({n} engines updated)"));
-            }
-
-            if ui
-                .add_enabled(
-                    new_enabled,
-                    egui::Button::new(RichText::new("New Tournament").size(13.0))
-                        .fill(theme::BG_ELEVATED)
-                        .stroke(egui::Stroke::new(1.0, theme::STROKE)),
-                )
-                .on_hover_text(if new_enabled {
-                    "Return to setup to configure another tournament."
-                } else {
-                    "Stop the tournament first."
-                })
-                .clicked()
-            {
-                backend.clear_active();
-                self.games_cache = None;
-            }
-
-            if let Some(note) = &self.export_note {
-                ui.label(RichText::new(note).color(theme::TEXT_WEAK).size(12.0));
-            }
-            if let Some(note) = &self.elo_note {
-                ui.label(RichText::new(note).color(theme::SUCCESS).size(12.0));
-            }
-        });
-    }
-
-    fn results_table(&mut self, ui: &mut Ui, live: &LiveData) {
-        if live.rows.is_empty() {
-            ui.add_space(20.0);
-            ui.label(
-                RichText::new("Waiting for the first game to finish…")
-                    .color(theme::TEXT_WEAK)
-                    .size(13.0),
-            );
-            return;
-        }
-
-        let mut rows = live.rows.clone();
-        sort_rows(&mut rows, self.sort);
-
-        let header_h = 30.0;
-        let row_h = 30.0;
-
-        TableBuilder::new(ui)
-            .striped(true)
-            .cell_layout(Layout::left_to_right(egui::Align::Center))
-            // Fixed widths (not Column::auto): auto re-measures cell content every
-            // frame, so live-updating numbers make the columns visibly jump.
-            .column(Column::exact(40.0)) // rank
-            .column(Column::initial(170.0).at_least(110.0).clip(true)) // name
-            .column(Column::exact(64.0)) // version
-            .column(Column::exact(60.0)) // elo
-            .column(Column::exact(76.0)) // elo delta chip
-            .column(Column::exact(60.0)) // points
-            .column(Column::exact(52.0)) // games
-            .column(Column::exact(92.0)) // w-d-l
-            .column(Column::remainder().at_least(80.0)) // nps
-            .header(header_h, |mut header| {
-                header.col(|ui| {
-                    ui.label(strong_header("#"));
-                });
-                header.col(|ui| {
-                    sortable_header(ui, "Engine", SortKey::Name, &mut self.sort);
-                });
-                header.col(|ui| {
-                    ui.label(strong_header("Ver"));
-                });
-                header.col(|ui| {
-                    sortable_header(ui, "Elo", SortKey::Elo, &mut self.sort);
-                });
-                header.col(|ui| {
-                    sortable_header(ui, "Δ", SortKey::EloDelta, &mut self.sort);
-                });
-                header.col(|ui| {
-                    sortable_header(ui, "Pts", SortKey::Points, &mut self.sort);
-                });
-                header.col(|ui| {
-                    sortable_header(ui, "Gms", SortKey::Games, &mut self.sort);
-                });
-                header.col(|ui| {
-                    ui.label(strong_header("W-D-L"));
-                });
-                header.col(|ui| {
-                    sortable_header(ui, "Avg nps", SortKey::Nps, &mut self.sort);
-                });
-            })
-            .body(|mut body| {
-                for row in &rows {
-                    body.row(row_h, |mut tr| {
-                        tr.col(|ui| {
-                            widgets::rank_badge(ui, row.rank);
-                        });
-                        tr.col(|ui| {
-                            ui.label(RichText::new(&row.name).color(theme::TEXT).strong());
-                        });
-                        tr.col(|ui| {
-                            ui.label(
-                                RichText::new(&row.version)
-                                    .color(theme::TEXT_WEAK)
-                                    .size(12.5),
-                            );
-                        });
-                        tr.col(|ui| {
-                            ui.label(
-                                RichText::new(format!("{:.0}", row.elo))
-                                    .color(theme::TEXT)
-                                    .monospace(),
-                            );
-                        });
-                        tr.col(|ui| {
-                            widgets::elo_delta_chip(ui, row.elo_delta);
-                        });
-                        tr.col(|ui| {
-                            ui.label(
-                                RichText::new(format!("{:.1}", row.points))
-                                    .color(theme::ACCENT)
-                                    .monospace()
-                                    .strong(),
-                            );
-                        });
-                        tr.col(|ui| {
-                            ui.label(
-                                RichText::new(row.games.to_string())
-                                    .color(theme::TEXT_WEAK)
-                                    .monospace(),
-                            );
-                        });
-                        tr.col(|ui| {
-                            ui.label(
-                                RichText::new(format!("{}-{}-{}", row.wins, row.draws, row.losses))
-                                    .color(theme::TEXT)
-                                    .monospace(),
-                            );
-                        });
-                        tr.col(|ui| {
-                            ui.label(
-                                RichText::new(format_nps(row.nps))
-                                    .color(theme::TEXT_WEAK)
-                                    .monospace(),
-                            );
-                        });
-                    });
-                }
-            });
-    }
-}
-
-// ── Head-to-head matrix ─────────────────────────────────────────────────────────
-
-fn head_to_head_matrix(ui: &mut Ui, live: &LiveData) {
-    ui.label(
-        RichText::new("Head-to-head")
-            .color(theme::TEXT)
-            .size(14.0)
-            .strong(),
-    );
-    ui.label(
-        RichText::new("Row engine's record (W–D–L) against each column engine.")
-            .color(theme::TEXT_WEAK)
-            .size(11.5),
-    );
-    ui.add_space(6.0);
-
-    // Order by current standings rank.
-    let order: Vec<&Row> = {
-        let mut r: Vec<&Row> = live.rows.iter().collect();
-        r.sort_by_key(|row| row.rank);
-        r
-    };
-
-    ScrollArea::horizontal()
-        .id_salt("h2h_scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            egui::Grid::new("h2h_matrix")
-                .striped(true)
-                .spacing([10.0, 4.0])
-                .show(ui, |ui| {
-                    // Header row.
-                    ui.label("");
-                    for col in &order {
-                        ui.label(
-                            RichText::new(short_name(&col.name))
-                                .color(theme::TEXT_WEAK)
-                                .size(11.5),
-                        );
-                    }
-                    ui.end_row();
-
-                    for row in &order {
-                        ui.label(
-                            RichText::new(short_name(&row.name))
-                                .color(theme::TEXT)
-                                .size(12.0)
-                                .strong(),
-                        );
-                        for col in &order {
-                            if row.id == col.id {
-                                ui.label(RichText::new("—").color(theme::TEXT_WEAK));
-                            } else {
-                                let h2h = live.standings.head_to_head(row.id, col.id);
-                                if h2h.games() == 0 {
-                                    ui.label(RichText::new("·").color(theme::TEXT_WEAK));
-                                } else {
-                                    let games = h2h.games() as f32;
-                                    let s = (h2h.wins as f32 + 0.5 * h2h.draws as f32) / games;
-                                    let fill = h2h_cell_fill(s);
-                                    egui::Frame::new()
-                                        .fill(fill)
-                                        .corner_radius(egui::CornerRadius::same(4))
-                                        .inner_margin(egui::Margin::symmetric(6, 2))
-                                        .show(ui, |ui| {
-                                            ui.label(
-                                                RichText::new(format!(
-                                                    "{}-{}-{}",
-                                                    h2h.wins, h2h.draws, h2h.losses
-                                                ))
-                                                .color(theme::TEXT)
-                                                .monospace()
-                                                .size(11.5),
-                                            );
-                                        });
-                                }
-                            }
-                        }
-                        ui.end_row();
-                    }
-                });
-        });
-}
-
-// ── Live data capture ───────────────────────────────────────────────────────────
-
-/// One results-table row: standings joined with rating + identity.
-#[derive(Clone)]
-struct Row {
-    id: EngineId,
-    rank: usize,
-    name: String,
-    version: String,
-    elo: f64,
-    elo_delta: f64,
-    points: f64,
-    games: u32,
-    wins: u32,
-    draws: u32,
-    losses: u32,
-    nps: Option<u64>,
-}
-
-/// An owned snapshot of everything the live view renders this frame.
-struct LiveData {
-    name: String,
-    status: TournamentStatus,
-    finished: usize,
-    total: usize,
-    rows: Vec<Row>,
-    standings: Standings,
-    errors: Vec<String>,
-    started_at: Option<std::time::Instant>,
-    total_game_ms: u64,
-    games_timed: usize,
-    in_flight_games: Vec<InFlightGame>,
-    termination_counts: HashMap<Termination, usize>,
-}
-
-impl LiveData {
-    fn capture(backend: &Backend) -> Self {
-        let active = backend
-            .active
-            .as_ref()
-            .expect("capture called with an active tournament");
-
-        let (status, standings, elo, finished, total, errors, started_at, total_game_ms, games_timed, in_flight_games, termination_counts) = {
-            let snap = active.snapshot.lock().unwrap();
-            (
-                snap.status,
-                snap.standings.clone(),
-                snap.elo.clone(),
-                snap.games_finished,
-                snap.games_total,
-                snap.recent_errors.clone(),
-                snap.started_at,
-                snap.total_game_ms,
-                snap.games_timed,
-                snap.in_flight_games.clone(),
-                snap.termination_counts.clone(),
-            )
-        };
-
-        // Rank map by points (descending).
-        let ranked = standings.ranked_by_points();
-        let rank_of = |id: EngineId| ranked.iter().position(|x| x == &id).map_or(0, |p| p + 1);
-
-        let mut rows: Vec<Row> = active
-            .participants
-            .iter()
-            .map(|p: &ParticipantInfo| {
-                let st = standings.standing(p.id);
-                let e = elo.get(&p.id).copied().unwrap_or(EloEntry::default());
-                Row {
-                    id: p.id,
-                    rank: rank_of(p.id),
-                    name: p.name.clone(),
-                    version: p.version.clone(),
-                    elo: e.current,
-                    elo_delta: e.delta,
-                    points: st.points(),
-                    games: st.games(),
-                    wins: st.wins,
-                    draws: st.draws,
-                    losses: st.losses,
-                    nps: st.avg_nps(),
-                }
-            })
-            .collect();
-
-        // Default order: by rank.
-        rows.sort_by_key(|r| r.rank);
-
-        Self {
-            name: active.name.clone(),
-            status,
-            finished,
-            total,
-            rows,
-            standings,
-            errors,
-            started_at,
-            total_game_ms,
-            games_timed,
-            in_flight_games,
-            termination_counts,
-        }
-    }
-
-    fn participant_name(&self, id: EngineId) -> &str {
-        self.rows
-            .iter()
-            .find(|r| r.id == id)
-            .map(|r| r.name.as_str())
-            .unwrap_or("?")
-    }
-
-    /// Rows in rank order, shaped for CSV export.
-    fn export_rows(&self) -> Vec<colosseum_core::ExportRow> {
-        let mut rows: Vec<&Row> = self.rows.iter().collect();
-        rows.sort_by_key(|r| r.rank);
-        rows.into_iter()
-            .map(|r| colosseum_core::ExportRow {
-                rank: r.rank,
-                name: r.name.clone(),
-                version: r.version.clone(),
-                elo: r.elo,
-                elo_delta: r.elo_delta,
-                points: r.points,
-                games: r.games,
-                wins: r.wins,
-                draws: r.draws,
-                losses: r.losses,
-                nps: r.nps,
-            })
-            .collect()
-    }
-
-    /// (id, name) pairs in rank order, for the crosstable header/rows.
-    fn crosstable_order(&self) -> Vec<(EngineId, String)> {
-        let mut rows: Vec<&Row> = self.rows.iter().collect();
-        rows.sort_by_key(|r| r.rank);
-        rows.into_iter().map(|r| (r.id, r.name.clone())).collect()
-    }
-}
-
-// ── Sorting ─────────────────────────────────────────────────────────────────────
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SortKey {
-    Rank,
-    Name,
-    Elo,
-    EloDelta,
-    Points,
-    Games,
-    Nps,
-}
-
-#[derive(Clone, Copy)]
-struct SortState {
-    key: SortKey,
-    ascending: bool,
-}
-
-impl Default for SortState {
-    fn default() -> Self {
-        Self {
-            key: SortKey::Rank,
-            ascending: true,
-        }
-    }
-}
-
-fn sort_rows(rows: &mut [Row], sort: SortState) {
-    use std::cmp::Ordering;
-    rows.sort_by(|a, b| {
-        let ord = match sort.key {
-            SortKey::Rank => a.rank.cmp(&b.rank),
-            SortKey::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-            SortKey::Elo => a.elo.partial_cmp(&b.elo).unwrap_or(Ordering::Equal),
-            SortKey::EloDelta => a
-                .elo_delta
-                .partial_cmp(&b.elo_delta)
-                .unwrap_or(Ordering::Equal),
-            SortKey::Points => a.points.partial_cmp(&b.points).unwrap_or(Ordering::Equal),
-            SortKey::Games => a.games.cmp(&b.games),
-            SortKey::Nps => a.nps.unwrap_or(0).cmp(&b.nps.unwrap_or(0)),
-        };
-        if sort.ascending { ord } else { ord.reverse() }
-    });
-}
-
-/// A clickable column header that toggles/sets the sort key.
-fn sortable_header(ui: &mut Ui, label: &str, key: SortKey, sort: &mut SortState) {
-    let active = sort.key == key;
-    let arrow = if active {
-        if sort.ascending { " ▲" } else { " ▼" }
-    } else {
-        ""
-    };
-    let text = RichText::new(format!("{label}{arrow}"))
-        .color(if active { theme::ACCENT } else { theme::TEXT })
-        .size(12.5)
-        .strong();
-    if ui.add(egui::Button::new(text).frame(false)).clicked() {
-        if active {
-            sort.ascending = !sort.ascending;
-        } else {
-            sort.key = key;
-            // Sensible default direction per column.
-            sort.ascending = matches!(key, SortKey::Name | SortKey::Rank);
-        }
-    }
-}
-
-fn strong_header(label: &str) -> RichText {
-    RichText::new(label).color(theme::TEXT).size(12.5).strong()
-}
-
-// ── Live side panel (currently playing + termination breakdown) ─────────────────
-
-fn live_side_panel(ui: &mut Ui, live: &LiveData) {
-    ScrollArea::vertical()
-        .id_salt("live_side_scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            if !live.in_flight_games.is_empty() {
-                ui.label(
-                    RichText::new(format!("▶ Playing ({})", live.in_flight_games.len()))
-                        .color(theme::TEXT)
-                        .size(12.5)
-                        .strong(),
-                );
-                ui.add_space(4.0);
-                for game in &live.in_flight_games {
-                    let white = live.participant_name(game.white);
-                    let black = live.participant_name(game.black);
-                    egui::Frame::new()
-                        .fill(theme::BG_ELEVATED)
-                        .corner_radius(egui::CornerRadius::same(4))
-                        .inner_margin(egui::Margin::symmetric(6, 4))
-                        .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.label(
-                                RichText::new(format!("Round {}", game.round))
-                                    .color(theme::TEXT_FAINT)
-                                    .size(10.5),
-                            );
-                            ui.label(
-                                RichText::new(format!("⬜ {}", short_name(white)))
-                                    .color(theme::TEXT)
-                                    .size(11.5),
-                            );
-                            ui.label(
-                                RichText::new(format!("⬛ {}", short_name(black)))
-                                    .color(theme::TEXT_WEAK)
-                                    .size(11.5),
-                            );
-                        });
-                    ui.add_space(3.0);
-                }
-            }
-
-            if !live.termination_counts.is_empty() {
-                if !live.in_flight_games.is_empty() {
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(6.0);
-                }
-                ui.label(
-                    RichText::new("Terminations")
-                        .color(theme::TEXT)
-                        .size(12.5)
-                        .strong(),
-                );
-                ui.add_space(4.0);
-                termination_breakdown(ui, &live.termination_counts);
-            }
-        });
-}
-
-fn termination_breakdown(ui: &mut Ui, counts: &HashMap<Termination, usize>) {
-    let groups: &[(&str, &[Termination])] = &[
-        (
-            "Natural",
-            &[
-                Termination::Checkmate,
-                Termination::Stalemate,
-                Termination::FiftyMove,
-                Termination::Threefold,
-                Termination::InsufficientMaterial,
-                Termination::MaxMoves,
-            ],
-        ),
-        (
-            "Adjudicated",
-            &[Termination::AdjudicatedDraw, Termination::AdjudicatedResign],
-        ),
-        (
-            "Errors",
-            &[
-                Termination::TimeForfeit,
-                Termination::EngineCrash,
-                Termination::IllegalMove,
-                Termination::Aborted,
-            ],
-        ),
-    ];
-
-    for (group_label, terms) in groups {
-        let relevant: Vec<(Termination, usize)> = terms
-            .iter()
-            .filter_map(|t| counts.get(t).map(|&n| (*t, n)))
-            .collect();
-        if relevant.is_empty() {
-            continue;
-        }
-        ui.label(
-            RichText::new(*group_label)
-                .color(theme::TEXT_FAINT)
-                .size(11.0)
-                .italics(),
-        );
-        for (term, count) in relevant {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(termination_label(term))
-                        .color(theme::TEXT_WEAK)
-                        .size(12.0),
-                );
-                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(count.to_string())
-                            .color(theme::TEXT)
-                            .size(12.0)
-                            .monospace(),
-                    );
-                });
-            });
-        }
-        ui.add_space(3.0);
-    }
-}
-
-fn termination_label(t: Termination) -> &'static str {
-    match t {
-        Termination::Checkmate => "Checkmate",
-        Termination::Stalemate => "Stalemate",
-        Termination::FiftyMove => "50-move rule",
-        Termination::Threefold => "Threefold rep.",
-        Termination::InsufficientMaterial => "Insuff. mat.",
-        Termination::AdjudicatedDraw => "Adj. draw",
-        Termination::AdjudicatedResign => "Adj. resign",
-        Termination::MaxMoves => "Max moves",
-        Termination::TimeForfeit => "Time forfeit",
-        Termination::EngineCrash => "Crash",
-        Termination::IllegalMove => "Illegal move",
-        Termination::Aborted => "Aborted",
     }
 }
 
@@ -2403,6 +2141,170 @@ fn termination_label(t: Termination) -> &'static str {
 
 fn field_label(ui: &mut Ui, text: &str) {
     ui.label(RichText::new(text).color(theme::TEXT_WEAK).size(13.0));
+}
+
+/// The one-line explanation under the time-control fields.
+fn tc_hint(ui: &mut Ui, text: &str) {
+    ui.label(RichText::new(text).color(theme::TEXT_WEAK).size(11.5));
+}
+
+/// "Name version" display string for an engine (version omitted when empty).
+fn engine_display_name(e: &EngineConfig) -> String {
+    let name = widgets::engine_base_name(e);
+    let version = e.meta.version.trim();
+    if version.is_empty() {
+        name
+    } else {
+        format!("{name} {version}")
+    }
+}
+
+/// Human-readable notes about selected engines that can't fully honour the
+/// tournament settings — no silent failures. An engine whose per-tournament
+/// override covers the setting is considered handled and not reported.
+fn compatibility_notes(form: &TournamentForm, engines: &[EngineConfig]) -> Vec<String> {
+    use colosseum_core::{is_hash_option, is_thread_option};
+    let mut notes = Vec::new();
+    for e in engines.iter().filter(|e| form.selected.contains(&e.id)) {
+        let name = {
+            let n = widgets::engine_base_name(e);
+            let v = e.meta.version.trim();
+            if v.is_empty() {
+                n
+            } else {
+                format!("{n} {v}")
+            }
+        };
+        if !e.path.exists() {
+            notes.push(format!(
+                "{name}: executable not found — its games will fail"
+            ));
+        }
+        let overridden = |pred: fn(&str) -> bool| {
+            form.overrides
+                .get(&e.id)
+                .is_some_and(|m| m.keys().any(|k| pred(k)))
+        };
+        if form.threads_on && form.threads > 1 && !overridden(is_thread_option) {
+            let thread_opts: Vec<&UciOption> = e
+                .detected_options
+                .iter()
+                .filter(|o| is_thread_option(o.name()))
+                .collect();
+            if thread_opts.is_empty() {
+                notes.push(format!(
+                    "{name}: no thread option — runs single-threaded \
+                     (Threads {} requested)",
+                    form.threads
+                ));
+            } else {
+                for o in thread_opts {
+                    if let UciOption::Spin { max, .. } = o
+                        && i64::from(form.threads) > *max
+                    {
+                        notes.push(format!(
+                            "{name}: {} will be capped at {max} (Threads {} requested)",
+                            o.name(),
+                            form.threads
+                        ));
+                    }
+                }
+            }
+        }
+        if form.hash_on && !overridden(is_hash_option) {
+            let hash_opts: Vec<&UciOption> = e
+                .detected_options
+                .iter()
+                .filter(|o| is_hash_option(o.name()))
+                .collect();
+            if hash_opts.is_empty() {
+                notes.push(format!(
+                    "{name}: no Hash option — Hash {} MB is not applied",
+                    form.hash_mb
+                ));
+            } else {
+                for o in hash_opts {
+                    if let UciOption::Spin { min, max, .. } = o {
+                        if i64::from(form.hash_mb) > *max {
+                            notes.push(format!(
+                                "{name}: {} will be capped at {max} MB \
+                                 (Hash {} requested)",
+                                o.name(),
+                                form.hash_mb
+                            ));
+                        } else if i64::from(form.hash_mb) < *min {
+                            notes.push(format!(
+                                "{name}: {} will be raised to {min} MB \
+                                 (Hash {} requested)",
+                                o.name(),
+                                form.hash_mb
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    notes
+}
+
+/// The engine's detected options with its saved (library) values and the
+/// tournament-wide Threads/Hash/Ponder substituted as the displayed defaults
+/// — i.e. what actually applies when no tournament override is set.
+fn effective_options(
+    engine: &EngineConfig,
+    common_threads: Option<u32>,
+    common_hash: Option<u32>,
+    common_ponder: bool,
+) -> Vec<UciOption> {
+    use colosseum_core::{is_hash_option, is_thread_option};
+    engine
+        .detected_options
+        .iter()
+        .cloned()
+        .map(|mut opt| {
+            // Library-saved value first…
+            if let Some(saved) = engine.options.get(opt.name()) {
+                match (&mut opt, saved) {
+                    (UciOption::Check { default, .. }, UciOptionValue::Check(v)) => *default = *v,
+                    (UciOption::Spin { default, .. }, UciOptionValue::Spin(v)) => *default = *v,
+                    (UciOption::Combo { default, .. }, UciOptionValue::Combo(v)) => {
+                        *default = v.clone();
+                    }
+                    (UciOption::Str { default, .. }, UciOptionValue::Str(v)) => {
+                        *default = v.clone();
+                    }
+                    _ => {}
+                }
+            }
+            // …then the tournament-wide values on top (matching what the
+            // scheduler forwards, including the range clamp).
+            match &mut opt {
+                UciOption::Spin {
+                    name,
+                    default,
+                    min,
+                    max,
+                } => {
+                    if let Some(t) = common_threads
+                        && is_thread_option(name)
+                    {
+                        *default = i64::from(t).clamp(*min, *max);
+                    }
+                    if let Some(h) = common_hash
+                        && is_hash_option(name)
+                    {
+                        *default = i64::from(h).clamp(*min, *max);
+                    }
+                }
+                UciOption::Check { name, default } if name == "Ponder" => {
+                    *default = common_ponder;
+                }
+                _ => {}
+            }
+            opt
+        })
+        .collect()
 }
 
 /// A labelled value + unit row for entering a duration (value DragValue, unit
@@ -2422,25 +2324,7 @@ fn time_value_row(
             ui.selectable_value(unit, TimeUnit::Seconds, "s");
             ui.selectable_value(unit, TimeUnit::Minutes, "min");
         });
-        let ms = unit.to_millis(*value);
-        ui.label(
-            RichText::new(format!("= {ms} ms"))
-                .color(theme::TEXT_WEAK)
-                .size(12.0),
-        );
     });
-}
-
-/// Render a millisecond duration as a friendly clock string.
-fn format_clock(ms: u64) -> String {
-    if ms >= 60_000 {
-        let secs = ms as f64 / 1000.0;
-        format!("{:.0}m{:02.0}s", (secs / 60.0).floor(), secs % 60.0)
-    } else if ms >= 1000 {
-        format!("{:.1}s", ms as f64 / 1000.0)
-    } else {
-        format!("{ms}ms")
-    }
 }
 
 /// Forward the global endgame-tablebase directories to every engine that
@@ -2482,12 +2366,41 @@ fn apply_global_tablebases(engines: &mut [EngineConfig], config: &AppConfig) {
                         return None;
                     };
                     let value = match opt {
-                        colosseum_core::UciOption::Spin { min, max, .. } => {
-                            i64::from(mb).clamp(*min, *max)
-                        }
+                        UciOption::Spin { min, max, .. } => i64::from(mb).clamp(*min, *max),
                         _ => i64::from(mb),
                     };
                     return Some((opt.name().to_string(), UciOptionValue::Spin(value)));
+                }
+                // Syzygy policy options, applied with the Syzygy path.
+                if n.contains("syzygy") && path_set(&config.syzygy_path) {
+                    if n.contains("50move") {
+                        return Some((
+                            opt.name().to_string(),
+                            UciOptionValue::Check(config.syzygy_50_move_rule),
+                        ));
+                    }
+                    if n.contains("probelimit") {
+                        let value = match opt {
+                            UciOption::Spin { min, max, .. } => {
+                                i64::from(config.syzygy_probe_limit).clamp(*min, *max)
+                            }
+                            _ => i64::from(config.syzygy_probe_limit),
+                        };
+                        return Some((opt.name().to_string(), UciOptionValue::Spin(value)));
+                    }
+                }
+                // Gaviota compression scheme, applied with the Gaviota path —
+                // only when the engine's combo actually offers the scheme.
+                if n.contains("gaviota")
+                    && n.contains("compression")
+                    && path_set(&config.gaviota_path)
+                    && let UciOption::Combo { vars, .. } = opt
+                    && vars.contains(&config.gaviota_compression)
+                {
+                    return Some((
+                        opt.name().to_string(),
+                        UciOptionValue::Combo(config.gaviota_compression.clone()),
+                    ));
                 }
                 None
             })
@@ -2496,104 +2409,6 @@ fn apply_global_tablebases(engines: &mut [EngineConfig], config: &AppConfig) {
             engine.options.insert(name, value);
         }
     }
-}
-
-fn elo_policy_label(p: EloPolicy) -> &'static str {
-    match p {
-        EloPolicy::PerGame => "After every game",
-        EloPolicy::EndOfTournament => "At end of tournament",
-        EloPolicy::Never => "Never",
-    }
-}
-
-fn status_pill_parts(status: TournamentStatus) -> (&'static str, &'static str, Color32) {
-    match status {
-        TournamentStatus::Running => ("Running", "●", theme::SUCCESS),
-        TournamentStatus::Stopping => ("Stopping", "●", theme::WARN),
-        TournamentStatus::Stopped => ("Stopped", "●", theme::TEXT_WEAK),
-        TournamentStatus::Finished => ("Finished", "●", theme::ACCENT),
-        TournamentStatus::Idle => ("Idle", "○", theme::TEXT_FAINT),
-    }
-}
-
-/// Background fill for a head-to-head cell based on score share `s` (0..=1).
-fn h2h_cell_fill(s: f32) -> Color32 {
-    if s > 0.5 {
-        theme::tint(theme::SUCCESS, (s - 0.5) * 0.5)
-    } else if s < 0.5 {
-        theme::tint(theme::DANGER, (0.5 - s) * 0.5)
-    } else {
-        Color32::TRANSPARENT
-    }
-}
-
-fn format_duration(secs: f64) -> String {
-    if secs < 60.0 {
-        format!("{:.0}s", secs)
-    } else if secs < 3600.0 {
-        format!("{:.0}m{:.0}s", (secs / 60.0).floor(), secs % 60.0)
-    } else {
-        format!(
-            "{:.0}h{:.0}m",
-            (secs / 3600.0).floor(),
-            (secs % 3600.0 / 60.0).floor()
-        )
-    }
-}
-
-fn format_nps(nps: Option<u64>) -> String {
-    match nps {
-        None => "—".to_string(),
-        Some(n) if n >= 1_000_000 => format!("{:.1}M", n as f64 / 1_000_000.0),
-        Some(n) if n >= 1_000 => format!("{:.0}k", n as f64 / 1_000.0),
-        Some(n) => n.to_string(),
-    }
-}
-
-// ── Resume banner ───────────────────────────────────────────────────────────────
-
-enum BannerAction {
-    None,
-    Resume,
-    Dismiss,
-}
-
-fn resume_banner(ui: &mut Ui, row: &TournamentRow) -> BannerAction {
-    let mut action = BannerAction::None;
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("Unfinished tournament found:")
-                .color(theme::ACCENT_BRIGHT)
-                .size(13.0)
-                .strong(),
-        );
-        ui.label(
-            RichText::new(format!(
-                "\"{}\"  ·  {}",
-                row.name,
-                &row.created_at[..10.min(row.created_at.len())]
-            ))
-            .color(theme::TEXT)
-            .size(13.0),
-        );
-        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .small_button(RichText::new("×").color(theme::TEXT_WEAK))
-                .on_hover_text("Dismiss for this session.")
-                .clicked()
-            {
-                action = BannerAction::Dismiss;
-            }
-            ui.add_space(4.0);
-            if widgets::tinted_button(ui, "Resume", theme::ACCENT, true)
-                .on_hover_text("Reload this tournament and continue from where it stopped.")
-                .clicked()
-            {
-                action = BannerAction::Resume;
-            }
-        });
-    });
-    action
 }
 
 /// Truncate `s` to at most `max` characters, appending an ellipsis if cut.
@@ -2607,35 +2422,9 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 /// Truncate a name for compact matrix headers.
-fn short_name(name: &str) -> String {
-    if name.chars().count() <= 10 {
-        name.to_string()
-    } else {
-        let s: String = name.chars().take(9).collect();
-        format!("{s}…")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn row(id: EngineId, points: f64, elo: f64, nps: Option<u64>) -> Row {
-        Row {
-            id,
-            rank: 0,
-            name: "E".to_string(),
-            version: String::new(),
-            elo,
-            elo_delta: 0.0,
-            points,
-            games: 0,
-            wins: 0,
-            draws: 0,
-            losses: 0,
-            nps,
-        }
-    }
 
     #[test]
     fn default_form_matches_config_defaults() {
@@ -2742,46 +2531,39 @@ mod tests {
     }
 
     #[test]
-    fn sort_rows_by_points_descending() {
-        let (a, b, c) = (EngineId::new(), EngineId::new(), EngineId::new());
-        let mut rows = vec![
-            row(a, 1.0, 1500.0, None),
-            row(b, 3.0, 1500.0, None),
-            row(c, 2.0, 1500.0, None),
-        ];
-        sort_rows(
-            &mut rows,
-            SortState {
-                key: SortKey::Points,
-                ascending: false,
-            },
-        );
-        assert_eq!(rows[0].id, b);
-        assert_eq!(rows[1].id, c);
-        assert_eq!(rows[2].id, a);
+    fn duration_formatting() {
+        assert_eq!(format_duration(45.0), "45s");
+        assert_eq!(format_duration(60.0), "1m");
+        assert_eq!(format_duration(150.0), "2m 30s");
+        assert_eq!(format_duration(3_900.0), "1h 05m");
+        assert_eq!(format_duration(200_000.0), "2d 7h");
     }
 
     #[test]
-    fn sort_rows_by_nps_handles_missing() {
-        let (a, b) = (EngineId::new(), EngineId::new());
-        let mut rows = vec![row(a, 0.0, 1500.0, None), row(b, 0.0, 1500.0, Some(5))];
-        sort_rows(
-            &mut rows,
-            SortState {
-                key: SortKey::Nps,
-                ascending: true,
-            },
-        );
-        // None is treated as 0, so it sorts first ascending.
-        assert_eq!(rows[0].id, a);
-        assert_eq!(rows[1].id, b);
+    fn games_per_pair_clamped_to_two() {
+        let form = TournamentForm {
+            games_per_pair: 20, // e.g. from an old preset
+            ..TournamentForm::default()
+        };
+        assert_eq!(form.build_config().games_per_pair, 2);
     }
 
     #[test]
-    fn nps_formatting() {
-        assert_eq!(format_nps(None), "—");
-        assert_eq!(format_nps(Some(500)), "500");
-        assert_eq!(format_nps(Some(12_000)), "12k");
-        assert_eq!(format_nps(Some(2_500_000)), "2.5M");
+    fn estimated_duration_scales_with_lanes() {
+        let mut form = TournamentForm {
+            selected: vec![EngineId::new(), EngineId::new()],
+            tc_kind: TcKind::PerMove,
+            tc_value: 1000.0,
+            tc_unit: TimeUnit::Milliseconds,
+            ..TournamentForm::default()
+        };
+        // 1 pair * 2 games; 1s/move * 60 moves * 2 sides = 120 s per game.
+        let d1 = form.estimated_duration_secs().unwrap();
+        form.concurrency = 2;
+        let d2 = form.estimated_duration_secs().unwrap();
+        assert!((d1 / d2 - 2.0).abs() < 1e-9);
+        // Nodes-based control has no wall-clock estimate.
+        form.tc_kind = TcKind::Nodes;
+        assert!(form.estimated_duration_secs().is_none());
     }
 }

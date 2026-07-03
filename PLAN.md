@@ -750,6 +750,301 @@ problems don't recur per-tab:
 - ✅ 14 pt bottom padding after the last UCI option row, so the scrolled list
   doesn't sit flush against the pinned Clone/Delete action-row divider.
 
+### Tournament/History to §7 standard + schedule estimate (step 40)
+
+- ✅ **Glyph sweep** (§7.1): a full non-ASCII census of the remaining tabs
+  found tofu in: Start Tournament (▶), Go/Stop/Force-Stop (▶⏸⏹), Presets and
+  Export menus (▾), sort indicators (▲▼ → ↑↓), "✓ openings loaded",
+  "▶ Playing" (→ ●), the viewer transport (⏮◀▶⏭ → «‹›»), History Refresh
+  (⟳) and empty state (🏛 → ♟). New `widgets::dropdown_arrow(ui, rect)`
+  paints the menu-button arrow (used by `select` and both Export/Presets
+  menus — labels reserve room with trailing spaces).
+- ✅ **Semibold headers** everywhere headers exist: `section_card` titles,
+  `strong_header`/`sortable_header`, table headers, tab labels (selected),
+  status pills, tinted buttons, live tournament name, History list/detail
+  titles, viewer header, stats values. `.strong()` remains only for inline
+  emphasis.
+- ✅ **Schedule controls**: Cycles 1..=10 000 (SPRT-scale runs); Games/pair is
+  a 1-or-2 dropdown (2 = both colours) — more repetition is exactly what
+  Cycles does, so >2 was redundant; clamped in `build_config` and when
+  loading old presets.
+- ✅ **Schedule summary**: the Tournament card ends with "This will play N
+  games · estimated ~D" (hover explains the ~60 moves/side assumption,
+  sudden-death costed at full budget, ÷ parallel games, +5% overhead); the
+  Start bar shows "N engines · G games · ~D". Nodes/depth controls say
+  "duration depends on engine speed". `format_duration` gained h/m + d/h
+  tiers; unit tests for clamping, formatting, and lane scaling.
+- ✅ **Humanized TC hints**: `time_value_row` shows "= 2m00s" via
+  `format_clock` and only when the unit isn't already milliseconds.
+- ⚠ Code-complete and tested; **visual verification pending** (machine was
+  locked at the end of the session).
+
+### Tournament setup rework (step 41)
+
+- ✅ **Two-column form** (`settings_form` split into per-card fns): Tournament
+  / Engine Options / Elo / Output left, Time Control / Adjudication /
+  Openings right when ≥ 720 pt, stacked otherwise. On a normal window the
+  whole form and the Start bar are visible without scrolling.
+- ✅ **Estimate placement**: games count stays in the Tournament card ("This
+  will play N games."); the wall-clock estimate lives in the Time Control
+  card ("Estimated length ~D (N games, L in parallel)") since duration is a
+  function of the TC; the Start bar shows the compact combo. All per-field
+  "= 2m00s"/ms conversion hints and the increment summary removed
+  (`format_clock` deleted).
+- ✅ **Engine selection**: filter (word-wise, shared `widgets::engine_matches`
+  moved from engines_tab) with `clear_button`, Select-all respecting the
+  filter, compact 36-pt rows — checkbox + 24-pt logo (LogoCache in the tab)
+  or rounded-square monogram + semibold name + dim version + ⚠ + Elo right,
+  whole-row click toggles. Circle-avatar helpers (`draw_avatar_in`,
+  `engine_avatar`) deleted — the rounded square is the only silhouette now.
+- ✅ **Verified end-to-end live**: a real 2-engine, 4-game, 100 ms/move
+  tournament — estimate ~50 s vs 58 s wall clock, live table/Elo Δ/match
+  stats/terminations all correct, history detail + game viewer + delete
+  confirmed; the test tournament was removed from the DB afterwards.
+- 🗒 **Live-board readiness** (analysis, not implemented): the GUI side is
+  ready (snapshot `Arc<Mutex>` + event channel + 30 Hz live repaint + board
+  renderer in `viewer.rs`), but `InFlightGame` carries only ids/round — the
+  runner does not publish moves. Missing piece: the game runner records
+  `moves: Vec<Move>` (+ clocks) into the in-flight snapshot entry after each
+  half-move; the live view then adds per-game "Watch" buttons feeding a live
+  variant of the board viewer, gated by a TC threshold (~≥ 300–500 ms/move)
+  with a hint for faster games. Small, contained backend step.
+
+### Per-engine per-tournament UCI overrides (step 42)
+
+- ✅ **Data model**: `TournamentConfig.engine_overrides:
+  HashMap<EngineId, BTreeMap<String, UciOptionValue>>` (`#[serde(default)]`
+  → old stored tournaments load fine; persisted with the tournament, so
+  resume keeps the overrides). `EngineId` serializes as a UUID string, valid
+  as a JSON map key.
+- ✅ **Precedence** (`resolve_options`, unit-tested): engine library options
+  < tournament common (Threads/Hash/Ponder/Syzygy…) < per-engine tournament
+  override. This is what makes the motivating case work: common Hash 8192
+  with a Rybka 3 override of 2048.
+- ✅ **UI**: right-click an engine-selection row → "Tournament UCI options…"
+  opens a modal listing *all* detected options (including Threads/Hash —
+  the point) with the engine's library-effective values as defaults
+  (`effective_options` substitutes saved values into the detected schema),
+  per-option × reset, Reset all, and a live "N options overridden" footer.
+  Rows with overrides show an accent ● (hover explains); the menu's "Clear
+  tournament overrides" reverts to Engines-tab + Tournament-tab settings.
+  `build_config` prunes overrides to selected engines. Overrides are session
+  state (not part of presets — they reference specific engine ids).
+  `uci_option_row` moved to `widgets` (shared with the Engines tab editor).
+- ✅ Labels trimmed per user: "40 games" and "~4h 12m" (assumptions and the
+  games/parallel context moved into hover text).
+- ✅ Verified live: modal opened from Rybka 3's row, Hash range shown as
+  the engine declares (2–4096), override set to 2048, footer counted it,
+  row dot appeared, Reset-all enabled.
+
+### Tablebase globals, option mapping, compatibility notes (step 43)
+
+- ✅ **Tablebases widget** (per the agreed analysis): Syzygy row gains
+  "Probe limit" (3–7, default 7 — matches the files you own) and a "50-move
+  rule" toggle (default on = FIDE-correct; the per-tournament checkbox was
+  removed — one authoritative home, per-tournament exceptions possible via
+  engine overrides); Gaviota row gains "Compression" (cp0–cp4, default cp4,
+  sent only when the engine's combo offers the scheme). All injected by
+  `apply_global_tablebases` when the matching path is set; hidden from
+  per-engine editors (`is_globally_managed_option`: path/cache/50move/
+  probelimit/compression). Probe depth, NalimovUsage/Frequency and vendor
+  combos stay per-engine as agreed.
+- ✅ **Option-name mapping** (real bug found by the user's Max CPUs remark):
+  the scheduler used to insert literal `"Threads"`/`"Hash"`, which engines
+  with different names (Rybka "Max CPUs") silently ignored. `resolve_options`
+  now forwards to every detected option matching the shared
+  `core::is_thread_option`/`is_hash_option` matchers, clamped to the
+  option's min/max (Rybka 3 + Hash 8192 → 4096, not a crash). Unit-tested.
+- ✅ **Compatibility notes**: `compatibility_notes` inspects selected engines
+  against the tournament settings — no thread option (runs single-threaded),
+  thread/hash values that will be clamped, missing Hash option, missing
+  executable — skipping anything covered by a per-engine override. Shown as
+  a "⚠ N compatibility notes" badge next to Start with the list on hover.
+  Verified live: Fruit 2.1 "no thread option — runs single-threaded
+  (Threads 6 requested)", Rybka 3 "Hash will be capped at 4096 MB".
+- ✅ **Override dialog**: scroll area fills the modal (`auto_shrink
+  [false, true]`) so the bar sits at the right edge; `effective_options`
+  overlays tournament common Threads/Hash/Ponder (clamped, matching the
+  scheduler) so Rybka's "Max CPUs" pre-fills with the tournament value.
+- ✅ **Single status pill** — removed from the bottom status bar; the header
+  pill (visible on every tab) is the one source of truth.
+- ✅ **Logo loading budget** — with ~25 logo-carrying engines the first paint
+  of a tab decoded + Lanczos-resized everything synchronously and froze the
+  app for seconds ("Not Responding"). `LogoCache` now has a per-frame work
+  budget (3 ops), returns "pending" beyond it (monogram fallback +
+  `request_repaint`), and callers `begin_frame()` each frame. Logos fill in
+  progressively over ~1–3 s with the UI fully responsive.
+
+### Setup polish + instant startup (step 44)
+
+- ✅ **Startup blink root-caused and fixed**: a Win32 window-creation monitor
+  (poll `EnumWindows` for the process during launch) caught a visible
+  `PseudoConsoleWindow` at ~135 ms — the debug binary was a console-subsystem
+  exe (`windows_subsystem = "windows"` was release-only), so Windows spawned
+  and then hid a console host at every launch. The attribute is now
+  unconditional, and `AttachConsole(ATTACH_PARENT_PROCESS)` (tiny kernel32
+  extern, no new deps) keeps tracing output working when launched from a
+  terminal. Re-monitored: only the main window appears.
+- ✅ **No layout shift on selection**: `pill_tab` lays the label out with the
+  semibold galley in both states and reserves that width (`add_sized`), so
+  switching tabs no longer nudges neighbours; `sortable_header` always
+  appends the sort arrow via a two-section `LayoutJob`, transparent when the
+  column is inactive, so activating a sort keeps every header in place.
+- ✅ **Compatibility notes are clickable**: the "⚠ N compatibility notes"
+  badge is a tinted-warn button (fill + stroke = obviously interactive)
+  opening a modal that lists every note at once with a scroll cap at 320 pt;
+  hover summary retained.
+- ✅ **Visible entry point for per-engine tournament options** (UI practice:
+  context menus must never be the only path to an action): engine rows show
+  a "…" button on hover — in a permanently reserved 20-pt slot so rows never
+  shift — that opens the Tournament-UCI-options editor directly; it stays
+  visible (accent-coloured) on rows that carry overrides. Right-click menu
+  kept. Gotcha fixed along the way: the row used `resp.hovered()` for its
+  hover fill and the button reveal, but a child widget owning hover turns the
+  parent's `hovered()` off — the button vanished under its own pointer and
+  swallowed the click. Row state now uses `resp.contains_pointer()`.
+- ✅ **Separator breathing room**: the settings `CentralPanel` has a 12-pt
+  left inner margin, so the section cards no longer touch the engine panel's
+  resize separator.
+
+### Real startup fix, setup usability, Elo writeback (step 45)
+
+- ✅ **Startup blink, actually fixed**: step 44 removed the console flash, but
+  a blink remained. A visibility-*transition* monitor showed the main window
+  going visible→hidden→visible: winit on Windows implements maximize via
+  `ShowWindow(SW_MAXIMIZE)`, so `with_maximized(true)` on a hidden window
+  briefly showed an empty maximized frame. `with_maximized` removed from the
+  builder; the app sends `ViewportCommand::Maximized(true)` at reveal time
+  (config value captured at construction — `capture_window_state` overwrites
+  it every frame). Monitor confirms a single hidden→visible transition.
+- ✅ **`widgets::dots_button`**: bordered rounded-square icon button with three
+  painted dots (the "…" glyph sits on the baseline and read bottom-aligned),
+  vertically centered in the engine row, accent-tinted when the row has
+  overrides.
+- ✅ **Gauntlet engine dropdown**: replaces the numeric seed count; lists the
+  currently selected engines (name + version); picking one moves it to the
+  front of the selection order (= seeding order) with `seeds = 1`.
+- ✅ **TC type hints**: every type has a one-line explanation (fixed per-move /
+  whole-game clock / base+increment / fixed nodes / fixed depth).
+- ✅ **Elo section redesigned as library-rating writeback**
+  (`TournamentConfig::rating_writeback`, serde-default None, honoured on
+  resume): "Update ratings" = **Never** (default — ratings never touched) /
+  **All engines** (final tournament ratings written back on finish; K-factor
+  field) / **Estimate one engine** (engine picker defaulting to the gauntlet
+  engine). Estimate uses `core::performance_rating` — bisection on the
+  logistic Elo model against the opponents' *fixed library* ratings, ±800
+  caps for 0%/100% scores, unit-tested — so only the estimated engine's
+  rating changes. Applied automatically by `Backend::poll` on the
+  Running→Finished transition (once, guarded). The live model is always
+  per-game now (the standings Elo column ticks regardless of writeback); the
+  old Update-policy select is gone. Verified live: 4-game gauntlet, Fruit
+  0/4 vs Rybka 3 (3078) → library Fruit = 2278, Rybka unchanged.
+- ✅ **Default name "Tournament"**, no longer restored from last-used settings
+  (named presets still apply their stored name).
+
+### Estimates split, hover-shift root cause, list sorting (step 46)
+
+- ✅ **Estimates**: Time Control card = single game ("1 game: ~10s", weak
+  label + semibold value, assumptions on hover); Tournament card = schedule
+  summary ("2 engines · 200 games · ~2m 06s", semibold counts, faint dot
+  separators, total on the estimate hover).
+- ✅ **Hover shift ROOT-CAUSED** (pixel-diff method: capture the region with
+  `Graphics::CopyFromScreen` before/after hover, diff bounding box): egui's
+  `selectable_label`/`selectable_value` draws no frame while idle and adds
+  frame padding when hovered — the widget widens and shifts everything to its
+  right. New `widgets::choice_chip` (always-framed, accent-tinted when
+  selected) replaced the in-row uses (openings Format/Order). RULE (also
+  GUIDELINES §7): never use selectable labels in row layouts; popup menu
+  items only, where nothing sits to their right.
+- ✅ **Tournament engine-list sorting**: same Name/Elo/Author options as the
+  Engines tab, persisted separately as `AppConfig::tournament_engines_sort`
+  (default "name"); sort enum/comparator/select deduplicated into
+  `widgets::EngineSort`, `sort_engine_indices`, `engine_sort_select`.
+- ✅ **Output hint**: short "optional" hint (fits) + full explanation on
+  hover.
+- ✅ **Openings/Output audit** — both fully implemented: EPD (4-field → FEN,
+  validated via shakmaty, opcodes ignored) and PGN (first N plies, `[FEN]`
+  tag, comments/variations/NAGs stripped) parsing; deterministic SplitMix64
+  Fisher–Yates shuffle from the stored seed (reproducible resume); count
+  cap; scheduler draws one opening per *encounter* (`i / games_per_pair`) so
+  both colours share it, cycling modulo the book; opening moves pre-played
+  and included in stored PGN; live "N openings loaded" + first-line preview;
+  PGN output appends each finished game to the chosen file as it ends.
+
+### Results tab, ML ratings, live concurrency (step 47)
+
+- ✅ **Results tab** (`results_tab.rs`) merges the live view and History:
+  right-hand tournament list (active pinned "● live"), centre = live view or
+  stored detail with Resume/Delete/Export; auto-follows starts/resumes
+  (`TournamentTab::take_started` → app switches tabs). Tournament tab is
+  setup-only; Start disabled while something is live; resume banner hidden
+  while live.
+- ✅ **Rating model**: `core::ml_ratings` — joint maximum-likelihood ratings
+  (synchronous damped performance-rating iteration, re-centred on the
+  participants' mean prior; engines without games keep their prior;
+  unit-tested incl. 75% ≈ 191 Elo and anchor preservation). The live Elo
+  column shows exactly what the writeback stores per mode (Never = static
+  library, All = ML, Estimate = target-only performance rating, others
+  anchored even in the live view). Priors are pinned on `ActiveTournament`
+  at start/resume so the Δ column survives the automatic writeback.
+  K-factor UI removed (the incremental model remains only as the Δ source
+  for "Never" and for stored-history reconstruction).
+- ✅ **Live concurrency**: `Command::SetConcurrency` + `Tournament::
+  set_concurrency` + a Parallel DragValue in the live bar — running games
+  always finish, only the launch rate changes; works running or stopped;
+  persisted via `Store::update_tournament_config` so resume honours it;
+  `TournamentSnapshot.concurrency` feeds the display and the ETA
+  (measured average per game once ≥1 game timed, TC-based estimate before,
+  ÷ lanes, +5%).
+- ✅ **Per-engine forfeit tracking**: `GameOutcome::termination` →
+  `EngineStanding::{time_losses, crash_losses}` (loser attribution,
+  unit-tested) → "Forfeits" column ("2× time · 1× crash") in live and
+  stored tables. `Standings::pair_results` keeps per-pair result sequences
+  for the crosstable's per-game display.
+- ✅ **H2H per format**: gauntlet (1 seed) = seed header + per-opponent rows
+  (score + tinted record cell); otherwise crosstable. W-D-L / "Results"
+  (`1 0 ½`) toggle via `choice_chip`. Fixed the dead-space bug: a
+  *horizontal* ScrollArea with `auto_shrink([false,false])` claims all
+  remaining height — shrink vertically.
+- ✅ **Readable engine errors**: scheduler names the culprit, what happened,
+  the opponent and the round ("X crashed vs Y (round 2) — loss awarded.
+  Detail: …"); `EngineError` event now targets the actual loser.
+- ✅ Setup polish: `small_button` retired app-wide (normal-framed buttons),
+  tablebase note at the bottom of Engine Options, Start Tournament at the
+  bottom-right with summary + compatibility badge beside it.
+
+### Multiple simultaneous tournaments + Results UX (step 48)
+
+- ✅ **Multi-active backend**: `Backend.actives: Vec<ActiveTournament>` with
+  per-id APIs (`active(id)`, `active_priors(id)`, `active_ml_ratings(id)`,
+  `apply_estimate_to_library(id, target)`, `set_active_concurrency(id, n)`,
+  `close_tournament(id)`); `poll` drains every event channel, applies each
+  finished tournament's writeback once, and returns the minimum repaint
+  interval; `status()` aggregates for the header pill; `is_busy` = any
+  running/stopping (close-confirm stops all). Starting no longer replaces —
+  several tournaments can run in parallel; `try_resume` is a no-op when
+  already loaded.
+- ✅ **Click-to-load**: clicking an unfinished tournament in the Results list
+  auto-resumes it (stopped, ready to Go) — no Resume button needed (it
+  remains in the stored detail as a fallback). Initial auto-selection does
+  NOT load; only explicit clicks do. Live-view caches are keyed by
+  tournament id so switching is instant and correct.
+- ✅ **Auto-refresh** (the "autosave" analogue for reads): the list re-reads
+  at most once per second while the tab is visible plus immediately after
+  every action; Refresh button removed. List rows show live progress
+  ("109 / 1400 games") for loaded tournaments and the date otherwise.
+- ✅ **Status convention**: Live (games in flight) / Stopped (idle or stored
+  unfinished — a stored "running" row has no driver, so nothing is playing)
+  / Finished (all games played), consistently capitalized, derived from the
+  snapshot for loaded rows.
+- ✅ **Banner removed**: the startup resume banner is gone entirely; the
+  Results list is the single home for resuming (`find_resumable` deleted).
+- ✅ Setup consistency: `widgets::filter_field` (28 pt text boxes shared by
+  Engines + Tournament panels), Select all/Clear at the standard interact
+  height matching the Sort select; engine rows carry explicit
+  `UiBuilder::id_salt` (fixes a transient duplicate-ID red flash during
+  relayout).
+
 ## 12. Deferred (architecture-ready)
 
 Error-bar/Ordo rating recompute (see step 24); engine process pool; tablebase-based

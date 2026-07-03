@@ -12,7 +12,7 @@ use colosseum_engine::TournamentStatus;
 
 use crate::backend::Backend;
 use crate::engines_tab::EnginesTab;
-use crate::history_tab::{HistoryAction, HistoryTab};
+use crate::results_tab::ResultsTab;
 use crate::theme;
 use crate::tournament_tab::TournamentTab;
 use crate::widgets;
@@ -23,7 +23,7 @@ enum Tab {
     #[default]
     Tournament,
     Engines,
-    History,
+    Results,
 }
 
 impl Tab {
@@ -31,7 +31,7 @@ impl Tab {
         match self {
             Tab::Tournament => "Tournament",
             Tab::Engines => "Engines",
-            Tab::History => "History",
+            Tab::Results => "Results",
         }
     }
 }
@@ -55,11 +55,17 @@ pub struct ColosseumApp {
     close: CloseState,
     engines_tab: EnginesTab,
     tournament_tab: TournamentTab,
-    history_tab: HistoryTab,
+    results_tab: ResultsTab,
     /// Frames painted so far while the window is still hidden. The window is
     /// revealed only after a couple of frames have actually been presented,
     /// so no unpainted surface is ever shown (startup flash).
     frames_before_reveal: u8,
+    /// Whether to maximize at reveal time. On Windows, winit can only maximize
+    /// a window by *showing* it, so `with_maximized(true)` in the builder made
+    /// the hidden window flash maximized-and-empty for a frame at startup.
+    /// Captured at construction because `capture_window_state` overwrites the
+    /// config field on every frame, including the hidden ones.
+    maximize_on_reveal: bool,
 }
 
 impl ColosseumApp {
@@ -67,14 +73,16 @@ impl ColosseumApp {
     pub fn new(cc: &eframe::CreationContext<'_>, backend: Backend) -> Self {
         theme::apply(&cc.egui_ctx);
         let tournament_tab = TournamentTab::new(&backend.dirs.config_dir);
+        let maximize_on_reveal = backend.config.window_maximized;
         Self {
             backend,
             tab: Tab::default(),
             close: CloseState::Open,
             engines_tab: EnginesTab::default(),
             tournament_tab,
-            history_tab: HistoryTab::default(),
+            results_tab: ResultsTab::default(),
             frames_before_reveal: 0,
+            maximize_on_reveal,
         }
     }
 
@@ -189,13 +197,13 @@ impl ColosseumApp {
             match decision {
                 CloseDecision::Cancel => self.close = CloseState::Open,
                 CloseDecision::StopAndQuit => {
-                    if let Some(active) = &self.backend.active {
+                    for active in &self.backend.actives {
                         active.handle.stop();
                     }
                     self.finish_close(ctx);
                 }
                 CloseDecision::ForceStopAndQuit => {
-                    if let Some(active) = &self.backend.active {
+                    for active in &self.backend.actives {
                         active.handle.force_stop();
                     }
                     self.finish_close(ctx);
@@ -231,7 +239,7 @@ impl ColosseumApp {
                     );
                     ui.add_space(20.0);
 
-                    for tab in [Tab::Tournament, Tab::Engines, Tab::History] {
+                    for tab in [Tab::Tournament, Tab::Results, Tab::Engines] {
                         let selected = self.tab == tab;
                         if widgets::pill_tab(ui, tab.label(), selected) {
                             if self.tab == Tab::Engines && tab != Tab::Engines {
@@ -258,7 +266,9 @@ impl ColosseumApp {
             });
     }
 
-    /// The bottom status bar: tournament status pill + engine count + version.
+    /// The bottom status bar: version + engine count. (The tournament status
+    /// pill lives only in the header — one source of truth, visible on every
+    /// tab.)
     fn status_bar(&self, ui: &mut Ui) {
         egui::Panel::bottom("status_bar")
             .frame(
@@ -268,15 +278,6 @@ impl ColosseumApp {
             )
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let (label, dot, color) = match self.backend.status() {
-                        Some(TournamentStatus::Running) => ("Running", "●", theme::SUCCESS),
-                        Some(TournamentStatus::Stopping) => ("Stopping", "●", theme::WARN),
-                        Some(TournamentStatus::Stopped) => ("Stopped", "●", theme::TEXT_WEAK),
-                        Some(TournamentStatus::Finished) => ("Finished", "●", theme::ACCENT),
-                        Some(TournamentStatus::Idle) | None => ("Idle", "○", theme::TEXT_FAINT),
-                    };
-                    widgets::status_pill(ui, label, dot, color);
-
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
                             RichText::new(format!("{} engines", self.backend.engines.len()))
@@ -307,16 +308,16 @@ impl ColosseumApp {
             .show_inside(ui, |ui| match self.tab {
                 Tab::Tournament => {
                     self.tournament_tab.show(ui, &mut self.backend);
+                    // A freshly started tournament switches to its live view.
+                    if self.tournament_tab.take_started() {
+                        self.tab = Tab::Results;
+                    }
                 }
                 Tab::Engines => {
                     self.engines_tab.show(ui, &mut self.backend);
                 }
-                Tab::History => {
-                    if self.history_tab.show(ui, &mut self.backend)
-                        == HistoryAction::SwitchToTournament
-                    {
-                        self.tab = Tab::Tournament;
-                    }
+                Tab::Results => {
+                    self.results_tab.show(ui, &mut self.backend);
                 }
             });
     }
@@ -344,6 +345,11 @@ impl eframe::App for ColosseumApp {
         if self.frames_before_reveal < 3 {
             self.frames_before_reveal += 1;
             if self.frames_before_reveal == 3 {
+                // Maximizing shows the window on Windows, so it must happen
+                // here (content already painted), never in the builder.
+                if self.maximize_on_reveal {
+                    ctx.send_viewport_cmd(ViewportCommand::Maximized(true));
+                }
                 ctx.send_viewport_cmd(ViewportCommand::Visible(true));
                 ctx.send_viewport_cmd(ViewportCommand::Focus);
             } else {

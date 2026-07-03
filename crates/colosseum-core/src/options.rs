@@ -53,6 +53,24 @@ impl UciOption {
     }
 }
 
+/// True when `name` is an engine's thread/CPU-count option. Engines spell it
+/// many ways ("Threads", "Max CPUs", "Cores", "CPU"…); the tournament-wide
+/// thread setting is forwarded to every option matching this.
+#[must_use]
+pub fn is_thread_option(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.contains("thread") || n.contains("cpu") || n == "cores" || n == "core"
+}
+
+/// True when `name` is an engine's main transposition-table size option
+/// ("Hash", "Hash Size", "Memory"…). Deliberately exact-ish so hash-adjacent
+/// options ("Clear Hash", "Hash File") don't match.
+#[must_use]
+pub fn is_hash_option(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n == "hash" || n == "hash size" || n == "hashsize" || n == "memory"
+}
+
 /// A concrete value the user has chosen for a UCI option, sent via `setoption`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UciOptionValue {

@@ -35,36 +35,64 @@ pub struct LogoCache {
     sources: HashMap<String, Option<Arc<RgbaImage>>>,
     /// Uploaded textures, keyed by (file path, target pixel width, height).
     textures: HashMap<(String, u32, u32), TextureHandle>,
+    /// Decode/resize operations performed this frame. Budgeted: with dozens
+    /// of logo-carrying engines, doing all the Lanczos work in one frame
+    /// freezes the UI for seconds — instead a few load per frame and the
+    /// rest show their monogram until their turn comes.
+    work_this_frame: usize,
 }
 
+/// Max decode/resize operations per frame (see `LogoCache::work_this_frame`).
+const WORK_BUDGET_PER_FRAME: usize = 3;
+
 impl LogoCache {
+    /// Reset the per-frame work budget. Call once at the top of each frame
+    /// that draws from this cache.
+    pub fn begin_frame(&mut self) {
+        self.work_this_frame = 0;
+    }
+
+    fn budget_exhausted(&self) -> bool {
+        self.work_this_frame >= WORK_BUDGET_PER_FRAME
+    }
+
     /// Natural pixel dimensions of the logo at `path`, if it decodes.
     /// Lets callers shape the display slot to the image's aspect ratio.
+    /// (Counts against the frame budget only when it triggers a decode.)
     pub fn natural_size(&mut self, path: &Path) -> Option<Vec2> {
-        self.source(path)
+        self.source(path)?
             .map(|img| Vec2::new(img.width() as f32, img.height() as f32))
     }
 
-    fn source(&mut self, path: &Path) -> Option<Arc<RgbaImage>> {
+    /// The decoded source image. Outer `None` = budget exhausted (pending);
+    /// inner `None` = missing/undecodable (cached, never retried).
+    fn source(&mut self, path: &Path) -> Option<Option<Arc<RgbaImage>>> {
         let key = path.to_string_lossy().to_string();
         if let Some(entry) = self.sources.get(&key) {
-            return entry.clone();
+            return Some(entry.clone());
         }
+        if self.budget_exhausted() {
+            return None;
+        }
+        self.work_this_frame += 1;
         let loaded = decode_logo(path);
         self.sources.insert(key, loaded.clone());
-        loaded
+        Some(loaded)
     }
 
     /// A texture of the logo resized (aspect-fit, high quality) to fill a
     /// `box_px`-sized box in physical pixels. Never upscales past native size.
-    /// Returns the texture and its size in physical pixels.
+    /// Outer `None` = pending (budget exhausted — caller should repaint and
+    /// fall back to the monogram this frame); inner `None` = no usable image.
     fn texture_for(
         &mut self,
         ctx: &egui::Context,
         path: &Path,
         box_px: Vec2,
-    ) -> Option<(TextureHandle, Vec2)> {
-        let src = self.source(path)?;
+    ) -> Option<Option<(TextureHandle, Vec2)>> {
+        let Some(src) = self.source(path)? else {
+            return Some(None);
+        };
         let (nw, nh) = (src.width() as f32, src.height() as f32);
         let scale = (box_px.x / nw).min(box_px.y / nh).min(1.0);
         let tw = ((nw * scale).round() as u32).max(1);
@@ -72,8 +100,12 @@ impl LogoCache {
 
         let key = (path.to_string_lossy().to_string(), tw, th);
         if let Some(tex) = self.textures.get(&key) {
-            return Some((tex.clone(), Vec2::new(tw as f32, th as f32)));
+            return Some(Some((tex.clone(), Vec2::new(tw as f32, th as f32))));
         }
+        if self.budget_exhausted() {
+            return None;
+        }
+        self.work_this_frame += 1;
 
         let resized: RgbaImage = if tw == src.width() && th == src.height() {
             (*src).clone()
@@ -88,7 +120,7 @@ impl LogoCache {
             TextureOptions::LINEAR,
         );
         self.textures.insert(key, tex.clone());
-        Some((tex, Vec2::new(tw as f32, th as f32)))
+        Some(Some((tex, Vec2::new(tw as f32, th as f32))))
     }
 }
 
@@ -118,9 +150,17 @@ pub fn draw_fitted(
     let ctx = ui.ctx().clone();
     let ppp = ctx.pixels_per_point();
     let box_px = rect.size() * ppp;
-    let Some((texture, size_px)) = cache.texture_for(&ctx, path, box_px) else {
-        return false;
+    let texture = match cache.texture_for(&ctx, path, box_px) {
+        // Pending: over the per-frame work budget — show the monogram this
+        // frame and keep frames coming until every logo has loaded.
+        None => {
+            ctx.request_repaint();
+            return false;
+        }
+        Some(None) => return false,
+        Some(Some(t)) => t,
     };
+    let (texture, size_px) = texture;
 
     // Fit the draw size to the slot (upscaling small sources so they fill the
     // available space; the texture itself is never upscaled past native, the

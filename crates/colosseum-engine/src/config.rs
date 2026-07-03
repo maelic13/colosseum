@@ -140,8 +140,22 @@ pub struct AppConfig {
     /// Cache size in MB for Gaviota probing (engines' `GaviotaTbCache`),
     /// applied when `gaviota_path` is set.
     pub gaviota_cache_mb: u32,
+    /// Whether tablebase scores respect the 50-move rule (engines'
+    /// `Syzygy50MoveRule`), applied when `syzygy_path` is set. `true` is
+    /// FIDE-correct; `false` counts "cursed" wins as wins.
+    pub syzygy_50_move_rule: bool,
+    /// Maximum piece count to probe (engines' `SyzygyProbeLimit`) — should
+    /// match the tablebase files on disk (5/6/7-man). Applied when
+    /// `syzygy_path` is set.
+    pub syzygy_probe_limit: u32,
+    /// Gaviota compression scheme (engines' `GaviotaTbCompression`) — must
+    /// match how the files on disk were compressed. Applied when
+    /// `gaviota_path` is set.
+    pub gaviota_compression: String,
     /// Engines-tab card sort order: `"name"`, `"elo"`, or `"author"`.
     pub engines_sort: String,
+    /// Tournament-setup engine list sort order (same values as `engines_sort`).
+    pub tournament_engines_sort: String,
 }
 
 impl Default for AppConfig {
@@ -158,7 +172,11 @@ impl Default for AppConfig {
             nalimov_path: None,
             nalimov_cache_mb: 32,
             gaviota_cache_mb: 32,
+            syzygy_50_move_rule: true,
+            syzygy_probe_limit: 7,
+            gaviota_compression: "cp4".to_string(),
             engines_sort: "name".to_string(),
+            tournament_engines_sort: "name".to_string(),
         }
     }
 }

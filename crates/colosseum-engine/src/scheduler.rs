@@ -47,6 +47,9 @@ pub enum Command {
     Go,
     Stop,
     ForceStop,
+    /// Change how many games may run at once. In-flight games always finish;
+    /// only the launch rate changes (effective immediately, persisted).
+    SetConcurrency(usize),
 }
 
 /// High-level tournament status for display.
@@ -95,6 +98,8 @@ pub struct TournamentSnapshot {
     pub in_flight_games: Vec<InFlightGame>,
     /// How many finished games ended with each termination reason.
     pub termination_counts: HashMap<Termination, usize>,
+    /// Current parallel-games limit (live-adjustable).
+    pub concurrency: usize,
 }
 
 /// A handle to a running tournament: send commands, read the live snapshot.
@@ -118,6 +123,13 @@ impl Tournament {
     /// Abort in-flight games (kill engines) and discard them.
     pub fn force_stop(&self) {
         let _ = self.commands.send(Command::ForceStop);
+    }
+
+    /// Change the parallel-games limit. Running games finish normally; new
+    /// games launch only up to the new limit. Works while running or stopped
+    /// (the limit then applies on resume) and is persisted for resume.
+    pub fn set_concurrency(&self, limit: usize) {
+        let _ = self.commands.send(Command::SetConcurrency(limit.max(1)));
     }
 
     /// A cheap clone of the shared snapshot handle for the GUI to read each frame.
@@ -185,7 +197,11 @@ pub fn create_tournament(
                     working_dir: engine.working_dir.clone(),
                     env: engine.env.clone().into_iter().collect(),
                 },
-                options: resolve_options(engine, &config.common),
+                options: resolve_options(
+                    engine,
+                    &config.common,
+                    config.engine_overrides.get(&engine.id),
+                ),
                 start_elo,
             },
         );
@@ -262,6 +278,7 @@ pub fn create_tournament(
         games_timed: 0,
         in_flight_games: Vec::new(),
         termination_counts: HashMap::new(),
+        concurrency: config.concurrency.max(1),
     }));
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
@@ -323,7 +340,7 @@ struct Driver {
 
 async fn drive(mut driver: Driver) {
     let total = driver.total_games;
-    let concurrency = driver.config.concurrency.max(1);
+    let mut concurrency = driver.config.concurrency.max(1);
     // Take the init state out of `driver` using `mem::take`/`replace` so the
     // struct remains fully initialized and `&driver` borrows remain valid later.
     let seeds = std::mem::take(&mut driver.seeds);
@@ -432,13 +449,22 @@ async fn drive(mut driver: Driver) {
                     let _ = driver.store.set_tournament_status(driver.id, store::STATUS_STOPPED);
                     publish_status(&driver.snapshot, TournamentStatus::Stopped);
                 }
+                Some(Command::SetConcurrency(limit)) => {
+                    concurrency = limit.max(1);
+                    // Persist so a later resume uses the new limit too.
+                    driver.config.concurrency = concurrency;
+                    let _ = driver.store.update_tournament_config(driver.id, &driver.config);
+                    if let Ok(mut snap) = driver.snapshot.lock() {
+                        snap.concurrency = concurrency;
+                    }
+                }
                 None => break, // handle dropped
             },
 
             Some(joined) = games.join_next(), if !games.is_empty() => {
                 match joined {
                     Ok(report) => {
-                        in_flight.remove(&report.game_id);
+                        let flight = in_flight.remove(&report.game_id);
                         *termination_counts.entry(report.termination).or_insert(0) += 1;
                         if let Some(dur_ms) = report.stats.duration_ms {
                             total_game_ms += dur_ms;
@@ -459,6 +485,7 @@ async fn drive(mut driver: Driver) {
                             white: report.white,
                             black: report.black,
                             result: report.result,
+                            termination: report.termination,
                             white_nps: report.stats.white_nps,
                             black_nps: report.stats.black_nps,
                         });
@@ -468,9 +495,42 @@ async fn drive(mut driver: Driver) {
                         }
 
                         if let Some(message) = &report.error {
-                            push_error(&mut recent_errors, format!("game {}: {message}", report.game_id));
+                            // Human-readable: which engine failed, how, and
+                            // against whom — not a game GUID.
+                            let name_of = |id: EngineId| {
+                                driver
+                                    .templates
+                                    .get(&id)
+                                    .map_or_else(|| "?".to_string(), |t| t.name.clone())
+                            };
+                            let culprit = match report.result {
+                                GameResult::WhiteWin => Some(report.black),
+                                GameResult::BlackWin => Some(report.white),
+                                GameResult::Draw => None,
+                            };
+                            let what = match report.termination {
+                                Termination::EngineCrash => "crashed",
+                                Termination::IllegalMove => "played an illegal move",
+                                Termination::TimeForfeit => "lost on time",
+                                _ => "failed",
+                            };
+                            let round = flight.as_ref().map_or(0, |f| f.round);
+                            let text = match culprit {
+                                Some(c) => {
+                                    let opp = if c == report.white { report.black } else { report.white };
+                                    format!(
+                                        "{} {} vs {} (round {round}) — loss awarded. Detail: {message}",
+                                        name_of(c), what, name_of(opp)
+                                    )
+                                }
+                                None => format!(
+                                    "{} vs {} (round {round}): {message}",
+                                    name_of(report.white), name_of(report.black)
+                                ),
+                            };
+                            push_error(&mut recent_errors, text);
                             let _ = driver.events.send(TournamentEvent::EngineError {
-                                engine: report.white,
+                                engine: culprit.unwrap_or(report.white),
                                 message: message.clone(),
                             });
                         }
@@ -569,7 +629,11 @@ pub fn resume_tournament(
                     working_dir: engine.working_dir.clone(),
                     env: engine.env.clone().into_iter().collect(),
                 },
-                options: resolve_options(engine, &config.common),
+                options: resolve_options(
+                    engine,
+                    &config.common,
+                    config.engine_overrides.get(&p.engine),
+                ),
                 start_elo: p.start_elo,
             },
         );
@@ -603,6 +667,8 @@ pub fn resume_tournament(
                     white: game.white,
                     black: game.black,
                     result,
+                    // Neutral fallback for legacy rows without a termination.
+                    termination: game.termination.unwrap_or(Termination::Checkmate),
                     white_nps: game.white_nps,
                     black_nps: game.black_nps,
                 });
@@ -653,6 +719,7 @@ pub fn resume_tournament(
         games_timed: 0,
         in_flight_games: Vec::new(),
         termination_counts: HashMap::new(),
+        concurrency: config.concurrency.max(1),
     }));
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -757,6 +824,7 @@ pub fn load_tournament_results(
             white: game.white,
             black: game.black,
             result,
+            termination: game.termination.unwrap_or(Termination::Checkmate),
             white_nps: game.white_nps,
             black_nps: game.black_nps,
         });
@@ -826,10 +894,13 @@ fn to_game_spec(template: &EngineTemplate) -> EngineGameSpec {
     }
 }
 
-/// Merge an engine's own option values with the tournament's common options.
+/// Merge an engine's own option values with the tournament's common options
+/// and its per-tournament overrides. Precedence (low → high): engine library
+/// options → common tournament options → per-engine tournament overrides.
 fn resolve_options(
     engine: &EngineConfig,
     common: &CommonEngineOptions,
+    overrides: Option<&std::collections::BTreeMap<String, UciOptionValue>>,
 ) -> Vec<(String, Option<String>)> {
     // Button options map to (name, None) — they send `setoption name X` with no value.
     // All other options map to (name, Some(value_string)).
@@ -845,11 +916,16 @@ fn resolve_options(
         })
         .collect();
 
+    // Thread/hash counts are forwarded to whatever the engine actually calls
+    // them ("Threads", "Max CPUs", "Cores", "Memory"…), clamped to each
+    // option's declared range — silently sending a literal "Threads" to an
+    // engine that only knows "Max CPUs" would be ignored, and sending an
+    // out-of-range Hash can crash engines (e.g. Rybka 3).
     if let Some(threads) = common.threads {
-        values.insert("Threads".into(), Some(threads.to_string()));
+        insert_matched(&mut values, engine, colosseum_core::is_thread_option, i64::from(threads));
     }
     if let Some(hash) = common.hash_mb {
-        values.insert("Hash".into(), Some(hash.to_string()));
+        insert_matched(&mut values, engine, colosseum_core::is_hash_option, i64::from(hash));
     }
     if let Some(path) = &common.syzygy_path
         && !path.is_empty()
@@ -862,7 +938,40 @@ fn resolve_options(
     // Ponder is always forwarded (default off keeps fast games fair).
     values.insert("Ponder".into(), Some(common.ponder.to_string()));
 
+    // Per-engine tournament overrides win over everything above.
+    if let Some(overrides) = overrides {
+        for (name, value) in overrides {
+            let v = match value {
+                UciOptionValue::Button => None,
+                other => Some(other.as_uci_string()),
+            };
+            values.insert(name.clone(), v);
+        }
+    }
+
     values.into_iter().collect()
+}
+
+/// Insert `value` under every detected option whose name matches `matches`,
+/// clamped to the option's declared range. Falls back to nothing when the
+/// engine declares no matching option (the GUI surfaces that as a
+/// compatibility note).
+fn insert_matched(
+    values: &mut std::collections::BTreeMap<String, Option<String>>,
+    engine: &EngineConfig,
+    matches: fn(&str) -> bool,
+    value: i64,
+) {
+    for opt in &engine.detected_options {
+        if !matches(opt.name()) {
+            continue;
+        }
+        let v = match opt {
+            colosseum_core::UciOption::Spin { min, max, .. } => value.clamp(*min, *max),
+            _ => value,
+        };
+        values.insert(opt.name().to_string(), Some(v.to_string()));
+    }
 }
 
 fn display_name(engine: &EngineConfig) -> String {
@@ -982,5 +1091,76 @@ fn publish(
 fn publish_status(snapshot: &Arc<Mutex<TournamentSnapshot>>, status: TournamentStatus) {
     if let Ok(mut snap) = snapshot.lock() {
         snap.status = status;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn test_engine() -> EngineConfig {
+        let mut engine = EngineConfig::new(PathBuf::from("engine.exe"));
+        engine.detected_options = vec![
+            colosseum_core::UciOption::Spin {
+                name: "Hash".into(),
+                default: 32,
+                min: 2,
+                max: 4096,
+            },
+            colosseum_core::UciOption::Spin {
+                name: "Max CPUs".into(),
+                default: 1,
+                min: 1,
+                max: 2048,
+            },
+        ];
+        engine
+    }
+
+    #[test]
+    fn per_engine_overrides_beat_common_options() {
+        let mut engine = test_engine();
+        engine
+            .options
+            .insert("Hash".into(), UciOptionValue::Spin(64));
+        let common = CommonEngineOptions {
+            hash_mb: Some(1024),
+            ..CommonEngineOptions::default()
+        };
+
+        // Common tournament options beat the engine's saved value…
+        let resolved = resolve_options(&engine, &common, None);
+        let hash = resolved.iter().find(|(n, _)| n == "Hash").unwrap();
+        assert_eq!(hash.1.as_deref(), Some("1024"));
+
+        // …but a per-tournament override beats both (the "Rybka can't take
+        // the common Hash" case).
+        let mut ov = std::collections::BTreeMap::new();
+        ov.insert("Hash".to_string(), UciOptionValue::Spin(2048));
+        let resolved = resolve_options(&engine, &common, Some(&ov));
+        let hash = resolved.iter().find(|(n, _)| n == "Hash").unwrap();
+        assert_eq!(hash.1.as_deref(), Some("2048"));
+    }
+
+    #[test]
+    fn common_options_map_to_engine_specific_names_and_clamp() {
+        let engine = test_engine();
+        let common = CommonEngineOptions {
+            threads: Some(6),
+            hash_mb: Some(8192),
+            ..CommonEngineOptions::default()
+        };
+        let resolved = resolve_options(&engine, &common, None);
+
+        // Threads land on the engine's actual "Max CPUs" option, and no
+        // bogus literal "Threads" option is sent.
+        let cpus = resolved.iter().find(|(n, _)| n == "Max CPUs").unwrap();
+        assert_eq!(cpus.1.as_deref(), Some("6"));
+        assert!(!resolved.iter().any(|(n, _)| n == "Threads"));
+
+        // Hash is clamped to the engine's declared max (8192 → 4096).
+        let hash = resolved.iter().find(|(n, _)| n == "Hash").unwrap();
+        assert_eq!(hash.1.as_deref(), Some("4096"));
     }
 }

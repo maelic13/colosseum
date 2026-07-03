@@ -6,7 +6,10 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use crate::{game::GameResult, ids::EngineId};
+use crate::{
+    game::{GameResult, Termination},
+    ids::EngineId,
+};
 
 /// One engine's record against one specific opponent (from this engine's view).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -34,6 +37,10 @@ pub struct EngineStanding {
     pub wins: u32,
     pub draws: u32,
     pub losses: u32,
+    /// Losses by running out of time.
+    pub time_losses: u32,
+    /// Losses by crashing or playing an illegal move.
+    pub crash_losses: u32,
     nps_total: u128,
     nps_samples: u64,
 }
@@ -67,8 +74,17 @@ pub struct GameOutcome {
     pub white: EngineId,
     pub black: EngineId,
     pub result: GameResult,
+    pub termination: Termination,
     pub white_nps: Option<u64>,
     pub black_nps: Option<u64>,
+}
+
+/// One game's result from a specific engine's perspective, in played order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PairGameResult {
+    Win,
+    Draw,
+    Loss,
 }
 
 /// Aggregated standings for a tournament.
@@ -77,6 +93,9 @@ pub struct Standings {
     per_engine: HashMap<EngineId, EngineStanding>,
     /// Keyed by `(engine, opponent)`; record is from `engine`'s perspective.
     head_to_head: HashMap<(EngineId, EngineId), HeadToHead>,
+    /// Per-pair individual results in played order, from the first id's
+    /// perspective (drives the per-game crosstable display).
+    pair_results: HashMap<(EngineId, EngineId), Vec<PairGameResult>>,
 }
 
 impl Standings {
@@ -122,6 +141,21 @@ impl Standings {
             }
         }
 
+        // Attribute forfeit-style terminations to the losing engine.
+        let loser = match outcome.result {
+            GameResult::WhiteWin => Some(outcome.black),
+            GameResult::BlackWin => Some(outcome.white),
+            GameResult::Draw => None,
+        };
+        if let Some(loser) = loser {
+            let entry = self.per_engine.entry(loser).or_default();
+            match outcome.termination {
+                Termination::TimeForfeit => entry.time_losses += 1,
+                Termination::EngineCrash | Termination::IllegalMove => entry.crash_losses += 1,
+                _ => {}
+            }
+        }
+
         // Head-to-head, both directions.
         record_h2h(
             self.head_to_head
@@ -137,6 +171,21 @@ impl Standings {
             outcome.result,
             false,
         );
+
+        // Per-pair result sequences, both perspectives.
+        let (white_res, black_res) = match outcome.result {
+            GameResult::WhiteWin => (PairGameResult::Win, PairGameResult::Loss),
+            GameResult::BlackWin => (PairGameResult::Loss, PairGameResult::Win),
+            GameResult::Draw => (PairGameResult::Draw, PairGameResult::Draw),
+        };
+        self.pair_results
+            .entry((outcome.white, outcome.black))
+            .or_default()
+            .push(white_res);
+        self.pair_results
+            .entry((outcome.black, outcome.white))
+            .or_default()
+            .push(black_res);
     }
 
     /// Overall standing for an engine (zeroed if it has not played).
@@ -152,6 +201,14 @@ impl Standings {
             .get(&(engine, opponent))
             .copied()
             .unwrap_or_default()
+    }
+
+    /// `engine`'s individual game results against `opponent`, in played order.
+    #[must_use]
+    pub fn pair_results(&self, engine: EngineId, opponent: EngineId) -> &[PairGameResult] {
+        self.pair_results
+            .get(&(engine, opponent))
+            .map_or(&[], Vec::as_slice)
     }
 
     /// All engines currently tracked.
@@ -200,6 +257,7 @@ mod tests {
             white: w,
             black: b,
             result,
+            termination: Termination::Checkmate,
             white_nps: Some(1_000_000),
             black_nps: Some(2_000_000),
         }
@@ -254,6 +312,52 @@ mod tests {
         let ranked = s.ranked_by_points();
         assert_eq!(ranked.first().copied(), Some(a)); // 2 pts
         assert_eq!(ranked.last().copied(), Some(c)); // 0 pts
+    }
+
+    #[test]
+    fn forfeit_terminations_attributed_to_loser() {
+        let a = EngineId::new();
+        let b = EngineId::new();
+        let mut s = Standings::with_engines(&[a, b]);
+        // b loses on time as black, then a crashes as white.
+        s.record(GameOutcome {
+            termination: Termination::TimeForfeit,
+            ..outcome(a, b, GameResult::WhiteWin)
+        });
+        s.record(GameOutcome {
+            termination: Termination::EngineCrash,
+            ..outcome(a, b, GameResult::BlackWin)
+        });
+        assert_eq!(s.standing(b).time_losses, 1);
+        assert_eq!(s.standing(b).crash_losses, 0);
+        assert_eq!(s.standing(a).crash_losses, 1);
+        assert_eq!(s.standing(a).time_losses, 0);
+    }
+
+    #[test]
+    fn pair_results_keep_order_and_perspective() {
+        let a = EngineId::new();
+        let b = EngineId::new();
+        let mut s = Standings::new();
+        s.record(outcome(a, b, GameResult::WhiteWin)); // a wins
+        s.record(outcome(b, a, GameResult::Draw)); // draw
+        s.record(outcome(a, b, GameResult::BlackWin)); // b wins
+        assert_eq!(
+            s.pair_results(a, b),
+            &[
+                PairGameResult::Win,
+                PairGameResult::Draw,
+                PairGameResult::Loss
+            ]
+        );
+        assert_eq!(
+            s.pair_results(b, a),
+            &[
+                PairGameResult::Loss,
+                PairGameResult::Draw,
+                PairGameResult::Win
+            ]
+        );
     }
 
     #[test]

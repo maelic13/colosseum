@@ -94,6 +94,10 @@ pub struct PresetData {
     // Elo
     pub elo_policy: EloPolicy,
     pub k_factor: f64,
+    /// Library-rating writeback mode: "never" (default), "all", "estimate".
+    /// The estimate target engine is session state and is not persisted.
+    #[serde(default)]
+    pub elo_writeback: String,
 
     // Openings
     pub openings_on: bool,
@@ -145,6 +149,7 @@ impl Default for PresetData {
             resign_score_cp: 800,
             elo_policy: EloPolicy::PerGame,
             k_factor: 32.0,
+            elo_writeback: String::new(),
             openings_on: false,
             openings_path: String::new(),
             openings_format: OpeningFormat::Epd,
@@ -260,11 +265,13 @@ mod tests {
 
     #[test]
     fn preset_data_round_trips() {
-        let mut data = PresetData::default();
-        data.preset_name = "Fast nodes".to_string();
-        data.tc_kind = PresetTcKind::Nodes;
-        data.tc_nodes = 50_000;
-        data.games_per_pair = 4;
+        let data = PresetData {
+            preset_name: "Fast nodes".to_string(),
+            tc_kind: PresetTcKind::Nodes,
+            tc_nodes: 50_000,
+            games_per_pair: 4,
+            ..Default::default()
+        };
 
         let json = serde_json::to_string_pretty(&data).unwrap();
         let loaded: PresetData = serde_json::from_str(&json).unwrap();
@@ -299,14 +306,18 @@ mod tests {
 
         assert!(mgr.load_all().is_empty());
 
-        let mut p = PresetData::default();
-        p.preset_name = "Alpha".to_string();
-        p.games_per_pair = 10;
+        let p = PresetData {
+            preset_name: "Alpha".to_string(),
+            games_per_pair: 10,
+            ..Default::default()
+        };
         mgr.save_preset(&p).unwrap();
 
-        let mut p2 = PresetData::default();
-        p2.preset_name = "Beta".to_string();
-        p2.concurrency = 4;
+        let p2 = PresetData {
+            preset_name: "Beta".to_string(),
+            concurrency: 4,
+            ..Default::default()
+        };
         mgr.save_preset(&p2).unwrap();
 
         let all = mgr.load_all();
@@ -329,9 +340,11 @@ mod tests {
 
         assert!(mgr.load_last_used().is_none());
 
-        let mut p = PresetData::default();
-        p.tournament_name = "My run".to_string();
-        p.concurrency = 3;
+        let p = PresetData {
+            tournament_name: "My run".to_string(),
+            concurrency: 3,
+            ..Default::default()
+        };
         mgr.save_last_used(&p);
 
         let loaded = mgr.load_last_used().unwrap();

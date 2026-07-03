@@ -151,6 +151,7 @@ mod tests {
             white: a,
             black: b,
             result: GameResult::WhiteWin,
+            termination: crate::game::Termination::Checkmate,
             white_nps: None,
             black_nps: None,
         });
