@@ -36,7 +36,7 @@ Pre-built binaries for every release are on the
 |---|---|
 | Windows x86-64 | `colosseum-vX.Y.Z-windows-x86_64.msi` (installer) or `.zip` (portable) |
 | Windows ARM64 | `colosseum-vX.Y.Z-windows-arm64.msi` (installer) or `.zip` (portable) |
-| Linux x86-64 | `colosseum-vX.Y.Z-linux-x86_64.tar.gz` |
+| Linux x86-64 | `colosseum-vX.Y.Z-linux-x86_64.tar.gz`, `.deb`, `.rpm`, or `.pkg.tar.zst` (Arch) |
 | macOS Apple Silicon | `colosseum-vX.Y.Z-macos-aarch64.dmg` or `.tar.gz` |
 
 > **macOS note:** v0.1 is unsigned. On first launch Gatekeeper may block it.
@@ -46,8 +46,27 @@ Pre-built binaries for every release are on the
 > ```
 > See [`docs/macos-signing.md`](docs/macos-signing.md) for the signing roadmap.
 
-> **Linux Flatpak:** a Flatpak manifest is included in `flatpak/` for building
-> locally or submitting to Flathub. See the build instructions in that file.
+> **Windows-only engines (Rybka, Houdini, …):** Colosseum runs classic Windows
+> `.exe` engines on macOS and Linux through Wine. When you add one, the app
+> offers to download its own Wine (checksummed, unpacked into the app data
+> folder — nothing system-wide); an existing system Wine is picked up
+> automatically. On macOS this uses Rosetta 2; on Windows ARM64 x64 engines
+> run out of the box via the built-in Prism emulation. On arm64 Linux install
+> [Hangover](https://github.com/AndreRH/hangover) system-wide and it is
+> auto-detected. Emulated engines run at reduced NPS — expect somewhat lower
+> effective Elo than on native x86-64 hardware. When an engine offers multiple
+> builds, prefer the SSE4.2/POPCNT one: it is fully supported by every
+> emulation layer, while `pext`/BMI2 builds emulate slowly and can end up
+> *slower* than the plain build.
+>
+> **Known engine compatibility (Wine on macOS):** most classic engines work at
+> full speed — verified: Critter 1.6a, Fruit 2.1 (32-bit), Deep Shredder 13,
+> Deep HIARCS 14 (32-bit). A few engines whose search loops poll the console
+> in unusual ways currently stall under Wine on macOS (search stays at depth 1):
+> Rybka 2.3/3/4, Houdini 1.5a, Deep Junior Yokohama. They handshake and are
+> added fine, but are not playable there yet; on Windows (including ARM64 via
+> Prism) they run normally, and Wine on Linux is expected to behave better —
+> reports welcome.
 
 ---
 
@@ -134,7 +153,7 @@ colosseum/
 │  ├─ colosseum-uci/      UCI protocol & async process management (tokio)
 │  ├─ colosseum-engine/   Orchestration: runner, scheduler, store, openings
 │  └─ colosseum-gui/      eframe/egui GUI — the shipped binary
-├─ flatpak/               Flatpak manifest + desktop/AppStream metadata
+├─ packaging/             Linux .deb/.rpm/Arch packaging (nfpm) + desktop entry
 ├─ docs/                  macOS signing guide
 └─ .github/workflows/     release (tag-triggered cross-platform packaging)
 ```

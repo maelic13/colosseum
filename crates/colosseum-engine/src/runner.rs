@@ -104,6 +104,12 @@ async fn prepare(
     spec: &EngineGameSpec,
     handshake_timeout: Duration,
 ) -> Result<EngineProcess, UciError> {
+    // Wine-launched engines: make sure the per-engine prefix exists (normally
+    // created at add time; this covers clones and configs moved between
+    // machines). A cheap directory check once initialised.
+    crate::runtime::ensure_prefix_for(&spec.spawn)
+        .await
+        .map_err(|e| UciError::Io(std::io::Error::other(e.to_string())))?;
     let mut engine = EngineProcess::spawn(spec.spawn.clone()).await?;
     engine.handshake(handshake_timeout).await?;
     for (name, value) in &spec.options {

@@ -11,15 +11,23 @@
 //! Adding an engine (single file or folder scan) spawns a background detection
 //! task on the tokio runtime so the GUI thread never blocks.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::Receiver;
 use eframe::egui::{self, DragValue, Layout, RichText, ScrollArea, Sense, Ui, UiBuilder};
 
-use colosseum_core::{EngineConfig, EngineId, UciOption, UciOptionValue};
-use colosseum_engine::{DetectResult, detect_engine, split_name_version};
+use colosseum_core::{
+    BinaryKind, EngineConfig, EngineId, EngineRuntime, UciOption, UciOptionValue,
+};
+use colosseum_engine::{
+    DetectResult, InstallPhase, WineStatus, detect_engine_config, install_managed_wine,
+    is_translated, managed_wine_spec, needs_wine, rosetta_available, sniff_binary,
+    split_name_version, translation_layer_name,
+};
 
 use crate::backend::Backend;
 use crate::logo;
@@ -53,6 +61,32 @@ pub struct EnginesTab {
     tb_expanded: bool,
     /// Decoded logo textures, keyed by file path.
     logos: logo::LogoCache,
+    /// Windows engines held back until the user decides on installing Wine
+    /// (modal). Dropped (not added) when the user declines; the question is
+    /// asked again on the next add that needs it.
+    wine_offer: Option<WineOffer>,
+    /// A running managed-Wine download/unpack job.
+    wine_install: Option<InstallJob>,
+    /// Sniffed binary kinds for library entries that predate sniffing.
+    binary_cache: HashMap<EngineId, BinaryKind>,
+    /// Cached Wine discovery (re-probed every couple of seconds while the
+    /// detail panel needs it, so we don't stat the filesystem every frame).
+    wine_status: Option<(Instant, WineStatus)>,
+}
+
+/// Windows engine paths waiting on the install-Wine decision.
+struct WineOffer {
+    paths: Vec<PathBuf>,
+}
+
+/// A background managed-Wine install (download → verify → unpack).
+struct InstallJob {
+    rx: Receiver<Result<(), String>>,
+    downloaded: Arc<AtomicU64>,
+    total: Arc<AtomicU64>,
+    unpacking: Arc<AtomicBool>,
+    /// Engines to detect + add once the install finishes.
+    pending_paths: Vec<PathBuf>,
 }
 
 /// How long after the last edit before the buffer is auto-committed.
@@ -75,12 +109,14 @@ impl EnginesTab {
         // Poll any background work first so results are visible this frame.
         self.poll_detect(backend);
         self.poll_redetect();
+        self.poll_wine_install(backend);
         self.autosave_tick(ui.ctx(), backend);
         self.show_delete_modal(ui.ctx(), backend);
+        self.show_wine_modal(ui.ctx(), backend);
 
         // Keep frames coming while detection runs in the background — results
         // arrive on a channel and would otherwise wait for the next input event.
-        if self.pending.is_some() || self.redetect_rx.is_some() {
+        if self.pending.is_some() || self.redetect_rx.is_some() || self.wine_install.is_some() {
             ui.ctx().request_repaint_after(Duration::from_millis(150));
         }
 
@@ -174,7 +210,9 @@ impl EnginesTab {
 
     /// The delete-confirmation modal, shown while `pending_delete` is set.
     fn show_delete_modal(&mut self, ctx: &egui::Context, backend: &mut Backend) {
-        let Some(id) = self.pending_delete else { return };
+        let Some(id) = self.pending_delete else {
+            return;
+        };
         let Some(engine) = backend.engines.iter().find(|e| e.id == id) else {
             self.pending_delete = None;
             return;
@@ -225,6 +263,7 @@ impl EnginesTab {
         }
         if confirmed {
             logo::remove(&backend.dirs.logos_dir(), id);
+            backend.runtime_env().delete_engine_data(id);
             backend.engines.retain(|e| e.id != id);
             backend.save_engines();
             if self.selected_id == Some(id) {
@@ -234,13 +273,276 @@ impl EnginesTab {
             self.pending_delete = None;
         }
     }
+
+    /// Finish a completed managed-Wine install: on success, run detection for
+    /// the engines that were waiting on it.
+    fn poll_wine_install(&mut self, backend: &mut Backend) {
+        let Some(job) = &self.wine_install else {
+            return;
+        };
+        match job.rx.try_recv() {
+            Ok(Ok(())) => {
+                let paths = self.wine_install.take().unwrap().pending_paths;
+                self.wine_status = None; // re-probe: managed Wine just appeared
+                if !paths.is_empty() {
+                    self.start_detection(paths, backend);
+                }
+            }
+            Ok(Err(msg)) => {
+                self.detect_error = Some(format!("Wine install failed: {msg}"));
+                self.wine_install = None;
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                self.detect_error = Some("Wine install failed unexpectedly.".to_string());
+                self.wine_install = None;
+            }
+        }
+    }
+
+    /// The install-Wine modal: shown while Windows engines are held back on
+    /// the decision, and (with a progress bar) while the download runs.
+    fn show_wine_modal(&mut self, ctx: &egui::Context, backend: &mut Backend) {
+        // ── Progress variant while installing ──
+        if let Some(job) = &self.wine_install {
+            let downloaded = job.downloaded.load(Ordering::Relaxed);
+            let total = job.total.load(Ordering::Relaxed).max(1);
+            let unpacking = job.unpacking.load(Ordering::Relaxed);
+            egui::Modal::new(egui::Id::new("wine_install_progress")).show(ctx, |ui| {
+                ui.set_width(380.0);
+                ui.label(
+                    RichText::new("Downloading Wine…")
+                        .size(16.0)
+                        .strong()
+                        .color(theme::TEXT),
+                );
+                ui.add_space(10.0);
+                if unpacking {
+                    ui.label(
+                        RichText::new("Verifying and unpacking…")
+                            .color(theme::TEXT_WEAK)
+                            .size(12.5),
+                    );
+                    ui.add_space(4.0);
+                    ui.add(egui::ProgressBar::new(1.0).animate(true));
+                } else {
+                    let frac = (downloaded as f32 / total as f32).clamp(0.0, 1.0);
+                    ui.add(egui::ProgressBar::new(frac).show_percentage());
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(format!(
+                            "{:.0} / {:.0} MB",
+                            downloaded as f64 / 1e6,
+                            total as f64 / 1e6
+                        ))
+                        .color(theme::TEXT_WEAK)
+                        .size(12.0),
+                    );
+                }
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(
+                        "The engines will be added automatically when the install finishes.",
+                    )
+                    .color(theme::TEXT_FAINT)
+                    .size(11.5),
+                );
+            });
+            return;
+        }
+
+        // ── Offer variant ──
+        let Some(offer) = &self.wine_offer else {
+            return;
+        };
+        let n = offer.paths.len();
+        let names: Vec<String> = offer
+            .paths
+            .iter()
+            .take(6)
+            .map(|p| {
+                p.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("?")
+                    .to_string()
+            })
+            .collect();
+        let spec = managed_wine_spec();
+        let rosetta_missing = cfg!(target_os = "macos") && !rosetta_available();
+
+        let mut do_install = false;
+        let mut do_skip = false;
+        egui::Modal::new(egui::Id::new("wine_offer_modal")).show(ctx, |ui| {
+            ui.set_width(440.0);
+            ui.label(
+                RichText::new(if n == 1 {
+                    "Windows engine detected".to_string()
+                } else {
+                    format!("{n} Windows engines detected")
+                })
+                .size(16.0)
+                .strong()
+                .color(theme::TEXT),
+            );
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("These are Windows executables and need Wine to run on this system:")
+                    .color(theme::TEXT_WEAK)
+                    .size(12.5),
+            );
+            ui.add_space(4.0);
+            for name in &names {
+                ui.label(
+                    RichText::new(format!("  •  {name}"))
+                        .color(theme::TEXT)
+                        .size(12.5)
+                        .monospace(),
+                );
+            }
+            if n > names.len() {
+                ui.label(
+                    RichText::new(format!("  …and {} more", n - names.len()))
+                        .color(theme::TEXT_FAINT)
+                        .size(12.0),
+                );
+            }
+            ui.add_space(10.0);
+
+            match spec {
+                Some(spec) => {
+                    ui.label(
+                        RichText::new(format!(
+                            "Colosseum can download Wine {} (~{} MB) into its own data \
+                             folder. Nothing is installed system-wide, and you can also \
+                             install Wine yourself — it is picked up automatically.",
+                            spec.version,
+                            spec.approx_bytes / 1_000_000
+                        ))
+                        .color(theme::TEXT_WEAK)
+                        .size(12.5),
+                    );
+                    if rosetta_missing {
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new(
+                                "⚠ Rosetta 2 is required on Apple Silicon but does not \
+                                 appear to be installed. Install it first:\n    \
+                                 softwareupdate --install-rosetta --agree-to-license",
+                            )
+                            .color(theme::WARN)
+                            .size(12.0),
+                        );
+                    }
+                    ui.add_space(14.0);
+                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                        if widgets::tinted_button(ui, "Download Wine", theme::ACCENT, true)
+                            .clicked()
+                        {
+                            do_install = true;
+                        }
+                        ui.add_space(4.0);
+                        if ui
+                            .button(RichText::new("Skip these engines").color(theme::TEXT))
+                            .clicked()
+                        {
+                            do_skip = true;
+                        }
+                    });
+                }
+                None => {
+                    ui.label(
+                        RichText::new(
+                            "No managed Wine download is available for this platform. \
+                             Install Wine system-wide (on arm64 Linux: Hangover, which \
+                             provides `wine`) and add these engines again — an installed \
+                             Wine is picked up automatically.",
+                        )
+                        .color(theme::TEXT_WEAK)
+                        .size(12.5),
+                    );
+                    ui.add_space(14.0);
+                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .button(RichText::new("Close").color(theme::TEXT))
+                            .clicked()
+                        {
+                            do_skip = true;
+                        }
+                    });
+                }
+            }
+        });
+
+        if do_skip {
+            self.wine_offer = None;
+        }
+        if do_install && let Some(offer) = self.wine_offer.take() {
+            self.start_wine_install(offer.paths, backend);
+        }
+    }
+
+    /// Kick off the managed-Wine download on a background thread.
+    fn start_wine_install(&mut self, pending_paths: Vec<PathBuf>, backend: &Backend) {
+        let env = backend.runtime_env();
+        let downloaded = Arc::new(AtomicU64::new(0));
+        let total = Arc::new(AtomicU64::new(0));
+        let unpacking = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let (d, t, u) = (downloaded.clone(), total.clone(), unpacking.clone());
+        std::thread::spawn(move || {
+            let progress = move |phase: InstallPhase, done: u64, total_bytes: u64| match phase {
+                InstallPhase::Downloading => {
+                    d.store(done, Ordering::Relaxed);
+                    t.store(total_bytes, Ordering::Relaxed);
+                }
+                InstallPhase::Unpacking => u.store(true, Ordering::Relaxed),
+            };
+            let res = install_managed_wine(&env, &progress)
+                .map(|_| ())
+                .map_err(|e| e.to_string());
+            let _ = tx.send(res);
+        });
+        self.wine_install = Some(InstallJob {
+            rx,
+            downloaded,
+            total,
+            unpacking,
+            pending_paths,
+        });
+    }
+
+    /// Cached Wine discovery, re-probed at most every 2 seconds.
+    fn wine_status(&mut self, backend: &Backend) -> WineStatus {
+        let stale = self
+            .wine_status
+            .as_ref()
+            .is_none_or(|(at, _)| at.elapsed() > Duration::from_secs(2));
+        if stale {
+            let status = WineStatus::probe(&backend.runtime_env());
+            self.wine_status = Some((Instant::now(), status));
+        }
+        self.wine_status.as_ref().unwrap().1.clone()
+    }
+
+    /// The engine's binary kind: stored value, else sniffed once and cached.
+    fn binary_kind(&mut self, engine: &EngineConfig) -> BinaryKind {
+        if let Some(kind) = engine.binary {
+            return kind;
+        }
+        *self
+            .binary_cache
+            .entry(engine.id)
+            .or_insert_with(|| sniff_binary(&engine.path))
+    }
 }
 
 // ── Detection jobs ────────────────────────────────────────────────────────────
 
-/// A background add-single / folder-scan job.
+/// A background add-single / folder-scan job. Each item carries the
+/// provisional [`EngineConfig`] (its id anchors the wineprefix created during
+/// detection, so the added engine must keep it).
 struct DetectJob {
-    rx: Receiver<(PathBuf, Result<DetectResult, String>)>,
+    rx: Receiver<(EngineConfig, Result<DetectResult, String>)>,
     total: usize,
     done: usize,
 }
@@ -260,18 +562,22 @@ impl EnginesTab {
             let job = self.pending.as_mut().unwrap();
             loop {
                 match job.rx.try_recv() {
-                    Ok((path, Ok(result))) => {
+                    Ok((cfg, Ok(result))) => {
                         job.done += 1;
-                        let id = add_engine_from_detect(path, result, backend);
+                        let id = add_engine_from_detect(cfg, result, backend);
                         new_ids.push(id);
                     }
-                    Ok((path, Err(msg))) => {
+                    Ok((cfg, Err(msg))) => {
                         job.done += 1;
-                        let name = path
+                        let name = cfg
+                            .path
                             .file_name()
                             .and_then(|s| s.to_str())
                             .unwrap_or("?")
                             .to_string();
+                        // Drop anything detection generated (e.g. a wineprefix)
+                        // for an engine that was never added.
+                        backend.runtime_env().delete_engine_data(cfg.id);
                         last_error = Some(format!("{name}: {msg}"));
                     }
                     Err(crossbeam_channel::TryRecvError::Empty) => break,
@@ -349,18 +655,7 @@ impl EnginesTab {
     }
 
     fn start_single(&mut self, path: PathBuf, backend: &Backend) {
-        let (tx, rx) = crossbeam_channel::bounded(4);
-        let p = path.clone();
-        backend.runtime.spawn(async move {
-            let res = detect_engine(&p).await.map_err(|e| e.to_string());
-            let _ = tx.send((p, res));
-        });
-        self.pending = Some(DetectJob {
-            rx,
-            total: 1,
-            done: 0,
-        });
-        self.detect_error = None;
+        self.start_add(vec![path], backend);
     }
 
     fn start_folder(&mut self, dir: &Path, backend: &Backend) {
@@ -369,24 +664,65 @@ impl EnginesTab {
             self.detect_error = Some("No executable files found in that folder.".to_string());
             return;
         }
+        self.start_add(paths, backend);
+    }
+
+    /// Route candidate executables into detection, holding Windows binaries
+    /// back behind the install-Wine modal when no Wine is available yet. One
+    /// modal per add/scan action; declining skips those engines.
+    fn start_add(&mut self, paths: Vec<PathBuf>, backend: &Backend) {
+        self.detect_error = None;
+        let env = backend.runtime_env();
+        let (wine_paths, direct): (Vec<PathBuf>, Vec<PathBuf>) =
+            paths.into_iter().partition(|p| needs_wine(sniff_binary(p)));
+
+        let mut to_detect = direct;
+        if !wine_paths.is_empty() {
+            if WineStatus::probe(&env).any() {
+                to_detect.extend(wine_paths);
+            } else {
+                self.wine_offer = Some(WineOffer { paths: wine_paths });
+            }
+        }
+        if !to_detect.is_empty() {
+            self.start_detection(to_detect, backend);
+        }
+    }
+
+    /// Spawn the background detect task for `paths` (runtimes already
+    /// resolved or resolvable).
+    fn start_detection(&mut self, paths: Vec<PathBuf>, backend: &Backend) {
         let total = paths.len();
+        let env = backend.runtime_env();
         let (tx, rx) = crossbeam_channel::bounded(total + 4);
         backend.runtime.spawn(async move {
             for path in paths {
-                let res = detect_engine(&path).await.map_err(|e| e.to_string());
-                if tx.send((path, res)).is_err() {
+                let mut cfg = EngineConfig::new(path);
+                cfg.binary = Some(sniff_binary(&cfg.path));
+                let res = detect_engine_config(&cfg, &env)
+                    .await
+                    .map_err(|e| e.to_string());
+                if tx.send((cfg, res)).is_err() {
                     break;
                 }
             }
         });
         self.pending = Some(DetectJob { rx, total, done: 0 });
-        self.detect_error = None;
     }
 
-    fn start_redetect(&mut self, path: PathBuf, engine_id: EngineId, backend: &Backend) {
+    fn start_redetect(&mut self, engine_id: EngineId, backend: &Backend) {
+        let Some(engine) = backend.engines.iter().find(|e| e.id == engine_id) else {
+            return;
+        };
+        let mut cfg = engine.clone();
+        cfg.binary = Some(sniff_binary(&cfg.path));
+        self.binary_cache.insert(engine_id, cfg.binary.unwrap());
+        let env = backend.runtime_env();
         let (tx, rx) = crossbeam_channel::bounded(1);
         backend.runtime.spawn(async move {
-            let res = detect_engine(&path).await.map_err(|e| e.to_string());
+            let res = detect_engine_config(&cfg, &env)
+                .await
+                .map_err(|e| e.to_string());
             let _ = tx.send(res);
         });
         self.redetect_rx = Some(rx);
@@ -400,8 +736,10 @@ impl EnginesTab {
         // Commit any pending edit of the previously selected engine first.
         self.flush_edit(backend);
         if let Some(engine) = backend.engines.iter().find(|e| e.id == id) {
+            let engine = engine.clone();
+            let binary = self.binary_kind(&engine);
             self.selected_id = Some(id);
-            self.edit = Some(EngineEditBuf::from_engine(engine));
+            self.edit = Some(EngineEditBuf::from_engine(&engine, binary));
         }
     }
 }
@@ -475,7 +813,9 @@ impl EnginesTab {
             if let Some(err) = self.detect_error.clone() {
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .add(egui::Button::new(RichText::new("×").color(theme::TEXT_WEAK)))
+                        .add(egui::Button::new(
+                            RichText::new("×").color(theme::TEXT_WEAK),
+                        ))
                         .clicked()
                     {
                         self.detect_error = None;
@@ -533,7 +873,9 @@ impl EnginesTab {
                         }
                         ui.add_space(2.0);
                         if ui
-                            .add(egui::Button::new(RichText::new("Cancel").color(theme::TEXT_WEAK)))
+                            .add(egui::Button::new(
+                                RichText::new("Cancel").color(theme::TEXT_WEAK),
+                            ))
                             .clicked()
                         {
                             cancel_delete_all = true;
@@ -550,8 +892,10 @@ impl EnginesTab {
 
         if do_delete_all {
             let logos_dir = backend.dirs.logos_dir();
+            let runtime_env = backend.runtime_env();
             for e in &backend.engines {
                 logo::remove(&logos_dir, e.id);
+                runtime_env.delete_engine_data(e.id);
             }
             backend.engines.clear();
             backend.save_engines();
@@ -706,8 +1050,7 @@ impl EnginesTab {
                     && !edit.redetect_pending
                 {
                     edit.redetect_pending = true;
-                    let path = edit.path.clone();
-                    self.start_redetect(path, id, backend);
+                    self.start_redetect(id, backend);
                 }
             }
             CardAction::Delete => self.pending_delete = Some(id),
@@ -761,6 +1104,8 @@ impl EnginesTab {
         let version = engine.meta.version.trim().to_string();
         let subtitle = widgets::engine_subtitle(engine);
         let path_missing = !engine.path.exists();
+        let kind = self.binary_kind(engine);
+        let translated_badge = is_translated(kind).then(|| kind.badge()).flatten();
         let logo_file = engine.meta.extra.get("logo").cloned();
         let elo = engine.meta.elo;
 
@@ -803,7 +1148,13 @@ impl EnginesTab {
 
         let (logo_rect, _) = logo::slot(&mut child, 36.0, Sense::hover());
         let drawn = logo_file.as_ref().is_some_and(|f| {
-            logo::draw_fitted(&mut child, &mut self.logos, &logos_dir.join(f), logo_rect, 6)
+            logo::draw_fitted(
+                &mut child,
+                &mut self.logos,
+                &logos_dir.join(f),
+                logo_rect,
+                6,
+            )
         });
         if !drawn {
             widgets::draw_avatar_square_in(&child, logo_rect, &name, is_sel, 6);
@@ -830,6 +1181,15 @@ impl EnginesTab {
                     ui.label(RichText::new("⚠").color(theme::WARN).size(13.0))
                         .on_hover_text("Executable not found at this path.");
                 }
+                if let Some(badge) = translated_badge {
+                    widgets::chip(ui, &format!("⚠ WIN {badge}"), theme::WARN).on_hover_text(
+                        format!(
+                            "Windows {badge} binary — not native on this system; runs \
+                             through {} at reduced speed.",
+                            translation_layer_name()
+                        ),
+                    );
+                }
             });
             if !subtitle.is_empty() {
                 ui.add(
@@ -840,10 +1200,8 @@ impl EnginesTab {
         });
 
         // Bottom stat columns: ELO (left) and VERSION (right-aligned).
-        let stats = egui::Rect::from_min_max(
-            egui::pos2(content.min.x, content.max.y - 27.0),
-            content.max,
-        );
+        let stats =
+            egui::Rect::from_min_max(egui::pos2(content.min.x, content.max.y - 27.0), content.max);
         let mut srow = ui.new_child(
             UiBuilder::new()
                 .max_rect(stats)
@@ -896,6 +1254,11 @@ struct EngineEditBuf {
     logo: Option<String>,
 
     path: PathBuf,
+    /// How the engine is launched (native / Wine …). Edited via the Runtime
+    /// dropdown in the identity header.
+    runtime: EngineRuntime,
+    /// The executable's sniffed format (drives the runtime status hint).
+    binary: BinaryKind,
     args_str: String,
     working_dir_str: String,
 
@@ -915,7 +1278,7 @@ struct EngineEditBuf {
 }
 
 impl EngineEditBuf {
-    fn from_engine(e: &EngineConfig) -> Self {
+    fn from_engine(e: &EngineConfig, binary: BinaryKind) -> Self {
         Self {
             engine_id: e.id,
             name: e.meta.name.clone(),
@@ -924,6 +1287,8 @@ impl EngineEditBuf {
             elo_str: e.meta.elo.map(|v| v.to_string()).unwrap_or_default(),
             logo: e.meta.extra.get("logo").cloned(),
             path: e.path.clone(),
+            runtime: e.runtime,
+            binary,
             args_str: e.args.join(" "),
             working_dir_str: e
                 .working_dir
@@ -966,6 +1331,7 @@ impl EngineEditBuf {
             }
         }
         engine.meta.elo = self.elo_str.trim().parse::<i32>().ok();
+        engine.runtime = self.runtime;
         engine.args = self
             .args_str
             .split_whitespace()
@@ -995,6 +1361,7 @@ impl EngineEditBuf {
 
 impl EnginesTab {
     fn show_engine_panel(&mut self, ui: &mut Ui, backend: &mut Backend) {
+        let wine = self.wine_status(backend);
         let Some(mut edit) = self.edit.take() else {
             return;
         };
@@ -1051,6 +1418,7 @@ impl EnginesTab {
                             ui,
                             &mut edit,
                             &logos_dir,
+                            &wine,
                             &mut pick_logo,
                             &mut clear_logo,
                         );
@@ -1066,10 +1434,12 @@ impl EnginesTab {
 
         // ── Deferred actions ──
         if pick_logo {
-            let mut dlg = rfd::FileDialog::new().set_title("Choose engine logo").add_filter(
-                "Images",
-                &["png", "jpg", "jpeg", "webp", "bmp", "gif", "ico"],
-            );
+            let mut dlg = rfd::FileDialog::new()
+                .set_title("Choose engine logo")
+                .add_filter(
+                    "Images",
+                    &["png", "jpg", "jpeg", "webp", "bmp", "gif", "ico"],
+                );
             if let Some(last) = &backend.config.last_engine_dir {
                 dlg = dlg.set_directory(last);
             }
@@ -1094,10 +1464,9 @@ impl EnginesTab {
         }
 
         if do_redetect {
-            let path = edit.path.clone();
             let id = edit.engine_id;
             edit.redetect_pending = true;
-            self.start_redetect(path, id, backend);
+            self.start_redetect(id, backend);
         }
 
         let engine_id = edit.engine_id;
@@ -1115,6 +1484,7 @@ impl EnginesTab {
         ui: &mut Ui,
         edit: &mut EngineEditBuf,
         logos_dir: &Path,
+        wine: &WineStatus,
         pick_logo: &mut bool,
         clear_logo: &mut bool,
     ) {
@@ -1132,14 +1502,13 @@ impl EnginesTab {
         // the same place with the same size for every engine, so switching
         // between engines never makes the layout jump. Only the logo *image*
         // varies in size (aspect-fitted, centered in its slot).
-        const HEADER_H: f32 = 176.0;
+        const HEADER_H: f32 = 208.0;
         const LOGO_MAX_W: f32 = 220.0;
         const LOGO_MAX_H: f32 = 128.0;
         const REMOVE_ROW_H: f32 = 26.0;
 
         let avail = ui.available_width();
-        let (header_rect, _) =
-            ui.allocate_exact_size(egui::vec2(avail, HEADER_H), Sense::hover());
+        let (header_rect, _) = ui.allocate_exact_size(egui::vec2(avail, HEADER_H), Sense::hover());
         let id_width = (avail * 0.5).max(240.0).min((avail - 96.0).max(160.0));
 
         // ── Identity column (fixed position, fixed rows) ──
@@ -1151,83 +1520,103 @@ impl EnginesTab {
         );
         {
             let ui = &mut idui;
-                ui.set_width(id_width);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 7.0;
+            ui.set_width(id_width);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 7.0;
+                ui.label(
+                    RichText::new(&header_name)
+                        .font(theme::semibold(18.0))
+                        .color(theme::TEXT),
+                );
+                if !edit.version.trim().is_empty() {
+                    widgets::chip(ui, edit.version.trim(), theme::ACCENT);
+                }
+                if !edit.dirty && edit.saved_at.is_some_and(|t| t.elapsed() < SAVED_FLASH) {
                     ui.label(
-                        RichText::new(&header_name)
-                            .font(theme::semibold(18.0))
-                            .color(theme::TEXT),
+                        RichText::new("saved")
+                            .color(theme::SUCCESS)
+                            .size(11.5)
+                            .italics(),
                     );
-                    if !edit.version.trim().is_empty() {
-                        widgets::chip(ui, edit.version.trim(), theme::ACCENT);
-                    }
-                    if !edit.dirty
-                        && edit
-                            .saved_at
-                            .is_some_and(|t| t.elapsed() < SAVED_FLASH)
+                }
+                if edit.redetect_pending {
+                    ui.label(
+                        RichText::new("⏳ detecting…")
+                            .color(theme::ACCENT)
+                            .size(11.5),
+                    );
+                }
+            });
+            ui.add_space(6.0);
+
+            egui::Grid::new("identity_grid")
+                .num_columns(2)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    field_label(ui, "Name");
+                    if ui
+                        .add(text_field(&mut edit.name).hint_text("e.g. Stockfish"))
+                        .changed()
                     {
-                        ui.label(
-                            RichText::new("saved")
-                                .color(theme::SUCCESS)
-                                .size(11.5)
-                                .italics(),
-                        );
+                        edit.mark_dirty();
                     }
-                    if edit.redetect_pending {
-                        ui.label(
-                            RichText::new("⏳ detecting…")
-                                .color(theme::ACCENT)
-                                .size(11.5),
-                        );
+                    ui.end_row();
+
+                    field_label(ui, "Version");
+                    if ui
+                        .add(text_field(&mut edit.version).hint_text("e.g. 16.1"))
+                        .changed()
+                    {
+                        edit.mark_dirty();
                     }
-                });
-                ui.add_space(6.0);
+                    ui.end_row();
 
-                egui::Grid::new("identity_grid")
-                    .num_columns(2)
-                    .spacing([12.0, 8.0])
-                    .show(ui, |ui| {
-                        field_label(ui, "Name");
-                        if ui
-                            .add(text_field(&mut edit.name).hint_text("e.g. Stockfish"))
-                            .changed()
-                        {
-                            edit.mark_dirty();
-                        }
-                        ui.end_row();
+                    field_label(ui, "Author");
+                    if ui
+                        .add(text_field(&mut edit.author).hint_text("from the engine's UCI id"))
+                        .changed()
+                    {
+                        edit.mark_dirty();
+                    }
+                    ui.end_row();
 
-                        field_label(ui, "Version");
-                        if ui
-                            .add(text_field(&mut edit.version).hint_text("e.g. 16.1"))
-                            .changed()
-                        {
-                            edit.mark_dirty();
-                        }
-                        ui.end_row();
+                    field_label(ui, "Elo");
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut edit.elo_str)
+                                .desired_width(90.0)
+                                .hint_text("optional"),
+                        )
+                        .changed()
+                    {
+                        edit.mark_dirty();
+                    }
+                    ui.end_row();
 
-                        field_label(ui, "Author");
-                        if ui
-                            .add(text_field(&mut edit.author).hint_text("from the engine's UCI id"))
-                            .changed()
-                        {
-                            edit.mark_dirty();
-                        }
-                        ui.end_row();
-
-                        field_label(ui, "Elo");
-                        if ui
-                            .add(
-                                egui::TextEdit::singleline(&mut edit.elo_str)
-                                    .desired_width(90.0)
-                                    .hint_text("optional"),
-                            )
-                            .changed()
-                        {
-                            edit.mark_dirty();
-                        }
-                        ui.end_row();
+                    field_label(ui, "Runtime");
+                    ui.horizontal(|ui| {
+                        widgets::select(
+                            ui,
+                            ("runtime_select", edit.engine_id),
+                            edit.runtime.label(),
+                            200.0,
+                            |ui| {
+                                for rt in EngineRuntime::ALL {
+                                    if ui
+                                        .selectable_label(edit.runtime == rt, rt.label())
+                                        .clicked()
+                                    {
+                                        edit.runtime = rt;
+                                        edit.mark_dirty();
+                                        ui.close();
+                                    }
+                                }
+                            },
+                        );
+                        runtime_status_hint(ui, edit, wine);
                     });
+                    ui.end_row();
+                });
         }
 
         // ── Logo slot: a fixed region right of the identity column. The
@@ -1299,9 +1688,7 @@ impl EnginesTab {
             if ui
                 .put(
                     btn_rect,
-                    egui::Button::new(
-                        RichText::new("Remove").color(theme::TEXT_WEAK).size(11.0),
-                    ),
+                    egui::Button::new(RichText::new("Remove").color(theme::TEXT_WEAK).size(11.0)),
                 )
                 .clicked()
             {
@@ -1326,7 +1713,9 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                         if let Some(folder) = edit.path.parent() {
                             let folder = folder.to_path_buf();
                             if ui
-                                .add(egui::Button::new(RichText::new("Open folder").color(theme::TEXT_WEAK)))
+                                .add(egui::Button::new(
+                                    RichText::new("Open folder").color(theme::TEXT_WEAK),
+                                ))
                                 .on_hover_text("Open the folder containing this engine.")
                                 .clicked()
                             {
@@ -1376,7 +1765,9 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                     field_label(ui, "Work dir");
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                         let browse_clicked = ui
-                            .add(egui::Button::new(RichText::new("Browse…").color(theme::TEXT_WEAK)))
+                            .add(egui::Button::new(
+                                RichText::new("Browse…").color(theme::TEXT_WEAK),
+                            ))
                             .clicked();
                         if ui
                             .add(
@@ -1540,7 +1931,9 @@ fn uci_options_section(
             }
             if !edit.option_overrides.is_empty()
                 && ui
-                    .add(egui::Button::new(RichText::new("Reset all").color(theme::TEXT_WEAK)))
+                    .add(egui::Button::new(
+                        RichText::new("Reset all").color(theme::TEXT_WEAK),
+                    ))
                     .on_hover_text("Remove all option overrides, reverting to engine defaults.")
                     .clicked()
             {
@@ -1611,9 +2004,7 @@ fn option_row_width(ui: &Ui, opt: &UciOption) -> f32 {
     };
     let label_w = text_w(opt.name(), 13.0);
     let value_w = match opt {
-        UciOption::Spin { min, max, .. } => {
-            56.0 + 10.0 + text_w(&format!("({min}–{max})"), 11.5)
-        }
+        UciOption::Spin { min, max, .. } => 56.0 + 10.0 + text_w(&format!("({min}–{max})"), 11.5),
         UciOption::Combo { .. } => 200.0,
         UciOption::Str { .. } => 240.0,
         UciOption::Check { .. } => 24.0,
@@ -1646,7 +2037,9 @@ fn options_grid(
                 widgets::uci_option_row(ui, opt, &mut edit.option_overrides, changed);
                 if edit.option_overrides.contains_key(opt.name()) {
                     if ui
-                        .add(egui::Button::new(RichText::new("×").color(theme::TEXT_FAINT)))
+                        .add(egui::Button::new(
+                            RichText::new("×").color(theme::TEXT_FAINT),
+                        ))
                         .on_hover_text("Reset to engine default.")
                         .clicked()
                     {
@@ -1702,17 +2095,14 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
                                 ("Nalimov", &backend.config.nalimov_path),
                                 ("Syzygy", &backend.config.syzygy_path),
                             ] {
-                                let set =
-                                    value.as_deref().is_some_and(|s| !s.trim().is_empty());
+                                let set = value.as_deref().is_some_and(|s| !s.trim().is_empty());
                                 let (mark, color) = if set {
                                     ("●", theme::SUCCESS)
                                 } else {
                                     ("○", theme::TEXT_FAINT)
                                 };
                                 ui.label(RichText::new(mark).color(color).size(10.0));
-                                ui.label(
-                                    RichText::new(label).color(theme::TEXT_WEAK).size(11.5),
-                                );
+                                ui.label(RichText::new(label).color(theme::TEXT_WEAK).size(11.5));
                                 ui.add_space(6.0);
                             }
                         });
@@ -1745,12 +2135,13 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
                     // controls in reverse visual order.
                     let cfg = &mut backend.config;
                     changed |= tablebase_row(ui, "Syzygy", &mut cfg.syzygy_path, |ui| {
-                        let mut ch = widgets::checkbox(ui, &mut cfg.syzygy_50_move_rule, "50-move rule")
-                            .on_hover_text(
-                                "Tablebase scores respect the 50-move rule (FIDE-correct). \
+                        let mut ch =
+                            widgets::checkbox(ui, &mut cfg.syzygy_50_move_rule, "50-move rule")
+                                .on_hover_text(
+                                    "Tablebase scores respect the 50-move rule (FIDE-correct). \
                                  Off counts \"cursed\" wins as wins.",
-                            )
-                            .changed();
+                                )
+                                .changed();
                         ui.add_space(8.0);
                         ch |= ui
                             .add(
@@ -1764,7 +2155,9 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
                             )
                             .changed();
                         ui.label(
-                            RichText::new("Probe limit").color(theme::TEXT_FAINT).size(11.5),
+                            RichText::new("Probe limit")
+                                .color(theme::TEXT_FAINT)
+                                .size(11.5),
                         );
                         ch
                     });
@@ -1781,10 +2174,7 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
                             |ui| {
                                 for scheme in ["cp0", "cp1", "cp2", "cp3", "cp4"] {
                                     if ui
-                                        .selectable_label(
-                                            cfg.gaviota_compression == scheme,
-                                            scheme,
-                                        )
+                                        .selectable_label(cfg.gaviota_compression == scheme, scheme)
                                         .clicked()
                                     {
                                         cfg.gaviota_compression = scheme.to_string();
@@ -1795,7 +2185,9 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
                             },
                         );
                         ui.label(
-                            RichText::new("Compression").color(theme::TEXT_FAINT).size(11.5),
+                            RichText::new("Compression")
+                                .color(theme::TEXT_FAINT)
+                                .size(11.5),
                         )
                         .on_hover_text(
                             "Compression scheme of the Gaviota files on disk (cp4 is the \
@@ -1827,7 +2219,9 @@ fn tablebase_row(
     let mut changed = false;
     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
         if ui
-            .add(egui::Button::new(RichText::new("Browse…").color(theme::TEXT_WEAK)))
+            .add(egui::Button::new(
+                RichText::new("Browse…").color(theme::TEXT_WEAK),
+            ))
             .clicked()
             && let Some(dir) = rfd::FileDialog::new()
                 .set_title(format!("Select {label} tablebase folder"))
@@ -1914,9 +2308,14 @@ fn set_or_remove(map: &mut BTreeMap<String, String>, key: &str, value: &str) {
     }
 }
 
-/// Create an `EngineConfig` from detection results and push it to `backend.engines`.
-fn add_engine_from_detect(path: PathBuf, result: DetectResult, backend: &mut Backend) -> EngineId {
-    let mut cfg = EngineConfig::new(path);
+/// Fill a provisional `EngineConfig` from detection results and push it to
+/// `backend.engines`. The config keeps its pre-detection id (the wineprefix
+/// created during detection is keyed by it).
+fn add_engine_from_detect(
+    mut cfg: EngineConfig,
+    result: DetectResult,
+    backend: &mut Backend,
+) -> EngineId {
     match result.name {
         Some(id_name) => {
             let (name, version) = split_name_version(&id_name);
@@ -1959,18 +2358,68 @@ fn find_executables(dir: &Path) -> Vec<PathBuf> {
 }
 
 fn is_executable(path: &Path) -> bool {
+    let is_exe = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("exe"));
     #[cfg(windows)]
     {
-        path.extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| e.eq_ignore_ascii_case("exe"))
+        is_exe
     }
     #[cfg(not(windows))]
     {
+        // Windows engines rarely carry the executable bit on unix filesystems,
+        // so `.exe` files count regardless (they run through Wine anyway).
         use std::os::unix::fs::PermissionsExt;
-        path.metadata()
-            .map(|m| m.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
+        is_exe
+            || path
+                .metadata()
+                .map(|m| m.permissions().mode() & 0o111 != 0)
+                .unwrap_or(false)
+    }
+}
+
+/// The short status next to the Runtime dropdown: what the choice resolves to
+/// right now, or a warning when the required Wine is missing.
+fn runtime_status_hint(ui: &mut Ui, edit: &EngineEditBuf, wine: &WineStatus) {
+    let ok = |ui: &mut Ui, text: String| {
+        ui.label(RichText::new(text).color(theme::TEXT_FAINT).size(11.5));
+    };
+    let warn = |ui: &mut Ui, text: &str| {
+        ui.label(
+            RichText::new(format!("⚠ {text}"))
+                .color(theme::WARN)
+                .size(11.5),
+        );
+    };
+    match edit.runtime {
+        EngineRuntime::Native => {}
+        EngineRuntime::Auto => {
+            if needs_wine(edit.binary) {
+                if wine.managed.is_some() {
+                    ok(ui, "→ managed Wine".to_string());
+                } else if wine.system.is_some() {
+                    ok(ui, "→ system Wine".to_string());
+                } else {
+                    warn(ui, "Wine not installed — this engine cannot start");
+                }
+            } else if is_translated(edit.binary) {
+                ok(ui, format!("→ {}", translation_layer_name()));
+            } else {
+                ok(ui, "→ native".to_string());
+            }
+        }
+        EngineRuntime::WineManaged => {
+            if wine.managed.is_some() {
+                ok(ui, "installed".to_string());
+            } else {
+                warn(ui, "managed Wine is not installed");
+            }
+        }
+        EngineRuntime::WineSystem => match &wine.system {
+            Some(path) => ok(ui, path.to_string_lossy().into_owned()),
+            None => warn(ui, "no system Wine found"),
+        },
     }
 }
 

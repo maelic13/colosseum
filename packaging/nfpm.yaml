@@ -1,0 +1,29 @@
+# nfpm configuration — produces .deb, .rpm and Arch packages from the release
+# binary. Used by .github/workflows/release.yml; VERSION and TARGET are
+# injected as environment variables there. Build locally with e.g.:
+#   VERSION=0.1.0 TARGET=x86_64-unknown-linux-gnu nfpm pkg -f packaging/nfpm.yaml -p deb
+name: colosseum
+arch: amd64
+platform: linux
+version: ${VERSION}
+section: games
+priority: optional
+maintainer: Miloslav Macůrek <macurek.m@gmail.com>
+description: |
+  Chess engine testing suite.
+  Run engine-vs-engine UCI tournaments with a live, sortable results table,
+  Elo tracking, opening books, adjudication, and PGN export. Windows-only
+  engines (Rybka, Houdini, ...) run through Wine.
+homepage: https://github.com/
+license: GPL-3.0-or-later
+suggests:
+  # Only needed to run Windows-only engines; Colosseum can also download its
+  # own Wine on demand.
+  - wine
+contents:
+  - src: target/${TARGET}/release/colosseum
+    dst: /usr/bin/colosseum
+  - src: packaging/colosseum.desktop
+    dst: /usr/share/applications/colosseum.desktop
+  - src: LICENSE
+    dst: /usr/share/doc/colosseum/LICENSE

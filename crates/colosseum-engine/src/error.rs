@@ -28,4 +28,7 @@ pub enum EngineError {
 
     #[error("could not determine application directories")]
     NoProjectDirs,
+
+    #[error("{0}")]
+    Runtime(String),
 }

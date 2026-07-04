@@ -11,8 +11,15 @@ use colosseum_core::{
     AdjudicationConfig, EngineConfig, Format, TimeControl, TournamentConfig, TournamentEvent,
     UciOptionValue,
 };
+use colosseum_engine::runtime::RuntimeEnv;
 use colosseum_engine::scheduler::{TournamentStatus, create_tournament, resume_tournament};
 use colosseum_engine::store::{self, Store};
+
+/// A throwaway runtime env — tests use native engines, so nothing under it is
+/// ever created; it only satisfies the resolver.
+fn test_runtime_env() -> RuntimeEnv {
+    RuntimeEnv::new(std::env::temp_dir().join("colosseum-test-runtime"))
+}
 
 fn engine_cfg(name: &str, exe: &Path, opts: &[(&str, &str)]) -> EngineConfig {
     let mut cfg = EngineConfig::new(exe.to_path_buf());
@@ -80,8 +87,15 @@ async fn full_round_robin_completes() {
     let ids: Vec<_> = engines.iter().map(|e| e.id).collect();
 
     let (events_tx, events_rx) = crossbeam_channel::unbounded();
-    let (tournament, driver) =
-        create_tournament("RR", fast_config(2, 8, 10), engines, store, events_tx).unwrap();
+    let (tournament, driver) = create_tournament(
+        "RR",
+        fast_config(2, 8, 10),
+        engines,
+        store,
+        events_tx,
+        &test_runtime_env(),
+    )
+    .unwrap();
     let handle = tokio::spawn(driver);
 
     tournament.go();
@@ -140,8 +154,15 @@ async fn stop_drains_then_resume_completes() {
     ];
     let (events_tx, _events_rx) = crossbeam_channel::unbounded();
     // Concurrency 1 + longer games so Stop reliably catches the tournament mid-way.
-    let (tournament, driver) =
-        create_tournament("StopGo", fast_config(1, 24, 20), engines, store, events_tx).unwrap();
+    let (tournament, driver) = create_tournament(
+        "StopGo",
+        fast_config(1, 24, 20),
+        engines,
+        store,
+        events_tx,
+        &test_runtime_env(),
+    )
+    .unwrap();
     let handle = tokio::spawn(driver);
 
     tournament.go();
@@ -195,8 +216,15 @@ async fn force_stop_discards_in_flight() {
     ];
     let (events_tx, _events_rx) = crossbeam_channel::unbounded();
     // Long games so they are still running when we force-stop.
-    let (tournament, driver) =
-        create_tournament("Force", fast_config(2, 200, 50), engines, store, events_tx).unwrap();
+    let (tournament, driver) = create_tournament(
+        "Force",
+        fast_config(2, 200, 50),
+        engines,
+        store,
+        events_tx,
+        &test_runtime_env(),
+    )
+    .unwrap();
     let handle = tokio::spawn(driver);
 
     tournament.go();
@@ -247,6 +275,7 @@ async fn failed_engine_loses_with_error() {
         vec![good, bogus],
         store,
         events_tx,
+        &test_runtime_env(),
     )
     .unwrap();
     let handle = tokio::spawn(driver);
@@ -299,8 +328,15 @@ async fn resume_across_restart() {
         engine_cfg("C", &exe, &[("Hash", "16")]),
     ];
     let (events_tx, _events_rx) = crossbeam_channel::unbounded();
-    let (t1, driver1) =
-        create_tournament("Restart", fast_config(1, 8, 10), engines, store1, events_tx).unwrap();
+    let (t1, driver1) = create_tournament(
+        "Restart",
+        fast_config(1, 8, 10),
+        engines,
+        store1,
+        events_tx,
+        &test_runtime_env(),
+    )
+    .unwrap();
     let tid = t1.id;
     let handle1 = tokio::spawn(driver1);
     t1.go();
@@ -341,7 +377,7 @@ async fn resume_across_restart() {
         .unwrap()
         .expect("tournament should still be in the database");
     let (events_tx2, _events_rx2) = crossbeam_channel::unbounded();
-    let (t2, driver2) = resume_tournament(row, store2, events_tx2).unwrap();
+    let (t2, driver2) = resume_tournament(row, store2, events_tx2, &test_runtime_env()).unwrap();
     let handle2 = tokio::spawn(driver2);
 
     // The resumed snapshot should already reflect the pre-restart finished games.
@@ -429,8 +465,15 @@ fn openings_assigned_per_encounter_and_persisted() {
         EngineConfig::new("/nonexistent/c".into()),
     ];
     let (events_tx, _rx) = crossbeam_channel::unbounded();
-    let (tournament, _driver) =
-        create_tournament("Book", config, engines, store, events_tx).unwrap();
+    let (tournament, _driver) = create_tournament(
+        "Book",
+        config,
+        engines,
+        store,
+        events_tx,
+        &test_runtime_env(),
+    )
+    .unwrap();
 
     let reopened = Store::open(&db).unwrap();
     let games = reopened.list_games(tournament.id).unwrap();
@@ -477,8 +520,15 @@ async fn tournament_with_openings_runs_to_completion() {
     config.start_position = StartPosition::Book(OpeningBook::new(book_path));
 
     let (events_tx, _rx) = crossbeam_channel::unbounded();
-    let (tournament, driver) =
-        create_tournament("Booked", config, engines, store, events_tx).unwrap();
+    let (tournament, driver) = create_tournament(
+        "Booked",
+        config,
+        engines,
+        store,
+        events_tx,
+        &test_runtime_env(),
+    )
+    .unwrap();
     let handle = tokio::spawn(driver);
 
     tournament.go();

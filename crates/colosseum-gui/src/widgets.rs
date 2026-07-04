@@ -84,7 +84,8 @@ pub fn status_pill(ui: &mut Ui, label: &str, dot: &str, c: Color32) {
 
 /// A small static text chip (rounded, tinted) — for version tags, counts, and
 /// other inline metadata. Text and border both take color `c` at tint strength.
-pub fn chip(ui: &mut Ui, text: &str, c: Color32) {
+/// Returns the chip's response (e.g. for hover text).
+pub fn chip(ui: &mut Ui, text: &str, c: Color32) -> egui::Response {
     egui::Frame::new()
         .fill(theme::tint(c, 0.14))
         .stroke(egui::Stroke::new(1.0, theme::tint(c, 0.4)))
@@ -92,7 +93,8 @@ pub fn chip(ui: &mut Ui, text: &str, c: Color32) {
         .inner_margin(egui::Margin::symmetric(6, 1))
         .show(ui, |ui| {
             ui.label(RichText::new(text).color(c).size(11.0));
-        });
+        })
+        .response
 }
 
 /// A tinted semantic button (success / warn / danger). Uses the tint convention.
@@ -146,8 +148,7 @@ pub fn rank_badge(ui: &mut Ui, rank: usize) {
     };
     match medal {
         Some(c) => {
-            let (rect, _) =
-                ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
             ui.painter().circle(
                 rect.center(),
                 9.0,
@@ -309,13 +310,12 @@ pub fn select<R>(
         // Trailing spaces reserve room for the painted dropdown arrow.
         let button = egui::Button::new(RichText::new(format!("{current}    ")))
             .min_size(egui::vec2(min_width, ui.spacing().interact_size.y));
-        let (resp, inner) =
-            egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
-                ui.set_min_width((min_width - 8.0).max(60.0));
-                ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
-                ui.spacing_mut().item_spacing.y = 2.0;
-                add_contents(ui)
-            });
+        let (resp, inner) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
+            ui.set_min_width((min_width - 8.0).max(60.0));
+            ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
+            ui.spacing_mut().item_spacing.y = 2.0;
+            add_contents(ui)
+        });
         dropdown_arrow(ui, resp.rect);
         inner.map(|i| i.inner)
     })
@@ -343,7 +343,9 @@ pub fn dropdown_arrow(ui: &Ui, rect: egui::Rect) {
 /// Place it to the right of the field it clears; show it only when there is
 /// something to clear.
 pub fn clear_button(ui: &mut Ui) -> egui::Response {
-    ui.add(egui::Button::new(RichText::new("×").color(theme::TEXT_WEAK)))
+    ui.add(egui::Button::new(
+        RichText::new("×").color(theme::TEXT_WEAK),
+    ))
 }
 
 /// The standard filter/search field: fixed 28 pt height with comfortable
@@ -443,14 +445,20 @@ pub fn sort_engine_indices(engines: &[EngineConfig], indices: &mut [usize], sort
 pub fn engine_sort_select(ui: &mut Ui, id_salt: &str, config_value: &mut String) -> bool {
     let mut sort = EngineSort::from_config(config_value);
     let prev = sort;
-    select(ui, id_salt, &format!("Sort: {}", sort.label()), 110.0, |ui| {
-        for s in EngineSort::ALL {
-            if ui.selectable_label(sort == s, s.label()).clicked() {
-                sort = s;
-                ui.close();
+    select(
+        ui,
+        id_salt,
+        &format!("Sort: {}", sort.label()),
+        110.0,
+        |ui| {
+            for s in EngineSort::ALL {
+                if ui.selectable_label(sort == s, s.label()).clicked() {
+                    sort = s;
+                    ui.close();
+                }
             }
-        }
-    });
+        },
+    );
     if sort != prev {
         *config_value = sort.as_config().to_string();
         true
@@ -559,8 +567,11 @@ pub fn disclosure_triangle(ui: &mut Ui, open: bool, color: Color32) {
             c + egui::vec2(-r * 0.5, r),
         ]
     };
-    ui.painter()
-        .add(egui::Shape::convex_polygon(points, color, egui::Stroke::NONE));
+    ui.painter().add(egui::Shape::convex_polygon(
+        points,
+        color,
+        egui::Stroke::NONE,
+    ));
 }
 
 /// Small tinted chip for Elo Δ values. Zero-ish delta shows a plain dim zero.
@@ -683,7 +694,11 @@ pub fn uci_option_row(
             } else {
                 "run at game start"
             };
-            let color = if armed { theme::SUCCESS } else { theme::TEXT_WEAK };
+            let color = if armed {
+                theme::SUCCESS
+            } else {
+                theme::TEXT_WEAK
+            };
             if ui
                 .add(egui::Button::new(RichText::new(label).color(color)))
                 .on_hover_text(if armed {

@@ -8,7 +8,40 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-*(nothing yet — next features are in the Deferred list in GUIDE.md)*
+### Added
+
+#### Windows engines on macOS & Linux (Wine)
+- Classic Windows-only UCI engines (Rybka, Houdini, Critter, Shredder, …) now
+  run on macOS (via Rosetta 2) and Linux x86-64. Both 64-bit and 32-bit
+  `.exe` engines are supported (WoW64 builds of Wine).
+- On first add of a Windows engine, a dialog offers to download a pinned,
+  SHA-256-verified portable Wine build into the app data folder (nothing is
+  installed system-wide). Declining skips those engines; the question is asked
+  again on the next add. A system-installed Wine is detected automatically and
+  used when present (on arm64 Linux, install Hangover — it provides `wine`).
+- Per-engine `Runtime` dropdown in the engine detail panel (Auto / Native /
+  managed Wine / system Wine). `Auto` is the default and recommended.
+- Each Wine engine gets its own isolated wineprefix under the app data dir,
+  created on add and removed when the engine is deleted.
+- Engine cards show a warning badge (e.g. `⚠ WIN x64`) for any binary that is
+  not native to the host — including x64 engines on Windows ARM64, which run
+  through the OS's built-in Prism emulation out of the box.
+- Folder scan now recognizes `.exe` files on macOS/Linux.
+
+#### Packaging
+- Linux `.deb`, `.rpm`, and Arch (`.pkg.tar.zst`) packages built via nfpm.
+
+### Removed
+- Flatpak manifest and Flatpak distribution (replaced by native Linux
+  packages; the Flatpak sandbox conflicts with launching Wine).
+
+### Known issues
+- Under Wine on macOS a few engines stall in search (stuck at depth 1) even
+  though they handshake fine: Rybka 2.3/3/4, Houdini 1.5a, Deep Junior
+  Yokohama. Verified working there: Critter 1.6a, Fruit 2.1, Deep Shredder 13,
+  Deep HIARCS 14. Appears to be an upstream Wine-on-macOS issue with these
+  engines' console-polling loops (reproduced on Wine 11.0 stable, 11.10 devel
+  and staging, with and without esync).
 
 ---
 

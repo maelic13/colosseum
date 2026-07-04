@@ -25,9 +25,9 @@ use colosseum_core::{
     ml_ratings, performance_rating,
 };
 use colosseum_engine::{
-    AppConfig, AppDirs, EngineLibrary, Store, Tournament, TournamentResults, TournamentRow,
-    TournamentSnapshot, TournamentStatus, create_tournament, load_tournament_results,
-    resume_tournament,
+    AppConfig, AppDirs, EngineLibrary, RuntimeEnv, Store, Tournament, TournamentResults,
+    TournamentRow, TournamentSnapshot, TournamentStatus, create_tournament,
+    load_tournament_results, resume_tournament,
 };
 
 /// Target redraw cadence while a tournament is running (~30 Hz).
@@ -121,12 +121,18 @@ impl Backend {
         })
     }
 
+    /// Runtime-related paths (managed Wine, per-engine wineprefixes) derived
+    /// from the data dir.
+    #[must_use]
+    pub fn runtime_env(&self) -> RuntimeEnv {
+        RuntimeEnv::new(self.dirs.data_dir.clone())
+    }
+
     /// The loaded tournament with this id, if any.
     #[must_use]
     pub fn active(&self, id: TournamentId) -> Option<&ActiveTournament> {
         self.actives.iter().find(|a| a.handle.id == id)
     }
-
 
     /// Drain pending tournament events and return the repaint interval the UI
     /// should request this frame (`Some` while live, `None` when idle).
@@ -191,11 +197,7 @@ impl Backend {
     /// `id`, computed against the other participants' pinned prior ratings
     /// (which stay untouched). Returns the new rating, or `None` when there is
     /// no data (no finished games, or the engine is unknown).
-    pub fn apply_estimate_to_library(
-        &mut self,
-        id: TournamentId,
-        target: EngineId,
-    ) -> Option<i32> {
+    pub fn apply_estimate_to_library(&mut self, id: TournamentId, target: EngineId) -> Option<i32> {
         let standings = {
             let active = self.active(id)?;
             let snap = active.snapshot.lock().ok()?;
@@ -302,7 +304,14 @@ impl Backend {
             .iter()
             .map(|e| (e.id, e.meta.elo.map_or(1500.0, f64::from)))
             .collect();
-        let (handle, driver) = create_tournament(name, config, engines, driver_store, events_tx)?;
+        let (handle, driver) = create_tournament(
+            name,
+            config,
+            engines,
+            driver_store,
+            events_tx,
+            &self.runtime_env(),
+        )?;
         let snapshot = handle.snapshot_handle();
 
         self.runtime.spawn(driver);
@@ -409,7 +418,8 @@ impl Backend {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
         let rating_writeback = row.config.rating_writeback;
         let config_copy = row.config.clone();
-        let (handle, driver) = resume_tournament(row, resume_store, events_tx)?;
+        let (handle, driver) =
+            resume_tournament(row, resume_store, events_tx, &self.runtime_env())?;
         let snapshot = handle.snapshot_handle();
 
         self.runtime.spawn(driver);

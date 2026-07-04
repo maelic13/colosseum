@@ -22,7 +22,7 @@ thinking / GPT-5.5 extra high.
 - [x] **Step 10** — Starting positions / openings (EPD + PGN, integrated UI) — final feature · _Large_
 
 ## Phase D — Release
-- [x] **Step 11** — Cross-platform packaging & release (cargo-dist; Flatpak/MSI/DMG/tarball) · _Small_
+- [x] **Step 11** — Cross-platform packaging & release (MSI/DMG/tarball; Linux deb/rpm/Arch via nfpm — Flatpak dropped) · _Small_
 - [x] **Step 12** — README, CHANGELOG, docs polish · _Small_
 
 ---

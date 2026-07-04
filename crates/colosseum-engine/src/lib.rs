@@ -13,14 +13,20 @@ pub mod openings;
 pub mod paths;
 pub mod pgn;
 pub mod runner;
+pub mod runtime;
 pub mod scheduler;
 pub mod store;
 
 pub use config::{AppConfig, AppDirs, EngineLibrary};
-pub use detect::{DetectResult, detect_engine, split_name_version};
+pub use detect::{DetectResult, detect_engine, detect_engine_config, split_name_version};
 pub use error::EngineError;
 pub use openings::{ResolvedOpening, load_openings, summarize};
 pub use runner::{EngineGameSpec, GameReport, GameSpec, run_game};
+pub use runtime::{
+    InstallPhase, ManagedWineSpec, RuntimeEnv, WineStatus, ensure_prefix_for, find_managed_wine,
+    find_system_wine, install_managed_wine, is_translated, managed_wine_spec, needs_wine,
+    remove_managed_wine, rosetta_available, sniff_binary, spawn_options, translation_layer_name,
+};
 pub use scheduler::{
     Command, EloEntry, InFlightGame, ResultParticipant, Tournament, TournamentResults,
     TournamentSnapshot, TournamentStatus, create_tournament, load_tournament_results,

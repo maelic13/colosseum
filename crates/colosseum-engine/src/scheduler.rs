@@ -30,14 +30,17 @@ use colosseum_uci::SpawnOptions;
 use crate::error::EngineError;
 use crate::openings::{ResolvedOpening, load_openings};
 use crate::runner::{EngineGameSpec, GameSpec, run_game};
+use crate::runtime::{self, RuntimeEnv};
 use crate::store::{self, Store, TournamentRow};
 
 /// Elo assigned to an engine that has no configured rating.
 const DEFAULT_ELO: f64 = 1500.0;
 /// Extra time beyond the move time before a move is judged a timeout.
 const TIMEOUT_TOLERANCE: Duration = Duration::from_secs(2);
-/// Time allowed for handshake / isready.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Time allowed for handshake / isready. Generous enough for engines started
+/// through a translation runtime (Wine): native engines only ever hit this
+/// deadline when they are already broken.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Cap on retained recent engine-error messages.
 const MAX_RECENT_ERRORS: usize = 50;
 
@@ -170,6 +173,7 @@ pub fn create_tournament(
     engines: Vec<EngineConfig>,
     store: Store,
     events: Sender<TournamentEvent>,
+    runtime_env: &RuntimeEnv,
 ) -> Result<(Tournament, impl Future<Output = ()> + use<>), EngineError> {
     if engines.len() < 2 {
         return Err(EngineError::Corrupt(
@@ -191,12 +195,7 @@ pub fn create_tournament(
             EngineTemplate {
                 id: engine.id,
                 name: display_name(engine),
-                spawn: SpawnOptions {
-                    path: engine.path.clone(),
-                    args: engine.args.clone(),
-                    working_dir: engine.working_dir.clone(),
-                    env: engine.env.clone().into_iter().collect(),
-                },
+                spawn: runtime::spawn_options(engine, runtime_env)?,
                 options: resolve_options(
                     engine,
                     &config.common,
@@ -593,6 +592,7 @@ pub fn resume_tournament(
     row: TournamentRow,
     store: Store,
     events: Sender<TournamentEvent>,
+    runtime_env: &RuntimeEnv,
 ) -> Result<(Tournament, impl Future<Output = ()> + use<>), EngineError> {
     let id = row.id;
     let config = row.config;
@@ -623,12 +623,7 @@ pub fn resume_tournament(
             EngineTemplate {
                 id: p.engine,
                 name: display_name(engine),
-                spawn: SpawnOptions {
-                    path: engine.path.clone(),
-                    args: engine.args.clone(),
-                    working_dir: engine.working_dir.clone(),
-                    env: engine.env.clone().into_iter().collect(),
-                },
+                spawn: runtime::spawn_options(engine, runtime_env)?,
                 options: resolve_options(
                     engine,
                     &config.common,
@@ -922,10 +917,20 @@ fn resolve_options(
     // engine that only knows "Max CPUs" would be ignored, and sending an
     // out-of-range Hash can crash engines (e.g. Rybka 3).
     if let Some(threads) = common.threads {
-        insert_matched(&mut values, engine, colosseum_core::is_thread_option, i64::from(threads));
+        insert_matched(
+            &mut values,
+            engine,
+            colosseum_core::is_thread_option,
+            i64::from(threads),
+        );
     }
     if let Some(hash) = common.hash_mb {
-        insert_matched(&mut values, engine, colosseum_core::is_hash_option, i64::from(hash));
+        insert_matched(
+            &mut values,
+            engine,
+            colosseum_core::is_hash_option,
+            i64::from(hash),
+        );
     }
     if let Some(path) = &common.syzygy_path
         && !path.is_empty()

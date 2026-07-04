@@ -8,10 +8,11 @@
 use std::path::Path;
 use std::time::Duration;
 
-use colosseum_core::UciOption;
+use colosseum_core::{EngineConfig, UciOption};
 use colosseum_uci::{EngineProcess, SpawnOptions};
 
 use crate::error::EngineError;
+use crate::runtime::{self, RuntimeEnv};
 
 /// Identity and option declarations collected during one handshake run.
 #[derive(Debug, Clone, Default)]
@@ -24,16 +25,42 @@ pub struct DetectResult {
     pub options: Vec<UciOption>,
 }
 
-/// Spawn the engine at `path`, complete the `uci` / `isready` handshake,
-/// collect identity and option declarations, then quit.
+/// Spawn the engine at `path` directly (no translation runtime), complete the
+/// `uci` / `isready` handshake, collect identity and option declarations, then
+/// quit.
 ///
 /// The handshake times out after **10 seconds** if the engine never sends
 /// `uciok`. The engine is killed on drop regardless of how `detect_engine`
 /// returns.
 pub async fn detect_engine(path: &Path) -> Result<DetectResult, EngineError> {
-    let opts = SpawnOptions::new(path);
-    let mut proc = EngineProcess::spawn(opts).await?;
-    proc.handshake(Duration::from_secs(10)).await?;
+    detect_with(SpawnOptions::new(path), Duration::from_secs(10)).await
+}
+
+/// Like [`detect_engine`], but resolves the engine's configured runtime first:
+/// Windows engines are launched through Wine (initialising their private
+/// wineprefix if this is the first run) with a correspondingly longer
+/// handshake deadline.
+pub async fn detect_engine_config(
+    engine: &EngineConfig,
+    env: &RuntimeEnv,
+) -> Result<DetectResult, EngineError> {
+    let spawn = runtime::spawn_options(engine, env)?;
+    let translated = spawn.path != engine.path;
+    runtime::ensure_prefix_for(&spawn).await?;
+    let deadline = if translated {
+        Duration::from_secs(30)
+    } else {
+        Duration::from_secs(10)
+    };
+    detect_with(spawn, deadline).await
+}
+
+async fn detect_with(
+    spawn: SpawnOptions,
+    handshake_deadline: Duration,
+) -> Result<DetectResult, EngineError> {
+    let mut proc = EngineProcess::spawn(spawn).await?;
+    proc.handshake(handshake_deadline).await?;
 
     let result = DetectResult {
         name: proc.name().map(str::to_string),
@@ -208,10 +235,7 @@ mod tests {
             ("Stockfish".to_string(), Some("16".to_string()))
         );
         // Noise with no version leaves just the name.
-        assert_eq!(
-            split_name_version("Fire x64"),
-            ("Fire".to_string(), None)
-        );
+        assert_eq!(split_name_version("Fire x64"), ("Fire".to_string(), None));
     }
 
     #[test]

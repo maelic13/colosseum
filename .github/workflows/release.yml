@@ -38,8 +38,7 @@ jobs:
             arch: arm64
             wix_arch: arm64
 
-          # Linux x86-64 → .tar.gz
-          # (Flatpak is built separately — see flatpak/ directory)
+          # Linux x86-64 → .tar.gz + .deb + .rpm + Arch package (nfpm)
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             platform: linux
@@ -163,6 +162,25 @@ jobs:
           tar -C staging -czf "${name}.tar.gz" "${name}"
           echo "ARTIFACT_TGZ=${name}.tar.gz" >> "$GITHUB_ENV"
 
+      # ── Linux: .deb / .rpm / Arch packages via nfpm ─────────────────────────
+      - name: Package deb/rpm/arch (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          tag='${{ github.ref_name }}'
+          # Package versions must be numeric x.y.z — strip 'v' and pre-release.
+          ver="${tag#v}"; ver="${ver%%-*}"
+          curl -sL https://github.com/goreleaser/nfpm/releases/download/v2.43.0/nfpm_2.43.0_Linux_x86_64.tar.gz | tar -xz nfpm
+          export VERSION="$ver" TARGET='${{ matrix.target }}'
+          base="colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}"
+          ./nfpm pkg -f packaging/nfpm.yaml -p deb       -t "${base}.deb"
+          ./nfpm pkg -f packaging/nfpm.yaml -p rpm       -t "${base}.rpm"
+          ./nfpm pkg -f packaging/nfpm.yaml -p archlinux -t "${base}.pkg.tar.zst"
+          {
+            echo "ARTIFACT_DEB=${base}.deb"
+            echo "ARTIFACT_RPM=${base}.rpm"
+            echo "ARTIFACT_ARCH=${base}.pkg.tar.zst"
+          } >> "$GITHUB_ENV"
+
       # ── macOS: tar.gz ───────────────────────────────────────────────────────
       - name: Package tar.gz (macOS)
         if: runner.os == 'macOS'
@@ -243,6 +261,27 @@ jobs:
         with:
           name: tgz-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_TGZ }}
+
+      - name: Upload DEB
+        if: env.ARTIFACT_DEB != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ env.ARTIFACT_DEB }}
+
+      - name: Upload RPM
+        if: env.ARTIFACT_RPM != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ env.ARTIFACT_RPM }}
+
+      - name: Upload Arch package
+        if: env.ARTIFACT_ARCH != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ env.ARTIFACT_ARCH }}
 
       - name: Upload DMG
         if: env.ARTIFACT_DMG != ''
