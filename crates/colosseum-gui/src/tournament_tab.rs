@@ -2165,6 +2165,27 @@ fn engine_display_name(e: &EngineConfig) -> String {
 fn compatibility_notes(form: &TournamentForm, engines: &[EngineConfig]) -> Vec<String> {
     use colosseum_core::{is_hash_option, is_thread_option};
     let mut notes = Vec::new();
+
+    // CPU oversubscription: more busy engine threads than logical cores
+    // starves engines of CPU — games are wall-clock timed, so that shows up
+    // as time forfeits, and fragile engines misbehave under starvation.
+    let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let threads_per = if form.threads_on {
+        form.threads.max(1) as usize
+    } else {
+        1
+    };
+    let demand = form.concurrency.max(1) * threads_per;
+    if demand > cores {
+        notes.push(format!(
+            "{} parallel games × {} thread{} = {demand} busy engine threads, but this \
+             machine has {cores} logical cores. Expect time losses and unstable engines \
+             from CPU starvation — lower Parallel games or Threads.",
+            form.concurrency.max(1),
+            threads_per,
+            if threads_per == 1 { "" } else { "s" },
+        ));
+    }
     for e in engines.iter().filter(|e| form.selected.contains(&e.id)) {
         let name = {
             let n = widgets::engine_base_name(e);

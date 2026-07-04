@@ -1045,6 +1045,54 @@ problems don't recur per-tab:
   `UiBuilder::id_salt` (fixes a transient duplicate-ID red flash during
   relayout).
 
+### Duplicate dialogs, logging, failure forensics (step 49)
+
+- ✅ **Duplicate engine detection** (`engines_tab::duplicate_of`): same
+  executable path or same detected name+version (case-insensitive, empty
+  names never match). Single add → "Engine already in library" confirm
+  ("Add anyway" / "Cancel"); folder scan → one checkbox dialog listing all
+  duplicates (unticked by default, Select all / Deselect all, primary "OK
+  (import N)" / "OK (skip all)"). Non-duplicates keep importing silently.
+- ✅ **Logging system**: `init_logging` in `main.rs` writes tracing output to
+  console *and* `data/logs/colosseum.log` (`Mutex<File>` MakeWriter, ANSI
+  off, 4 MB rotation to `colosseum.prev.log`, session banner).
+- ✅ **Incident forensics**: `colosseum-engine::incidents` (OnceLock dir set
+  by the GUI at startup → `data/logs/incidents`). The runner writes a report
+  for every TimeForfeit / EngineCrash / IllegalMove: engines + paths, TC,
+  clocks at end, start FEN, full canonical move list, offending detail, and
+  per-engine forensics from `EngineProcess`: a 120-line protocol transcript
+  ring buffer (consecutive `info` lines collapsed) plus a 40-line **stderr
+  tail** (stderr was `Stdio::null` before — crash/assert messages were
+  discarded). Error messages reference the file name.
+- ✅ **Desync root cause FIXED**: the runner pushed the engine's *raw*
+  bestmove string into `uci_moves`, which is replayed to the opponent every
+  move. shakmaty accepts king-onto-rook castling ("e1h1") even in Standard
+  mode, so engine A's nonstandard notation reached engine B verbatim →
+  B desynced → B's later moves (legal in B's position) judged illegal, or B
+  crashed. Moves are now re-encoded canonically (`to_uci`) before entering
+  the shared history; test `king_onto_rook_castling_is_canonicalized`.
+- ✅ **Lenient parsing** (`parse_engine_move`, warn-logged, only when the
+  result is legal): uppercase notation; bare promotions (`d7d8` → assume
+  queen — the exact Rybka failure from the Grand Tour). Garbage/`0000`/
+  `(none)` still lose as before.
+- ✅ **Overload warning**: compatibility note when parallel games × threads
+  exceeds `available_parallelism` — games are wall-clock timed (2 s
+  tolerance), so CPU starvation shows up as time forfeits and destabilizes
+  fragile engines.
+
+### Instant tournament start (step 50)
+
+- ✅ Root cause of the slow start: `create_tournament` inserted every game
+  row individually — one implicit SQLite transaction (and disk sync) per
+  game, minutes for 10k+ games, all synchronously on the UI thread.
+  `Store::insert_pending_games(tournament, &[PendingGame])` persists the
+  whole schedule in one transaction with a prepared statement (~90 ms for
+  10 500 games on disk; `tests/bulk_insert_timing.rs` asserts < 5 s and the
+  scheduler logs the measured time). Resume similarly replaced its per-row
+  `reset_game_to_pending` loop with one `reset_unfinished_games` UPDATE
+  (row-level method removed). LESSON: never loop `execute` for bulk writes —
+  batch in a transaction.
+
 ## 12. Deferred (architecture-ready)
 
 Error-bar/Ordo rating recompute (see step 24); engine process pool; tablebase-based

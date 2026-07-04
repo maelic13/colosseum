@@ -225,7 +225,8 @@ pub fn create_tournament(
     };
     let games_per_pair = config.games_per_pair.max(1) as usize;
 
-    // Build and persist the schedule.
+    // Build the schedule, then persist it in one transaction — row-by-row
+    // insertion pays a disk sync per game and froze the UI for large runs.
     let pairings = generate_schedule(&ids, &config);
     let mut schedule = Vec::with_capacity(pairings.len());
     for (i, pairing) in pairings.into_iter().enumerate() {
@@ -236,15 +237,6 @@ pub fn create_tournament(
             let opening = &openings[(i / games_per_pair) % openings.len()];
             (opening.start_fen.clone(), opening.moves.clone())
         };
-        store.insert_pending_game(
-            game_id,
-            id,
-            pairing.round,
-            pairing.white,
-            pairing.black,
-            start_fen.as_deref(),
-            &opening_moves,
-        )?;
         schedule.push(ScheduledGame {
             game_id,
             pairing,
@@ -252,6 +244,25 @@ pub fn create_tournament(
             opening_moves,
         });
     }
+    let rows: Vec<store::PendingGame<'_>> = schedule
+        .iter()
+        .map(|s| store::PendingGame {
+            id: s.game_id,
+            round: s.pairing.round,
+            white: s.pairing.white,
+            black: s.pairing.black,
+            start_fen: s.start_fen.as_deref(),
+            opening_moves: &s.opening_moves,
+        })
+        .collect();
+    let persist_start = std::time::Instant::now();
+    store.insert_pending_games(id, &rows)?;
+    tracing::info!(
+        target: "scheduler",
+        "scheduled {} games in {:?}",
+        rows.len(),
+        persist_start.elapsed()
+    );
 
     let total_games = schedule.len();
     let elo_snapshot: HashMap<EngineId, EloEntry> = ids
@@ -645,12 +656,8 @@ pub fn resume_tournament(
     let total_games = all_games.len();
 
     // Reset in-flight (running) and force-stopped (discarded) games to pending
-    // so they will be replayed in this session.
-    for game in &all_games {
-        if game.status == store::GAME_RUNNING || game.status == store::GAME_DISCARDED {
-            store.reset_game_to_pending(game.id)?;
-        }
-    }
+    // so they will be replayed in this session (one statement, not per-row).
+    store.reset_unfinished_games(id)?;
 
     // Replay finished games to reconstruct standings and Elo.
     let mut elo = IncrementalElo::with_seed(config.k_factor, seeds.iter().copied());

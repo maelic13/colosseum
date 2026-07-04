@@ -210,22 +210,29 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         // above: an engine that runs out is cut off and loses on TimeForfeit.
         clocks.consume(&spec.time_control, mover, output.elapsed);
 
-        // Parse and validate the move.
-        let parsed = output
-            .best_move
-            .parse::<UciMove>()
-            .ok()
-            .and_then(|uci| uci.to_move(&pos).ok());
-        let Some(legal_move) = parsed else {
+        // Parse and validate the move, tolerating two common nonstandard
+        // notations from older engines (see `parse_engine_move`).
+        let Some((legal_move, leniency)) = parse_engine_move(&output.best_move, &pos) else {
             break Outcome::loss(
                 mover,
                 Termination::IllegalMove,
                 Some(format!("illegal move: {}", output.best_move)),
             );
         };
+        if let Some(note) = leniency {
+            tracing::warn!(
+                target: "runner",
+                "{} sent '{}' — accepted leniently ({note})",
+                if mover == Color::White { &spec.white.name } else { &spec.black.name },
+                output.best_move,
+            );
+        }
 
         san_moves.push(SanPlus::from_move(pos.clone(), legal_move).to_string());
-        uci_moves.push(output.best_move.clone());
+        // Store the CANONICAL encoding, not the engine's raw text: the move
+        // list is replayed to the opponent every move, so a tolerated
+        // nonstandard form must never leak into the shared history.
+        uci_moves.push(legal_move.to_uci(CastlingMode::Standard).to_string());
 
         // Score normalized to White's point of view.
         let white_pov_cp = match output.score {
@@ -265,6 +272,28 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         }
     };
 
+    // Abnormal end: write a forensic incident report while the engines'
+    // transcripts are still available, and point the error text at it.
+    let mut outcome = outcome;
+    if matches!(
+        outcome.termination,
+        Termination::TimeForfeit | Termination::EngineCrash | Termination::IllegalMove
+    ) {
+        let text = incident_report(&spec, &uci_moves, &clocks, &outcome, &white, &black);
+        let stub = format!(
+            "{:?}-{}-vs-{}-r{}",
+            outcome.termination, spec.white.name, spec.black.name, spec.round
+        );
+        if let Some(file) = crate::incidents::write(&stub, &text) {
+            let detail = outcome.error.take().unwrap_or_default();
+            outcome.error = Some(if detail.is_empty() {
+                format!("see logs/incidents/{file}")
+            } else {
+                format!("{detail} — see logs/incidents/{file}")
+            });
+        }
+    }
+
     // Shut engines down gracefully (kill_on_drop covers anything left).
     let _ = white.quit(Duration::from_millis(500)).await;
     let _ = black.quit(Duration::from_millis(500)).await;
@@ -289,6 +318,87 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         pgn,
         error: outcome.error,
     }
+}
+
+/// Parse an engine's `bestmove` against the current position, tolerating two
+/// widespread nonstandard notations (each only when it resolves to a legal
+/// move): uppercase text, and bare promotions like `d7d8` (promotion piece
+/// omitted → assume queen). King-onto-rook castling (`e1h1`, Chess960 style)
+/// is already understood by shakmaty; the caller's canonical re-encoding
+/// turns it into `e1g1` before it reaches the opponent's move list.
+///
+/// Returns the legal move plus a note when leniency was applied.
+fn parse_engine_move(text: &str, pos: &Chess) -> Option<(shakmaty::Move, Option<&'static str>)> {
+    let try_uci = |s: &str| {
+        s.parse::<UciMove>()
+            .ok()
+            .and_then(|uci| uci.to_move(pos).ok())
+    };
+    let trimmed = text.trim();
+    if let Some(mv) = try_uci(trimmed) {
+        return Some((mv, None));
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower != trimmed
+        && let Some(mv) = try_uci(&lower)
+    {
+        return Some((mv, Some("uppercase notation")));
+    }
+    if lower.len() == 4
+        && let Some(mv) = try_uci(&format!("{lower}q"))
+    {
+        return Some((mv, Some("promotion piece omitted — assumed queen")));
+    }
+    None
+}
+
+/// Build the plain-text forensic report for an abnormal game end.
+fn incident_report(
+    spec: &GameSpec,
+    uci_moves: &[String],
+    clocks: &Clocks,
+    outcome: &Outcome,
+    white: &EngineProcess,
+    black: &EngineProcess,
+) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::with_capacity(8 * 1024);
+    let _ = writeln!(s, "event:       {} (round {})", spec.event, spec.round);
+    let _ = writeln!(s, "white:       {}  [{}]", spec.white.name, spec.white.spawn.path.display());
+    let _ = writeln!(s, "black:       {}  [{}]", spec.black.name, spec.black.spawn.path.display());
+    let _ = writeln!(s, "time control: {}", spec.time_control_label);
+    let _ = writeln!(s, "termination: {:?}", outcome.termination);
+    let _ = writeln!(s, "result:      {}", outcome.result.pgn());
+    if let Some(err) = &outcome.error {
+        let _ = writeln!(s, "detail:      {err}");
+    }
+    let _ = writeln!(
+        s,
+        "clocks at end: white {:?}, black {:?}",
+        clocks.remaining(Color::White),
+        clocks.remaining(Color::Black)
+    );
+    let _ = writeln!(
+        s,
+        "start fen:   {}",
+        spec.start_fen.as_deref().unwrap_or("startpos")
+    );
+    let _ = writeln!(s, "opening plies: {}", spec.opening_moves.len());
+    let _ = writeln!(s, "moves ({}): {}", uci_moves.len(), uci_moves.join(" "));
+    for (label, engine) in [("white", white), ("black", black)] {
+        let _ = writeln!(s, "\n── {label} UCI transcript (last lines; > sent, < received; info collapsed) ──");
+        for line in engine.transcript() {
+            let _ = writeln!(s, "{line}");
+        }
+        let stderr = engine.stderr_tail();
+        if !stderr.is_empty() {
+            let _ = writeln!(s, "── {label} stderr ──");
+            for line in stderr {
+                let _ = writeln!(s, "{line}");
+            }
+        }
+    }
+    s
 }
 
 /// Per-side game clocks for clock-based time controls. Both sides start at the
@@ -469,6 +579,55 @@ mod tests {
     use super::*;
 
     const TOL: Duration = Duration::from_millis(50);
+
+    fn pos_from(fen: &str) -> Chess {
+        fen.parse::<shakmaty::fen::Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap()
+    }
+
+    #[test]
+    fn lenient_parsing_defaults_bare_promotion_to_queen() {
+        let pos = pos_from("k7/3P4/8/8/8/8/8/K7 w - - 0 1");
+        let (mv, note) = parse_engine_move("d7d8", &pos).expect("accepted");
+        assert!(note.is_some());
+        assert_eq!(mv.to_uci(CastlingMode::Standard).to_string(), "d7d8q");
+        // A correctly-specified promotion is passed through without a note.
+        let (mv, note) = parse_engine_move("d7d8n", &pos).expect("accepted");
+        assert!(note.is_none());
+        assert_eq!(mv.to_uci(CastlingMode::Standard).to_string(), "d7d8n");
+    }
+
+    #[test]
+    fn king_onto_rook_castling_is_canonicalized() {
+        // shakmaty accepts Chess960-style castling notation even in standard
+        // games; the canonical re-encoding must turn it into e1g1/e1c1 so the
+        // OPPONENT's move list never sees the nonstandard form (a real desync
+        // source before step 49 — the raw text used to be forwarded).
+        let pos = pos_from("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+        let (mv, _) = parse_engine_move("e1h1", &pos).expect("accepted");
+        assert_eq!(mv.to_uci(CastlingMode::Standard).to_string(), "e1g1");
+        let (mv, _) = parse_engine_move("e1a1", &pos).expect("accepted");
+        assert_eq!(mv.to_uci(CastlingMode::Standard).to_string(), "e1c1");
+    }
+
+    #[test]
+    fn lenient_parsing_accepts_uppercase() {
+        let pos = Chess::default();
+        let (mv, note) = parse_engine_move("E2E4", &pos).expect("accepted");
+        assert!(note.is_some());
+        assert_eq!(mv.to_uci(CastlingMode::Standard).to_string(), "e2e4");
+    }
+
+    #[test]
+    fn lenient_parsing_still_rejects_garbage_and_illegal() {
+        let pos = Chess::default();
+        assert!(parse_engine_move("(none)", &pos).is_none());
+        assert!(parse_engine_move("0000", &pos).is_none());
+        assert!(parse_engine_move("e2e5", &pos).is_none()); // illegal push
+        assert!(parse_engine_move("d3c2", &pos).is_none()); // no piece there
+    }
 
     #[test]
     fn per_move_limits_are_constant_per_move() {

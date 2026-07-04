@@ -9,6 +9,7 @@
 pub mod config;
 pub mod detect;
 pub mod error;
+pub mod incidents;
 pub mod openings;
 pub mod paths;
 pub mod pgn;
@@ -26,4 +27,4 @@ pub use scheduler::{
     TournamentSnapshot, TournamentStatus, create_tournament, load_tournament_results,
     resume_tournament,
 };
-pub use store::{GameRow, Store, TournamentEngineRow, TournamentRow};
+pub use store::{GameRow, PendingGame, Store, TournamentEngineRow, TournamentRow};

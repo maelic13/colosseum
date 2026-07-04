@@ -53,6 +53,22 @@ pub struct EnginesTab {
     tb_expanded: bool,
     /// Decoded logo textures, keyed by file path.
     logos: logo::LogoCache,
+    /// A single-add result that matches a library engine, awaiting the user's
+    /// "Add anyway" / "Cancel" decision.
+    dup_single: Option<DupCandidate>,
+    /// Folder-scan results that match library engines; shown in one checkbox
+    /// dialog when the scan finishes (nothing ticked by default).
+    dup_batch: Vec<(DupCandidate, bool)>,
+    /// Whether the batch-duplicates dialog is open.
+    dup_batch_open: bool,
+}
+
+/// A detected engine that duplicates one already in the library.
+struct DupCandidate {
+    /// The fully-built config, ready to insert if the user confirms.
+    cfg: EngineConfig,
+    /// Display name of the library engine it matches.
+    matches: String,
 }
 
 /// How long after the last edit before the buffer is auto-committed.
@@ -77,6 +93,7 @@ impl EnginesTab {
         self.poll_redetect();
         self.autosave_tick(ui.ctx(), backend);
         self.show_delete_modal(ui.ctx(), backend);
+        self.show_duplicate_modals(ui.ctx(), backend);
 
         // Keep frames coming while detection runs in the background — results
         // arrive on a channel and would otherwise wait for the next input event.
@@ -243,6 +260,9 @@ struct DetectJob {
     rx: Receiver<(PathBuf, Result<DetectResult, String>)>,
     total: usize,
     done: usize,
+    /// True for a single "Add Engine", false for a folder scan — decides
+    /// which duplicate dialog is shown.
+    single: bool,
 }
 
 impl EnginesTab {
@@ -256,14 +276,24 @@ impl EnginesTab {
         let mut last_error: Option<String> = None;
         let mut disconnected = false;
 
+        let single = self.pending.as_ref().is_some_and(|j| j.single);
+        let mut duplicates: Vec<DupCandidate> = Vec::new();
         {
             let job = self.pending.as_mut().unwrap();
             loop {
                 match job.rx.try_recv() {
                     Ok((path, Ok(result))) => {
                         job.done += 1;
-                        let id = add_engine_from_detect(path, result, backend);
-                        new_ids.push(id);
+                        let cfg = engine_from_detect(path, result);
+                        match duplicate_of(&cfg, &backend.engines) {
+                            Some(matches) => duplicates.push(DupCandidate { cfg, matches }),
+                            None => {
+                                let id = cfg.id;
+                                backend.engines.push(cfg);
+                                backend.save_engines();
+                                new_ids.push(id);
+                            }
+                        }
                     }
                     Ok((path, Err(msg))) => {
                         job.done += 1;
@@ -287,16 +317,219 @@ impl EnginesTab {
             self.detect_error = Some(err);
         }
 
+        // Route duplicates to the appropriate dialog.
+        for dup in duplicates {
+            if single {
+                self.dup_single = Some(dup);
+            } else {
+                self.dup_batch.push((dup, false));
+            }
+        }
+
         let done = self.pending.as_ref().map_or(0, |j| j.done);
         let total = self.pending.as_ref().map_or(0, |j| j.total);
         if disconnected || done >= total {
             self.pending = None;
+            // Folder scan finished: raise the batch dialog if anything matched.
+            if !self.dup_batch.is_empty() {
+                self.dup_batch_open = true;
+            }
         }
 
         for id in new_ids {
             if self.selected_id.is_none() {
                 self.select_engine(id, backend);
             }
+        }
+    }
+
+    /// The two duplicate dialogs: a Yes/No confirm for a single add, and a
+    /// checkbox list (nothing ticked by default) for a folder scan.
+    fn show_duplicate_modals(&mut self, ctx: &egui::Context, backend: &mut Backend) {
+        // ── Single add ──
+        if let Some(dup) = &self.dup_single {
+            let title = widgets::engine_base_name(&dup.cfg);
+            let version = dup.cfg.meta.version.trim().to_string();
+            let file = dup
+                .cfg
+                .path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("?")
+                .to_string();
+            let matches = dup.matches.clone();
+            let mut decision: Option<bool> = None;
+
+            let modal = egui::Modal::new(egui::Id::new("dup_single_modal")).show(ctx, |ui| {
+                ui.set_width(420.0);
+                ui.label(
+                    RichText::new("Engine already in library")
+                        .color(theme::TEXT)
+                        .font(theme::semibold(15.0)),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(format!(
+                        "{title} {version} ({file}) matches \"{matches}\" in your library.",
+                    ))
+                    .color(theme::TEXT_WEAK)
+                    .size(13.0),
+                );
+                ui.add_space(12.0);
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new("Add anyway")
+                                    .color(theme::BG_DARKEST)
+                                    .font(theme::semibold(13.5)),
+                            )
+                            .fill(theme::ACCENT),
+                        )
+                        .clicked()
+                    {
+                        decision = Some(true);
+                    }
+                    ui.add_space(4.0);
+                    if ui
+                        .button(RichText::new("Cancel").color(theme::TEXT))
+                        .clicked()
+                    {
+                        decision = Some(false);
+                    }
+                });
+            });
+            if modal.should_close() && decision.is_none() {
+                decision = Some(false);
+            }
+            if let Some(add) = decision {
+                let dup = self.dup_single.take().unwrap();
+                if add {
+                    let id = dup.cfg.id;
+                    backend.engines.push(dup.cfg);
+                    backend.save_engines();
+                    self.select_engine(id, backend);
+                }
+            }
+        }
+
+        // ── Folder scan ──
+        if !self.dup_batch_open {
+            return;
+        }
+        let mut close = false;
+        let mut import = false;
+        let modal = egui::Modal::new(egui::Id::new("dup_batch_modal")).show(ctx, |ui| {
+            ui.set_width(480.0);
+            ui.label(
+                RichText::new(format!("Duplicates found ({})", self.dup_batch.len()))
+                    .color(theme::TEXT)
+                    .font(theme::semibold(15.0)),
+            );
+            ui.add_space(2.0);
+            ui.label(
+                RichText::new(
+                    "These detected engines match ones already in your library. \
+                     Tick any you still want to import.",
+                )
+                .color(theme::TEXT_WEAK)
+                .size(12.0),
+            );
+            ui.add_space(8.0);
+            ScrollArea::vertical()
+                .id_salt("dup_batch_scroll")
+                .max_height(320.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    for (dup, checked) in &mut self.dup_batch {
+                        ui.horizontal(|ui| {
+                            widgets::checkbox(ui, checked, "");
+                            let name = widgets::engine_base_name(&dup.cfg);
+                            let version = dup.cfg.meta.version.trim();
+                            ui.label(
+                                RichText::new(if version.is_empty() {
+                                    name.clone()
+                                } else {
+                                    format!("{name} {version}")
+                                })
+                                .color(theme::TEXT)
+                                .font(theme::semibold(13.0)),
+                            );
+                            ui.label(
+                                RichText::new(format!("matches \"{}\"", dup.matches))
+                                    .color(theme::TEXT_FAINT)
+                                    .size(12.0),
+                            );
+                        })
+                        .response
+                        .on_hover_text(dup.cfg.path.to_string_lossy());
+                        ui.add_space(2.0);
+                    }
+                });
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .button(RichText::new("Select all").color(theme::TEXT_WEAK))
+                    .clicked()
+                {
+                    for (_, checked) in &mut self.dup_batch {
+                        *checked = true;
+                    }
+                }
+                if ui
+                    .button(RichText::new("Deselect all").color(theme::TEXT_WEAK))
+                    .clicked()
+                {
+                    for (_, checked) in &mut self.dup_batch {
+                        *checked = false;
+                    }
+                }
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    let n = self.dup_batch.iter().filter(|(_, c)| *c).count();
+                    let label = if n == 0 {
+                        "OK (skip all)".to_string()
+                    } else {
+                        format!("OK (import {n})")
+                    };
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(label)
+                                    .color(theme::BG_DARKEST)
+                                    .font(theme::semibold(13.5)),
+                            )
+                            .fill(theme::ACCENT),
+                        )
+                        .clicked()
+                    {
+                        import = true;
+                        close = true;
+                    }
+                });
+            });
+        });
+        if modal.should_close() {
+            close = true;
+        }
+        if close {
+            if import {
+                let mut first: Option<EngineId> = None;
+                for (dup, checked) in self.dup_batch.drain(..) {
+                    if checked {
+                        first.get_or_insert(dup.cfg.id);
+                        backend.engines.push(dup.cfg);
+                    }
+                }
+                backend.save_engines();
+                if let Some(id) = first
+                    && self.selected_id.is_none()
+                {
+                    self.select_engine(id, backend);
+                }
+            } else {
+                self.dup_batch.clear();
+            }
+            self.dup_batch_open = false;
         }
     }
 
@@ -359,6 +592,7 @@ impl EnginesTab {
             rx,
             total: 1,
             done: 0,
+            single: true,
         });
         self.detect_error = None;
     }
@@ -379,7 +613,12 @@ impl EnginesTab {
                 }
             }
         });
-        self.pending = Some(DetectJob { rx, total, done: 0 });
+        self.pending = Some(DetectJob {
+            rx,
+            total,
+            done: 0,
+            single: false,
+        });
         self.detect_error = None;
     }
 
@@ -1914,8 +2153,8 @@ fn set_or_remove(map: &mut BTreeMap<String, String>, key: &str, value: &str) {
     }
 }
 
-/// Create an `EngineConfig` from detection results and push it to `backend.engines`.
-fn add_engine_from_detect(path: PathBuf, result: DetectResult, backend: &mut Backend) -> EngineId {
+/// Create an `EngineConfig` from detection results (not yet in the library).
+fn engine_from_detect(path: PathBuf, result: DetectResult) -> EngineConfig {
     let mut cfg = EngineConfig::new(path);
     match result.name {
         Some(id_name) => {
@@ -1938,10 +2177,34 @@ fn add_engine_from_detect(path: PathBuf, result: DetectResult, backend: &mut Bac
         cfg.meta.extra.insert("author".to_string(), author);
     }
     cfg.detected_options = result.options;
-    let id = cfg.id;
-    backend.engines.push(cfg);
-    backend.save_engines();
-    id
+    cfg
+}
+
+/// If `cfg` duplicates a library engine, return that engine's display name.
+///
+/// A duplicate is the same executable path, or the same detected identity
+/// (name + version, case-insensitive; never matched on an empty name).
+fn duplicate_of(cfg: &EngineConfig, library: &[EngineConfig]) -> Option<String> {
+    let norm_path = |p: &Path| p.to_string_lossy().to_lowercase();
+    let name = cfg.meta.name.trim().to_lowercase();
+    let version = cfg.meta.version.trim().to_lowercase();
+    library
+        .iter()
+        .find(|e| {
+            norm_path(&e.path) == norm_path(&cfg.path)
+                || (!name.is_empty()
+                    && e.meta.name.trim().to_lowercase() == name
+                    && e.meta.version.trim().to_lowercase() == version)
+        })
+        .map(|e| {
+            let n = widgets::engine_base_name(e);
+            let v = e.meta.version.trim();
+            if v.is_empty() {
+                n
+            } else {
+                format!("{n} {v}")
+            }
+        })
 }
 
 /// Enumerate executable files (non-recursive) in `dir`.

@@ -9,9 +9,10 @@
 //! spawn helper processes; hardening against grandchildren (Unix process groups /
 //! Windows job objects) is a documented follow-up.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use colosseum_core::UciOption;
@@ -67,12 +68,24 @@ pub struct SearchOutput {
     pub elapsed: Duration,
 }
 
+/// How many recent protocol lines are kept for incident forensics.
+const TRANSCRIPT_CAP: usize = 120;
+/// How many recent stderr lines are kept (crash/assert messages).
+const STDERR_CAP: usize = 40;
+
 /// A running UCI engine.
 pub struct EngineProcess {
     child: Child,
     stdin: ChildStdin,
     lines: Lines<BufReader<ChildStdout>>,
     info: HandshakeInfo,
+    /// Recent protocol traffic ("> sent" / "< received"), for incident
+    /// reports. Consecutive `info` lines are collapsed to the latest so the
+    /// buffer isn't all search spam.
+    transcript: VecDeque<String>,
+    /// Recent stderr output, collected by a background task — engines print
+    /// their panic/assert messages there.
+    stderr_tail: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl EngineProcess {
@@ -85,7 +98,7 @@ impl EngineProcess {
             .args(&options.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
         if let Some(dir) = &options.working_dir {
             std_cmd.current_dir(dir);
         }
@@ -108,12 +121,66 @@ impl EngineProcess {
         let stdout = child.stdout.take().ok_or(UciError::Terminated)?;
         let lines = BufReader::new(stdout).lines();
 
+        // Drain stderr in the background into a small tail buffer — engines
+        // print crash/assert messages there, which is exactly what an
+        // incident report needs.
+        let stderr_tail = Arc::new(Mutex::new(VecDeque::new()));
+        if let Some(stderr) = child.stderr.take() {
+            let tail = Arc::clone(&stderr_tail);
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if let Ok(mut tail) = tail.lock() {
+                        if tail.len() >= STDERR_CAP {
+                            tail.pop_front();
+                        }
+                        tail.push_back(line);
+                    }
+                }
+            });
+        }
+
         Ok(Self {
             child,
             stdin,
             lines,
             info: HandshakeInfo::default(),
+            transcript: VecDeque::new(),
+            stderr_tail,
         })
+    }
+
+    /// Recent protocol traffic (oldest first) for incident reports.
+    #[must_use]
+    pub fn transcript(&self) -> Vec<String> {
+        self.transcript.iter().cloned().collect()
+    }
+
+    /// Recent stderr output (oldest first) for incident reports.
+    #[must_use]
+    pub fn stderr_tail(&self) -> Vec<String> {
+        self.stderr_tail
+            .lock()
+            .map(|t| t.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Record one protocol line into the transcript ring buffer.
+    fn record(&mut self, prefix: &str, line: &str) {
+        // Collapse runs of `info` spam: keep only the latest.
+        if prefix == "<"
+            && line.starts_with("info ")
+            && self
+                .transcript
+                .back()
+                .is_some_and(|last| last.starts_with("< info "))
+        {
+            self.transcript.pop_back();
+        }
+        if self.transcript.len() >= TRANSCRIPT_CAP {
+            self.transcript.pop_front();
+        }
+        self.transcript.push_back(format!("{prefix} {line}"));
     }
 
     /// The engine's reported name, once handshaken.
@@ -256,6 +323,7 @@ impl EngineProcess {
     /// Write a command line to the engine and flush.
     async fn send(&mut self, line: &str) -> Result<(), UciError> {
         tracing::trace!(target: "uci", direction = "send", "{line}");
+        self.record(">", line);
         self.stdin.write_all(line.as_bytes()).await?;
         self.stdin.write_all(b"\n").await?;
         self.stdin.flush().await?;
@@ -278,6 +346,7 @@ impl EngineProcess {
             Err(_elapsed) => Err(timeout_err),
             Ok(Ok(Some(line))) => {
                 tracing::trace!(target: "uci", direction = "recv", "{line}");
+                self.record("<", &line);
                 Ok(line)
             }
             Ok(Ok(None)) => Err(UciError::Terminated),

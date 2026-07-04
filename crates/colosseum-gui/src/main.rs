@@ -25,6 +25,7 @@ mod viewer;
 mod widgets;
 
 use colosseum_core::branding::DISPLAY_NAME;
+use colosseum_engine::AppDirs;
 use eframe::egui;
 
 use crate::app::ColosseumApp;
@@ -44,19 +45,55 @@ fn attach_parent_console() {
     }
 }
 
+/// Initialise logging to both the console (when attached) and a file in the
+/// data directory (`logs/colosseum.log`, rotated once past ~4 MB), so engine
+/// problems can be diagnosed after the fact in a windowed build.
+fn init_logging(dirs: Option<&AppDirs>) {
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+    let file = dirs.and_then(|dirs| {
+        let dir = dirs.data_dir.join("logs");
+        std::fs::create_dir_all(&dir).ok()?;
+        let path = dir.join("colosseum.log");
+        if std::fs::metadata(&path).is_ok_and(|m| m.len() > 4 * 1024 * 1024) {
+            let prev = dir.join("colosseum.prev.log");
+            let _ = std::fs::remove_file(&prev);
+            let _ = std::fs::rename(&path, &prev);
+        }
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .ok()
+    });
+
+    match file {
+        Some(file) => tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_ansi(false)
+            .with_writer(std::io::stderr.and(std::sync::Mutex::new(file)))
+            .init(),
+        None => tracing_subscriber::fmt().with_env_filter(filter).init(),
+    }
+}
+
 fn main() -> eframe::Result<()> {
     #[cfg(windows)]
     attach_parent_console();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
     // `--portable` keeps all data (config, database, engines) next to the binary.
     let portable = std::env::args().any(|a| a == "--portable");
+
+    // Resolve the data directories early so the log file and incident reports
+    // land in the right place from the very first message.
+    let dirs = AppDirs::new(portable).or_else(|| AppDirs::new(true));
+    init_logging(dirs.as_ref());
+    if let Some(dirs) = &dirs {
+        colosseum_engine::incidents::set_dir(dirs.data_dir.join("logs").join("incidents"));
+    }
+    tracing::info!("─── Colosseum {} starting ───", env!("CARGO_PKG_VERSION"));
 
     let backend = match Backend::new(portable) {
         Ok(backend) => backend,

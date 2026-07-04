@@ -60,6 +60,20 @@ pub struct GameRow {
     pub opening_moves: Vec<String>,
 }
 
+/// One game of a schedule, for bulk insertion via
+/// [`Store::insert_pending_games`].
+#[derive(Debug, Clone, Copy)]
+pub struct PendingGame<'a> {
+    pub id: GameId,
+    pub round: u32,
+    pub white: EngineId,
+    pub black: EngineId,
+    /// Opening start FEN; `None` means the standard start position.
+    pub start_fen: Option<&'a str>,
+    /// Opening moves (UCI) pre-played before the engines move.
+    pub opening_moves: &'a [String],
+}
+
 /// One participating engine's seed, starting Elo, and config snapshot within a tournament.
 #[derive(Debug, Clone)]
 pub struct TournamentEngineRow {
@@ -330,6 +344,63 @@ impl Store {
 
     // ---- games ---------------------------------------------------------------
 
+    /// Insert a whole schedule of pending games in **one transaction**.
+    ///
+    /// Inserting thousands of rows through [`Self::insert_pending_game`] pays
+    /// one commit (and disk sync) per row — minutes for a big tournament and
+    /// a frozen UI. One transaction does the same work in milliseconds.
+    pub fn insert_pending_games(
+        &self,
+        tournament: TournamentId,
+        games: &[PendingGame<'_>],
+    ) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO games
+                   (id, tournament_id, round, white_id, black_id, status, start_fen, opening_moves)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )?;
+            for game in games {
+                let moves_json = if game.opening_moves.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::to_string(game.opening_moves)?)
+                };
+                stmt.execute(params![
+                    game.id.to_string(),
+                    tournament.to_string(),
+                    game.round,
+                    game.white.to_string(),
+                    game.black.to_string(),
+                    GAME_PENDING,
+                    game.start_fen,
+                    moves_json,
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Reset every non-finished game of a tournament back to pending in a
+    /// single statement (resume path). Returns how many rows changed.
+    pub fn reset_unfinished_games(&self, tournament: TournamentId) -> Result<usize> {
+        Ok(self.conn.execute(
+            "UPDATE games
+             SET status = ?2, result = NULL, termination = NULL,
+                 white_nps = NULL, black_nps = NULL, plies = NULL, pgn = NULL,
+                 started_at = NULL, finished_at = NULL
+             WHERE tournament_id = ?1 AND status IN (?3, ?4)",
+            params![
+                tournament.to_string(),
+                GAME_PENDING,
+                GAME_RUNNING,
+                GAME_DISCARDED
+            ],
+        )?)
+    }
+
     /// Insert a pending game with its assigned opening (start FEN + pre-moves).
     #[allow(clippy::too_many_arguments)]
     pub fn insert_pending_game(
@@ -377,23 +448,6 @@ impl Store {
     /// Mark a game as discarded (e.g. aborted by Force-Stop).
     pub fn discard_game(&self, id: GameId) -> Result<()> {
         self.set_game_status(id, GAME_DISCARDED)
-    }
-
-    /// Reset a game back to `pending` so it can be replayed on resume.
-    ///
-    /// Clears result, termination, nps, plies, PGN and timestamps.  Used on
-    /// tournament resume for games that were `running` (in-flight when the app
-    /// exited) or `discarded` (aborted by a prior Force-Stop).
-    pub fn reset_game_to_pending(&self, id: GameId) -> Result<()> {
-        self.conn.execute(
-            "UPDATE games
-             SET status = ?2, result = NULL, termination = NULL,
-                 white_nps = NULL, black_nps = NULL, plies = NULL, pgn = NULL,
-                 started_at = NULL, finished_at = NULL
-             WHERE id = ?1",
-            params![id.to_string(), GAME_PENDING],
-        )?;
-        Ok(())
     }
 
     fn set_game_status(&self, id: GameId, status: &str) -> Result<()> {
@@ -576,6 +630,65 @@ CREATE INDEX IF NOT EXISTS idx_games_tournament ON games(tournament_id);
 mod tests {
     use super::*;
     use colosseum_core::{GameResult, Termination, TournamentConfig};
+
+    #[test]
+    fn bulk_insert_and_reset_round_trip() {
+        let store = Store::open_in_memory().unwrap();
+        let tid = TournamentId::new();
+        store
+            .create_tournament(tid, "Bulk", &TournamentConfig::default())
+            .unwrap();
+
+        let (a, b) = (EngineId::new(), EngineId::new());
+        let opening = vec!["e2e4".to_string(), "e7e5".to_string()];
+        let games: Vec<(GameId, u32)> = (0..500).map(|i| (GameId::new(), i / 2 + 1)).collect();
+        let rows: Vec<PendingGame<'_>> = games
+            .iter()
+            .map(|(id, round)| PendingGame {
+                id: *id,
+                round: *round,
+                white: a,
+                black: b,
+                start_fen: None,
+                opening_moves: &opening,
+            })
+            .collect();
+        store.insert_pending_games(tid, &rows).unwrap();
+
+        let listed = store.list_games(tid).unwrap();
+        assert_eq!(listed.len(), 500);
+        assert_eq!(listed[0].opening_moves, opening);
+
+        // Finish one, leave one running, one discarded; reset touches only
+        // the non-finished ones.
+        store.mark_game_running(games[0].0).unwrap();
+        store
+            .finish_game(
+                games[0].0,
+                GameResult::WhiteWin,
+                Termination::Checkmate,
+                None,
+                None,
+                10,
+                "pgn",
+            )
+            .unwrap();
+        store.mark_game_running(games[1].0).unwrap();
+        store.mark_game_running(games[2].0).unwrap();
+        store.discard_game(games[2].0).unwrap();
+
+        let reset = store.reset_unfinished_games(tid).unwrap();
+        assert_eq!(reset, 2); // the running + discarded ones
+        let listed = store.list_games(tid).unwrap();
+        assert!(listed.iter().filter(|g| g.status == GAME_FINISHED).count() == 1);
+        assert!(
+            listed
+                .iter()
+                .filter(|g| g.status == GAME_PENDING)
+                .count()
+                == 499
+        );
+    }
 
     #[test]
     fn round_trips_tournaments_and_games() {
