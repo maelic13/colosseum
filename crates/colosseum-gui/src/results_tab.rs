@@ -817,49 +817,52 @@ impl ResultsTab {
                 self.refresh(backend);
             }
 
-            // Delete — available even while running (force-stops first), for
-            // when a run is a write-off rather than something to finish.
-            ui.add_space(4.0);
-            if self.pending_delete == Some(id) {
-                if widgets::tinted_button(ui, "Confirm delete", theme::DANGER, true)
-                    .on_hover_text(
-                        "Stop this tournament and permanently remove it and its games.",
-                    )
-                    .clicked()
-                {
-                    if let Some(active) = backend.active(id) {
-                        active.handle.force_stop();
-                    }
-                    backend.close_tournament(id);
-                    match backend.delete_tournament(id) {
-                        Ok(()) => self.error = None,
-                        Err(e) => self.error = Some(format!("Delete failed: {e}")),
-                    }
-                    self.pending_delete = None;
-                    self.live_games_cache = None;
-                    self.elo_cache = None;
-                    self.refresh(backend);
-                }
-                ui.add_space(2.0);
-                if ui
-                    .button(RichText::new("Cancel").color(theme::TEXT))
-                    .clicked()
-                {
-                    self.pending_delete = None;
-                }
-            } else if widgets::tinted_button(ui, "Delete", theme::DANGER, true)
-                .on_hover_text("Delete this tournament — stops it first if it's running.")
-                .clicked()
-            {
-                self.pending_delete = Some(id);
-            }
-
             if let Some(note) = &self.export_note {
                 ui.label(RichText::new(note).color(theme::TEXT_WEAK).size(12.0));
             }
             if let Some(note) = &self.elo_note {
                 ui.label(RichText::new(note).color(theme::SUCCESS).size(12.0));
             }
+
+            // Delete — available even while running (force-stops first), for
+            // when a run is a write-off rather than something to finish. Kept
+            // pinned to the far right, away from the routine actions.
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if self.pending_delete == Some(id) {
+                    // Right-to-left: Cancel sits at the edge, Confirm to its left.
+                    if ui
+                        .button(RichText::new("Cancel").color(theme::TEXT))
+                        .clicked()
+                    {
+                        self.pending_delete = None;
+                    }
+                    ui.add_space(2.0);
+                    if widgets::tinted_button(ui, "Confirm delete", theme::DANGER, true)
+                        .on_hover_text(
+                            "Stop this tournament and permanently remove it and its games.",
+                        )
+                        .clicked()
+                    {
+                        if let Some(active) = backend.active(id) {
+                            active.handle.force_stop();
+                        }
+                        backend.close_tournament(id);
+                        match backend.delete_tournament(id) {
+                            Ok(()) => self.error = None,
+                            Err(e) => self.error = Some(format!("Delete failed: {e}")),
+                        }
+                        self.pending_delete = None;
+                        self.live_games_cache = None;
+                        self.elo_cache = None;
+                        self.refresh(backend);
+                    }
+                } else if widgets::tinted_button(ui, "Delete", theme::DANGER, true)
+                    .on_hover_text("Delete this tournament — stops it first if it's running.")
+                    .clicked()
+                {
+                    self.pending_delete = Some(id);
+                }
+            });
         });
     }
 
@@ -1417,7 +1420,7 @@ impl ResultsTab {
         // fallback when that failed (e.g. missing engines were re-added).
         let resumable = row.status != STATUS_FINISHED;
 
-        ui.horizontal_wrapped(|ui| {
+        ui.horizontal(|ui| {
             if resumable {
                 if widgets::tinted_button(ui, "↩ Resume", theme::SUCCESS, true)
                     .on_hover_text("Reload this tournament and continue from where it stopped.")
@@ -1434,39 +1437,7 @@ impl ResultsTab {
                 ui.add_space(6.0);
             }
 
-            if self.pending_delete == Some(row.id) {
-                if widgets::tinted_button(ui, "Confirm delete", theme::DANGER, true)
-                    .on_hover_text("Permanently remove this tournament and its games.")
-                    .clicked()
-                {
-                    match backend.delete_tournament(row.id) {
-                        Ok(()) => {
-                            self.error = None;
-                            self.pending_delete = None;
-                            self.refresh(backend);
-                        }
-                        Err(e) => {
-                            self.error = Some(format!("Delete failed: {e}"));
-                            self.pending_delete = None;
-                        }
-                    }
-                }
-                ui.add_space(4.0);
-                if ui
-                    .button(RichText::new("Cancel").color(theme::TEXT))
-                    .clicked()
-                {
-                    self.pending_delete = None;
-                }
-            } else if widgets::tinted_button(ui, "Delete", theme::DANGER, true)
-                .on_hover_text("Delete this tournament from the database.")
-                .clicked()
-            {
-                self.pending_delete = Some(row.id);
-            }
-
             if let Some(pgn) = &row.pgn_path {
-                ui.add_space(6.0);
                 if ui
                     .button(RichText::new("Copy PGN path").color(theme::TEXT_WEAK))
                     .on_hover_text(pgn.clone())
@@ -1474,9 +1445,9 @@ impl ResultsTab {
                 {
                     ui.ctx().copy_text(pgn.clone());
                 }
+                ui.add_space(6.0);
             }
 
-            ui.add_space(6.0);
             let export_resp = ui.menu_button(RichText::new("Export    ").size(13.0), |ui| {
                 ui.set_min_width(170.0);
                 let have_results = matches!(&self.results, Some((id, _)) if *id == row.id);
@@ -1519,6 +1490,42 @@ impl ResultsTab {
                 ui.add_space(6.0);
                 ui.label(RichText::new(note).color(theme::TEXT_WEAK).size(12.0));
             }
+
+            // Delete is destructive, so keep it pinned to the far right, away
+            // from the routine actions and consistent with the live control bar.
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if self.pending_delete == Some(row.id) {
+                    // Right-to-left: Cancel sits at the edge, Confirm to its left.
+                    if ui
+                        .button(RichText::new("Cancel").color(theme::TEXT))
+                        .clicked()
+                    {
+                        self.pending_delete = None;
+                    }
+                    ui.add_space(4.0);
+                    if widgets::tinted_button(ui, "Confirm delete", theme::DANGER, true)
+                        .on_hover_text("Permanently remove this tournament and its games.")
+                        .clicked()
+                    {
+                        match backend.delete_tournament(row.id) {
+                            Ok(()) => {
+                                self.error = None;
+                                self.pending_delete = None;
+                                self.refresh(backend);
+                            }
+                            Err(e) => {
+                                self.error = Some(format!("Delete failed: {e}"));
+                                self.pending_delete = None;
+                            }
+                        }
+                    }
+                } else if widgets::tinted_button(ui, "Delete", theme::DANGER, true)
+                    .on_hover_text("Delete this tournament from the database.")
+                    .clicked()
+                {
+                    self.pending_delete = Some(row.id);
+                }
+            });
         });
     }
 }

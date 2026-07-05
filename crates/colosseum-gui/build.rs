@@ -17,12 +17,19 @@ fn main() {
         return;
     }
 
-    println!("cargo:rerun-if-changed=assets/colosseum.ico");
+    // `winresource` is only available as a build-dependency on a Windows
+    // *host* (see `[target.'cfg(windows)'.build-dependencies]` in Cargo.toml),
+    // so gate its use on the host to keep the build script compiling on other
+    // platforms (e.g. cross-compiling to Windows from macOS/Linux).
+    #[cfg(windows)]
+    {
+        println!("cargo:rerun-if-changed=assets/colosseum.ico");
 
-    let mut res = winresource::WindowsResource::new();
-    res.set_icon("assets/colosseum.ico");
-    if let Err(err) = res.compile() {
-        // Don't break the build — just note it and keep the runtime icon.
-        println!("cargo:warning=failed to embed exe icon resource: {err}");
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon("assets/colosseum.ico");
+        if let Err(err) = res.compile() {
+            // Don't break the build — just note it and keep the runtime icon.
+            println!("cargo:warning=failed to embed exe icon resource: {err}");
+        }
     }
 }

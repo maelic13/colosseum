@@ -442,27 +442,49 @@ impl EnginesTab {
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
                     for (dup, checked) in &mut self.dup_batch {
+                        // The whole row toggles the checkbox, not just the box —
+                        // clicking the engine name/"matches" text works too.
+                        let mut toggle = false;
                         ui.horizontal(|ui| {
                             widgets::checkbox(ui, checked, "");
                             let name = widgets::engine_base_name(&dup.cfg);
                             let version = dup.cfg.meta.version.trim();
-                            ui.label(
-                                RichText::new(if version.is_empty() {
-                                    name.clone()
-                                } else {
-                                    format!("{name} {version}")
-                                })
-                                .color(theme::TEXT)
-                                .font(theme::semibold(13.0)),
-                            );
-                            ui.label(
-                                RichText::new(format!("matches \"{}\"", dup.matches))
-                                    .color(theme::TEXT_FAINT)
-                                    .size(12.0),
-                            );
+                            if ui
+                                .add(
+                                    egui::Label::new(
+                                        RichText::new(if version.is_empty() {
+                                            name.clone()
+                                        } else {
+                                            format!("{name} {version}")
+                                        })
+                                        .color(theme::TEXT)
+                                        .font(theme::semibold(13.0)),
+                                    )
+                                    .sense(egui::Sense::click()),
+                                )
+                                .clicked()
+                            {
+                                toggle = true;
+                            }
+                            if ui
+                                .add(
+                                    egui::Label::new(
+                                        RichText::new(format!("matches \"{}\"", dup.matches))
+                                            .color(theme::TEXT_FAINT)
+                                            .size(12.0),
+                                    )
+                                    .sense(egui::Sense::click()),
+                                )
+                                .clicked()
+                            {
+                                toggle = true;
+                            }
                         })
                         .response
                         .on_hover_text(dup.cfg.path.to_string_lossy());
+                        if toggle {
+                            *checked = !*checked;
+                        }
                         ui.add_space(2.0);
                     }
                 });
