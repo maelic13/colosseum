@@ -72,6 +72,17 @@ impl ColosseumApp {
     /// Construct the app, applying the theme to the egui context.
     pub fn new(cc: &eframe::CreationContext<'_>, backend: Backend) -> Self {
         theme::apply(&cc.egui_ctx);
+
+        // Capture the window/display handles so native file dialogs open on the
+        // same monitor as Colosseum instead of drifting to another screen.
+        use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+        if let (Ok(window), Ok(display)) = (cc.window_handle(), cc.display_handle()) {
+            crate::dialog::set_parent(crate::dialog::DialogParent::new(
+                window.as_raw(),
+                display.as_raw(),
+            ));
+        }
+
         let tournament_tab = TournamentTab::new(&backend.dirs.config_dir);
         let maximize_on_reveal = backend.config.window_maximized;
         Self {

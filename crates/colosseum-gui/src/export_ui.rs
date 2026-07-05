@@ -7,7 +7,7 @@ use colosseum_core::{EngineId, ExportRow, Standings, crosstable_csv, standings_c
 /// Write `contents` to a user-chosen file seeded with `default_name`/`ext`.
 /// Returns `None` if the dialog was cancelled, else a status note (ok or error).
 fn save_text(default_name: &str, ext: &str, contents: &str) -> Option<String> {
-    let path = rfd::FileDialog::new()
+    let path = crate::dialog::file_dialog()
         .set_title("Export")
         .set_file_name(default_name)
         .add_filter(ext.to_uppercase(), &[ext])

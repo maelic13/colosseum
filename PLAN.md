@@ -1176,6 +1176,20 @@ problems don't recur per-tab:
   failure), plus `SetCurrentProcessExplicitAppUserModelID("Colosseum.ChessGUI")`
   for a stable taskbar identity. Runtime `with_icon` kept for the title bar.
 
+### Native dialogs parented to the window (step 55)
+
+- ✅ rfd file pickers were unparented → Windows opened them on the primary
+  monitor (wrong screen on multi-monitor). New `dialog` module: capture the
+  main window's `RawWindowHandle`/`RawDisplayHandle` at startup (from
+  `CreationContext`, which impls `HasWindowHandle`+`HasDisplayHandle`) into a
+  main-thread `thread_local`; `dialog::file_dialog()` returns an
+  `rfd::FileDialog` pre-`set_parent`'d to it (rfd copies the raw handles, so
+  nothing is borrowed past the call). Replaced all 8 `rfd::FileDialog::new()`
+  sites — including free fns without `backend` access, which is why a
+  thread_local beats threading a handle through. Added `raw-window-handle
+  = "0.6"` (unifies with eframe/rfd at 0.6.2). egui modals were already
+  in-window; startup `MessageDialog` stays unparented (pre-window).
+
 ## 12. Deferred (architecture-ready)
 
 Error-bar/Ordo rating recompute (see step 24); engine process pool; tablebase-based

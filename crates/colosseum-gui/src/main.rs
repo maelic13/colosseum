@@ -12,6 +12,7 @@
 
 mod app;
 mod backend;
+mod dialog;
 mod engines_tab;
 mod export_ui;
 mod icon;

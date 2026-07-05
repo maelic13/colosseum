@@ -1973,7 +1973,7 @@ impl TournamentTab {
                     if ui
                         .add(egui::Button::new(RichText::new("Browse…").color(theme::TEXT_WEAK)))
                         .clicked()
-                        && let Some(path) = rfd::FileDialog::new()
+                        && let Some(path) = crate::dialog::file_dialog()
                             .set_title("Choose opening book")
                             .add_filter("Openings", &["epd", "pgn"])
                             .add_filter("All files", &["*"])
@@ -2125,7 +2125,7 @@ impl TournamentTab {
                 if ui
                     .add(egui::Button::new(RichText::new("Browse…").color(theme::TEXT_WEAK)))
                     .clicked()
-                    && let Some(path) = rfd::FileDialog::new()
+                    && let Some(path) = crate::dialog::file_dialog()
                         .set_title("Choose PGN output file")
                         .add_filter("PGN", &["pgn"])
                         .save_file()

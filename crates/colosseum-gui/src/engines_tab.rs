@@ -687,7 +687,7 @@ impl EnginesTab {
                 )
                 .on_hover_text("Pick an engine executable and auto-detect its UCI options.");
             if add_resp.clicked() {
-                let mut dialog = rfd::FileDialog::new().set_title("Select engine executable");
+                let mut dialog = crate::dialog::file_dialog().set_title("Select engine executable");
                 if let Some(last) = &backend.config.last_engine_dir {
                     dialog = dialog.set_directory(last);
                 }
@@ -712,7 +712,7 @@ impl EnginesTab {
                     "Scan a folder for engine executables and add those that respond to UCI.",
                 );
             if folder_resp.clicked() {
-                let mut dialog = rfd::FileDialog::new().set_title("Select folder of engines");
+                let mut dialog = crate::dialog::file_dialog().set_title("Select folder of engines");
                 if let Some(last) = &backend.config.last_engine_dir {
                     dialog = dialog.set_directory(last);
                 }
@@ -1327,7 +1327,7 @@ impl EnginesTab {
 
         // ── Deferred actions ──
         if pick_logo {
-            let mut dlg = rfd::FileDialog::new().set_title("Choose engine logo").add_filter(
+            let mut dlg = crate::dialog::file_dialog().set_title("Choose engine logo").add_filter(
                 "Images",
                 &["png", "jpg", "jpeg", "webp", "bmp", "gif", "ico"],
             );
@@ -1649,7 +1649,7 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                             edit.mark_dirty();
                         }
                         if browse_clicked
-                            && let Some(dir) = rfd::FileDialog::new()
+                            && let Some(dir) = crate::dialog::file_dialog()
                                 .set_title("Select working directory")
                                 .pick_folder()
                         {
@@ -2090,7 +2090,7 @@ fn tablebase_row(
         if ui
             .add(egui::Button::new(RichText::new("Browse…").color(theme::TEXT_WEAK)))
             .clicked()
-            && let Some(dir) = rfd::FileDialog::new()
+            && let Some(dir) = crate::dialog::file_dialog()
                 .set_title(format!("Select {label} tablebase folder"))
                 .pick_folder()
         {

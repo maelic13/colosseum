@@ -699,6 +699,7 @@ dependencies = [
  "egui",
  "egui_extras",
  "image",
+ "raw-window-handle",
  "rfd",
  "serde",
  "serde_json",
