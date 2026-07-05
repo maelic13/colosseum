@@ -1190,6 +1190,44 @@ problems don't recur per-tab:
   = "0.6"` (unifies with eframe/rfd at 0.6.2). egui modals were already
   in-window; startup `MessageDialog` stays unparented (pre-window).
 
+### H2H identity + sub-second durations (step 56)
+
+- ✅ Head-to-head crosstable used `short_name` (name only) for row/column
+  labels → four "Rybka" columns identical. Now both use
+  `engine_name_label_full` (name + version), matching the standings table.
+  (`short_name` still used by the compact "Playing" side panel.)
+- ✅ `format_duration` (both copies) rounded sub-second values to "0s"
+  (sudden-death ~0.4 s/game). Now < 1 s renders as ms ("400ms"); ≥ 1 s
+  unchanged. The whole-tournament estimate was already correct — only the
+  per-game display was broken. Test `duration_formatting` extended.
+
+### Name+version everywhere + Rybka 2.3.2a time-loss diagnosis (step 57)
+
+- ✅ Follow-through on step 56: every remaining name-only display in the
+  Results tab now shows **name + version**, matching the standings and the
+  head-to-head crosstable. New `join_name_version(name, version)` helper
+  ("Name version", version omitted when blank) and `LiveData::participant_label`
+  built on it. Updated: the live **Games** list (both sides), the history
+  **Games** list (`names` map), the compact **Playing** side panel (truncating
+  `Label::truncate()` so long "name version" strings don't overflow the narrow
+  column), the ETA/estimate button, the board viewer open path, and *both*
+  `crosstable_order` builders (LiveData method + free fn for
+  `TournamentResults`). Removed the now-dead `participant_name` method and the
+  `short_name` free fn. `cargo test -p colosseum-gui` (24 pass) + clippy clean;
+  verified live in the app (standings + Games list render "Basilisk 1.6.0 vs
+  Whitespine 1.4.0" etc.).
+- ✅ Diagnosed Rybka 2.3.2a's remaining time forfeits (170× in the Grand RR
+  run) as an **engine bug, not a Colosseum bug**. The step-52 CPU-Usage fix is
+  confirmed working — its incidents now show healthy 200–400 k nps. Reproduced
+  with a direct single-instance UCI probe at full CPU: `go movetime 150` on the
+  incident position returns bestmove after **~5.0 s** (4996–5001 ms) every time,
+  ignoring the 150 ms limit; clock-based commands don't help either
+  (`go wtime 3000` → 5003 ms; `go wtime 800` → 3949 ms, overshooting its own
+  clock). Colosseum's wall-clock accounting is correct and already lenient
+  (2 s tolerance) and matches cutechess's behaviour. **No code change
+  warranted.** User workaround: run old Rybka under a **Nodes/Depth** time
+  control (600 s deadline, immune to its clock-ignoring) or exclude/accept it.
+
 ## 12. Deferred (architecture-ready)
 
 Error-bar/Ordo rating recompute (see step 24); engine process pool; tablebase-based

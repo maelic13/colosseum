@@ -632,9 +632,15 @@ impl TournamentForm {
 /// engine-vs-engine games typically finish (or get adjudicated) around here.
 const EST_MOVES_PER_SIDE: f64 = 60.0;
 
-/// Render a duration in seconds as a compact human string ("45s", "12m",
-/// "1h 05m", "2d 3h").
+/// Render a duration in seconds as a compact human string ("400ms", "45s",
+/// "12m", "1h 05m", "2d 3h").
 fn format_duration(secs: f64) -> String {
+    let ms = (secs * 1000.0).round().max(0.0) as u64;
+    if ms < 1000 {
+        // Sub-second (e.g. fast sudden-death games) — show milliseconds
+        // rather than rounding down to a useless "0s".
+        return format!("{ms}ms");
+    }
     let s = secs.round().max(0.0) as u64;
     if s < 60 {
         format!("{s}s")
@@ -2553,6 +2559,11 @@ mod tests {
 
     #[test]
     fn duration_formatting() {
+        // Sub-second (fast sudden-death games) shows ms, not a rounded "0s".
+        assert_eq!(format_duration(0.4), "400ms");
+        assert_eq!(format_duration(0.05), "50ms");
+        assert_eq!(format_duration(0.999), "999ms");
+        assert_eq!(format_duration(1.0), "1s");
         assert_eq!(format_duration(45.0), "45s");
         assert_eq!(format_duration(60.0), "1m");
         assert_eq!(format_duration(150.0), "2m 30s");

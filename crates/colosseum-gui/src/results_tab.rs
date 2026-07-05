@@ -756,7 +756,7 @@ impl ResultsTab {
             // writes something different from what the table shows.
             match live.writeback {
                 RatingWriteback::Estimate(target) => {
-                    let target_name = live.participant_name(target).to_string();
+                    let target_name = live.participant_label(target);
                     if widgets::tinted_button(
                         ui,
                         &format!("Apply {target_name} estimate → Library"),
@@ -1091,21 +1091,14 @@ impl ResultsTab {
                     .show(ui, |ui| {
                         ui.label("");
                         for col in &order {
-                            ui.label(
-                                RichText::new(short_name(&col.name))
-                                    .color(theme::TEXT_WEAK)
-                                    .size(11.5),
-                            );
+                            // Same "name version" identity as the main table,
+                            // so the four Rybkas / two Basilisks are distinct.
+                            engine_name_label_full(ui, &col.name, &col.version);
                         }
                         ui.end_row();
 
                         for row in &order {
-                            ui.label(
-                                RichText::new(short_name(&row.name))
-                                    .color(theme::TEXT)
-                                    .size(12.0)
-                                    .strong(),
-                            );
+                            engine_name_label_full(ui, &row.name, &row.version);
                             for col in &order {
                                 if row.id == col.id {
                                     ui.label(RichText::new("—").color(theme::TEXT_WEAK));
@@ -1201,8 +1194,8 @@ impl ResultsTab {
                     ui.label(
                         RichText::new(format!(
                             "{} vs {}  {}",
-                            live.participant_name(g.white),
-                            live.participant_name(g.black),
+                            live.participant_label(g.white),
+                            live.participant_label(g.black),
                             result
                         ))
                         .color(theme::TEXT_WEAK)
@@ -1222,8 +1215,8 @@ impl ResultsTab {
             && let Some((_, _, games)) = &self.live_games_cache
         {
             let g = &games[i];
-            let white = live.participant_name(g.white).to_string();
-            let black = live.participant_name(g.black).to_string();
+            let white = live.participant_label(g.white);
+            let black = live.participant_label(g.black);
             self.viewer.open_game(g, &white, &black);
         }
     }
@@ -1338,7 +1331,7 @@ impl ResultsTab {
             .map(|(_, res)| {
                 res.participants
                     .iter()
-                    .map(|p| (p.id, p.name.clone()))
+                    .map(|p| (p.id, join_name_version(&p.name, &p.version)))
                     .collect()
             })
             .unwrap_or_default();
@@ -1576,12 +1569,14 @@ struct LiveData {
 }
 
 impl LiveData {
-    fn participant_name(&self, id: EngineId) -> &str {
+    /// "Name version" for an engine — the same identity shown in the standings
+    /// table, so lists don't render four indistinguishable "Rybka"s.
+    fn participant_label(&self, id: EngineId) -> String {
         self.rows
             .iter()
             .find(|r| r.id == id)
-            .map(|r| r.name.as_str())
-            .unwrap_or("?")
+            .map(|r| join_name_version(&r.name, &r.version))
+            .unwrap_or_else(|| "?".to_string())
     }
 
     /// Rows in rank order, shaped for CSV export.
@@ -1609,7 +1604,9 @@ impl LiveData {
     fn crosstable_order(&self) -> Vec<(EngineId, String)> {
         let mut rows: Vec<&Row> = self.rows.iter().collect();
         rows.sort_by_key(|r| r.rank);
-        rows.into_iter().map(|r| (r.id, r.name.clone())).collect()
+        rows.into_iter()
+            .map(|r| (r.id, join_name_version(&r.name, &r.version)))
+            .collect()
     }
 }
 
@@ -1798,8 +1795,8 @@ fn live_side_panel(ui: &mut Ui, live: &LiveData) {
                 );
                 ui.add_space(4.0);
                 for game in &live.in_flight_games {
-                    let white = live.participant_name(game.white);
-                    let black = live.participant_name(game.black);
+                    let white = live.participant_label(game.white);
+                    let black = live.participant_label(game.black);
                     egui::Frame::new()
                         .fill(theme::BG_ELEVATED)
                         .corner_radius(egui::CornerRadius::same(4))
@@ -1811,15 +1808,21 @@ fn live_side_panel(ui: &mut Ui, live: &LiveData) {
                                     .color(theme::TEXT_FAINT)
                                     .size(10.5),
                             );
-                            ui.label(
-                                RichText::new(format!("⬜ {}", short_name(white)))
-                                    .color(theme::TEXT)
-                                    .size(11.5),
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!("⬜ {white}"))
+                                        .color(theme::TEXT)
+                                        .size(11.5),
+                                )
+                                .truncate(),
                             );
-                            ui.label(
-                                RichText::new(format!("⬛ {}", short_name(black)))
-                                    .color(theme::TEXT_WEAK)
-                                    .size(11.5),
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!("⬛ {black}"))
+                                        .color(theme::TEXT_WEAK)
+                                        .size(11.5),
+                                )
+                                .truncate(),
                             );
                         });
                     ui.add_space(3.0);
@@ -2000,7 +2003,9 @@ fn crosstable_order(res: &TournamentResults) -> Vec<(EngineId, String)> {
     let rank_of = |id: EngineId| ranked.iter().position(|x| *x == id).unwrap_or(usize::MAX);
     let mut ps: Vec<_> = res.participants.iter().collect();
     ps.sort_by_key(|p| rank_of(p.id));
-    ps.into_iter().map(|p| (p.id, p.name.clone())).collect()
+    ps.into_iter()
+        .map(|p| (p.id, join_name_version(&p.name, &p.version)))
+        .collect()
 }
 
 fn results_summary(ui: &mut Ui, res: &TournamentResults) {
@@ -2199,9 +2204,15 @@ fn format_timestamp(ts: &str) -> String {
     }
 }
 
-/// Render a duration in seconds as a compact human string ("45s", "12m",
-/// "1h 05m", "2d 3h").
+/// Render a duration in seconds as a compact human string ("400ms", "45s",
+/// "12m", "1h 05m", "2d 3h").
 fn format_duration(secs: f64) -> String {
+    let ms = (secs * 1000.0).round().max(0.0) as u64;
+    if ms < 1000 {
+        // Sub-second (e.g. fast sudden-death games) — show milliseconds
+        // rather than rounding down to a useless "0s".
+        return format!("{ms}ms");
+    }
     let s = secs.round().max(0.0) as u64;
     if s < 60 {
         format!("{s}s")
@@ -2229,12 +2240,14 @@ fn format_nps(nps: Option<u64>) -> String {
     }
 }
 
-fn short_name(name: &str) -> String {
-    if name.chars().count() <= 10 {
+/// "Name version" (version omitted when blank) — the engine identity used
+/// consistently across tables, lists and panels.
+fn join_name_version(name: &str, version: &str) -> String {
+    let version = version.trim();
+    if version.is_empty() {
         name.to_string()
     } else {
-        let s: String = name.chars().take(9).collect();
-        format!("{s}…")
+        format!("{name} {version}")
     }
 }
 
