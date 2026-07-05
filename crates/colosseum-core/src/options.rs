@@ -53,13 +53,45 @@ impl UciOption {
     }
 }
 
-/// True when `name` is an engine's thread/CPU-count option. Engines spell it
-/// many ways ("Threads", "Max CPUs", "Cores", "CPU"…); the tournament-wide
-/// thread setting is forwarded to every option matching this.
+/// Known option names (whitespace-insensitive, case-insensitive) that set an
+/// engine's thread/CPU **count**. The tournament-wide thread setting is
+/// forwarded to whichever of these an engine declares.
+///
+/// This is a deliberate **allowlist**, not a substring heuristic. A
+/// `contains("cpu"/"core"/"thread")` test wrongly matched, in a real 33-engine
+/// library, thirteen distinct options where only two were thread counts —
+/// including Rybka's "CPU Usage" (a 1–100 % throttle), Rybka's "Score Offset
+/// millipawns" and some engines' "ThreadIdlingThreshold" (both numeric Spins
+/// that would be silently corrupted), Lc0's "CPuct*" params, and anything
+/// containing "Score" (which contains "core"). Setting "CPU Usage" to a thread
+/// count of 1 pinned those engines to 1 % CPU (~40× slowdown). An unrecognised
+/// name is safely left at the engine's default; it can be set per-engine or
+/// added here. New names are cheap to add and misses are visible (the engine
+/// simply runs at its default thread count).
+const THREAD_COUNT_OPTIONS: &[&str] = &[
+    "threads",
+    "maxcpus",
+    "cpus",
+    "cores",
+    "maxthreads",
+    "numberofthreads",
+    "numthreads",
+    "corethreads",
+];
+
+/// Normalise an option name for matching: strip whitespace, lowercase.
+fn normalize_option_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// True when `name` is one of the recognised thread/CPU-count options.
 #[must_use]
 pub fn is_thread_option(name: &str) -> bool {
-    let n = name.to_ascii_lowercase();
-    n.contains("thread") || n.contains("cpu") || n == "cores" || n == "core"
+    let n = normalize_option_name(name);
+    THREAD_COUNT_OPTIONS.contains(&n.as_str())
 }
 
 /// True when `name` is an engine's main transposition-table size option
@@ -93,5 +125,58 @@ impl UciOptionValue {
             Self::Combo(s) | Self::Str(s) => s.clone(),
             Self::Button => panic!("Button options have no value string"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thread_option_matches_real_count_options() {
+        // Every spelling a real engine uses, in mixed case / spacing.
+        for name in [
+            "Threads",
+            "Max CPUs",
+            "MaxCPUs",
+            "CPUs",
+            "Cores",
+            "Max Threads",
+            "Number of Threads",
+            "NumThreads",
+        ] {
+            assert!(is_thread_option(name), "{name} should match");
+        }
+    }
+
+    #[test]
+    fn thread_option_rejects_the_real_library_false_positives() {
+        // These all matched the old `contains(...)` heuristic in a real
+        // 33-engine library but are NOT thread counts. Several are numeric
+        // Spins that would have been silently corrupted to "1".
+        for name in [
+            "CPU Usage",              // Rybka: a 1–100 % throttle (Spin)
+            "Score Offset millipawns", // Rybka 4.1: "sCOREoffset" (Spin)
+            "ThreadIdlingThreshold",   // SMP idling knob (Spin)
+            "Busy Threads",            // HIARCS: boolean toggle
+            "CPuct",                   // Lc0 search param
+            "CPuctBase",
+            "CPuctFactor",
+            "Always Score Main Move",  // has "core" via "Score"
+            "DrawScore",
+            "ScoreType",
+            "Resolve Score Drops",
+        ] {
+            assert!(!is_thread_option(name), "{name} must NOT match");
+        }
+    }
+
+    #[test]
+    fn hash_option_is_exact_ish() {
+        assert!(is_hash_option("Hash"));
+        assert!(is_hash_option("Hash Size"));
+        assert!(is_hash_option("Memory"));
+        assert!(!is_hash_option("Clear Hash"));
+        assert!(!is_hash_option("Hash File"));
     }
 }

@@ -99,12 +99,29 @@ impl NpsAccumulator {
     }
 }
 
-/// Spawn, configure, and ready one engine for a game.
-async fn prepare(
+/// The result of preparing one engine for a game. (The `Ready` variant holds
+/// the full process inline; this enum is short-lived and immediately matched,
+/// so the size difference between variants is immaterial.)
+#[allow(clippy::large_enum_variant)]
+enum Prepared {
+    /// Handshaken, configured, and ready to play.
+    Ready(EngineProcess),
+    /// Setup failed *after* the process spawned — the process is retained so
+    /// its UCI transcript and stderr can go into an incident report (this is
+    /// where finicky engines like Deep Junior die: on handshake / setoption /
+    /// `ucinewgame`, not mid-game).
+    Failed(UciError, Box<EngineProcess>),
+    /// The process never spawned (bad path, missing DLL, etc.); no forensics
+    /// beyond the error itself.
+    NoSpawn(UciError),
+}
+
+/// Run the handshake / option / ready sequence on an already-spawned engine.
+async fn init_engine(
+    engine: &mut EngineProcess,
     spec: &EngineGameSpec,
     handshake_timeout: Duration,
-) -> Result<EngineProcess, UciError> {
-    let mut engine = EngineProcess::spawn(spec.spawn.clone()).await?;
+) -> Result<(), UciError> {
     engine.handshake(handshake_timeout).await?;
     for (name, value) in &spec.options {
         engine.set_option(name, value.as_deref()).await?;
@@ -112,7 +129,20 @@ async fn prepare(
     engine.is_ready(handshake_timeout).await?;
     engine.new_game().await?;
     engine.is_ready(handshake_timeout).await?;
-    Ok(engine)
+    Ok(())
+}
+
+/// Spawn, configure, and ready one engine for a game — retaining the process
+/// on setup failure so the caller can capture forensics.
+async fn prepare(spec: &EngineGameSpec, handshake_timeout: Duration) -> Prepared {
+    let mut engine = match EngineProcess::spawn(spec.spawn.clone()).await {
+        Ok(engine) => engine,
+        Err(err) => return Prepared::NoSpawn(err),
+    };
+    match init_engine(&mut engine, spec, handshake_timeout).await {
+        Ok(()) => Prepared::Ready(engine),
+        Err(err) => Prepared::Failed(err, Box::new(engine)),
+    }
 }
 
 /// Play one complete game and return its report. Never panics on engine misbehavior.
@@ -123,21 +153,9 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
     let black = prepare(&spec.black, spec.handshake_timeout).await;
 
     let (mut white, mut black) = match (white, black) {
-        (Ok(w), Ok(b)) => (w, b),
-        (Err(err), Ok(b)) => {
-            let _ = b.quit(Duration::from_millis(500)).await;
-            let mut report = setup_failure(&spec, Color::White, &err);
-            report.stats.duration_ms = Some(game_start.elapsed().as_millis() as u64);
-            return report;
-        }
-        (Ok(w), Err(err)) => {
-            let _ = w.quit(Duration::from_millis(500)).await;
-            let mut report = setup_failure(&spec, Color::Black, &err);
-            report.stats.duration_ms = Some(game_start.elapsed().as_millis() as u64);
-            return report;
-        }
-        (Err(err), Err(_)) => {
-            let mut report = setup_failure(&spec, Color::White, &err);
+        (Prepared::Ready(w), Prepared::Ready(b)) => (w, b),
+        (white, black) => {
+            let mut report = handle_setup_failure(&spec, white, black).await;
             report.stats.duration_ms = Some(game_start.elapsed().as_millis() as u64);
             return report;
         }
@@ -535,11 +553,43 @@ fn initial_position(start_fen: Option<&str>) -> Chess {
     }
 }
 
-/// Build a report for an engine that failed during setup; the other side wins.
-fn setup_failure(spec: &GameSpec, failed: Color, err: &UciError) -> GameReport {
+/// Handle a game where one (or both) engines failed to set up. Picks the
+/// failing side (white takes precedence when both fail), quits any survivor,
+/// writes a forensic incident report from the failed engine's transcript and
+/// stderr, and returns the loss report.
+async fn handle_setup_failure(spec: &GameSpec, white: Prepared, black: Prepared) -> GameReport {
+    // Consume each side: quit survivors, harvest forensics from the failure.
+    async fn consume(
+        prepared: Prepared,
+    ) -> (Option<UciError>, Option<(Vec<String>, Vec<String>)>) {
+        match prepared {
+            Prepared::Ready(engine) => {
+                let _ = engine.quit(Duration::from_millis(500)).await;
+                (None, None)
+            }
+            Prepared::Failed(err, engine) => {
+                (Some(err), Some((engine.transcript(), engine.stderr_tail())))
+            }
+            Prepared::NoSpawn(err) => (Some(err), None),
+        }
+    }
+
+    let (white_err, white_forensics) = consume(white).await;
+    let (black_err, black_forensics) = consume(black).await;
+
+    // White takes precedence when both failed.
+    let (failed, err, forensics) = if let Some(err) = white_err {
+        (Color::White, err, white_forensics)
+    } else {
+        (
+            Color::Black,
+            black_err.expect("a setup failure occurred"),
+            black_forensics,
+        )
+    };
+
     let outcome = Outcome::loss(failed, Termination::EngineCrash, Some(err.to_string()));
-    let pgn = render_pgn(spec, &[], outcome.result, outcome.termination);
-    GameReport {
+    let mut report = GameReport {
         game_id: spec.game_id,
         white: spec.white.id,
         black: spec.black.id,
@@ -548,9 +598,89 @@ fn setup_failure(spec: &GameSpec, failed: Color, err: &UciError) -> GameReport {
         stats: GameStats::default(),
         san_moves: Vec::new(),
         uci_moves: Vec::new(),
-        pgn,
+        pgn: render_pgn(spec, &[], outcome.result, outcome.termination),
         error: outcome.error,
+    };
+
+    // Forensic incident: setup failures never reach the main game-loop
+    // reporter, so write one here — this is what makes an engine that dies on
+    // startup (e.g. Junior under heavy load) diagnosable.
+    let side_spec = if failed == Color::White {
+        &spec.white
+    } else {
+        &spec.black
+    };
+    let text = setup_incident_report(spec, failed, side_spec, &err, forensics.as_ref());
+    let stub = format!(
+        "SetupCrash-{}-r{}",
+        side_spec.name, spec.round
+    );
+    if let Some(file) = crate::incidents::write(&stub, &text) {
+        let detail = report.error.take().unwrap_or_default();
+        report.error = Some(format!("{detail} — see logs/incidents/{file}"));
     }
+    report
+}
+
+/// Plain-text incident report for an engine that failed during setup.
+fn setup_incident_report(
+    spec: &GameSpec,
+    failed: Color,
+    side_spec: &EngineGameSpec,
+    err: &UciError,
+    forensics: Option<&(Vec<String>, Vec<String>)>,
+) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::with_capacity(4 * 1024);
+    let _ = writeln!(s, "event:       {} (round {})", spec.event, spec.round);
+    let _ = writeln!(
+        s,
+        "failed side: {} — {}  [{}]",
+        if failed == Color::White { "white" } else { "black" },
+        side_spec.name,
+        side_spec.spawn.path.display()
+    );
+    let _ = writeln!(s, "opponent:    {}", if failed == Color::White { &spec.black.name } else { &spec.white.name });
+    let _ = writeln!(s, "termination: EngineCrash (during setup)");
+    let _ = writeln!(s, "detail:      {err}");
+    let _ = writeln!(s, "handshake timeout: {:?}", spec.handshake_timeout);
+    let _ = writeln!(
+        s,
+        "options sent: {}",
+        side_spec
+            .options
+            .iter()
+            .map(|(n, v)| match v {
+                Some(v) => format!("{n}={v}"),
+                None => n.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    match forensics {
+        Some((transcript, stderr)) => {
+            let _ = writeln!(s, "\n── UCI transcript (> sent, < received) ──");
+            for line in transcript {
+                let _ = writeln!(s, "{line}");
+            }
+            if stderr.is_empty() {
+                let _ = writeln!(s, "── stderr: (none captured) ──");
+            } else {
+                let _ = writeln!(s, "── stderr ──");
+                for line in stderr {
+                    let _ = writeln!(s, "{line}");
+                }
+            }
+        }
+        None => {
+            let _ = writeln!(
+                s,
+                "\n(process never spawned — check the executable path, its DLLs, \
+                 and the working directory)"
+            );
+        }
+    }
+    s
 }
 
 fn render_pgn(

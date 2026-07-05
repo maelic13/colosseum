@@ -36,8 +36,11 @@ use crate::store::{self, Store, TournamentRow};
 const DEFAULT_ELO: f64 = 1500.0;
 /// Extra time beyond the move time before a move is judged a timeout.
 const TIMEOUT_TOLERANCE: Duration = Duration::from_secs(2);
-/// Time allowed for handshake / isready.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Time allowed for handshake / isready. Generous because a *slow* startup
+/// under heavy parallelism (many engines spawning + initialising at once) is
+/// not a real failure — cutting it short falsely reports the engine as a
+/// setup crash (Deep Junior did exactly this under 15 concurrent games).
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Cap on retained recent engine-error messages.
 const MAX_RECENT_ERRORS: usize = 50;
 
@@ -973,11 +976,13 @@ fn insert_matched(
         if !matches(opt.name()) {
             continue;
         }
-        let v = match opt {
-            colosseum_core::UciOption::Spin { min, max, .. } => value.clamp(*min, *max),
-            _ => value,
-        };
-        values.insert(opt.name().to_string(), Some(v.to_string()));
+        // A thread/hash count is always a Spin (numeric) option. Skip anything
+        // else that merely name-matches — e.g. HIARCS's boolean "Busy Threads"
+        // toggle, which must not be clobbered to the thread count.
+        if let colosseum_core::UciOption::Spin { min, max, .. } = opt {
+            let v = value.clamp(*min, *max);
+            values.insert(opt.name().to_string(), Some(v.to_string()));
+        }
     }
 }
 
@@ -1169,5 +1174,47 @@ mod tests {
         // Hash is clamped to the engine's declared max (8192 → 4096).
         let hash = resolved.iter().find(|(n, _)| n == "Hash").unwrap();
         assert_eq!(hash.1.as_deref(), Some("4096"));
+    }
+
+    /// Regression: Rybka's "CPU Usage" is a 1–100 % throttle, and its boolean
+    /// thread toggles must not be clobbered by the thread-count mapping. Only
+    /// the genuine count option ("Max CPUs") should receive the thread value.
+    #[test]
+    fn thread_mapping_leaves_cpu_usage_and_bool_toggles_alone() {
+        let mut engine = EngineConfig::new(PathBuf::from("rybka.exe"));
+        engine.detected_options = vec![
+            colosseum_core::UciOption::Spin {
+                name: "Max CPUs".into(),
+                default: 2048,
+                min: 1,
+                max: 2048,
+            },
+            colosseum_core::UciOption::Spin {
+                name: "CPU Usage".into(),
+                default: 100,
+                min: 1,
+                max: 100,
+            },
+            colosseum_core::UciOption::Check {
+                name: "Busy Threads".into(),
+                default: true,
+            },
+        ];
+        let common = CommonEngineOptions {
+            threads: Some(1),
+            ..CommonEngineOptions::default()
+        };
+        let resolved = resolve_options(&engine, &common, None);
+
+        // The count option is set to 1 (single-threaded)…
+        let cpus = resolved.iter().find(|(n, _)| n == "Max CPUs").unwrap();
+        assert_eq!(cpus.1.as_deref(), Some("1"));
+        // …but the percentage throttle is NOT touched (would be 1 % CPU!)…
+        assert!(
+            !resolved.iter().any(|(n, _)| n == "CPU Usage"),
+            "CPU Usage must not be sent as a thread count"
+        );
+        // …and the boolean toggle is left alone too.
+        assert!(!resolved.iter().any(|(n, _)| n == "Busy Threads"));
     }
 }

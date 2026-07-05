@@ -817,6 +817,43 @@ impl ResultsTab {
                 self.refresh(backend);
             }
 
+            // Delete — available even while running (force-stops first), for
+            // when a run is a write-off rather than something to finish.
+            ui.add_space(4.0);
+            if self.pending_delete == Some(id) {
+                if widgets::tinted_button(ui, "Confirm delete", theme::DANGER, true)
+                    .on_hover_text(
+                        "Stop this tournament and permanently remove it and its games.",
+                    )
+                    .clicked()
+                {
+                    if let Some(active) = backend.active(id) {
+                        active.handle.force_stop();
+                    }
+                    backend.close_tournament(id);
+                    match backend.delete_tournament(id) {
+                        Ok(()) => self.error = None,
+                        Err(e) => self.error = Some(format!("Delete failed: {e}")),
+                    }
+                    self.pending_delete = None;
+                    self.live_games_cache = None;
+                    self.elo_cache = None;
+                    self.refresh(backend);
+                }
+                ui.add_space(2.0);
+                if ui
+                    .button(RichText::new("Cancel").color(theme::TEXT))
+                    .clicked()
+                {
+                    self.pending_delete = None;
+                }
+            } else if widgets::tinted_button(ui, "Delete", theme::DANGER, true)
+                .on_hover_text("Delete this tournament — stops it first if it's running.")
+                .clicked()
+            {
+                self.pending_delete = Some(id);
+            }
+
             if let Some(note) = &self.export_note {
                 ui.label(RichText::new(note).color(theme::TEXT_WEAK).size(12.0));
             }

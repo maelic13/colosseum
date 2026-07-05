@@ -202,3 +202,63 @@ async fn game_starts_from_fen() {
     assert!(report.pgn.contains(&format!("[FEN \"{fen}\"]")));
     assert!(report.pgn.contains("[SetUp \"1\"]"));
 }
+
+/// An engine that spawns but never speaks UCI must be reported as a setup
+/// crash *and* leave a forensic incident file — the gap that hid Deep
+/// Junior's 17 startup crashes. Uses `cmd /c exit` as a process that starts
+/// and immediately closes its pipes (handshake sees EOF).
+#[cfg(windows)]
+#[tokio::test]
+async fn setup_failure_writes_incident() {
+    let dir = tempfile::tempdir().unwrap();
+    colosseum_engine::incidents::set_dir(dir.path().to_path_buf());
+
+    let bogus = |name: &str| EngineGameSpec {
+        id: EngineId::new(),
+        name: name.to_string(),
+        spawn: SpawnOptions {
+            path: "cmd".into(),
+            args: vec!["/c".into(), "exit".into()],
+            working_dir: None,
+            env: Default::default(),
+        },
+        options: vec![("Threads".to_string(), Some("1".to_string()))],
+    };
+
+    let game = GameSpec {
+        game_id: GameId::new(),
+        event: "Setup Fail".into(),
+        site: "Local".into(),
+        date: "2026.07.04".into(),
+        round: 7,
+        white: bogus("BrokenWhite"),
+        black: bogus("BrokenBlack"),
+        start_fen: None,
+        opening_moves: Vec::new(),
+        time_control: TimeControl::PerMove { ms: 20 },
+        time_control_label: "movetime/20ms".into(),
+        adjudication: AdjudicationConfig::default(),
+        timeout_tolerance: Duration::from_secs(2),
+        handshake_timeout: Duration::from_secs(3),
+    };
+
+    let report = run_game(game).await;
+    // White takes precedence when both fail → Black wins by White's crash.
+    assert_eq!(report.result, GameResult::BlackWin);
+    assert!(
+        report.error.as_deref().unwrap_or("").contains("incidents/"),
+        "error should reference the incident file: {:?}",
+        report.error
+    );
+
+    let files: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(files.len(), 1, "exactly one incident file expected");
+    let name = files[0].file_name().into_string().unwrap();
+    assert!(name.contains("SetupCrash"), "unexpected name: {name}");
+    let text = std::fs::read_to_string(files[0].path()).unwrap();
+    assert!(text.contains("EngineCrash (during setup)"));
+    assert!(text.contains("BrokenWhite"));
+}

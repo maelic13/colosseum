@@ -1093,6 +1093,89 @@ problems don't recur per-tab:
   (row-level method removed). LESSON: never loop `execute` for bulk writes —
   batch in a transaction.
 
+### Setup-crash forensics + failure diagnosis (step 51)
+
+- ✅ **Junior crashes diagnosed & now captured**: all 17 were *setup* failures
+  (during spawn/handshake/`ucinewgame`), which returned early via
+  `setup_failure` before the incident writer — and the failed `EngineProcess`
+  (holding its stderr + UCI transcript) was dropped, so nothing was logged.
+  A direct UCI probe confirmed Junior handshakes and searches fine in
+  isolation (3.2 M nps), so it was dying only under heavy parallel load.
+  Fix: `prepare` → `Prepared { Ready | Failed(err, Box<EngineProcess>) |
+  NoSpawn(err) }`; `handle_setup_failure` quits the survivor, harvests the
+  failed engine's transcript + stderr, and writes a `SetupCrash-*` incident
+  (`setup_incident_report`). Integration test `setup_failure_writes_incident`
+  drives a `cmd /c exit` stub and asserts the file + its contents.
+- ✅ **Handshake timeout 10 s → 30 s**: a slow startup under many concurrent
+  spawns is not a failure; the old 10 s cut it short and falsely reported a
+  setup crash. (Only affects `prepare`; move deadlines are unchanged.)
+- ✅ **Rybka 2.3.2a time losses = CPU oversubscription, not a bug**: incident
+  transcripts show ~40 k nps (vs its normal 1–2 M+) and a 5.11 s search on a
+  3.21 s budget, draining its clock. Wall-clock accounting is correct and the
+  2 s tolerance is generous; the fix is the step-49 oversubscription warning,
+  fewer parallel games, or Nodes/Depth TC (deterministic, starvation-immune).
+- ✅ Noted: the scheduler launches games in schedule order without ensuring an
+  engine isn't already playing, so one engine can be in several concurrent
+  games — a crash vector for stateful engines (Junior `Book_learning=true`
+  writes a shared learning file). Not changed (serialising per engine would
+  cap concurrency far below what the user wants); documented as a mitigation.
+
+### "CPU Usage" throttle bug (step 52)
+
+- ✅ **THE bug behind Rybka 4/4.1/2.3.2a weakness**: `is_thread_option` used
+  `name.contains("cpu")`, which matched Rybka's **"CPU Usage"** option — a
+  1–100 % utilisation throttle, not a thread count. The common Threads=1
+  setting was forwarded to it via `insert_matched`, setting CPU Usage=1 =
+  1 % CPU. Probe proof: CPU Usage=1 → depth 7 / 5 934 nps; CPU Usage=100 →
+  depth 12 / 236 192 nps (40× throttle). Rybka 3 has only "Max CPUs" (no
+  "CPU Usage") so it was unaffected (146 k nps, rank 3) — the tell that
+  isolated the bug.
+- ✅ Ruled out (empirically, via shell UCI probes) the wrong hypotheses:
+  CPU starvation (15 concurrent single-threaded Rybka 4 = ~159 k nps each on
+  a 32-logical-core box; the user ran 15 lanes), Nalimov tablebases
+  (middlegame depth identical with/without; low endgame nps is just a TB
+  hit-and-stop artifact), and time management (clock-based `go` → depth 8).
+- ✅ Fix: `is_thread_option` excludes `usage`/`percent`/`%`; `insert_matched`
+  only writes to `Spin` (count) options, so boolean toggles that merely
+  name-match (HIARCS "Busy Threads") are also left alone. Tests:
+  `options::thread_option_excludes_cpu_usage_percentage`,
+  `scheduler::thread_mapping_leaves_cpu_usage_and_bool_toggles_alone`.
+- Note: Fruit's 224 nps and Whitespine's 42 k are unrelated (neither has a
+  "CPU Usage" option; Fruit has no thread option at all) — likely nps-report
+  quirks of those old engines, not a throttle.
+
+### Thread-option allowlist (step 53)
+
+- ✅ Replaced `is_thread_option`'s substring heuristic with an explicit
+  allowlist after enumerating the real library: the old
+  `contains("thread"/"cpu"/"core")` matched 13 distinct option names, only 2
+  real thread counts. False positives that step-52's blacklist would STILL
+  have corrupted: `Score Offset millipawns` (Spin, "sCOREoffset"),
+  `ThreadIdlingThreshold` (Spin). Others: Lc0 `CPuct*`, `Always Score Main
+  Move`, `DrawScore`, `ScoreType`, `Resolve Score Drops`, `Busy Threads`,
+  `CPU Usage`. New matcher = whitespace/case-insensitive membership in
+  `THREAD_COUNT_OPTIONS` (threads, maxcpus, cpus, cores, maxthreads,
+  numberofthreads, numthreads, corethreads). Design rationale (worth
+  keeping): a false positive corrupts a real option *silently*; a false
+  negative just leaves the engine at its default thread count (*visible*, and
+  fixable per-engine or by adding the name). Now consistent with
+  `is_hash_option` (already an exact allowlist). The `insert_matched`
+  Spin-only guard from step 52 stays as defence in depth.
+
+### Delete in-progress tournaments + taskbar icon (step 54)
+
+- ✅ Live-view control bar: two-step **Delete** (reuses `pending_delete`)
+  available while running — `force_stop` → `close_tournament` →
+  `delete_tournament` → refresh. Deleting a running tournament is safe: the
+  driver's DB writes fail harmlessly against the deleted rows and its engines
+  are reaped by `kill_on_drop` when the handle drops.
+- ✅ Windows taskbar icon: runtime `with_icon` alone was unreliable on the
+  hidden→reveal path (Windows fell back to the exe's absent embedded icon).
+  Now: `build.rs` embeds `assets/colosseum.ico` (PIL-generated multi-size,
+  matching `icon.rs`'s design) via `winresource` (target-gated, non-fatal on
+  failure), plus `SetCurrentProcessExplicitAppUserModelID("Colosseum.ChessGUI")`
+  for a stable taskbar identity. Runtime `with_icon` kept for the title bar.
+
 ## 12. Deferred (architecture-ready)
 
 Error-bar/Ordo rating recompute (see step 24); engine process pool; tablebase-based

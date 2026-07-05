@@ -45,6 +45,25 @@ fn attach_parent_console() {
     }
 }
 
+/// Give the process a stable, explicit taskbar identity (AppUserModelID) so
+/// Windows treats the app as its own entity and consistently shows its icon,
+/// rather than grouping it under a generic host and dropping the icon. Pairs
+/// with the exe-embedded icon (see `build.rs`) to make the taskbar reliable.
+#[cfg(windows)]
+fn set_app_user_model_id() {
+    #[link(name = "shell32")]
+    unsafe extern "system" {
+        fn SetCurrentProcessExplicitAppUserModelID(app_id: *const u16) -> i32;
+    }
+    let id: Vec<u16> = "Colosseum.ChessGUI"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        let _ = SetCurrentProcessExplicitAppUserModelID(id.as_ptr());
+    }
+}
+
 /// Initialise logging to both the console (when attached) and a file in the
 /// data directory (`logs/colosseum.log`, rotated once past ~4 MB), so engine
 /// problems can be diagnosed after the fact in a windowed build.
@@ -81,7 +100,10 @@ fn init_logging(dirs: Option<&AppDirs>) {
 
 fn main() -> eframe::Result<()> {
     #[cfg(windows)]
-    attach_parent_console();
+    {
+        attach_parent_console();
+        set_app_user_model_id();
+    }
 
     // `--portable` keeps all data (config, database, engines) next to the binary.
     let portable = std::env::args().any(|a| a == "--portable");
