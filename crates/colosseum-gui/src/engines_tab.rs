@@ -212,7 +212,7 @@ impl EnginesTab {
                 RichText::new(format!("Delete {label}?"))
                     .size(16.0)
                     .strong()
-                    .color(theme::TEXT),
+                    .color(theme::text()),
             );
             ui.add_space(6.0);
             ui.label(
@@ -220,17 +220,17 @@ impl EnginesTab {
                     "This removes the engine from the library. The executable on disk \
                      is not touched.",
                 )
-                .color(theme::TEXT_WEAK)
+                .color(theme::text_weak())
                 .size(12.5),
             );
             ui.add_space(14.0);
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                if widgets::tinted_button(ui, "Delete", theme::DANGER, true).clicked() {
+                if widgets::tinted_button(ui, "Delete", theme::danger(), true).clicked() {
                     confirmed = true;
                 }
                 ui.add_space(4.0);
                 if ui
-                    .button(RichText::new("Cancel").color(theme::TEXT))
+                    .button(RichText::new("Cancel").color(theme::text()))
                     .clicked()
                 {
                     cancelled = true;
@@ -364,7 +364,7 @@ impl EnginesTab {
                 ui.set_width(420.0);
                 ui.label(
                     RichText::new("Engine already in library")
-                        .color(theme::TEXT)
+                        .color(theme::text())
                         .font(theme::semibold(15.0)),
                 );
                 ui.add_space(6.0);
@@ -372,7 +372,7 @@ impl EnginesTab {
                     RichText::new(format!(
                         "{title} {version} ({file}) matches \"{matches}\" in your library.",
                     ))
-                    .color(theme::TEXT_WEAK)
+                    .color(theme::text_weak())
                     .size(13.0),
                 );
                 ui.add_space(12.0);
@@ -381,10 +381,10 @@ impl EnginesTab {
                         .add(
                             egui::Button::new(
                                 RichText::new("Add anyway")
-                                    .color(theme::BG_DARKEST)
+                                    .color(theme::bg_darkest())
                                     .font(theme::semibold(13.5)),
                             )
-                            .fill(theme::ACCENT),
+                            .fill(theme::accent()),
                         )
                         .clicked()
                     {
@@ -392,7 +392,7 @@ impl EnginesTab {
                     }
                     ui.add_space(4.0);
                     if ui
-                        .button(RichText::new("Cancel").color(theme::TEXT))
+                        .button(RichText::new("Cancel").color(theme::text()))
                         .clicked()
                     {
                         decision = Some(false);
@@ -423,7 +423,7 @@ impl EnginesTab {
             ui.set_width(480.0);
             ui.label(
                 RichText::new(format!("Duplicates found ({})", self.dup_batch.len()))
-                    .color(theme::TEXT)
+                    .color(theme::text())
                     .font(theme::semibold(15.0)),
             );
             ui.add_space(2.0);
@@ -432,7 +432,7 @@ impl EnginesTab {
                     "These detected engines match ones already in your library. \
                      Tick any you still want to import.",
                 )
-                .color(theme::TEXT_WEAK)
+                .color(theme::text_weak())
                 .size(12.0),
             );
             ui.add_space(8.0);
@@ -457,7 +457,7 @@ impl EnginesTab {
                                         } else {
                                             format!("{name} {version}")
                                         })
-                                        .color(theme::TEXT)
+                                        .color(theme::text())
                                         .font(theme::semibold(13.0)),
                                     )
                                     .sense(egui::Sense::click()),
@@ -470,7 +470,7 @@ impl EnginesTab {
                                 .add(
                                     egui::Label::new(
                                         RichText::new(format!("matches \"{}\"", dup.matches))
-                                            .color(theme::TEXT_FAINT)
+                                            .color(theme::text_faint())
                                             .size(12.0),
                                     )
                                     .sense(egui::Sense::click()),
@@ -491,7 +491,7 @@ impl EnginesTab {
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if ui
-                    .button(RichText::new("Select all").color(theme::TEXT_WEAK))
+                    .button(RichText::new("Select all").color(theme::text_weak()))
                     .clicked()
                 {
                     for (_, checked) in &mut self.dup_batch {
@@ -499,7 +499,7 @@ impl EnginesTab {
                     }
                 }
                 if ui
-                    .button(RichText::new("Deselect all").color(theme::TEXT_WEAK))
+                    .button(RichText::new("Deselect all").color(theme::text_weak()))
                     .clicked()
                 {
                     for (_, checked) in &mut self.dup_batch {
@@ -517,10 +517,10 @@ impl EnginesTab {
                         .add(
                             egui::Button::new(
                                 RichText::new(label)
-                                    .color(theme::BG_DARKEST)
+                                    .color(theme::bg_darkest())
                                     .font(theme::semibold(13.5)),
                             )
-                            .fill(theme::ACCENT),
+                            .fill(theme::accent()),
                         )
                         .clicked()
                     {
@@ -679,11 +679,11 @@ impl EnginesTab {
                     !busy,
                     egui::Button::new(
                         RichText::new("+ Add Engine")
-                            .color(theme::BG_DARKEST)
+                            .color(theme::bg_darkest())
                             .size(13.5)
                             .strong(),
                     )
-                    .fill(theme::ACCENT),
+                    .fill(theme::accent()),
                 )
                 .on_hover_text("Pick an engine executable and auto-detect its UCI options.");
             if add_resp.clicked() {
@@ -704,9 +704,9 @@ impl EnginesTab {
             let folder_resp = ui
                 .add_enabled(
                     !busy,
-                    egui::Button::new(RichText::new("Scan Folder…").color(theme::TEXT).size(13.5))
-                        .fill(theme::BG_ELEVATED)
-                        .stroke(egui::Stroke::new(1.0, theme::STROKE)),
+                    egui::Button::new(RichText::new("Scan Folder…").color(theme::text()).size(13.5))
+                        .fill(theme::bg_elevated())
+                        .stroke(egui::Stroke::new(1.0, theme::stroke())),
                 )
                 .on_hover_text(
                     "Scan a folder for engine executables and add those that respond to UCI.",
@@ -730,13 +730,13 @@ impl EnginesTab {
                 } else {
                     format!("⏳ Scanning {}/{}…", job.done, job.total)
                 };
-                ui.label(RichText::new(label).color(theme::ACCENT).size(13.0));
+                ui.label(RichText::new(label).color(theme::accent()).size(13.0));
             }
 
             if let Some(err) = self.detect_error.clone() {
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .add(egui::Button::new(RichText::new("×").color(theme::TEXT_WEAK)))
+                        .add(egui::Button::new(RichText::new("×").color(theme::text_weak())))
                         .clicked()
                     {
                         self.detect_error = None;
@@ -744,7 +744,7 @@ impl EnginesTab {
                     ui.add(
                         egui::Label::new(
                             RichText::new(format!("⚠ {err}"))
-                                .color(theme::DANGER)
+                                .color(theme::danger())
                                 .size(13.0),
                         )
                         .truncate(),
@@ -770,7 +770,7 @@ impl EnginesTab {
                     "{engine_count} engine{}",
                     if engine_count == 1 { "" } else { "s" }
                 ))
-                .color(theme::TEXT_WEAK)
+                .color(theme::text_weak())
                 .size(12.0),
             );
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
@@ -786,7 +786,7 @@ impl EnginesTab {
 
                 if engine_count > 0 {
                     if self.delete_all_confirm {
-                        if widgets::tinted_button(ui, "Confirm", theme::DANGER, true)
+                        if widgets::tinted_button(ui, "Confirm", theme::danger(), true)
                             .on_hover_text("Permanently remove every engine from the library.")
                             .clicked()
                         {
@@ -794,12 +794,12 @@ impl EnginesTab {
                         }
                         ui.add_space(2.0);
                         if ui
-                            .add(egui::Button::new(RichText::new("Cancel").color(theme::TEXT_WEAK)))
+                            .add(egui::Button::new(RichText::new("Cancel").color(theme::text_weak())))
                             .clicked()
                         {
                             cancel_delete_all = true;
                         }
-                    } else if widgets::tinted_button(ui, "Delete All", theme::DANGER, true)
+                    } else if widgets::tinted_button(ui, "Delete All", theme::danger(), true)
                         .on_hover_text("Remove all engines from the library.")
                         .clicked()
                     {
@@ -842,18 +842,18 @@ impl EnginesTab {
                 if backend.engines.is_empty() {
                     ui.add_space(28.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("♟").color(theme::TEXT_FAINT).size(40.0));
+                        ui.label(RichText::new("♟").color(theme::text_faint()).size(40.0));
                         ui.add_space(6.0);
                         ui.label(
                             RichText::new("No engines yet")
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(15.0)
                                 .strong(),
                         );
                         ui.add_space(4.0);
                         ui.label(
                             RichText::new("Add an engine with the buttons above.")
-                                .color(theme::TEXT_FAINT)
+                                .color(theme::text_faint())
                                 .size(12.5),
                         );
                     });
@@ -879,7 +879,7 @@ impl EnginesTab {
                     ui.vertical_centered(|ui| {
                         ui.label(
                             RichText::new("No engines match your filter.")
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(13.0),
                         );
                     });
@@ -936,7 +936,7 @@ impl EnginesTab {
                                 }
                                 ui.separator();
                                 if ui
-                                    .button(RichText::new("Delete Engine…").color(theme::DANGER))
+                                    .button(RichText::new("Delete Engine…").color(theme::danger()))
                                     .clicked()
                                 {
                                     action = Some((id, CardAction::Delete));
@@ -1031,16 +1031,16 @@ impl EnginesTab {
         }
 
         let fill = if is_sel {
-            theme::tint(theme::ACCENT, 0.12)
+            theme::tint(theme::accent(), 0.12)
         } else if resp.hovered() {
-            theme::BG_HOVER
+            theme::bg_hover()
         } else {
-            theme::BG_ELEVATED
+            theme::bg_elevated()
         };
         let stroke = if is_sel {
-            egui::Stroke::new(1.0, theme::tint(theme::ACCENT, 0.45))
+            egui::Stroke::new(1.0, theme::tint(theme::accent(), 0.45))
         } else {
-            egui::Stroke::new(1.0, theme::STROKE)
+            egui::Stroke::new(1.0, theme::stroke())
         };
         ui.painter().rect(
             rect,
@@ -1079,22 +1079,22 @@ impl EnginesTab {
                     egui::Label::new(
                         RichText::new(&name)
                             .color(if is_sel {
-                                theme::ACCENT_BRIGHT
+                                theme::accent_bright()
                             } else {
-                                theme::TEXT
+                                theme::text()
                             })
                             .font(theme::semibold(15.0)),
                     )
                     .truncate(),
                 );
                 if path_missing {
-                    ui.label(RichText::new("⚠").color(theme::WARN).size(13.0))
+                    ui.label(RichText::new("⚠").color(theme::warn()).size(13.0))
                         .on_hover_text("Executable not found at this path.");
                 }
             });
             if !subtitle.is_empty() {
                 ui.add(
-                    egui::Label::new(RichText::new(&subtitle).color(theme::TEXT_WEAK).size(11.5))
+                    egui::Label::new(RichText::new(&subtitle).color(theme::text_weak()).size(11.5))
                         .truncate(),
                 );
             }
@@ -1113,16 +1113,16 @@ impl EnginesTab {
         let col_w = stats.width() * 0.5;
         let stat_value = |v: Option<String>| match v {
             Some(v) if !v.is_empty() => RichText::new(v)
-                .color(theme::TEXT)
+                .color(theme::text())
                 .font(theme::semibold(13.5)),
-            _ => RichText::new("—").color(theme::TEXT_FAINT).size(13.5),
+            _ => RichText::new("—").color(theme::text_faint()).size(13.5),
         };
         srow.allocate_ui_with_layout(
             egui::vec2(col_w, stats.height()),
             Layout::top_down(egui::Align::Min),
             |ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
-                ui.label(RichText::new("ELO").color(theme::TEXT_FAINT).size(11.0));
+                ui.label(RichText::new("ELO").color(theme::text_faint()).size(11.0));
                 ui.label(stat_value(elo.map(|e| e.to_string())));
             },
         );
@@ -1131,7 +1131,7 @@ impl EnginesTab {
             Layout::top_down(egui::Align::Max),
             |ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
-                ui.label(RichText::new("VERSION").color(theme::TEXT_FAINT).size(11.0));
+                ui.label(RichText::new("VERSION").color(theme::text_faint()).size(11.0));
                 let ver = Some(version.clone()).filter(|v| !v.is_empty());
                 ui.add(egui::Label::new(stat_value(ver)).truncate());
             },
@@ -1283,14 +1283,14 @@ impl EnginesTab {
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     if ui
-                        .button(RichText::new("Clone").color(theme::TEXT_WEAK).size(13.0))
+                        .button(RichText::new("Clone").color(theme::text_weak()).size(13.0))
                         .on_hover_text("Duplicate this engine entry with a new identity.")
                         .clicked()
                     {
                         do_clone = true;
                     }
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                        if widgets::tinted_button(ui, "Delete Engine", theme::DANGER, true)
+                        if widgets::tinted_button(ui, "Delete Engine", theme::danger(), true)
                             .clicked()
                         {
                             do_delete = true;
@@ -1418,10 +1418,10 @@ impl EnginesTab {
                     ui.label(
                         RichText::new(&header_name)
                             .font(theme::semibold(18.0))
-                            .color(theme::TEXT),
+                            .color(theme::text()),
                     );
                     if !edit.version.trim().is_empty() {
-                        widgets::chip(ui, edit.version.trim(), theme::ACCENT);
+                        widgets::chip(ui, edit.version.trim(), theme::accent());
                     }
                     if !edit.dirty
                         && edit
@@ -1430,7 +1430,7 @@ impl EnginesTab {
                     {
                         ui.label(
                             RichText::new("saved")
-                                .color(theme::SUCCESS)
+                                .color(theme::success())
                                 .size(11.5)
                                 .italics(),
                         );
@@ -1438,7 +1438,7 @@ impl EnginesTab {
                     if edit.redetect_pending {
                         ui.label(
                             RichText::new("⏳ detecting…")
-                                .color(theme::ACCENT)
+                                .color(theme::accent())
                                 .size(11.5),
                         );
                     }
@@ -1540,7 +1540,7 @@ impl EnginesTab {
             ui.painter().rect_stroke(
                 logo_rect,
                 egui::CornerRadius::same(8),
-                egui::Stroke::new(1.0, theme::STROKE),
+                egui::Stroke::new(1.0, theme::stroke()),
                 egui::StrokeKind::Inside,
             );
         } else {
@@ -1561,7 +1561,7 @@ impl EnginesTab {
                 .put(
                     btn_rect,
                     egui::Button::new(
-                        RichText::new("Remove").color(theme::TEXT_WEAK).size(11.0),
+                        RichText::new("Remove").color(theme::text_weak()).size(11.0),
                     ),
                 )
                 .clicked()
@@ -1587,7 +1587,7 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                         if let Some(folder) = edit.path.parent() {
                             let folder = folder.to_path_buf();
                             if ui
-                                .add(egui::Button::new(RichText::new("Open folder").color(theme::TEXT_WEAK)))
+                                .add(egui::Button::new(RichText::new("Open folder").color(theme::text_weak())))
                                 .on_hover_text("Open the folder containing this engine.")
                                 .clicked()
                             {
@@ -1600,16 +1600,16 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                             Layout::left_to_right(egui::Align::Center),
                             |ui| {
                                 if path_missing {
-                                    ui.label(RichText::new("⚠").color(theme::WARN).size(13.0))
+                                    ui.label(RichText::new("⚠").color(theme::warn()).size(13.0))
                                         .on_hover_text("Executable not found at this path.");
                                 }
                                 ui.add(
                                     egui::Label::new(
                                         RichText::new(edit.path.to_string_lossy())
                                             .color(if path_missing {
-                                                theme::WARN
+                                                theme::warn()
                                             } else {
-                                                theme::TEXT_WEAK
+                                                theme::text_weak()
                                             })
                                             .size(12.0)
                                             .monospace(),
@@ -1637,7 +1637,7 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                     field_label(ui, "Work dir");
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                         let browse_clicked = ui
-                            .add(egui::Button::new(RichText::new("Browse…").color(theme::TEXT_WEAK)))
+                            .add(egui::Button::new(RichText::new("Browse…").color(theme::text_weak())))
                             .clicked();
                         if ui
                             .add(
@@ -1663,7 +1663,7 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
             ui.add_space(6.0);
             ui.label(
                 RichText::new("Environment variables")
-                    .color(theme::TEXT_WEAK)
+                    .color(theme::text_weak())
                     .size(12.0)
                     .strong(),
             );
@@ -1685,7 +1685,7 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                     }
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .add(egui::Button::new(RichText::new("×").color(theme::DANGER)))
+                            .add(egui::Button::new(RichText::new("×").color(theme::danger())))
                             .clicked()
                         {
                             remove_idx = Some(i);
@@ -1722,7 +1722,7 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                     if ui
                         .add_enabled(
                             key_nonempty,
-                            egui::Button::new(RichText::new("+").color(theme::ACCENT)),
+                            egui::Button::new(RichText::new("+").color(theme::accent())),
                         )
                         .clicked()
                     {
@@ -1764,13 +1764,13 @@ fn uci_options_section(
     ui.horizontal(|ui| {
         ui.label(
             RichText::new("UCI Options")
-                .color(theme::TEXT)
+                .color(theme::text())
                 .font(theme::semibold(13.0)),
         );
         if hidden > 0 {
             ui.label(
                 RichText::new(format!("· {hidden} managed elsewhere"))
-                    .color(theme::TEXT_FAINT)
+                    .color(theme::text_faint())
                     .size(11.0),
             )
             .on_hover_text(
@@ -1789,10 +1789,10 @@ fn uci_options_section(
                             "Re-detect"
                         })
                         .size(12.0)
-                        .color(theme::TEXT_WEAK),
+                        .color(theme::text_weak()),
                     )
-                    .fill(theme::BG_ELEVATED)
-                    .stroke(egui::Stroke::new(1.0, theme::STROKE)),
+                    .fill(theme::bg_elevated())
+                    .stroke(egui::Stroke::new(1.0, theme::stroke())),
                 )
                 .on_hover_text("Re-run the UCI handshake to refresh options and identity.")
                 .clicked()
@@ -1801,7 +1801,7 @@ fn uci_options_section(
             }
             if !edit.option_overrides.is_empty()
                 && ui
-                    .add(egui::Button::new(RichText::new("Reset all").color(theme::TEXT_WEAK)))
+                    .add(egui::Button::new(RichText::new("Reset all").color(theme::text_weak())))
                     .on_hover_text("Remove all option overrides, reverting to engine defaults.")
                     .clicked()
             {
@@ -1819,7 +1819,7 @@ fn uci_options_section(
             } else {
                 "No engine-specific options (all are managed globally)."
             })
-            .color(theme::TEXT_WEAK)
+            .color(theme::text_weak())
             .size(12.0)
             .italics(),
         );
@@ -1907,7 +1907,7 @@ fn options_grid(
                 widgets::uci_option_row(ui, opt, &mut edit.option_overrides, changed);
                 if edit.option_overrides.contains_key(opt.name()) {
                     if ui
-                        .add(egui::Button::new(RichText::new("×").color(theme::TEXT_FAINT)))
+                        .add(egui::Button::new(RichText::new("×").color(theme::text_faint())))
                         .on_hover_text("Reset to engine default.")
                         .clicked()
                     {
@@ -1932,8 +1932,8 @@ fn options_grid(
 /// the rarely-touched paths don't hold vertical space hostage.
 fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut bool) {
     egui::Frame::new()
-        .fill(theme::BG_ELEVATED)
-        .stroke(egui::Stroke::new(1.0, theme::STROKE))
+        .fill(theme::bg_elevated())
+        .stroke(egui::Stroke::new(1.0, theme::stroke()))
         .corner_radius(egui::CornerRadius::same(8))
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {
@@ -1942,15 +1942,15 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
             // Clickable header row toggles the panel.
             let header = ui
                 .horizontal(|ui| {
-                    widgets::disclosure_triangle(ui, *expanded, theme::TEXT_FAINT);
+                    widgets::disclosure_triangle(ui, *expanded, theme::text_faint());
                     ui.label(
                         RichText::new("Endgame Tablebases")
-                            .color(theme::TEXT)
+                            .color(theme::text())
                             .font(theme::semibold(14.0)),
                     );
                     ui.label(
                         RichText::new("· shared by all engines")
-                            .color(theme::TEXT_FAINT)
+                            .color(theme::text_faint())
                             .size(11.5),
                     );
                     // Right side: per-format set/unset summary. Skipped when
@@ -1966,13 +1966,13 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
                                 let set =
                                     value.as_deref().is_some_and(|s| !s.trim().is_empty());
                                 let (mark, color) = if set {
-                                    ("●", theme::SUCCESS)
+                                    ("●", theme::success())
                                 } else {
-                                    ("○", theme::TEXT_FAINT)
+                                    ("○", theme::text_faint())
                                 };
                                 ui.label(RichText::new(mark).color(color).size(10.0));
                                 ui.label(
-                                    RichText::new(label).color(theme::TEXT_WEAK).size(11.5),
+                                    RichText::new(label).color(theme::text_weak()).size(11.5),
                                 );
                                 ui.add_space(6.0);
                             }
@@ -2025,7 +2025,7 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
                             )
                             .changed();
                         ui.label(
-                            RichText::new("Probe limit").color(theme::TEXT_FAINT).size(11.5),
+                            RichText::new("Probe limit").color(theme::text_faint()).size(11.5),
                         );
                         ch
                     });
@@ -2056,7 +2056,7 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
                             },
                         );
                         ui.label(
-                            RichText::new("Compression").color(theme::TEXT_FAINT).size(11.5),
+                            RichText::new("Compression").color(theme::text_faint()).size(11.5),
                         )
                         .on_hover_text(
                             "Compression scheme of the Gaviota files on disk (cp4 is the \
@@ -2088,7 +2088,7 @@ fn tablebase_row(
     let mut changed = false;
     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
         if ui
-            .add(egui::Button::new(RichText::new("Browse…").color(theme::TEXT_WEAK)))
+            .add(egui::Button::new(RichText::new("Browse…").color(theme::text_weak())))
             .clicked()
             && let Some(dir) = crate::dialog::file_dialog()
                 .set_title(format!("Select {label} tablebase folder"))
@@ -2134,14 +2134,14 @@ fn tablebase_row(
 /// Gaviota rows. Remember: this draws inside a right-to-left layout, so add
 /// items in reverse visual order.
 fn cache_extra(ui: &mut Ui, label: &str, mb: &mut u32) -> bool {
-    ui.label(RichText::new("MB").color(theme::TEXT_FAINT).size(11.5));
+    ui.label(RichText::new("MB").color(theme::text_faint()).size(11.5));
     let changed = ui
         .add(DragValue::new(mb).range(1..=1024).speed(1.0))
         .on_hover_text(format!(
             "Probe-cache size forwarded to engines' {label} cache option."
         ))
         .changed();
-    ui.label(RichText::new("Cache").color(theme::TEXT_FAINT).size(11.5));
+    ui.label(RichText::new("Cache").color(theme::text_faint()).size(11.5));
     changed
 }
 
@@ -2261,7 +2261,7 @@ fn is_executable(path: &Path) -> bool {
 
 /// Dim label for a grid row's left column.
 fn field_label(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).color(theme::TEXT_WEAK).size(13.0));
+    ui.label(RichText::new(text).color(theme::text_weak()).size(13.0));
 }
 
 /// A `TextEdit::singleline` filling available width.
@@ -2289,18 +2289,18 @@ fn open_folder(path: &std::path::Path) {
 fn empty_state(ui: &mut Ui) {
     ui.vertical_centered(|ui| {
         ui.add_space(72.0);
-        ui.label(RichText::new("♟").color(theme::TEXT_FAINT).size(40.0));
+        ui.label(RichText::new("♟").color(theme::text_faint()).size(40.0));
         ui.add_space(8.0);
         ui.label(
             RichText::new("No engine selected")
-                .color(theme::TEXT_WEAK)
+                .color(theme::text_weak())
                 .size(15.0)
                 .strong(),
         );
         ui.add_space(4.0);
         ui.label(
             RichText::new("Pick an engine from the grid, or add one with the buttons above.")
-                .color(theme::TEXT_FAINT)
+                .color(theme::text_faint())
                 .size(12.5),
         );
     });

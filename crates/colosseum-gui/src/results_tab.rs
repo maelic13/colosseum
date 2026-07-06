@@ -145,20 +145,20 @@ impl ResultsTab {
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new("Tournaments")
-                    .color(theme::TEXT)
+                    .color(theme::text())
                     .font(theme::semibold(14.0)),
             );
             let count = self.list.as_ref().map_or(0, Vec::len);
             ui.label(
                 RichText::new(count.to_string())
-                    .color(theme::TEXT_FAINT)
+                    .color(theme::text_faint())
                     .size(12.0),
             );
         });
         if let Some(err) = &self.error {
             ui.label(
                 RichText::new(format!("⚠ {err}"))
-                    .color(theme::DANGER)
+                    .color(theme::danger())
                     .size(12.0),
             );
         }
@@ -172,17 +172,17 @@ impl ResultsTab {
         if list.is_empty() {
             ui.add_space(24.0);
             ui.vertical_centered(|ui| {
-                ui.label(RichText::new("♟").color(theme::TEXT_FAINT).size(40.0));
+                ui.label(RichText::new("♟").color(theme::text_faint()).size(40.0));
                 ui.add_space(6.0);
                 ui.label(
                     RichText::new("No tournaments yet")
-                        .color(theme::TEXT_WEAK)
+                        .color(theme::text_weak())
                         .font(theme::semibold(15.0)),
                 );
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new("Set one up in the Tournament tab.")
-                        .color(theme::TEXT_FAINT)
+                        .color(theme::text_faint())
                         .size(12.5),
                 );
             });
@@ -229,8 +229,8 @@ impl ResultsTab {
     ) -> bool {
         let (fill, stroke) = if selected {
             (
-                theme::tint(theme::ACCENT, 0.12),
-                egui::Stroke::new(1.0, theme::tint(theme::ACCENT, 0.4)),
+                theme::tint(theme::accent(), 0.12),
+                egui::Stroke::new(1.0, theme::tint(theme::accent(), 0.4)),
             )
         } else {
             (Color32::TRANSPARENT, egui::Stroke::NONE)
@@ -248,9 +248,9 @@ impl ResultsTab {
                     ui.label(
                         RichText::new(&row.name)
                             .color(if selected {
-                                theme::ACCENT_BRIGHT
+                                theme::accent_bright()
                             } else {
-                                theme::TEXT
+                                theme::text()
                             })
                             .font(theme::semibold(13.5)),
                     );
@@ -260,11 +260,11 @@ impl ResultsTab {
                         let (label, color) = match live {
                             Some((status, ..)) => match status {
                                 TournamentStatus::Running | TournamentStatus::Stopping => {
-                                    ("● Live", theme::SUCCESS)
+                                    ("● Live", theme::success())
                                 }
-                                TournamentStatus::Finished => ("Finished", theme::ACCENT),
+                                TournamentStatus::Finished => ("Finished", theme::accent()),
                                 TournamentStatus::Stopped | TournamentStatus::Idle => {
-                                    ("Stopped", theme::WARN)
+                                    ("Stopped", theme::warn())
                                 }
                             },
                             None => status_parts(&row.status),
@@ -281,14 +281,14 @@ impl ResultsTab {
                     Some((_, finished, total)) if total > 0 => {
                         ui.label(
                             RichText::new(format!("{finished} / {total} games"))
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(11.5),
                         );
                     }
                     _ => {
                         ui.label(
                             RichText::new(format_timestamp(&row.created_at))
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(11.5),
                         );
                     }
@@ -304,7 +304,7 @@ impl ResultsTab {
         if interact.hovered() && !selected {
             ui.painter().set(
                 bg_slot,
-                egui::Shape::rect_filled(resp.rect, egui::CornerRadius::same(6), theme::BG_HOVER),
+                egui::Shape::rect_filled(resp.rect, egui::CornerRadius::same(6), theme::bg_hover()),
             );
         }
         interact.clicked()
@@ -331,7 +331,7 @@ impl ResultsTab {
         egui::Panel::top("results_live_controls")
             .frame(
                 egui::Frame::new()
-                    .fill(theme::BG_DARKEST)
+                    .fill(theme::bg_darkest())
                     .inner_margin(egui::Margin::symmetric(14, 10)),
             )
             .show_inside(ui, |ui| {
@@ -344,15 +344,15 @@ impl ResultsTab {
                 .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(14, 8)))
                 .show_inside(ui, |ui| {
                     egui::Frame::new()
-                        .fill(theme::tint(theme::DANGER, 0.08))
-                        .stroke(egui::Stroke::new(1.0, theme::tint(theme::DANGER, 0.35)))
+                        .fill(theme::tint(theme::danger(), 0.08))
+                        .stroke(egui::Stroke::new(1.0, theme::tint(theme::danger(), 0.35)))
                         .corner_radius(egui::CornerRadius::same(8))
                         .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             ui.label(
                                 RichText::new(format!("Engine errors ({})", live.errors.len()))
-                                    .color(theme::DANGER)
+                                    .color(theme::danger())
                                     .font(theme::semibold(12.5)),
                             );
                             ScrollArea::vertical()
@@ -362,7 +362,7 @@ impl ResultsTab {
                                 .show(ui, |ui| {
                                     for err in live.errors.iter().rev().take(20) {
                                         ui.label(
-                                            RichText::new(err).color(theme::TEXT_WEAK).size(12.0),
+                                            RichText::new(err).color(theme::text_weak()).size(12.0),
                                         );
                                     }
                                 });
@@ -377,8 +377,8 @@ impl ResultsTab {
                 .resizable(false)
                 .frame(
                     egui::Frame::new()
-                        .fill(theme::BG_DARKEST)
-                        .stroke(egui::Stroke::new(1.0, theme::STROKE))
+                        .fill(theme::bg_darkest())
+                        .stroke(egui::Stroke::new(1.0, theme::stroke()))
                         .inner_margin(egui::Margin::same(10)),
                 )
                 .show_inside(ui, |ui| {
@@ -470,6 +470,8 @@ impl ResultsTab {
                     time_losses: st.time_losses,
                     crash_losses: st.crash_losses,
                     nps: st.avg_nps(),
+                    depth: st.avg_depth(),
+                    move_ms: st.avg_move_ms(),
                 }
             })
             .collect();
@@ -592,7 +594,7 @@ impl ResultsTab {
             ui.add_space(6.0);
             ui.label(
                 RichText::new(&live.name)
-                    .color(theme::TEXT)
+                    .color(theme::text())
                     .font(theme::semibold(15.0)),
             );
             ui.add_space(10.0);
@@ -604,21 +606,21 @@ impl ResultsTab {
                 TournamentStatus::Running | TournamentStatus::Stopping
             );
 
-            if widgets::tinted_button(ui, "Go", theme::SUCCESS, go_enabled)
+            if widgets::tinted_button(ui, "Go", theme::success(), go_enabled)
                 .on_hover_text("Resume the tournament.")
                 .clicked()
                 && let Some(active) = backend.active(id)
             {
                 active.handle.go();
             }
-            if widgets::tinted_button(ui, "Stop", theme::WARN, stop_enabled)
+            if widgets::tinted_button(ui, "Stop", theme::warn(), stop_enabled)
                 .on_hover_text("Stop launching new games; let in-flight games finish.")
                 .clicked()
                 && let Some(active) = backend.active(id)
             {
                 active.handle.stop();
             }
-            if widgets::tinted_button(ui, "Force-Stop", theme::DANGER, force_enabled)
+            if widgets::tinted_button(ui, "Force-Stop", theme::danger(), force_enabled)
                 .on_hover_text("Abort in-flight games immediately (discarding them).")
                 .clicked()
                 && let Some(active) = backend.active(id)
@@ -630,7 +632,7 @@ impl ResultsTab {
 
             // Parallel-games limit, adjustable while running or stopped:
             // in-flight games always finish, only the launch rate changes.
-            ui.label(RichText::new("Parallel").color(theme::TEXT_WEAK).size(13.0));
+            ui.label(RichText::new("Parallel").color(theme::text_weak()).size(13.0));
             let mut lanes = live.concurrency as u32;
             if ui
                 .add(DragValue::new(&mut lanes).range(1..=256).speed(0.1))
@@ -648,7 +650,7 @@ impl ResultsTab {
             // Progress: caption + slim bar.
             ui.label(
                 RichText::new(format!("{} / {} games", live.finished, live.total))
-                    .color(theme::TEXT_WEAK)
+                    .color(theme::text_weak())
                     .size(13.0),
             );
             let frac = if live.total == 0 {
@@ -661,7 +663,7 @@ impl ResultsTab {
                     .desired_width(150.0)
                     .desired_height(6.0)
                     .corner_radius(4.0)
-                    .fill(theme::ACCENT),
+                    .fill(theme::accent()),
             );
 
             // Timing: elapsed / avg / ETA (measured average once available,
@@ -672,7 +674,7 @@ impl ResultsTab {
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(format!("⏱ {}", format_duration(elapsed_secs)))
-                        .color(theme::TEXT_WEAK)
+                        .color(theme::text_weak())
                         .size(12.5),
                 );
                 let avg_secs = if live.games_timed > 0 {
@@ -684,7 +686,7 @@ impl ResultsTab {
                     if live.games_timed > 0 {
                         ui.label(
                             RichText::new(format!("avg {}/game", format_duration(avg)))
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(12.5),
                         );
                     }
@@ -694,7 +696,7 @@ impl ResultsTab {
                         let eta = remaining as f64 * avg / lanes * 1.05;
                         ui.label(
                             RichText::new(format!("ETA ~{}", format_duration(eta)))
-                                .color(theme::TEXT_FAINT)
+                                .color(theme::text_faint())
                                 .size(12.0),
                         )
                         .on_hover_text(format!(
@@ -760,7 +762,7 @@ impl ResultsTab {
                     if widgets::tinted_button(
                         ui,
                         &format!("Apply {target_name} estimate → Library"),
-                        theme::ACCENT,
+                        theme::accent(),
                         new_enabled,
                     )
                     .on_hover_text(
@@ -782,7 +784,7 @@ impl ResultsTab {
                     }
                 }
                 _ => {
-                    if widgets::tinted_button(ui, "Apply Elo → Library", theme::ACCENT, new_enabled)
+                    if widgets::tinted_button(ui, "Apply Elo → Library", theme::accent(), new_enabled)
                         .on_hover_text(
                             "Write the maximum-likelihood ratings shown in the Elo \
                              column to the engine library.",
@@ -800,8 +802,8 @@ impl ResultsTab {
                 .add_enabled(
                     new_enabled,
                     egui::Button::new(RichText::new("Close").size(13.0))
-                        .fill(theme::BG_ELEVATED)
-                        .stroke(egui::Stroke::new(1.0, theme::STROKE)),
+                        .fill(theme::bg_elevated())
+                        .stroke(egui::Stroke::new(1.0, theme::stroke())),
                 )
                 .on_hover_text(if new_enabled {
                     "Unload this tournament (its results stay in the list; \
@@ -818,10 +820,10 @@ impl ResultsTab {
             }
 
             if let Some(note) = &self.export_note {
-                ui.label(RichText::new(note).color(theme::TEXT_WEAK).size(12.0));
+                ui.label(RichText::new(note).color(theme::text_weak()).size(12.0));
             }
             if let Some(note) = &self.elo_note {
-                ui.label(RichText::new(note).color(theme::SUCCESS).size(12.0));
+                ui.label(RichText::new(note).color(theme::success()).size(12.0));
             }
 
             // Delete — available even while running (force-stops first), for
@@ -831,13 +833,13 @@ impl ResultsTab {
                 if self.pending_delete == Some(id) {
                     // Right-to-left: Cancel sits at the edge, Confirm to its left.
                     if ui
-                        .button(RichText::new("Cancel").color(theme::TEXT))
+                        .button(RichText::new("Cancel").color(theme::text()))
                         .clicked()
                     {
                         self.pending_delete = None;
                     }
                     ui.add_space(2.0);
-                    if widgets::tinted_button(ui, "Confirm delete", theme::DANGER, true)
+                    if widgets::tinted_button(ui, "Confirm delete", theme::danger(), true)
                         .on_hover_text(
                             "Stop this tournament and permanently remove it and its games.",
                         )
@@ -856,7 +858,7 @@ impl ResultsTab {
                         self.elo_cache = None;
                         self.refresh(backend);
                     }
-                } else if widgets::tinted_button(ui, "Delete", theme::DANGER, true)
+                } else if widgets::tinted_button(ui, "Delete", theme::danger(), true)
                     .on_hover_text("Delete this tournament — stops it first if it's running.")
                     .clicked()
                 {
@@ -871,7 +873,7 @@ impl ResultsTab {
             ui.add_space(20.0);
             ui.label(
                 RichText::new("Waiting for the first game to finish…")
-                    .color(theme::TEXT_WEAK)
+                    .color(theme::text_weak())
                     .size(13.0),
             );
             return;
@@ -896,7 +898,9 @@ impl ResultsTab {
             .column(Column::exact(52.0)) // games
             .column(Column::exact(92.0)) // w-d-l
             .column(Column::exact(110.0)) // forfeits (time / crash losses)
-            .column(Column::remainder().at_least(80.0)) // nps
+            .column(Column::exact(90.0)) // nps
+            .column(Column::exact(84.0)) // avg depth
+            .column(Column::remainder().at_least(84.0)) // avg time/move
             .header(header_h, |mut header| {
                 header.col(|ui| {
                     ui.label(strong_header("#"));
@@ -927,6 +931,12 @@ impl ResultsTab {
                 header.col(|ui| {
                     sortable_header(ui, "Avg nps", SortKey::Nps, &mut self.sort);
                 });
+                header.col(|ui| {
+                    sortable_header(ui, "Avg depth", SortKey::Depth, &mut self.sort)
+                });
+                header.col(|ui| {
+                    sortable_header(ui, "Time/move", SortKey::MoveTime, &mut self.sort)
+                });
             })
             .body(|mut body| {
                 for row in &rows {
@@ -940,7 +950,7 @@ impl ResultsTab {
                         tr.col(|ui| {
                             ui.label(
                                 RichText::new(format!("{:.0}", row.elo))
-                                    .color(theme::TEXT)
+                                    .color(theme::text())
                                     .monospace(),
                             );
                         });
@@ -950,7 +960,7 @@ impl ResultsTab {
                         tr.col(|ui| {
                             ui.label(
                                 RichText::new(format!("{:.1}", row.points))
-                                    .color(theme::ACCENT)
+                                    .color(theme::accent())
                                     .monospace()
                                     .strong(),
                             );
@@ -958,7 +968,7 @@ impl ResultsTab {
                         tr.col(|ui| {
                             ui.label(
                                 RichText::new(row.games.to_string())
-                                    .color(theme::TEXT_WEAK)
+                                    .color(theme::text_weak())
                                     .monospace(),
                             );
                         });
@@ -968,7 +978,7 @@ impl ResultsTab {
                                     "{}-{}-{}",
                                     row.wins, row.draws, row.losses
                                 ))
-                                .color(theme::TEXT)
+                                .color(theme::text())
                                 .monospace(),
                             );
                         });
@@ -978,7 +988,21 @@ impl ResultsTab {
                         tr.col(|ui| {
                             ui.label(
                                 RichText::new(format_nps(row.nps))
-                                    .color(theme::TEXT_WEAK)
+                                    .color(theme::text_weak())
+                                    .monospace(),
+                            );
+                        });
+                        tr.col(|ui| {
+                            ui.label(
+                                RichText::new(format_depth(row.depth))
+                                    .color(theme::text_weak())
+                                    .monospace(),
+                            );
+                        });
+                        tr.col(|ui| {
+                            ui.label(
+                                RichText::new(format_move_time(row.move_ms))
+                                    .color(theme::text_weak())
                                     .monospace(),
                             );
                         });
@@ -993,7 +1017,7 @@ impl ResultsTab {
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new("Head-to-head")
-                    .color(theme::TEXT)
+                    .color(theme::text())
                     .font(theme::semibold(14.0)),
             );
             ui.add_space(10.0);
@@ -1022,12 +1046,12 @@ impl ResultsTab {
             ui.add_space(8.0);
             ui.label(
                 RichText::new(format!("{:.1} / {}", seed_row.points, seed_row.games))
-                    .color(theme::ACCENT)
+                    .color(theme::accent())
                     .font(theme::semibold(13.0)),
             );
             ui.label(
                 RichText::new("vs each opponent:")
-                    .color(theme::TEXT_FAINT)
+                    .color(theme::text_faint())
                     .size(12.0),
             );
         });
@@ -1044,12 +1068,12 @@ impl ResultsTab {
                     let h2h = live.standings.head_to_head(seed, opp.id);
                     engine_name_label_full(ui, &opp.name, &opp.version);
                     if h2h.games() == 0 {
-                        ui.label(RichText::new("·").color(theme::TEXT_WEAK));
+                        ui.label(RichText::new("·").color(theme::text_weak()));
                         ui.label("");
                     } else {
                         ui.label(
                             RichText::new(format!("{:.1} / {}", h2h.points(), h2h.games()))
-                                .color(theme::TEXT)
+                                .color(theme::text())
                                 .monospace()
                                 .size(12.5),
                         );
@@ -1068,7 +1092,7 @@ impl ResultsTab {
     fn h2h_matrix(&self, ui: &mut Ui, live: &LiveData) {
         ui.label(
             RichText::new("Row engine's record against each column engine.")
-                .color(theme::TEXT_WEAK)
+                .color(theme::text_weak())
                 .size(11.5),
         );
         ui.add_space(6.0);
@@ -1101,11 +1125,11 @@ impl ResultsTab {
                             engine_name_label_full(ui, &row.name, &row.version);
                             for col in &order {
                                 if row.id == col.id {
-                                    ui.label(RichText::new("—").color(theme::TEXT_WEAK));
+                                    ui.label(RichText::new("—").color(theme::text_weak()));
                                 } else {
                                     let h2h = live.standings.head_to_head(row.id, col.id);
                                     if h2h.games() == 0 {
-                                        ui.label(RichText::new("·").color(theme::TEXT_WEAK));
+                                        ui.label(RichText::new("·").color(theme::text_weak()));
                                     } else {
                                         let share =
                                             (h2h.points() / f64::from(h2h.games())) as f32;
@@ -1163,13 +1187,13 @@ impl ResultsTab {
 
         ui.label(
             RichText::new(format!("Games ({})", order.len()))
-                .color(theme::TEXT)
+                .color(theme::text())
                 .font(theme::semibold(13.5)),
         );
         if order.is_empty() {
             ui.label(
                 RichText::new("No finished games yet.")
-                    .color(theme::TEXT_WEAK)
+                    .color(theme::text_weak())
                     .size(12.5),
             );
             return;
@@ -1183,7 +1207,7 @@ impl ResultsTab {
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(format!("R{}", g.round))
-                            .color(theme::TEXT_FAINT)
+                            .color(theme::text_faint())
                             .monospace()
                             .size(12.0),
                     );
@@ -1198,7 +1222,7 @@ impl ResultsTab {
                             live.participant_label(g.black),
                             result
                         ))
-                        .color(theme::TEXT_WEAK)
+                        .color(theme::text_weak())
                         .size(12.5),
                     );
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1229,7 +1253,7 @@ impl ResultsTab {
             ui.vertical_centered(|ui| {
                 ui.label(
                     RichText::new("Select a tournament to view its results.")
-                        .color(theme::TEXT_WEAK)
+                        .color(theme::text_weak())
                         .size(13.0),
                 );
             });
@@ -1273,7 +1297,7 @@ impl ResultsTab {
                         ui.horizontal(|ui| {
                             ui.label(
                                 RichText::new(&row.name)
-                                    .color(theme::TEXT)
+                                    .color(theme::text())
                                     .font(theme::semibold(18.0)),
                             );
                             ui.add_space(8.0);
@@ -1283,7 +1307,7 @@ impl ResultsTab {
                         ui.add_space(2.0);
                         ui.label(
                             RichText::new(config_summary(&row))
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(12.5),
                         );
 
@@ -1309,7 +1333,7 @@ impl ResultsTab {
                         } else {
                             ui.label(
                                 RichText::new("No results to show.")
-                                    .color(theme::TEXT_WEAK)
+                                    .color(theme::text_weak())
                                     .size(13.0),
                             );
                         }
@@ -1348,7 +1372,7 @@ impl ResultsTab {
         ui.add_space(6.0);
         ui.label(
             RichText::new(format!("Games ({count})"))
-                .color(theme::TEXT)
+                .color(theme::text())
                 .font(theme::semibold(13.5)),
         );
         ui.add_space(6.0);
@@ -1364,7 +1388,7 @@ impl ResultsTab {
                         ui.horizontal(|ui| {
                             ui.label(
                                 RichText::new(format!("R{}", g.round))
-                                    .color(theme::TEXT_FAINT)
+                                    .color(theme::text_faint())
                                     .monospace()
                                     .size(12.0),
                             );
@@ -1379,7 +1403,7 @@ impl ResultsTab {
                                     name_of(g.black),
                                     result
                                 ))
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(12.5),
                             );
                             let has_pgn =
@@ -1415,7 +1439,7 @@ impl ResultsTab {
 
         ui.horizontal(|ui| {
             if resumable {
-                if widgets::tinted_button(ui, "↩ Resume", theme::SUCCESS, true)
+                if widgets::tinted_button(ui, "↩ Resume", theme::success(), true)
                     .on_hover_text("Reload this tournament and continue from where it stopped.")
                     .clicked()
                 {
@@ -1432,7 +1456,7 @@ impl ResultsTab {
 
             if let Some(pgn) = &row.pgn_path {
                 if ui
-                    .button(RichText::new("Copy PGN path").color(theme::TEXT_WEAK))
+                    .button(RichText::new("Copy PGN path").color(theme::text_weak()))
                     .on_hover_text(pgn.clone())
                     .clicked()
                 {
@@ -1481,7 +1505,7 @@ impl ResultsTab {
             widgets::dropdown_arrow(ui, export_resp.response.rect);
             if let Some(note) = &self.export_note {
                 ui.add_space(6.0);
-                ui.label(RichText::new(note).color(theme::TEXT_WEAK).size(12.0));
+                ui.label(RichText::new(note).color(theme::text_weak()).size(12.0));
             }
 
             // Delete is destructive, so keep it pinned to the far right, away
@@ -1490,13 +1514,13 @@ impl ResultsTab {
                 if self.pending_delete == Some(row.id) {
                     // Right-to-left: Cancel sits at the edge, Confirm to its left.
                     if ui
-                        .button(RichText::new("Cancel").color(theme::TEXT))
+                        .button(RichText::new("Cancel").color(theme::text()))
                         .clicked()
                     {
                         self.pending_delete = None;
                     }
                     ui.add_space(4.0);
-                    if widgets::tinted_button(ui, "Confirm delete", theme::DANGER, true)
+                    if widgets::tinted_button(ui, "Confirm delete", theme::danger(), true)
                         .on_hover_text("Permanently remove this tournament and its games.")
                         .clicked()
                     {
@@ -1512,7 +1536,7 @@ impl ResultsTab {
                             }
                         }
                     }
-                } else if widgets::tinted_button(ui, "Delete", theme::DANGER, true)
+                } else if widgets::tinted_button(ui, "Delete", theme::danger(), true)
                     .on_hover_text("Delete this tournament from the database.")
                     .clicked()
                 {
@@ -1542,6 +1566,8 @@ struct Row {
     time_losses: u32,
     crash_losses: u32,
     nps: Option<u64>,
+    depth: Option<f64>,
+    move_ms: Option<f64>,
 }
 
 /// An owned snapshot of everything the live view renders this frame.
@@ -1621,6 +1647,8 @@ enum SortKey {
     Points,
     Games,
     Nps,
+    Depth,
+    MoveTime,
 }
 
 #[derive(Clone, Copy)]
@@ -1652,6 +1680,16 @@ fn sort_rows(rows: &mut [Row], sort: SortState) {
             SortKey::Points => a.points.partial_cmp(&b.points).unwrap_or(Ordering::Equal),
             SortKey::Games => a.games.cmp(&b.games),
             SortKey::Nps => a.nps.unwrap_or(0).cmp(&b.nps.unwrap_or(0)),
+            SortKey::Depth => a
+                .depth
+                .unwrap_or(0.0)
+                .partial_cmp(&b.depth.unwrap_or(0.0))
+                .unwrap_or(Ordering::Equal),
+            SortKey::MoveTime => a
+                .move_ms
+                .unwrap_or(0.0)
+                .partial_cmp(&b.move_ms.unwrap_or(0.0))
+                .unwrap_or(Ordering::Equal),
         };
         if sort.ascending { ord } else { ord.reverse() }
     });
@@ -1663,7 +1701,7 @@ fn sortable_header(ui: &mut Ui, label: &str, key: SortKey, sort: &mut SortState)
     // Always lay out an arrow (transparent when inactive) so activating a
     // column never changes the header width and shifts the table.
     let arrow = if active && sort.ascending { " ↑" } else { " ↓" };
-    let color = if active { theme::ACCENT } else { theme::TEXT };
+    let color = if active { theme::accent() } else { theme::text() };
     let fmt = |color| egui::TextFormat {
         font_id: theme::semibold(12.5),
         color,
@@ -1688,7 +1726,7 @@ fn sortable_header(ui: &mut Ui, label: &str, key: SortKey, sort: &mut SortState)
 
 fn strong_header(label: &str) -> RichText {
     RichText::new(label)
-        .color(theme::TEXT)
+        .color(theme::text())
         .font(theme::semibold(12.5))
 }
 
@@ -1702,7 +1740,7 @@ fn engine_name_job(name: &str, version: &str) -> egui::text::LayoutJob {
         0.0,
         egui::TextFormat {
             font_id: theme::semibold(13.0),
-            color: theme::TEXT,
+            color: theme::text(),
             ..Default::default()
         },
     );
@@ -1713,7 +1751,7 @@ fn engine_name_job(name: &str, version: &str) -> egui::text::LayoutJob {
             5.0,
             egui::TextFormat {
                 font_id: egui::FontId::proportional(12.0),
-                color: theme::TEXT_WEAK,
+                color: theme::text_weak(),
                 ..Default::default()
             },
         );
@@ -1735,7 +1773,7 @@ fn engine_name_label_full(ui: &mut Ui, name: &str, version: &str) {
 /// Forfeit summary ("2× time · 1× crash"), dim dash when clean.
 fn forfeit_cell(ui: &mut Ui, time_losses: u32, crash_losses: u32) {
     if time_losses == 0 && crash_losses == 0 {
-        ui.label(RichText::new("—").color(theme::TEXT_FAINT).size(12.0));
+        ui.label(RichText::new("—").color(theme::text_faint()).size(12.0));
         return;
     }
     let mut parts: Vec<String> = Vec::new();
@@ -1747,7 +1785,7 @@ fn forfeit_cell(ui: &mut Ui, time_losses: u32, crash_losses: u32) {
     }
     ui.label(
         RichText::new(parts.join(" · "))
-            .color(theme::WARN)
+            .color(theme::warn())
             .size(12.0),
     )
     .on_hover_text("Losses on time / by crash or illegal move.");
@@ -1762,7 +1800,7 @@ fn h2h_record_cell(ui: &mut Ui, score_share: f32, text: &str) {
         .show(ui, |ui| {
             ui.label(
                 RichText::new(text)
-                    .color(theme::TEXT)
+                    .color(theme::text())
                     .monospace()
                     .size(11.5),
             );
@@ -1772,9 +1810,9 @@ fn h2h_record_cell(ui: &mut Ui, score_share: f32, text: &str) {
 /// Background fill for a head-to-head cell based on score share `s` (0..=1).
 fn h2h_cell_fill(s: f32) -> Color32 {
     if s > 0.5 {
-        theme::tint(theme::SUCCESS, (s - 0.5) * 0.5)
+        theme::tint(theme::success(), (s - 0.5) * 0.5)
     } else if s < 0.5 {
-        theme::tint(theme::DANGER, (0.5 - s) * 0.5)
+        theme::tint(theme::danger(), (0.5 - s) * 0.5)
     } else {
         Color32::TRANSPARENT
     }
@@ -1790,7 +1828,7 @@ fn live_side_panel(ui: &mut Ui, live: &LiveData) {
             if !live.in_flight_games.is_empty() {
                 ui.label(
                     RichText::new(format!("● Playing ({})", live.in_flight_games.len()))
-                        .color(theme::TEXT)
+                        .color(theme::text())
                         .font(theme::semibold(12.5)),
                 );
                 ui.add_space(4.0);
@@ -1798,20 +1836,20 @@ fn live_side_panel(ui: &mut Ui, live: &LiveData) {
                     let white = live.participant_label(game.white);
                     let black = live.participant_label(game.black);
                     egui::Frame::new()
-                        .fill(theme::BG_ELEVATED)
+                        .fill(theme::bg_elevated())
                         .corner_radius(egui::CornerRadius::same(4))
                         .inner_margin(egui::Margin::symmetric(6, 4))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
                             ui.label(
                                 RichText::new(format!("Round {}", game.round))
-                                    .color(theme::TEXT_FAINT)
+                                    .color(theme::text_faint())
                                     .size(10.5),
                             );
                             ui.add(
                                 egui::Label::new(
                                     RichText::new(format!("⬜ {white}"))
-                                        .color(theme::TEXT)
+                                        .color(theme::text())
                                         .size(11.5),
                                 )
                                 .truncate(),
@@ -1819,7 +1857,7 @@ fn live_side_panel(ui: &mut Ui, live: &LiveData) {
                             ui.add(
                                 egui::Label::new(
                                     RichText::new(format!("⬛ {black}"))
-                                        .color(theme::TEXT_WEAK)
+                                        .color(theme::text_weak())
                                         .size(11.5),
                                 )
                                 .truncate(),
@@ -1837,7 +1875,7 @@ fn live_side_panel(ui: &mut Ui, live: &LiveData) {
                 }
                 ui.label(
                     RichText::new("Terminations")
-                        .color(theme::TEXT)
+                        .color(theme::text())
                         .font(theme::semibold(12.5)),
                 );
                 ui.add_space(4.0);
@@ -1884,7 +1922,7 @@ fn termination_breakdown(ui: &mut Ui, counts: &HashMap<Termination, usize>) {
         }
         ui.label(
             RichText::new(*group_label)
-                .color(theme::TEXT_FAINT)
+                .color(theme::text_faint())
                 .size(11.0)
                 .italics(),
         );
@@ -1892,13 +1930,13 @@ fn termination_breakdown(ui: &mut Ui, counts: &HashMap<Termination, usize>) {
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(termination_label(term))
-                        .color(theme::TEXT_WEAK)
+                        .color(theme::text_weak())
                         .size(12.0),
                 );
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         RichText::new(count.to_string())
-                            .color(theme::TEXT)
+                            .color(theme::text())
                             .size(12.0)
                             .monospace(),
                     );
@@ -1943,6 +1981,8 @@ struct ResultRow {
     time_losses: u32,
     crash_losses: u32,
     nps: Option<u64>,
+    depth: Option<f64>,
+    move_ms: Option<f64>,
 }
 
 fn build_rows(res: &TournamentResults) -> Vec<ResultRow> {
@@ -1970,6 +2010,8 @@ fn build_rows(res: &TournamentResults) -> Vec<ResultRow> {
                 time_losses: st.time_losses,
                 crash_losses: st.crash_losses,
                 nps: st.avg_nps(),
+                depth: st.avg_depth(),
+                move_ms: st.avg_move_ms(),
             }
         })
         .collect();
@@ -2015,13 +2057,13 @@ fn results_summary(ui: &mut Ui, res: &TournamentResults) {
                 "{} / {} games played",
                 res.games_finished, res.games_total
             ))
-            .color(theme::TEXT)
+            .color(theme::text())
             .font(theme::semibold(13.0)),
         );
         ui.add_space(10.0);
         ui.label(
             RichText::new(format!("{} decisive · {} drawn", res.decisive, res.draws))
-                .color(theme::TEXT_WEAK)
+                .color(theme::text_weak())
                 .size(12.5),
         );
     });
@@ -2032,7 +2074,7 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
     if rows.is_empty() {
         ui.label(
             RichText::new("No participants recorded.")
-                .color(theme::TEXT_WEAK)
+                .color(theme::text_weak())
                 .size(13.0),
         );
         return;
@@ -2051,15 +2093,18 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
         .column(Column::exact(52.0)) // games
         .column(Column::exact(92.0)) // w-d-l
         .column(Column::exact(110.0)) // forfeits
-        .column(Column::remainder().at_least(80.0)) // nps
+        .column(Column::exact(90.0)) // nps
+        .column(Column::exact(84.0)) // avg depth
+        .column(Column::remainder().at_least(84.0)) // avg time/move
         .header(header_h, |mut header| {
             for label in [
                 "#", "Engine", "Elo", "Δ", "Pts", "Gms", "W-D-L", "Forfeits", "Avg nps",
+                "Avg depth", "Time/move",
             ] {
                 header.col(|ui| {
                     ui.label(
                         RichText::new(label)
-                            .color(theme::TEXT)
+                            .color(theme::text())
                             .font(theme::semibold(12.5)),
                     );
                 });
@@ -2075,7 +2120,7 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
                     tr.col(|ui| {
                         ui.label(
                             RichText::new(format!("{:.0}", row.elo))
-                                .color(theme::TEXT)
+                                .color(theme::text())
                                 .monospace(),
                         );
                     });
@@ -2083,7 +2128,7 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
                     tr.col(|ui| {
                         ui.label(
                             RichText::new(format!("{:.1}", row.points))
-                                .color(theme::ACCENT)
+                                .color(theme::accent())
                                 .monospace()
                                 .strong(),
                         );
@@ -2091,14 +2136,14 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
                     tr.col(|ui| {
                         ui.label(
                             RichText::new(row.games.to_string())
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .monospace(),
                         );
                     });
                     tr.col(|ui| {
                         ui.label(
                             RichText::new(format!("{}-{}-{}", row.wins, row.draws, row.losses))
-                                .color(theme::TEXT)
+                                .color(theme::text())
                                 .monospace(),
                         );
                     });
@@ -2108,7 +2153,21 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
                     tr.col(|ui| {
                         ui.label(
                             RichText::new(format_nps(row.nps))
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
+                                .monospace(),
+                        );
+                    });
+                    tr.col(|ui| {
+                        ui.label(
+                            RichText::new(format_depth(row.depth))
+                                .color(theme::text_weak())
+                                .monospace(),
+                        );
+                    });
+                    tr.col(|ui| {
+                        ui.label(
+                            RichText::new(format_move_time(row.move_ms))
+                                .color(theme::text_weak())
                                 .monospace(),
                         );
                     });
@@ -2121,11 +2180,11 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
 
 fn status_pill_parts(status: TournamentStatus) -> (&'static str, &'static str, Color32) {
     match status {
-        TournamentStatus::Running => ("Running", "●", theme::SUCCESS),
-        TournamentStatus::Stopping => ("Stopping", "●", theme::WARN),
-        TournamentStatus::Stopped => ("Stopped", "●", theme::TEXT_WEAK),
-        TournamentStatus::Finished => ("Finished", "●", theme::ACCENT),
-        TournamentStatus::Idle => ("Idle", "○", theme::TEXT_FAINT),
+        TournamentStatus::Running => ("Running", "●", theme::success()),
+        TournamentStatus::Stopping => ("Stopping", "●", theme::warn()),
+        TournamentStatus::Stopped => ("Stopped", "●", theme::text_weak()),
+        TournamentStatus::Finished => ("Finished", "●", theme::accent()),
+        TournamentStatus::Idle => ("Idle", "○", theme::text_faint()),
     }
 }
 
@@ -2133,8 +2192,8 @@ fn status_pill_parts(status: TournamentStatus) -> (&'static str, &'static str, C
 /// no live driver, so nothing is actually playing: it shows as Stopped.
 fn status_parts(status: &str) -> (&'static str, Color32) {
     match status {
-        "finished" => ("Finished", theme::ACCENT),
-        _ => ("Stopped", theme::WARN),
+        "finished" => ("Finished", theme::accent()),
+        _ => ("Stopped", theme::warn()),
     }
 }
 
@@ -2231,6 +2290,24 @@ fn format_duration(secs: f64) -> String {
     }
 }
 
+/// Mean search depth: one decimal, em-dash when never reported.
+fn format_depth(depth: Option<f64>) -> String {
+    match depth {
+        Some(d) => format!("{d:.1}"),
+        None => "\u{2014}".to_string(),
+    }
+}
+
+/// Mean time per move: milliseconds below one second, else seconds with one
+/// decimal; em-dash when no moves were timed.
+fn format_move_time(ms: Option<f64>) -> String {
+    match ms {
+        Some(ms) if ms < 1000.0 => format!("{ms:.0}ms"),
+        Some(ms) => format!("{:.1}s", ms / 1000.0),
+        None => "\u{2014}".to_string(),
+    }
+}
+
 fn format_nps(nps: Option<u64>) -> String {
     match nps {
         None => "—".to_string(),
@@ -2271,6 +2348,8 @@ mod tests {
             time_losses: 0,
             crash_losses: 0,
             nps,
+            depth: None,
+            move_ms: None,
         }
     }
 

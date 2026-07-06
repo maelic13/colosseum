@@ -8,7 +8,14 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-*(nothing yet — next features are in the Deferred list in GUIDE.md)*
+### Added
+- "Time/move" column in the live and history results tables: mean wall-clock time per move per engine
+- "Avg depth" column in the live and history results tables: mean search depth per engine (averaged per move within a game, then across games), persisted per game in the database
+- Theme setting: Dark / Light / System (follows the OS), switchable from the status bar and persisted in `config.toml`
+- One-step build scripts (`build_macos.sh`, `build_linux.sh`, `build_windows.ps1`) that place the distributable in `dist/`; the macOS one assembles a double-clickable `Colosseum.app` (no Terminal window)
+
+### Fixed
+- The live "Playing" panel now shows all in-flight games; it previously lagged one behind the parallel-games limit and kept killed games listed after Force-Stop
 
 ---
 

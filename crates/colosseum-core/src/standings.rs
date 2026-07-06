@@ -31,8 +31,8 @@ impl HeadToHead {
     }
 }
 
-/// One engine's overall record plus nps accumulation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// One engine's overall record plus nps and search-depth accumulation.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct EngineStanding {
     pub wins: u32,
     pub draws: u32,
@@ -43,6 +43,10 @@ pub struct EngineStanding {
     pub crash_losses: u32,
     nps_total: u128,
     nps_samples: u64,
+    depth_total: f64,
+    depth_samples: u64,
+    move_ms_total: f64,
+    move_ms_samples: u64,
 }
 
 impl EngineStanding {
@@ -66,10 +70,30 @@ impl EngineStanding {
             Some((self.nps_total / u128::from(self.nps_samples)) as u64)
         }
     }
+
+    /// Average search depth across sampled games, if any were sampled.
+    #[must_use]
+    pub fn avg_depth(&self) -> Option<f64> {
+        if self.depth_samples == 0 {
+            None
+        } else {
+            Some(self.depth_total / self.depth_samples as f64)
+        }
+    }
+
+    /// Average wall-clock milliseconds per move across sampled games.
+    #[must_use]
+    pub fn avg_move_ms(&self) -> Option<f64> {
+        if self.move_ms_samples == 0 {
+            None
+        } else {
+            Some(self.move_ms_total / self.move_ms_samples as f64)
+        }
+    }
 }
 
 /// A finished game's outcome, fed into [`Standings::record`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GameOutcome {
     pub white: EngineId,
     pub black: EngineId,
@@ -77,6 +101,12 @@ pub struct GameOutcome {
     pub termination: Termination,
     pub white_nps: Option<u64>,
     pub black_nps: Option<u64>,
+    /// Mean search depth over each engine's moves in this game.
+    pub white_depth: Option<f64>,
+    pub black_depth: Option<f64>,
+    /// Mean wall-clock milliseconds per move for each engine in this game.
+    pub white_move_ms: Option<f64>,
+    pub black_move_ms: Option<f64>,
 }
 
 /// One game's result from a specific engine's perspective, in played order.
@@ -127,6 +157,14 @@ impl Standings {
                 white.nps_total += u128::from(nps);
                 white.nps_samples += 1;
             }
+            if let Some(depth) = outcome.white_depth {
+                white.depth_total += depth;
+                white.depth_samples += 1;
+            }
+            if let Some(ms) = outcome.white_move_ms {
+                white.move_ms_total += ms;
+                white.move_ms_samples += 1;
+            }
         }
         {
             let black = self.per_engine.entry(outcome.black).or_default();
@@ -138,6 +176,14 @@ impl Standings {
             if let Some(nps) = outcome.black_nps {
                 black.nps_total += u128::from(nps);
                 black.nps_samples += 1;
+            }
+            if let Some(depth) = outcome.black_depth {
+                black.depth_total += depth;
+                black.depth_samples += 1;
+            }
+            if let Some(ms) = outcome.black_move_ms {
+                black.move_ms_total += ms;
+                black.move_ms_samples += 1;
             }
         }
 
@@ -260,6 +306,10 @@ mod tests {
             termination: Termination::Checkmate,
             white_nps: Some(1_000_000),
             black_nps: Some(2_000_000),
+            white_depth: Some(20.0),
+            black_depth: Some(10.0),
+            white_move_ms: Some(100.0),
+            black_move_ms: Some(300.0),
         }
     }
 
@@ -297,6 +347,12 @@ mod tests {
         // a sampled 1.0M then 2.0M -> 1.5M; b sampled 2.0M then 1.0M -> 1.5M.
         assert_eq!(s.standing(a).avg_nps(), Some(1_500_000));
         assert_eq!(s.standing(b).avg_nps(), Some(1_500_000));
+        // Depth mirrors the same per-color sampling: both average 15.
+        assert_eq!(s.standing(a).avg_depth(), Some(15.0));
+        assert_eq!(s.standing(b).avg_depth(), Some(15.0));
+        // Time/move likewise: both average 200 ms.
+        assert_eq!(s.standing(a).avg_move_ms(), Some(200.0));
+        assert_eq!(s.standing(b).avg_move_ms(), Some(200.0));
     }
 
     #[test]

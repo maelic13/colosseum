@@ -39,13 +39,13 @@ pub fn match_stats_card(ui: &mut Ui, participants: &[(EngineId, String)], standi
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(format!("{a_name}: {score:.1} / {n}"))
-                        .color(theme::TEXT)
+                        .color(theme::text())
                         .font(theme::semibold(13.0)),
                 );
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(format!("(+{w} ={d} -{l})"))
-                        .color(theme::TEXT_WEAK)
+                        .color(theme::text_weak())
                         .size(12.5),
                 );
             });
@@ -56,9 +56,9 @@ pub fn match_stats_card(ui: &mut Ui, participants: &[(EngineId, String)], standi
                 match elo_with_error(w, d, l, Z_95) {
                     Some(est) => {
                         let c = if est.elo >= 0.0 {
-                            theme::SUCCESS
+                            theme::success()
                         } else {
-                            theme::DANGER
+                            theme::danger()
                         };
                         stat(ui, "Elo");
                         ui.label(
@@ -73,7 +73,7 @@ pub fn match_stats_card(ui: &mut Ui, participants: &[(EngineId, String)], standi
                     }
                     None => {
                         stat(ui, "Elo");
-                        ui.label(RichText::new("—").color(theme::TEXT_FAINT).size(13.0))
+                        ui.label(RichText::new("—").color(theme::text_faint()).size(13.0))
                             .on_hover_text("Undefined until there is at least one win and one loss.");
                     }
                 }
@@ -85,7 +85,7 @@ pub fn match_stats_card(ui: &mut Ui, participants: &[(EngineId, String)], standi
                 stat(ui, "LOS");
                 ui.label(
                     RichText::new(format!("{los_pct:.1}%"))
-                        .color(theme::TEXT)
+                        .color(theme::text())
                         .font(theme::semibold(13.0)),
                 )
                 .on_hover_text("Likelihood of superiority: probability A is stronger than B.");
@@ -95,14 +95,14 @@ pub fn match_stats_card(ui: &mut Ui, participants: &[(EngineId, String)], standi
                 // SPRT.
                 let r = sprt(w, d, l, SPRT_ELO0, SPRT_ELO1, SPRT_ALPHA, SPRT_BETA);
                 let (verdict, vc) = match r.decision {
-                    SprtDecision::AcceptH1 => ("H1 accepted", theme::SUCCESS),
-                    SprtDecision::AcceptH0 => ("H0 accepted", theme::DANGER),
-                    SprtDecision::Continue => ("continue", theme::TEXT_WEAK),
+                    SprtDecision::AcceptH1 => ("H1 accepted", theme::success()),
+                    SprtDecision::AcceptH0 => ("H0 accepted", theme::danger()),
+                    SprtDecision::Continue => ("continue", theme::text_weak()),
                 };
                 stat(ui, "SPRT");
                 ui.label(
                     RichText::new(format!("LLR {:.2}", r.llr))
-                        .color(theme::TEXT)
+                        .color(theme::text())
                         .font(theme::semibold(13.0)),
                 )
                 .on_hover_text(format!(
@@ -118,6 +118,6 @@ pub fn match_stats_card(ui: &mut Ui, participants: &[(EngineId, String)], standi
 
 /// A dim caption label preceding a statistic value.
 fn stat(ui: &mut Ui, label: &str) {
-    ui.label(RichText::new(label).color(theme::TEXT_FAINT).size(12.0));
+    ui.label(RichText::new(label).color(theme::text_faint()).size(12.0));
     ui.add_space(2.0);
 }

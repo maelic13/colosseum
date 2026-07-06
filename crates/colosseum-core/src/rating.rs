@@ -294,6 +294,10 @@ mod tests {
             termination: Termination::Checkmate,
             white_nps: None,
             black_nps: None,
+            white_depth: None,
+            black_depth: None,
+            white_move_ms: None,
+            black_move_ms: None,
         }
     }
 

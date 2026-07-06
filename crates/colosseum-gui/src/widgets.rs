@@ -18,9 +18,9 @@ pub fn pill_tab(ui: &mut Ui, label: &str, selected: bool) -> bool {
     let bg_slot = ui.painter().add(egui::Shape::Noop);
 
     let text_color = if selected {
-        theme::ACCENT_BRIGHT
+        theme::accent_bright()
     } else {
-        theme::TEXT_WEAK
+        theme::text_weak()
     };
     let text = if selected {
         RichText::new(label)
@@ -51,9 +51,9 @@ pub fn pill_tab(ui: &mut Ui, label: &str, selected: bool) -> bool {
         .on_hover_cursor(egui::CursorIcon::PointingHand);
 
     let fill = if selected {
-        theme::tint(theme::ACCENT, 0.18)
+        theme::tint(theme::accent(), 0.18)
     } else if click.hovered() {
-        theme::BG_HOVER
+        theme::bg_hover()
     } else {
         Color32::TRANSPARENT
     };
@@ -114,19 +114,19 @@ pub fn section_card<R>(
     body: impl FnOnce(&mut Ui) -> R,
 ) -> R {
     let r = egui::Frame::new()
-        .fill(theme::BG_ELEVATED)
-        .stroke(egui::Stroke::new(1.0, theme::STROKE))
+        .fill(theme::bg_elevated())
+        .stroke(egui::Stroke::new(1.0, theme::stroke()))
         .corner_radius(egui::CornerRadius::same(8))
         .inner_margin(egui::Margin::same(14))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(
                 RichText::new(title)
-                    .color(theme::TEXT)
+                    .color(theme::text())
                     .font(theme::semibold(14.0)),
             );
             if let Some(s) = subtitle {
-                ui.label(RichText::new(s).color(theme::TEXT_WEAK).size(11.5));
+                ui.label(RichText::new(s).color(theme::text_weak()).size(11.5));
             }
             ui.add_space(8.0);
             body(ui)
@@ -139,9 +139,9 @@ pub fn section_card<R>(
 /// Medal badge for ranks 1–3; plain dim number for rank ≥ 4.
 pub fn rank_badge(ui: &mut Ui, rank: usize) {
     let medal = match rank {
-        1 => Some(theme::MEDAL_GOLD),
-        2 => Some(theme::MEDAL_SILVER),
-        3 => Some(theme::MEDAL_BRONZE),
+        1 => Some(theme::medal_gold()),
+        2 => Some(theme::medal_silver()),
+        3 => Some(theme::medal_bronze()),
         _ => None,
     };
     match medal {
@@ -165,7 +165,7 @@ pub fn rank_badge(ui: &mut Ui, rank: usize) {
         None => {
             ui.label(
                 RichText::new(rank.to_string())
-                    .color(theme::TEXT_FAINT)
+                    .color(theme::text_faint())
                     .monospace(),
             );
         }
@@ -240,7 +240,7 @@ pub fn avatar_color(name: &str) -> Color32 {
         h ^= u32::from(b);
         h = h.wrapping_mul(0x0100_0193);
     }
-    let palette = theme::AVATAR_PALETTE;
+    let palette = theme::avatar_palette();
     palette[(h as usize) % palette.len()]
 }
 
@@ -334,7 +334,7 @@ pub fn dropdown_arrow(ui: &Ui, rect: egui::Rect) {
             c + egui::vec2(r, -r * 0.6),
             c + egui::vec2(0.0, r * 0.9),
         ],
-        theme::TEXT_WEAK,
+        theme::text_weak(),
         egui::Stroke::NONE,
     ));
 }
@@ -343,7 +343,7 @@ pub fn dropdown_arrow(ui: &Ui, rect: egui::Rect) {
 /// Place it to the right of the field it clears; show it only when there is
 /// something to clear.
 pub fn clear_button(ui: &mut Ui) -> egui::Response {
-    ui.add(egui::Button::new(RichText::new("×").color(theme::TEXT_WEAK)))
+    ui.add(egui::Button::new(RichText::new("×").color(theme::text_weak())))
 }
 
 /// The standard filter/search field: fixed 28 pt height with comfortable
@@ -474,15 +474,15 @@ pub fn choice_chip<T: PartialEq>(
 ) -> egui::Response {
     let selected = *current == value;
     let text = RichText::new(label).size(12.5).color(if selected {
-        theme::ACCENT_BRIGHT
+        theme::accent_bright()
     } else {
-        theme::TEXT_WEAK
+        theme::text_weak()
     });
     let mut button = egui::Button::new(text).corner_radius(egui::CornerRadius::same(4));
     if selected {
         button = button
-            .fill(theme::tint(theme::ACCENT, 0.15))
-            .stroke(egui::Stroke::new(1.0, theme::tint(theme::ACCENT, 0.4)));
+            .fill(theme::tint(theme::accent(), 0.15))
+            .stroke(egui::Stroke::new(1.0, theme::tint(theme::accent(), 0.4)));
     }
     let mut resp = ui.add(button);
     if resp.clicked() && !selected {
@@ -505,16 +505,16 @@ pub fn dots_button(
     let resp = ui.interact(rect, ui.id().with(id_salt), egui::Sense::click());
     let hovered = resp.hovered();
     let fill = if hovered {
-        theme::BG_HOVER
+        theme::bg_hover()
     } else {
-        theme::BG_ELEVATED
+        theme::bg_elevated()
     };
     let stroke_color = if emphasized {
-        theme::ACCENT
+        theme::accent()
     } else if hovered {
-        theme::BORDER_INTERACTIVE
+        theme::border_interactive()
     } else {
-        theme::STROKE
+        theme::stroke()
     };
     ui.painter().rect(
         rect,
@@ -524,11 +524,11 @@ pub fn dots_button(
         egui::StrokeKind::Inside,
     );
     let dot_color = if emphasized {
-        theme::ACCENT
+        theme::accent()
     } else if hovered {
-        theme::TEXT
+        theme::text()
     } else {
-        theme::TEXT_WEAK
+        theme::text_weak()
     };
     let c = rect.center();
     for dx in [-4.0, 0.0, 4.0] {
@@ -566,13 +566,13 @@ pub fn disclosure_triangle(ui: &mut Ui, open: bool, color: Color32) {
 /// Small tinted chip for Elo Δ values. Zero-ish delta shows a plain dim zero.
 pub fn elo_delta_chip(ui: &mut Ui, delta: f64) {
     if delta.abs() <= 0.05 {
-        ui.label(RichText::new("0").color(theme::TEXT_FAINT).monospace());
+        ui.label(RichText::new("0").color(theme::text_faint()).monospace());
         return;
     }
     let (c, sign) = if delta > 0.0 {
-        (theme::SUCCESS, "+")
+        (theme::success(), "+")
     } else {
-        (theme::DANGER, "")
+        (theme::danger(), "")
     };
     egui::Frame::new()
         .fill(theme::tint(c, 0.16))
@@ -598,7 +598,7 @@ pub fn uci_option_row(
     overrides: &mut BTreeMap<String, UciOptionValue>,
     dirty: &mut bool,
 ) {
-    ui.label(RichText::new(opt.name()).color(theme::TEXT_WEAK).size(13.0));
+    ui.label(RichText::new(opt.name()).color(theme::text_weak()).size(13.0));
 
     match opt {
         UciOption::Check { name, default } => {
@@ -629,7 +629,7 @@ pub fn uci_option_row(
             }
             ui.label(
                 RichText::new(format!("({min}–{max})"))
-                    .color(theme::TEXT_FAINT)
+                    .color(theme::text_faint())
                     .size(11.5),
             );
         }
@@ -683,7 +683,7 @@ pub fn uci_option_row(
             } else {
                 "run at game start"
             };
-            let color = if armed { theme::SUCCESS } else { theme::TEXT_WEAK };
+            let color = if armed { theme::success() } else { theme::text_weak() };
             if ui
                 .add(egui::Button::new(RichText::new(label).color(color)))
                 .on_hover_text(if armed {

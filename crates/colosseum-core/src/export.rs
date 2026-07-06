@@ -154,6 +154,10 @@ mod tests {
             termination: crate::game::Termination::Checkmate,
             white_nps: None,
             black_nps: None,
+            white_depth: None,
+            black_depth: None,
+            white_move_ms: None,
+            black_move_ms: None,
         });
         let order = vec![(a, "A".to_string()), (b, "B".to_string())];
         let csv = crosstable_csv(&order, &s);

@@ -92,6 +92,22 @@ cargo build --release --bin colosseum
 #                target\release\colosseum.exe     (Windows)
 ```
 
+### One-step build scripts
+
+Each script builds the optimized binary and puts the distributable artifact
+in `dist/`:
+
+```bash
+./build_macos.sh      # dist/Colosseum.app (double-clickable, no Terminal window)
+./build_linux.sh      # dist/colosseum
+.\build_windows.ps1   # dist\colosseum.exe
+```
+
+macOS note: a bare executable opened from Finder always spawns a Terminal
+window, so the macOS script wraps the binary in a minimal app bundle with a
+Dock icon. The bundle is ad-hoc signed: fine on the machine that built it;
+distributing it to other Macs requires codesigning/notarization.
+
 ### Run tests
 
 ```bash

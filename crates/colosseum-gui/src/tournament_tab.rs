@@ -689,7 +689,7 @@ impl TournamentTab {
             ui.set_width(560.0);
             ui.label(
                 RichText::new(format!("Tournament UCI options — {title}"))
-                    .color(theme::TEXT)
+                    .color(theme::text())
                     .font(theme::semibold(15.0)),
             );
             ui.add_space(2.0);
@@ -698,7 +698,7 @@ impl TournamentTab {
                     "Apply to this tournament only. Overrides beat both the engine's saved \
                      options and the tournament-wide Threads / Hash / Ponder.",
                 )
-                .color(theme::TEXT_WEAK)
+                .color(theme::text_weak())
                 .size(12.0),
             );
             ui.add_space(8.0);
@@ -706,7 +706,7 @@ impl TournamentTab {
             if opts.is_empty() {
                 ui.label(
                     RichText::new("No UCI options detected for this engine.")
-                        .color(theme::TEXT_FAINT)
+                        .color(theme::text_faint())
                         .size(12.5),
                 );
             } else {
@@ -726,7 +726,7 @@ impl TournamentTab {
                                     widgets::uci_option_row(ui, opt, overrides, &mut _dirty);
                                     if overrides.contains_key(opt.name()) {
                                         if ui
-                                            .add(egui::Button::new(RichText::new("×").color(theme::TEXT_FAINT)))
+                                            .add(egui::Button::new(RichText::new("×").color(theme::text_faint())))
                                             .on_hover_text("Remove this override.")
                                             .clicked()
                                         {
@@ -749,7 +749,7 @@ impl TournamentTab {
                         "{n} option{} overridden",
                         if n == 1 { "" } else { "s" }
                     ))
-                    .color(if n > 0 { theme::ACCENT } else { theme::TEXT_FAINT })
+                    .color(if n > 0 { theme::accent() } else { theme::text_faint() })
                     .size(12.0),
                 );
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
@@ -757,10 +757,10 @@ impl TournamentTab {
                         .add(
                             egui::Button::new(
                                 RichText::new("Done")
-                                    .color(theme::BG_DARKEST)
+                                    .color(theme::bg_darkest())
                                     .font(theme::semibold(13.5)),
                             )
-                            .fill(theme::ACCENT),
+                            .fill(theme::accent()),
                         )
                         .clicked()
                     {
@@ -771,7 +771,7 @@ impl TournamentTab {
                         .add_enabled(
                             n > 0,
                             egui::Button::new(
-                                RichText::new("Reset all").color(theme::TEXT_WEAK),
+                                RichText::new("Reset all").color(theme::text_weak()),
                             ),
                         )
                         .on_hover_text("Remove every override — the engine plays with its \
@@ -814,7 +814,7 @@ impl TournamentTab {
             ui.set_width(480.0);
             ui.label(
                 RichText::new("Compatibility notes")
-                    .color(theme::TEXT)
+                    .color(theme::text())
                     .font(theme::semibold(15.0)),
             );
             ui.add_space(2.0);
@@ -823,7 +823,7 @@ impl TournamentTab {
                     "These engines can't fully honour the current tournament settings. \
                      The tournament will still run — with the adjustments below.",
                 )
-                .color(theme::TEXT_WEAK)
+                .color(theme::text_weak())
                 .size(12.0),
             );
             ui.add_space(8.0);
@@ -834,8 +834,8 @@ impl TournamentTab {
                 .show(ui, |ui| {
                     for note in &notes {
                         ui.horizontal_wrapped(|ui| {
-                            ui.label(RichText::new("⚠").color(theme::WARN).size(13.0));
-                            ui.label(RichText::new(note).color(theme::TEXT).size(13.0));
+                            ui.label(RichText::new("⚠").color(theme::warn()).size(13.0));
+                            ui.label(RichText::new(note).color(theme::text()).size(13.0));
                         });
                         ui.add_space(4.0);
                     }
@@ -846,10 +846,10 @@ impl TournamentTab {
                     .add(
                         egui::Button::new(
                             RichText::new("Close")
-                                .color(theme::BG_DARKEST)
+                                .color(theme::bg_darkest())
                                 .font(theme::semibold(13.5)),
                         )
-                        .fill(theme::ACCENT),
+                        .fill(theme::accent()),
                     )
                     .clicked()
                 {
@@ -870,7 +870,7 @@ impl TournamentTab {
         egui::Panel::bottom("tournament_setup_actions")
             .frame(
                 egui::Frame::new()
-                    .fill(theme::BG_DARKEST)
+                    .fill(theme::bg_darkest())
                     .inner_margin(egui::Margin::symmetric(14, 10)),
             )
             .show_inside(ui, |ui| {
@@ -921,11 +921,11 @@ impl TournamentTab {
                 ui.add_space(10.0);
                 ui.label(
                     RichText::new(format!("⚠ {err}"))
-                        .color(theme::DANGER)
+                        .color(theme::danger())
                         .size(13.0),
                 );
                 if ui
-                    .add(egui::Button::new(RichText::new("×").color(theme::TEXT_WEAK)))
+                    .add(egui::Button::new(RichText::new("×").color(theme::text_weak())))
                     .clicked()
                 {
                     self.start_error = None;
@@ -937,10 +937,10 @@ impl TournamentTab {
                     ready,
                     egui::Button::new(
                         RichText::new("Start Tournament")
-                            .color(theme::BG_DARKEST)
+                            .color(theme::bg_darkest())
                             .font(theme::semibold(15.0)),
                     )
-                    .fill(theme::ACCENT)
+                    .fill(theme::accent())
                     .min_size(egui::vec2(0.0, 32.0)),
                 );
                 if start.clicked() {
@@ -960,11 +960,11 @@ impl TournamentTab {
                                     notes.len(),
                                     if notes.len() == 1 { "" } else { "s" }
                                 ))
-                                .color(theme::WARN)
+                                .color(theme::warn())
                                 .size(13.0),
                             )
-                            .fill(theme::tint(theme::WARN, 0.10))
-                            .stroke(egui::Stroke::new(1.0, theme::tint(theme::WARN, 0.30)))
+                            .fill(theme::tint(theme::warn(), 0.10))
+                            .stroke(egui::Stroke::new(1.0, theme::tint(theme::warn(), 0.30)))
                             .corner_radius(egui::CornerRadius::same(6)),
                         );
                         if badge.on_hover_text("Click for details.").clicked() {
@@ -979,13 +979,13 @@ impl TournamentTab {
                         .unwrap_or_default();
                     ui.label(
                         RichText::new(format!("{count} engines · {games} games{duration}"))
-                            .color(theme::TEXT_WEAK)
+                            .color(theme::text_weak())
                             .size(13.0),
                     );
                 } else {
                     ui.label(
                         RichText::new("Select at least two engines to start.")
-                            .color(theme::WARN)
+                            .color(theme::warn())
                             .size(13.0),
                     );
                 }
@@ -1000,19 +1000,33 @@ impl TournamentTab {
         let mut delete_name: Option<String> = None;
         let mut saved = false;
 
-        let menu_resp = ui.menu_button(RichText::new("Presets    ").size(13.0), |ui| {
-                ui.set_min_width(240.0);
+        // Close only on outside clicks: the default close-on-any-click made the
+        // whole menu vanish as soon as the preset-name field was clicked.
+        let (menu_resp, _) = egui::containers::menu::MenuButton::from_button(egui::Button::new(
+            RichText::new("Presets    ").size(13.0),
+        ))
+        .config(
+            egui::containers::menu::MenuConfig::new()
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+        )
+        .ui(ui, |ui| {
+                // Fixed width: the preset list's ScrollArea doesn't shrink
+                // horizontally (`auto_shrink[0] = false`), so without a
+                // ceiling the popup expands all the way to the screen edge.
+                ui.set_width(300.0);
 
                 // ── Save section ──────────────────────────────────────────
                 ui.label(
                     RichText::new("Save current config as:")
-                        .color(theme::TEXT_WEAK)
+                        .color(theme::text_weak())
                         .size(11.5),
                 );
                 ui.horizontal(|ui| {
+                    // Let the name field take the row minus the Save button.
+                    let save_w = 52.0;
                     ui.add(
                         egui::TextEdit::singleline(&mut self.preset_save_name)
-                            .desired_width(152.0)
+                            .desired_width(ui.available_width() - save_w - ui.spacing().item_spacing.x)
                             .hint_text(if self.form.name.is_empty() {
                                 "Preset name"
                             } else {
@@ -1046,13 +1060,20 @@ impl TournamentTab {
                 if cache.is_empty() {
                     ui.label(
                         RichText::new("No presets saved yet.")
-                            .color(theme::TEXT_FAINT)
+                            .color(theme::text_faint())
                             .size(12.0),
                     );
                 } else {
+                    // Let the list grow with its content up to roughly half the
+                    // window before scrolling. `min_scrolled_height` matters:
+                    // its 64 px default let the upward-opening popup squeeze
+                    // the list to a couple of rows plus a scrollbar even
+                    // though there was plenty of screen space to grow into.
+                    let max_h = (ui.ctx().content_rect().height() * 0.5).max(200.0);
                     ScrollArea::vertical()
                         .id_salt("preset_list_scroll")
-                        .max_height(200.0)
+                        .max_height(max_h)
+                        .min_scrolled_height(max_h)
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
                             for (i, preset) in cache.iter().enumerate() {
@@ -1069,12 +1090,13 @@ impl TournamentTab {
                                         .clicked()
                                     {
                                         load_idx = Some(i);
+                                        ui.close();
                                     }
                                     ui.with_layout(
                                         Layout::right_to_left(egui::Align::Center),
                                         |ui| {
                                             if ui
-                                                .add(egui::Button::new(RichText::new("×").color(theme::TEXT_WEAK)))
+                                                .add(egui::Button::new(RichText::new("×").color(theme::text_weak())))
                                                 .on_hover_text("Delete preset")
                                                 .clicked()
                                             {
@@ -1093,7 +1115,7 @@ impl TournamentTab {
                 }
             },
         );
-        widgets::dropdown_arrow(ui, menu_resp.response.rect);
+        widgets::dropdown_arrow(ui, menu_resp.rect);
 
         // Apply deferred actions.
         if let Some(i) = load_idx
@@ -1141,13 +1163,13 @@ impl TournamentTab {
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new("Engines")
-                    .color(theme::TEXT)
+                    .color(theme::text())
                     .font(theme::semibold(15.0)),
             );
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
                     RichText::new(format!("{} selected", self.form.selected.len()))
-                        .color(theme::ACCENT)
+                        .color(theme::accent())
                         .size(12.5),
                 );
             });
@@ -1172,7 +1194,7 @@ impl TournamentTab {
             let h = ui.spacing().interact_size.y;
             if ui
                 .add(
-                    egui::Button::new(RichText::new("Select all").color(theme::TEXT_WEAK))
+                    egui::Button::new(RichText::new("Select all").color(theme::text_weak()))
                         .min_size(egui::vec2(0.0, h)),
                 )
                 .on_hover_text("Select every engine matching the filter.")
@@ -1188,7 +1210,7 @@ impl TournamentTab {
             }
             if ui
                 .add(
-                    egui::Button::new(RichText::new("Clear").color(theme::TEXT_WEAK))
+                    egui::Button::new(RichText::new("Clear").color(theme::text_weak()))
                         .min_size(egui::vec2(0.0, h)),
                 )
                 .clicked()
@@ -1217,17 +1239,17 @@ impl TournamentTab {
                 if backend.engines.is_empty() {
                     ui.add_space(24.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("♟").color(theme::TEXT_FAINT).size(40.0));
+                        ui.label(RichText::new("♟").color(theme::text_faint()).size(40.0));
                         ui.add_space(6.0);
                         ui.label(
                             RichText::new("No engines yet")
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .font(theme::semibold(15.0)),
                         );
                         ui.add_space(4.0);
                         ui.label(
                             RichText::new("Add engines in the Engines tab to get started.")
-                                .color(theme::TEXT_FAINT)
+                                .color(theme::text_faint())
                                 .size(12.5),
                         );
                     });
@@ -1261,7 +1283,7 @@ impl TournamentTab {
                     ui.vertical_centered(|ui| {
                         ui.label(
                             RichText::new("No engines match the filter.")
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(12.5),
                         );
                     });
@@ -1291,14 +1313,14 @@ impl TournamentTab {
         // button) take hover ownership, which would flicker the row state.
         let row_hovered = resp.contains_pointer();
         let fill = if selected {
-            theme::tint(theme::ACCENT, 0.12)
+            theme::tint(theme::accent(), 0.12)
         } else if row_hovered {
-            theme::BG_HOVER
+            theme::bg_hover()
         } else {
             Color32::TRANSPARENT
         };
         let stroke = if selected {
-            egui::Stroke::new(1.0, theme::tint(theme::ACCENT, 0.4))
+            egui::Stroke::new(1.0, theme::tint(theme::accent(), 0.4))
         } else {
             egui::Stroke::NONE
         };
@@ -1360,13 +1382,13 @@ impl TournamentTab {
             if let Some(elo) = engine.meta.elo {
                 ui.label(
                     RichText::new(elo.to_string())
-                        .color(theme::TEXT_FAINT)
+                        .color(theme::text_faint())
                         .monospace()
                         .size(12.0),
                 );
             }
             if n_overrides > 0 {
-                ui.label(RichText::new("●").color(theme::ACCENT).size(9.0))
+                ui.label(RichText::new("●").color(theme::accent()).size(9.0))
                     .on_hover_text(format!(
                         "{n_overrides} UCI option{} overridden for this tournament.",
                         if n_overrides == 1 { "" } else { "s" }
@@ -1378,9 +1400,9 @@ impl TournamentTab {
                     egui::Label::new(
                         RichText::new(&name)
                             .color(if selected {
-                                theme::ACCENT_BRIGHT
+                                theme::accent_bright()
                             } else {
-                                theme::TEXT
+                                theme::text()
                             })
                             .font(theme::semibold(13.0)),
                     )
@@ -1389,13 +1411,13 @@ impl TournamentTab {
                 if !version.is_empty() {
                     ui.add(
                         egui::Label::new(
-                            RichText::new(version).color(theme::TEXT_WEAK).size(11.5),
+                            RichText::new(version).color(theme::text_weak()).size(11.5),
                         )
                         .truncate(),
                     );
                 }
                 if path_missing {
-                    ui.label(RichText::new("⚠").color(theme::WARN).size(12.0))
+                    ui.label(RichText::new("⚠").color(theme::warn()).size(12.0))
                         .on_hover_text("Executable not found at this path.");
                 }
             });
@@ -1501,7 +1523,7 @@ impl TournamentTab {
                     if f.format_kind == FormatKind::Gauntlet {
                         ui.label(
                             RichText::new("Gauntlet engine")
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(13.0),
                         )
                         .on_hover_text(
@@ -1593,7 +1615,7 @@ impl TournamentTab {
             if games == 0 {
                 ui.label(
                     RichText::new("Select at least two engines to see the schedule.")
-                        .color(theme::TEXT_FAINT)
+                        .color(theme::text_faint())
                         .size(12.5),
                 );
             } else {
@@ -1604,14 +1626,14 @@ impl TournamentTab {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     let dot = |ui: &mut Ui| {
-                        ui.label(RichText::new("·").color(theme::TEXT_FAINT).size(12.5));
+                        ui.label(RichText::new("·").color(theme::text_faint()).size(12.5));
                     };
                     ui.label(
                         RichText::new(format!(
                             "{n_engines} engine{}",
                             if n_engines == 1 { "" } else { "s" }
                         ))
-                        .color(theme::TEXT)
+                        .color(theme::text())
                         .font(theme::semibold(12.5)),
                     );
                     dot(ui);
@@ -1620,7 +1642,7 @@ impl TournamentTab {
                             "{games} game{}",
                             if games == 1 { "" } else { "s" }
                         ))
-                        .color(theme::TEXT)
+                        .color(theme::text())
                         .font(theme::semibold(12.5)),
                     );
                     if let Some(total) = f.estimated_duration_secs() {
@@ -1628,7 +1650,7 @@ impl TournamentTab {
                         dot(ui);
                         ui.label(
                             RichText::new(format!("~{}", format_duration(total)))
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(12.5),
                         )
                         .on_hover_text(format!(
@@ -1713,12 +1735,12 @@ impl TournamentTab {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         ui.label(
                             RichText::new("1 game:")
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(12.5),
                         );
                         ui.label(
                             RichText::new(format!("~{}", format_duration(d)))
-                                .color(theme::TEXT)
+                                .color(theme::text())
                                 .font(theme::semibold(12.5)),
                         )
                         .on_hover_text(format!(
@@ -1731,7 +1753,7 @@ impl TournamentTab {
                 None => {
                     ui.label(
                         RichText::new("1 game: depends on engine speed")
-                            .color(theme::TEXT_FAINT)
+                            .color(theme::text_faint())
                             .size(12.5),
                     );
                 }
@@ -1780,7 +1802,7 @@ impl TournamentTab {
                         "Tablebases (paths, caches, Syzygy 50-move rule & probe limit, \
                          Gaviota compression) are configured globally in the Engines tab.",
                     )
-                    .color(theme::TEXT_FAINT)
+                    .color(theme::text_faint())
                     .size(11.5),
                 );
             },
@@ -1907,7 +1929,7 @@ impl TournamentTab {
                             WritebackKind::Estimate => {
                                 ui.label(
                                     RichText::new("Engine")
-                                        .color(theme::TEXT_WEAK)
+                                        .color(theme::text_weak())
                                         .size(13.0),
                                 )
                                 .on_hover_text(
@@ -1977,7 +1999,7 @@ impl TournamentTab {
                         f.refresh_openings_preview();
                     }
                     if ui
-                        .add(egui::Button::new(RichText::new("Browse…").color(theme::TEXT_WEAK)))
+                        .add(egui::Button::new(RichText::new("Browse…").color(theme::text_weak())))
                         .clicked()
                         && let Some(path) = crate::dialog::file_dialog()
                             .set_title("Choose opening book")
@@ -2087,13 +2109,13 @@ impl TournamentTab {
                     Some(Ok((count, sample))) => {
                         ui.label(
                             RichText::new(format!("{count} openings loaded"))
-                                .color(theme::SUCCESS)
+                                .color(theme::success())
                                 .size(12.0),
                         );
                         if let Some(label) = sample {
                             ui.label(
                                 RichText::new(format!("e.g. {}", truncate(label, 60)))
-                                    .color(theme::TEXT_WEAK)
+                                    .color(theme::text_weak())
                                     .size(11.5),
                             );
                         }
@@ -2101,14 +2123,14 @@ impl TournamentTab {
                     Some(Err(e)) => {
                         ui.label(
                             RichText::new(format!("⚠ {e}"))
-                                .color(theme::DANGER)
+                                .color(theme::danger())
                                 .size(12.0),
                         );
                     }
                     None => {
                         ui.label(
                             RichText::new("Choose a file to preview its openings.")
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(11.5),
                         );
                     }
@@ -2129,7 +2151,7 @@ impl TournamentTab {
                 )
                 .on_hover_text("Finished games are appended to this PGN file as they end.");
                 if ui
-                    .add(egui::Button::new(RichText::new("Browse…").color(theme::TEXT_WEAK)))
+                    .add(egui::Button::new(RichText::new("Browse…").color(theme::text_weak())))
                     .clicked()
                     && let Some(path) = crate::dialog::file_dialog()
                         .set_title("Choose PGN output file")
@@ -2146,12 +2168,12 @@ impl TournamentTab {
 // ── Small helpers ───────────────────────────────────────────────────────────────
 
 fn field_label(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).color(theme::TEXT_WEAK).size(13.0));
+    ui.label(RichText::new(text).color(theme::text_weak()).size(13.0));
 }
 
 /// The one-line explanation under the time-control fields.
 fn tc_hint(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).color(theme::TEXT_WEAK).size(11.5));
+    ui.label(RichText::new(text).color(theme::text_weak()).size(11.5));
 }
 
 /// "Name version" display string for an engine (version omitted when empty).

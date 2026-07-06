@@ -71,7 +71,10 @@ pub struct ColosseumApp {
 impl ColosseumApp {
     /// Construct the app, applying the theme to the egui context.
     pub fn new(cc: &eframe::CreationContext<'_>, backend: Backend) -> Self {
-        theme::apply(&cc.egui_ctx);
+        theme::apply(
+            &cc.egui_ctx,
+            theme::ThemeChoice::from_config(&backend.config.theme),
+        );
 
         // Capture the window/display handles so native file dialogs open on the
         // same monitor as Colosseum instead of drifting to another screen.
@@ -150,20 +153,20 @@ impl ColosseumApp {
 
         let modal = egui::Modal::new(egui::Id::new("close_confirm")).show(ctx, |ui| {
             ui.set_width(400.0);
-            ui.label(RichText::new("Quit Colosseum?").size(18.0).strong().color(theme::TEXT));
+            ui.label(RichText::new("Quit Colosseum?").size(18.0).strong().color(theme::text()));
             ui.add_space(8.0);
             ui.label(
                 RichText::new(
                     "A tournament is still running. Choose how to handle the games in \
                      progress before quitting.",
                 )
-                .color(theme::TEXT_WEAK),
+                .color(theme::text_weak()),
             );
             ui.add_space(16.0);
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // Right-to-left: add rightmost item first.
-                if widgets::tinted_button(ui, "Force-stop & quit", theme::DANGER, true)
+                if widgets::tinted_button(ui, "Force-stop & quit", theme::danger(), true)
                     .on_hover_text("Abort in-flight games (discarding them) and quit immediately.")
                     .clicked()
                 {
@@ -174,10 +177,10 @@ impl ColosseumApp {
                     .add(
                         egui::Button::new(
                             RichText::new("Stop & quit")
-                                .color(theme::BG_DARKEST)
+                                .color(theme::bg_darkest())
                                 .strong(),
                         )
-                        .fill(theme::ACCENT),
+                        .fill(theme::accent()),
                     )
                     .on_hover_text(
                         "Let in-flight games finish and record their results, then quit.",
@@ -189,9 +192,9 @@ impl ColosseumApp {
                 ui.add_space(4.0);
                 if ui
                     .add(
-                        egui::Button::new(RichText::new("Keep running").color(theme::TEXT))
-                            .fill(theme::BG_ELEVATED)
-                            .stroke(egui::Stroke::new(1.0, theme::STROKE)),
+                        egui::Button::new(RichText::new("Keep running").color(theme::text()))
+                            .fill(theme::bg_elevated())
+                            .stroke(egui::Stroke::new(1.0, theme::stroke())),
                     )
                     .clicked()
                 {
@@ -235,7 +238,7 @@ impl ColosseumApp {
         egui::Panel::top("header")
             .frame(
                 egui::Frame::default()
-                    .fill(theme::BG_DARKEST)
+                    .fill(theme::bg_darkest())
                     .inner_margin(egui::Margin::symmetric(16, 8)),
             )
             .show_inside(ui, |ui| {
@@ -246,7 +249,7 @@ impl ColosseumApp {
                         RichText::new(DISPLAY_NAME)
                             .size(17.0)
                             .strong()
-                            .color(theme::TEXT),
+                            .color(theme::text()),
                     );
                     ui.add_space(20.0);
 
@@ -265,11 +268,11 @@ impl ColosseumApp {
                     // Right-aligned: live tournament status pill.
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let (label, dot, color) = match self.backend.status() {
-                            Some(TournamentStatus::Running) => ("Running", "●", theme::SUCCESS),
-                            Some(TournamentStatus::Stopping) => ("Stopping", "●", theme::WARN),
-                            Some(TournamentStatus::Stopped) => ("Stopped", "●", theme::TEXT_WEAK),
-                            Some(TournamentStatus::Finished) => ("Finished", "●", theme::ACCENT),
-                            Some(TournamentStatus::Idle) | None => ("Idle", "○", theme::TEXT_FAINT),
+                            Some(TournamentStatus::Running) => ("Running", "●", theme::success()),
+                            Some(TournamentStatus::Stopping) => ("Stopping", "●", theme::warn()),
+                            Some(TournamentStatus::Stopped) => ("Stopped", "●", theme::text_weak()),
+                            Some(TournamentStatus::Finished) => ("Finished", "●", theme::accent()),
+                            Some(TournamentStatus::Idle) | None => ("Idle", "○", theme::text_faint()),
                         };
                         widgets::status_pill(ui, label, dot, color);
                     });
@@ -277,33 +280,54 @@ impl ColosseumApp {
             });
     }
 
-    /// The bottom status bar: version + engine count. (The tournament status
-    /// pill lives only in the header — one source of truth, visible on every
-    /// tab.)
-    fn status_bar(&self, ui: &mut Ui) {
+    /// The bottom status bar: theme switcher, version + engine count. (The
+    /// tournament status pill lives only in the header — one source of truth,
+    /// visible on every tab.)
+    fn status_bar(&mut self, ui: &mut Ui) {
         egui::Panel::bottom("status_bar")
             .frame(
                 egui::Frame::default()
-                    .fill(theme::BG_DARKEST)
+                    .fill(theme::bg_darkest())
                     .inner_margin(egui::Margin::symmetric(14, 6)),
             )
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
+                    self.theme_switcher(ui);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
                             RichText::new(format!("{} engines", self.backend.engines.len()))
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(12.0),
                         );
-                        ui.label(RichText::new("·").color(theme::TEXT_FAINT).size(12.0));
+                        ui.label(RichText::new("·").color(theme::text_faint()).size(12.0));
                         ui.label(
                             RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
-                                .color(theme::TEXT_WEAK)
+                                .color(theme::text_weak())
                                 .size(12.0),
                         );
                     });
                 });
             });
+    }
+
+    /// A compact theme dropdown (Dark / Light / System) in the status bar,
+    /// using the app-standard [`widgets::select`] so the popup gets the same
+    /// padding and alignment as every other dropdown.
+    fn theme_switcher(&mut self, ui: &mut Ui) {
+        let current = theme::ThemeChoice::from_config(&self.backend.config.theme);
+        widgets::select(ui, "theme_select", current.label(), 96.0, |ui| {
+            for choice in theme::ThemeChoice::ALL {
+                if ui
+                    .selectable_label(choice == current, choice.label())
+                    .clicked()
+                {
+                    self.backend.config.theme = choice.as_config().to_string();
+                    theme::set_choice(ui.ctx(), choice);
+                    self.backend.save_config();
+                    ui.close();
+                }
+            }
+        });
     }
 
     /// The central tab body. A `CentralPanel` (not a bare frame) so content is
@@ -313,7 +337,7 @@ impl ColosseumApp {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::default()
-                    .fill(theme::BG_PANEL)
+                    .fill(theme::bg_panel())
                     .inner_margin(egui::Margin::same(16)),
             )
             .show_inside(ui, |ui| match self.tab {
@@ -337,6 +361,11 @@ impl ColosseumApp {
 impl eframe::App for ColosseumApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+
+        // Track the effective theme before painting anything: with "System"
+        // the OS can flip dark/light between frames, and the custom-painted
+        // chrome (theme::* colors) must follow in the same frame.
+        theme::sync_active(&ctx);
 
         if let Some(interval) = self.backend.poll() {
             ctx.request_repaint_after(interval);
@@ -385,10 +414,10 @@ fn logo(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let painter = ui.painter();
     let center = rect.center();
-    painter.circle_stroke(center, 8.5, egui::Stroke::new(2.2, theme::ACCENT));
+    painter.circle_stroke(center, 8.5, egui::Stroke::new(2.2, theme::accent()));
     painter.circle_stroke(
         center,
         4.0,
-        egui::Stroke::new(1.8, theme::ACCENT.gamma_multiply(0.8)),
+        egui::Stroke::new(1.8, theme::accent().gamma_multiply(0.8)),
     );
 }

@@ -53,11 +53,17 @@ pub enum Termination {
 }
 
 /// Per-game statistics surfaced in the results table (extensible).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct GameStats {
     pub plies: u32,
     pub white_nps: Option<u64>,
     pub black_nps: Option<u64>,
+    /// Mean search depth across this engine's moves in the game.
+    pub white_depth: Option<f64>,
+    pub black_depth: Option<f64>,
+    /// Mean wall-clock milliseconds this engine spent per move in the game.
+    pub white_move_ms: Option<f64>,
+    pub black_move_ms: Option<f64>,
     /// Wall-clock duration of the game in milliseconds (None for aborted/setup-failure games).
     pub duration_ms: Option<u64>,
 }

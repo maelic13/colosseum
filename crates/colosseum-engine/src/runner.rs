@@ -99,6 +99,52 @@ impl NpsAccumulator {
     }
 }
 
+/// Per-side running average of reported search depth.
+#[derive(Default)]
+struct DepthAccumulator {
+    total: u64,
+    samples: u64,
+}
+
+impl DepthAccumulator {
+    fn add(&mut self, depth: Option<u32>) {
+        if let Some(depth) = depth {
+            self.total += u64::from(depth);
+            self.samples += 1;
+        }
+    }
+
+    fn average(&self) -> Option<f64> {
+        if self.samples == 0 {
+            None
+        } else {
+            Some(self.total as f64 / self.samples as f64)
+        }
+    }
+}
+
+/// Per-side running average of wall-clock time spent per move.
+#[derive(Default)]
+struct MoveTimeAccumulator {
+    total_ms: u128,
+    samples: u64,
+}
+
+impl MoveTimeAccumulator {
+    fn add(&mut self, elapsed: std::time::Duration) {
+        self.total_ms += elapsed.as_millis();
+        self.samples += 1;
+    }
+
+    fn average_ms(&self) -> Option<f64> {
+        if self.samples == 0 {
+            None
+        } else {
+            Some(self.total_ms as f64 / self.samples as f64)
+        }
+    }
+}
+
 /// The result of preparing one engine for a game. (The `Ready` variant holds
 /// the full process inline; this enum is short-lived and immediately matched,
 /// so the size difference between variants is immaterial.)
@@ -171,6 +217,10 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
     let mut repetitions: HashMap<Zobrist64, u8> = HashMap::new();
     let mut white_nps = NpsAccumulator::default();
     let mut black_nps = NpsAccumulator::default();
+    let mut white_depth = DepthAccumulator::default();
+    let mut black_depth = DepthAccumulator::default();
+    let mut white_move_time = MoveTimeAccumulator::default();
+    let mut black_move_time = MoveTimeAccumulator::default();
 
     // Pre-play the assigned opening moves before the engines take over. These
     // were validated when the book was loaded, but we re-validate defensively.
@@ -219,8 +269,12 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
 
         if mover == Color::White {
             white_nps.add(output.nps);
+            white_depth.add(output.depth);
+            white_move_time.add(output.elapsed);
         } else {
             black_nps.add(output.nps);
+            black_depth.add(output.depth);
+            black_move_time.add(output.elapsed);
         }
 
         // Deduct the time used from the mover's clock (clock-based controls only)
@@ -320,6 +374,10 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         plies: san_moves.len() as u32,
         white_nps: white_nps.average(),
         black_nps: black_nps.average(),
+        white_depth: white_depth.average(),
+        black_depth: black_depth.average(),
+        white_move_ms: white_move_time.average_ms(),
+        black_move_ms: black_move_time.average_ms(),
         duration_ms: Some(game_start.elapsed().as_millis() as u64),
     };
     let pgn = render_pgn(&spec, &san_moves, outcome.result, outcome.termination);

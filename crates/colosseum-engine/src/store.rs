@@ -51,6 +51,12 @@ pub struct GameRow {
     pub termination: Option<Termination>,
     pub white_nps: Option<u64>,
     pub black_nps: Option<u64>,
+    /// Mean search depth over each engine's moves in this game.
+    pub white_depth: Option<f64>,
+    pub black_depth: Option<f64>,
+    /// Mean wall-clock milliseconds per move for each engine in this game.
+    pub white_move_ms: Option<f64>,
+    pub black_move_ms: Option<f64>,
     pub plies: Option<u32>,
     pub pgn: Option<String>,
     pub status: String,
@@ -124,7 +130,14 @@ impl Store {
             )?;
         }
         // Migration: per-game opening columns, introduced in Step 10.
-        for column in ["start_fen TEXT", "opening_moves TEXT"] {
+        for column in [
+            "start_fen TEXT",
+            "opening_moves TEXT",
+            "white_depth REAL",
+            "black_depth REAL",
+            "white_move_ms REAL",
+            "black_move_ms REAL",
+        ] {
             let name = column.split_whitespace().next().unwrap();
             let exists: bool = conn
                 .query_row(
@@ -390,6 +403,8 @@ impl Store {
             "UPDATE games
              SET status = ?2, result = NULL, termination = NULL,
                  white_nps = NULL, black_nps = NULL, plies = NULL, pgn = NULL,
+                 white_depth = NULL, black_depth = NULL,
+                 white_move_ms = NULL, black_move_ms = NULL,
                  started_at = NULL, finished_at = NULL
              WHERE tournament_id = ?1 AND status IN (?3, ?4)",
             params![
@@ -467,12 +482,17 @@ impl Store {
         termination: Termination,
         white_nps: Option<u64>,
         black_nps: Option<u64>,
+        white_depth: Option<f64>,
+        black_depth: Option<f64>,
+        white_move_ms: Option<f64>,
+        black_move_ms: Option<f64>,
         plies: u32,
         pgn: &str,
     ) -> Result<()> {
         self.conn.execute(
             "UPDATE games SET status = ?2, result = ?3, termination = ?4,
-               white_nps = ?5, black_nps = ?6, plies = ?7, pgn = ?8, finished_at = ?9
+               white_nps = ?5, black_nps = ?6, plies = ?7, pgn = ?8, finished_at = ?9,
+               white_depth = ?10, black_depth = ?11, white_move_ms = ?12, black_move_ms = ?13
              WHERE id = ?1",
             params![
                 id.to_string(),
@@ -484,6 +504,10 @@ impl Store {
                 plies,
                 pgn,
                 now_iso8601(),
+                white_depth,
+                black_depth,
+                white_move_ms,
+                black_move_ms,
             ],
         )?;
         Ok(())
@@ -493,7 +517,8 @@ impl Store {
     pub fn list_games(&self, tournament: TournamentId) -> Result<Vec<GameRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, round, white_id, black_id, result, termination,
-                    white_nps, black_nps, plies, pgn, status, start_fen, opening_moves
+                    white_nps, black_nps, plies, pgn, status, start_fen, opening_moves,
+                    white_depth, black_depth, white_move_ms, black_move_ms
              FROM games WHERE tournament_id = ?1 ORDER BY round, rowid",
         )?;
         let rows = stmt.query_map(params![tournament.to_string()], |row| {
@@ -511,6 +536,10 @@ impl Store {
                 status: row.get(10)?,
                 start_fen: row.get(11)?,
                 opening_moves: row.get(12)?,
+                white_depth: row.get(13)?,
+                black_depth: row.get(14)?,
+                white_move_ms: row.get(15)?,
+                black_move_ms: row.get(16)?,
             })
         })?;
         let mut games = Vec::new();
@@ -531,6 +560,10 @@ struct RawGame {
     termination: Option<String>,
     white_nps: Option<i64>,
     black_nps: Option<i64>,
+    white_depth: Option<f64>,
+    black_depth: Option<f64>,
+    white_move_ms: Option<f64>,
+    black_move_ms: Option<f64>,
     plies: Option<u32>,
     pgn: Option<String>,
     status: String,
@@ -557,6 +590,10 @@ impl RawGame {
                 .transpose()?,
             white_nps: self.white_nps.map(|n| n as u64),
             black_nps: self.black_nps.map(|n| n as u64),
+            white_depth: self.white_depth,
+            black_depth: self.black_depth,
+            white_move_ms: self.white_move_ms,
+            black_move_ms: self.black_move_ms,
             plies: self.plies,
             pgn: self.pgn,
             status: self.status,
@@ -614,6 +651,10 @@ CREATE TABLE IF NOT EXISTS games (
   termination   TEXT,
   white_nps     INTEGER,
   black_nps     INTEGER,
+  white_depth   REAL,
+  black_depth   REAL,
+  white_move_ms REAL,
+  black_move_ms REAL,
   plies         INTEGER,
   pgn           TEXT,
   started_at    TEXT,
@@ -669,6 +710,10 @@ mod tests {
                 Termination::Checkmate,
                 None,
                 None,
+                None,
+                None,
+                None,
+                None,
                 10,
                 "pgn",
             )
@@ -718,6 +763,10 @@ mod tests {
                 Termination::Checkmate,
                 Some(1_234_567),
                 Some(2_345_678),
+                Some(21.5),
+                Some(18.0),
+                Some(120.0),
+                Some(95.5),
                 42,
                 "[Event \"Test\"]\n\n1. e4 e5 1-0",
             )
@@ -744,6 +793,11 @@ mod tests {
         assert_eq!(g1.result, Some(GameResult::WhiteWin));
         assert_eq!(g1.termination, Some(Termination::Checkmate));
         assert_eq!(g1.plies, Some(42));
+        assert_eq!(g1.white_nps, Some(1_234_567));
+        assert_eq!(g1.white_depth, Some(21.5));
+        assert_eq!(g1.black_depth, Some(18.0));
+        assert_eq!(g1.white_move_ms, Some(120.0));
+        assert_eq!(g1.black_move_ms, Some(95.5));
         assert_eq!(g1.status, GAME_FINISHED);
         assert_eq!(g1.start_fen, None);
         assert!(g1.opening_moves.is_empty());

@@ -504,6 +504,10 @@ async fn drive(mut driver: Driver) {
                             report.termination,
                             report.stats.white_nps,
                             report.stats.black_nps,
+                            report.stats.white_depth,
+                            report.stats.black_depth,
+                            report.stats.white_move_ms,
+                            report.stats.black_move_ms,
                             report.stats.plies,
                             &report.pgn,
                         );
@@ -516,6 +520,10 @@ async fn drive(mut driver: Driver) {
                             termination: report.termination,
                             white_nps: report.stats.white_nps,
                             black_nps: report.stats.black_nps,
+                            white_depth: report.stats.white_depth,
+                            black_depth: report.stats.black_depth,
+                            white_move_ms: report.stats.white_move_ms,
+                            black_move_ms: report.stats.black_move_ms,
                         });
                         finished_results.push((report.white, report.black, report.result));
                         if driver.config.elo_policy == EloPolicy::PerGame {
@@ -695,6 +703,10 @@ pub fn resume_tournament(
                     termination: game.termination.unwrap_or(Termination::Checkmate),
                     white_nps: game.white_nps,
                     black_nps: game.black_nps,
+                    white_depth: game.white_depth,
+                    black_depth: game.black_depth,
+                    white_move_ms: game.white_move_ms,
+                    black_move_ms: game.black_move_ms,
                 });
                 finished_results.push((game.white, game.black, result));
                 if config.elo_policy == EloPolicy::PerGame {
@@ -851,6 +863,10 @@ pub fn load_tournament_results(
             termination: game.termination.unwrap_or(Termination::Checkmate),
             white_nps: game.white_nps,
             black_nps: game.black_nps,
+            white_depth: game.white_depth,
+            black_depth: game.black_depth,
+            white_move_ms: game.white_move_ms,
+            black_move_ms: game.black_move_ms,
         });
         if config.elo_policy != EloPolicy::Never {
             elo.update(game.white, game.black, result);

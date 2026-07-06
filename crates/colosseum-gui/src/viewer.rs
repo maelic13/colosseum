@@ -95,16 +95,16 @@ impl GameViewer {
     fn body(&mut self, ui: &mut Ui) {
         ui.label(
             RichText::new(&self.header)
-                .color(theme::TEXT)
+                .color(theme::text())
                 .font(theme::semibold(14.0)),
         );
         ui.label(
             RichText::new(format!("Result: {}", self.result))
-                .color(theme::TEXT_WEAK)
+                .color(theme::text_weak())
                 .size(12.5),
         );
         if let Some(note) = &self.note {
-            ui.label(RichText::new(format!("⚠ {note}")).color(theme::WARN).size(12.0));
+            ui.label(RichText::new(format!("⚠ {note}")).color(theme::warn()).size(12.0));
         }
         ui.add_space(6.0);
 
@@ -158,7 +158,7 @@ impl GameViewer {
                     let move_no = i / 2 + 1;
                     ui.label(
                         RichText::new(format!("{move_no}."))
-                            .color(theme::TEXT_FAINT)
+                            .color(theme::text_faint())
                             .monospace(),
                     );
                     // White move (ply i+1 selects board after it).
@@ -201,7 +201,7 @@ impl GameViewer {
             ui.add_space(10.0);
             ui.label(
                 RichText::new(format!("ply {} / {}", self.ply, last))
-                    .color(theme::TEXT_WEAK)
+                    .color(theme::text_weak())
                     .size(12.5),
             );
         });
@@ -258,7 +258,7 @@ impl GameViewer {
         painter.rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, theme::STROKE),
+            Stroke::new(1.0, theme::stroke()),
             egui::StrokeKind::Inside,
         );
     }
@@ -268,10 +268,10 @@ impl GameViewer {
 fn move_button(ui: &mut Ui, san: &str, selected: bool) -> bool {
     let text = RichText::new(san)
         .monospace()
-        .color(if selected { theme::BG_DARKEST } else { theme::TEXT });
+        .color(if selected { theme::bg_darkest() } else { theme::text() });
     let btn = egui::Button::new(text)
         .fill(if selected {
-            theme::ACCENT
+            theme::accent()
         } else {
             Color32::TRANSPARENT
         })
@@ -385,6 +385,10 @@ mod tests {
             termination: None,
             white_nps: None,
             black_nps: None,
+            white_depth: None,
+            black_depth: None,
+            white_move_ms: None,
+            black_move_ms: None,
             plies: None,
             pgn: Some("1. e4 e5 2. Nf3 Nc6 *".to_string()),
             status: "finished".to_string(),

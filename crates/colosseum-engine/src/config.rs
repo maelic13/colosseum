@@ -152,6 +152,8 @@ pub struct AppConfig {
     /// match how the files on disk were compressed. Applied when
     /// `gaviota_path` is set.
     pub gaviota_compression: String,
+    /// UI theme: `"dark"`, `"light"`, or `"system"` (follow the OS).
+    pub theme: String,
     /// Engines-tab card sort order: `"name"`, `"elo"`, or `"author"`.
     pub engines_sort: String,
     /// Tournament-setup engine list sort order (same values as `engines_sort`).
@@ -175,6 +177,7 @@ impl Default for AppConfig {
             syzygy_50_move_rule: true,
             syzygy_probe_limit: 7,
             gaviota_compression: "cp4".to_string(),
+            theme: "system".to_string(),
             engines_sort: "name".to_string(),
             tournament_engines_sort: "name".to_string(),
         }
