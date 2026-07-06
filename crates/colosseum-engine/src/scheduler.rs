@@ -375,6 +375,7 @@ async fn drive(mut driver: Driver) {
 
     loop {
         // Launch while running, with spare capacity and pending games.
+        let mut launched_any = false;
         while running && games.len() < concurrency && next_index < driver.schedule.len() {
             if tournament_started_at.is_none() {
                 tournament_started_at = Some(std::time::Instant::now());
@@ -399,6 +400,16 @@ async fn drive(mut driver: Driver) {
             );
             let spec = build_game_spec(&driver, &scheduled);
             games.spawn(run_game(spec));
+            launched_any = true;
+        }
+        // The GUI's "Playing" panel reads `in_flight_games` from the snapshot;
+        // without this sync it would show the pre-launch list (perpetually
+        // `concurrency - 1` in steady state) until the next game finished.
+        if launched_any && let Ok(mut snap) = driver.snapshot.lock() {
+            snap.in_flight_games = in_flight.values().cloned().collect();
+            if snap.started_at.is_none() {
+                snap.started_at = tournament_started_at;
+            }
         }
 
         // All games launched and drained: the tournament is finished.
@@ -461,7 +472,10 @@ async fn drive(mut driver: Driver) {
                     }
                     running = false;
                     let _ = driver.store.set_tournament_status(driver.id, store::STATUS_STOPPED);
-                    publish_status(&driver.snapshot, TournamentStatus::Stopped);
+                    if let Ok(mut snap) = driver.snapshot.lock() {
+                        snap.status = TournamentStatus::Stopped;
+                        snap.in_flight_games.clear();
+                    }
                 }
                 Some(Command::SetConcurrency(limit)) => {
                     concurrency = limit.max(1);
