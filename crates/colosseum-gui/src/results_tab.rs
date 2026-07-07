@@ -67,6 +67,8 @@ pub struct ResultsTab {
     known_actives: Vec<TournamentId>,
     /// When the list was last re-read from the database (auto-refresh).
     last_refresh: Option<std::time::Instant>,
+    /// Per-tournament live-view (Standings | Live lens) states.
+    live_views: crate::live_view::LiveViews,
 }
 
 impl ResultsTab {
@@ -370,6 +372,22 @@ impl ResultsTab {
                 });
         }
 
+        // Live lens: the whole body is the live game view.
+        if self.live_views.is_watching(id) {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::new().inner_margin(egui::Margin::same(10)))
+                .show_inside(ui, |ui| {
+                    self.live_views.show(
+                        ui,
+                        backend,
+                        id,
+                        &live.in_flight_games,
+                        live.concurrency,
+                    );
+                });
+            return;
+        }
+
         // Side panel: in-flight games + termination breakdown.
         if !live.in_flight_games.is_empty() || !live.termination_counts.is_empty() {
             egui::Panel::right("results_live_side")
@@ -382,7 +400,12 @@ impl ResultsTab {
                         .inner_margin(egui::Margin::same(10)),
                 )
                 .show_inside(ui, |ui| {
-                    live_side_panel(ui, &live);
+                    if let Some(game_id) = live_side_panel(ui, &live)
+                        && let Some(game) =
+                            live.in_flight_games.iter().find(|g| g.game_id == game_id)
+                    {
+                        self.live_views.watch_game(id, game, live.concurrency);
+                    }
                 });
         }
 
@@ -586,8 +609,10 @@ impl ResultsTab {
         live: &LiveData,
     ) {
         let status = live.status;
+        let live_views = &mut self.live_views;
+        let (in_flight, concurrency) = (live.in_flight_games.len(), live.concurrency);
 
-        // ── Row 1: status + name + transport + progress + timing ──
+        // ── Row 1: status + name + transport + progress + lens switcher ──
         ui.horizontal_wrapped(|ui| {
             let (label, dot, color) = status_pill_parts(status);
             widgets::status_pill(ui, label, dot, color);
@@ -713,6 +738,11 @@ impl ResultsTab {
                     }
                 }
             }
+
+            // Lens switcher (Standings | Live) pinned to the row's right edge.
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                live_views.header_controls(ui, id, in_flight, concurrency);
+            });
         });
 
         ui.add_space(8.0);
@@ -1820,7 +1850,9 @@ fn h2h_cell_fill(s: f32) -> Color32 {
 
 // ── Live side panel (currently playing + termination breakdown) ─────────────
 
-fn live_side_panel(ui: &mut Ui, live: &LiveData) {
+/// Returns a game id when a Playing entry is clicked (opens it in Live view).
+fn live_side_panel(ui: &mut Ui, live: &LiveData) -> Option<colosseum_core::GameId> {
+    let mut clicked = None;
     ScrollArea::vertical()
         .id_salt("results_side_scroll")
         .auto_shrink([false, false])
@@ -1835,7 +1867,7 @@ fn live_side_panel(ui: &mut Ui, live: &LiveData) {
                 for game in &live.in_flight_games {
                     let white = live.participant_label(game.white);
                     let black = live.participant_label(game.black);
-                    egui::Frame::new()
+                    let card = egui::Frame::new()
                         .fill(theme::bg_elevated())
                         .corner_radius(egui::CornerRadius::same(4))
                         .inner_margin(egui::Margin::symmetric(6, 4))
@@ -1863,6 +1895,24 @@ fn live_side_panel(ui: &mut Ui, live: &LiveData) {
                                 .truncate(),
                             );
                         });
+                    let resp = ui
+                        .interact(
+                            card.response.rect,
+                            egui::Id::new("playing_card").with(game.game_id),
+                            egui::Sense::click(),
+                        )
+                        .on_hover_text("Watch live");
+                    if resp.hovered() {
+                        ui.painter().rect_stroke(
+                            card.response.rect,
+                            egui::CornerRadius::same(4),
+                            egui::Stroke::new(1.0, theme::accent()),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    if resp.clicked() {
+                        clicked = Some(game.game_id);
+                    }
                     ui.add_space(3.0);
                 }
             }
@@ -1882,8 +1932,8 @@ fn live_side_panel(ui: &mut Ui, live: &LiveData) {
                 termination_breakdown(ui, &live.termination_counts);
             }
         });
+    clicked
 }
-
 fn termination_breakdown(ui: &mut Ui, counts: &HashMap<Termination, usize>) {
     let groups: &[(&str, &[Termination])] = &[
         (

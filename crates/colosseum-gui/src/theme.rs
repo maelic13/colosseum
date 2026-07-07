@@ -107,6 +107,10 @@ pub struct Palette {
     pub warn: Color32,
     /// Negative status (errors, "Force-Stop", losses).
     pub danger: Color32,
+    /// Live-view eval-graph series colors (white/black engine). Bound to the
+    /// engine panels' identity dots so panel ↔ line always match.
+    pub graph_white: Color32,
+    pub graph_black: Color32,
     /// Medal colors for ranks 2–3 in results tables (rank 1 uses the accent).
     pub medal_silver: Color32,
     pub medal_bronze: Color32,
@@ -136,6 +140,8 @@ static DARK: Palette = Palette {
     success: rgb(0x5f, 0xb8, 0x73),
     warn: rgb(0xd9, 0xa5, 0x4f),
     danger: rgb(0xdb, 0x5d, 0x52),
+    graph_white: rgb(0xef, 0x9f, 0x27),
+    graph_black: rgb(0x37, 0x8a, 0xdd),
     medal_silver: rgb(0xaa, 0xb4, 0xc4),
     medal_bronze: rgb(0xc0, 0x82, 0x55),
     avatar: [
@@ -167,6 +173,8 @@ static LIGHT: Palette = Palette {
     success: rgb(0x2f, 0x8f, 0x4e),
     warn: rgb(0xa4, 0x76, 0x1f),
     danger: rgb(0xc0, 0x4a, 0x40),
+    graph_white: rgb(0xba, 0x75, 0x17),
+    graph_black: rgb(0x18, 0x5f, 0xa5),
     medal_silver: rgb(0x7f, 0x8a, 0x9c),
     medal_bronze: rgb(0x9d, 0x64, 0x37),
     avatar: [
@@ -210,6 +218,8 @@ pub fn accent_bright() -> Color32 { palette().accent_bright }
 pub fn success() -> Color32 { palette().success }
 pub fn warn() -> Color32 { palette().warn }
 pub fn danger() -> Color32 { palette().danger }
+pub fn graph_white() -> Color32 { palette().graph_white }
+pub fn graph_black() -> Color32 { palette().graph_black }
 pub fn medal_gold() -> Color32 { palette().accent }
 pub fn medal_silver() -> Color32 { palette().medal_silver }
 pub fn medal_bronze() -> Color32 { palette().medal_bronze }

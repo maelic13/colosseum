@@ -28,6 +28,7 @@ use colosseum_core::{
 use colosseum_uci::SpawnOptions;
 
 use crate::error::EngineError;
+use crate::live::{LiveGameHandle, LiveGameState};
 use crate::openings::{ResolvedOpening, load_openings};
 use crate::runner::{EngineGameSpec, GameSpec, run_game};
 use crate::store::{self, Store, TournamentRow};
@@ -80,6 +81,11 @@ pub struct InFlightGame {
     pub white: EngineId,
     pub black: EngineId,
     pub round: u32,
+    /// Order the game was launched in (monotonic per driver); the live view
+    /// uses it to find the newest game when auto-following.
+    pub launch_seq: u64,
+    /// Live state written by the runner, read by the GUI's live view.
+    pub live: LiveGameHandle,
 }
 
 /// A consistent snapshot of tournament state for the GUI to render.
@@ -365,6 +371,7 @@ async fn drive(mut driver: Driver) {
 
     let mut games: JoinSet<crate::runner::GameReport> = JoinSet::new();
     let mut in_flight: HashMap<GameId, InFlightGame> = HashMap::new();
+    let mut launch_seq = 0u64;
     let mut next_index = 0usize;
     let mut running = false;
     let mut finished = false;
@@ -389,6 +396,21 @@ async fn drive(mut driver: Driver) {
                 black: scheduled.pairing.black,
                 round: scheduled.pairing.round,
             });
+            let live: LiveGameHandle = LiveGameState::new_handle(
+                scheduled.game_id,
+                scheduled.pairing.round,
+                (
+                    scheduled.pairing.white,
+                    driver.templates[&scheduled.pairing.white].name.clone(),
+                ),
+                (
+                    scheduled.pairing.black,
+                    driver.templates[&scheduled.pairing.black].name.clone(),
+                ),
+                scheduled.start_fen.clone(),
+                driver.config.time_control,
+            );
+            launch_seq += 1;
             in_flight.insert(
                 scheduled.game_id,
                 InFlightGame {
@@ -396,10 +418,12 @@ async fn drive(mut driver: Driver) {
                     white: scheduled.pairing.white,
                     black: scheduled.pairing.black,
                     round: scheduled.pairing.round,
+                    launch_seq,
+                    live: Arc::clone(&live),
                 },
             );
             let spec = build_game_spec(&driver, &scheduled);
-            games.spawn(run_game(spec));
+            games.spawn(run_game(spec, live));
             launched_any = true;
         }
         // The GUI's "Playing" panel reads `in_flight_games` from the snapshot;

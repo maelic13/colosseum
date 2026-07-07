@@ -10,6 +10,7 @@ pub mod config;
 pub mod detect;
 pub mod error;
 pub mod incidents;
+pub mod live;
 pub mod openings;
 pub mod paths;
 pub mod pgn;
@@ -20,6 +21,8 @@ pub mod store;
 pub use config::{AppConfig, AppDirs, EngineLibrary};
 pub use detect::{DetectResult, detect_engine, split_name_version};
 pub use error::EngineError;
+pub use colosseum_uci::Score;
+pub use live::{EvalPoint, LiveGameHandle, LiveGameState, LiveSearch};
 pub use openings::{ResolvedOpening, load_openings, summarize};
 pub use runner::{EngineGameSpec, GameReport, GameSpec, run_game};
 pub use scheduler::{

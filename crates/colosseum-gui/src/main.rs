@@ -12,9 +12,12 @@
 
 mod app;
 mod backend;
+mod board;
 mod dialog;
+mod eco;
 mod engines_tab;
 mod export_ui;
+mod live_view;
 mod icon;
 mod logo;
 mod presets;

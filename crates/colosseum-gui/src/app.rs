@@ -71,6 +71,8 @@ pub struct ColosseumApp {
 impl ColosseumApp {
     /// Construct the app, applying the theme to the egui context.
     pub fn new(cc: &eframe::CreationContext<'_>, backend: Backend) -> Self {
+        // SVG piece images (live view board) load through egui's image loaders.
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         theme::apply(
             &cc.egui_ctx,
             theme::ThemeChoice::from_config(&backend.config.theme),

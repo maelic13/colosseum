@@ -18,6 +18,7 @@ use shakmaty::uci::UciMove;
 use shakmaty::zobrist::Zobrist64;
 use shakmaty::{CastlingMode, Chess, Color, EnPassantMode, Position};
 
+use crate::live::{EvalPoint, LiveGameHandle, to_white_pov};
 use crate::pgn::{PgnTags, build_pgn};
 
 /// Centipawn magnitude used to represent mate scores for adjudication.
@@ -192,7 +193,8 @@ async fn prepare(spec: &EngineGameSpec, handshake_timeout: Duration) -> Prepared
 }
 
 /// Play one complete game and return its report. Never panics on engine misbehavior.
-pub async fn run_game(spec: GameSpec) -> GameReport {
+/// `live` is updated throughout for the GUI's live view.
+pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
     let game_start = std::time::Instant::now();
 
     let white = prepare(&spec.white, spec.handshake_timeout).await;
@@ -203,6 +205,9 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         (white, black) => {
             let mut report = handle_setup_failure(&spec, white, black).await;
             report.stats.duration_ms = Some(game_start.elapsed().as_millis() as u64);
+            if let Ok(mut lg) = live.lock() {
+                lg.finished = Some((report.result, report.termination));
+            }
             return report;
         }
     };
@@ -240,6 +245,15 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
         *repetitions.entry(key).or_insert(0) += 1;
     }
 
+    if let Ok(mut lg) = live.lock() {
+        lg.san_moves = san_moves.clone();
+        lg.uci_moves = uci_moves.clone();
+        lg.opening_plies = san_moves.len() as u32;
+        lg.white_clock_ms = clock_ms(&spec.time_control, &clocks, Color::White);
+        lg.black_clock_ms = clock_ms(&spec.time_control, &clocks, Color::Black);
+        lg.white_to_move = pos.turn() == Color::White;
+    }
+
     let outcome = loop {
         if san_moves.len() >= MAX_PLIES {
             break Outcome::natural(GameResult::Draw, Termination::MaxMoves);
@@ -255,7 +269,39 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
 
         let (limits, deadline) =
             move_limits(&spec.time_control, &clocks, mover, spec.timeout_tolerance);
-        let search = engine.search(&position, &limits, deadline).await;
+
+        if let Ok(mut lg) = live.lock() {
+            lg.white_to_move = mover == Color::White;
+            lg.search_started = Some(std::time::Instant::now());
+        }
+        let search = engine
+            .search(&position, &limits, deadline, |info| {
+                let Ok(mut lg) = live.lock() else { return };
+                let side = if mover == Color::White {
+                    &mut lg.white_search
+                } else {
+                    &mut lg.black_search
+                };
+                if let Some(score) = info.score {
+                    side.score = Some(to_white_pov(score, mover == Color::White));
+                }
+                if info.depth.is_some() {
+                    side.depth = info.depth;
+                }
+                if info.seldepth.is_some() {
+                    side.seldepth = info.seldepth;
+                }
+                if info.nodes.is_some() {
+                    side.nodes = info.nodes;
+                }
+                if info.nps.is_some() {
+                    side.nps = info.nps;
+                }
+                if !info.pv.is_empty() {
+                    side.pv = info.pv.clone();
+                }
+            })
+            .await;
 
         let output = match search {
             Ok(output) => output,
@@ -319,6 +365,22 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
 
         pos.play_unchecked(legal_move);
 
+        if let Ok(mut lg) = live.lock() {
+            lg.san_moves.push(san_moves.last().cloned().unwrap_or_default());
+            lg.uci_moves.push(uci_moves.last().cloned().unwrap_or_default());
+            lg.white_clock_ms = clock_ms(&spec.time_control, &clocks, Color::White);
+            lg.black_clock_ms = clock_ms(&spec.time_control, &clocks, Color::Black);
+            lg.white_to_move = pos.turn() == Color::White;
+            lg.search_started = None;
+            if let Some(score) = output.score {
+                lg.evals.push(EvalPoint {
+                    ply: san_moves.len() as u32,
+                    by_white: mover == Color::White,
+                    score: to_white_pov(score, mover == Color::White),
+                });
+            }
+        }
+
         // Natural endings take precedence over adjudication.
         if pos.is_checkmate() {
             break Outcome::win(mover, Termination::Checkmate);
@@ -364,6 +426,11 @@ pub async fn run_game(spec: GameSpec) -> GameReport {
                 format!("{detail} — see logs/incidents/{file}")
             });
         }
+    }
+
+    if let Ok(mut lg) = live.lock() {
+        lg.finished = Some((outcome.result, outcome.termination));
+        lg.search_started = None;
     }
 
     // Shut engines down gracefully (kill_on_drop covers anything left).
@@ -482,6 +549,12 @@ fn incident_report(
 struct Clocks {
     white: Duration,
     black: Duration,
+}
+
+/// Remaining clock in ms for the live view; `None` for non-clock controls.
+fn clock_ms(tc: &TimeControl, clocks: &Clocks, side: Color) -> Option<u64> {
+    tc.is_clock()
+        .then(|| clocks.remaining(side).as_millis() as u64)
 }
 
 impl Clocks {

@@ -256,13 +256,16 @@ impl EngineProcess {
     }
 
     /// Run a search: set the position, issue `go`, and read until `bestmove`, tracking
-    /// the last score/nps/depth. Fails with [`UciError::MoveTimeout`] if `deadline`
-    /// elapses first, or [`UciError::Terminated`] if the engine exits mid-search.
+    /// the last score/nps/depth. Every parsed `info` line is also handed to
+    /// `on_info` mid-search (live view); pass `|_| {}` when not observing.
+    /// Fails with [`UciError::MoveTimeout`] if `deadline` elapses first, or
+    /// [`UciError::Terminated`] if the engine exits mid-search.
     pub async fn search(
         &mut self,
         position: &UciPosition,
         limits: &GoLimits,
         deadline: Duration,
+        mut on_info: impl FnMut(&parse::InfoLine),
     ) -> Result<SearchOutput, UciError> {
         self.send(&position.to_command()).await?;
         self.send(&limits.to_command()).await?;
@@ -297,6 +300,7 @@ impl EngineProcess {
                 if info.depth.is_some() {
                     depth = info.depth;
                 }
+                on_info(&info);
             }
         }
     }

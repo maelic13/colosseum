@@ -9,6 +9,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Live game view: the Results tab gains a `Standings | Live` switcher for running tournaments — full-size board (bundled cburnett pieces, CC BY-SA 3.0), move list with ECO opening name (embedded lichess openings database, CC0), material imbalance, per-engine panels (logo, live eval/depth/nodes/nps/PV, ticking clocks) and a raw-eval graph with adaptive ±1…±10 range whose zero line sits level with the board midline; games rail with auto-follow for parallel play; clicking a game in the "Playing" panel jumps straight to it
 - "Time/move" column in the live and history results tables: mean wall-clock time per move per engine
 - "Avg depth" column in the live and history results tables: mean search depth per engine (averaged per move within a game, then across games), persisted per game in the database
 - Theme setting: Dark / Light / System (follows the OS), switchable from the status bar and persisted in `config.toml`

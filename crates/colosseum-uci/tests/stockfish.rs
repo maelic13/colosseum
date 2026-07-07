@@ -74,6 +74,7 @@ async fn stockfish_full_cycle() {
             &startpos,
             &GoLimits::MoveTime(Duration::from_millis(100)),
             Duration::from_secs(3),
+            |_| {},
         )
         .await
         .expect("search 100ms");
@@ -91,6 +92,7 @@ async fn stockfish_full_cycle() {
             &startpos,
             &GoLimits::MoveTime(Duration::from_millis(10)),
             Duration::from_secs(1),
+            |_| {},
         )
         .await
         .expect("search 10ms");
@@ -105,6 +107,7 @@ async fn stockfish_full_cycle() {
             &after_e4,
             &GoLimits::MoveTime(Duration::from_millis(50)),
             Duration::from_secs(2),
+            |_| {},
         )
         .await
         .expect("search after e4");

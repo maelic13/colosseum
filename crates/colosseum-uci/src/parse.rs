@@ -103,15 +103,22 @@ fn read_value(tokens: &[&str], start: usize) -> (String, usize) {
 }
 
 /// The fields of an `info` line we track.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InfoLine {
     pub depth: Option<u32>,
+    pub seldepth: Option<u32>,
     pub score: Option<Score>,
     pub nps: Option<u64>,
+    pub nodes: Option<u64>,
+    /// Search time so far in milliseconds.
+    pub time_ms: Option<u64>,
+    /// Principal variation as UCI moves (empty when the line carries none).
+    pub pv: Vec<String>,
 }
 
-/// Parse an `info ...` line, extracting depth/score/nps. Returns `None` for non-info
-/// lines; an `info string ...` engine message yields an all-`None` [`InfoLine`].
+/// Parse an `info ...` line, extracting depth/seldepth/score/nodes/nps/time/pv.
+/// Returns `None` for non-info lines; an `info string ...` engine message yields
+/// an all-`None` [`InfoLine`].
 #[must_use]
 pub fn parse_info_line(line: &str) -> Option<InfoLine> {
     let tokens: Vec<&str> = line.split_whitespace().collect();
@@ -130,8 +137,20 @@ pub fn parse_info_line(line: &str) -> Option<InfoLine> {
                 info.depth = tokens.get(i + 1).and_then(|t| t.parse().ok());
                 i += 2;
             }
+            "seldepth" => {
+                info.seldepth = tokens.get(i + 1).and_then(|t| t.parse().ok());
+                i += 2;
+            }
             "nps" => {
                 info.nps = tokens.get(i + 1).and_then(|t| t.parse().ok());
+                i += 2;
+            }
+            "nodes" => {
+                info.nodes = tokens.get(i + 1).and_then(|t| t.parse().ok());
+                i += 2;
+            }
+            "time" => {
+                info.time_ms = tokens.get(i + 1).and_then(|t| t.parse().ok());
                 i += 2;
             }
             "score" => match tokens.get(i + 1).copied() {
@@ -151,8 +170,12 @@ pub fn parse_info_line(line: &str) -> Option<InfoLine> {
                 }
                 _ => i += 1,
             },
-            // The principal variation is the rest of the line; stop scanning.
-            "pv" => break,
+            // The principal variation is the rest of the line (moves only —
+            // no keyword can follow `pv` per the UCI spec).
+            "pv" => {
+                info.pv = tokens[i + 1..].iter().map(|t| (*t).to_string()).collect();
+                break;
+            }
             _ => i += 1,
         }
     }
@@ -261,8 +284,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(info.depth, Some(20));
+        assert_eq!(info.seldepth, Some(28));
         assert_eq!(info.score, Some(Score::Cp(34)));
+        assert_eq!(info.nodes, Some(1_000_000));
         assert_eq!(info.nps, Some(5_000_000));
+        assert_eq!(info.time_ms, Some(200));
+        assert_eq!(info.pv, vec!["e2e4", "e7e5"]);
     }
 
     #[test]

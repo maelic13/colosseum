@@ -12,6 +12,17 @@ use colosseum_core::{
 use colosseum_engine::runner::{EngineGameSpec, GameSpec, run_game};
 use colosseum_uci::SpawnOptions;
 
+fn live_for(game: &GameSpec) -> colosseum_engine::LiveGameHandle {
+    colosseum_engine::LiveGameState::new_handle(
+        game.game_id,
+        game.round,
+        (game.white.id, game.white.name.clone()),
+        (game.black.id, game.black.name.clone()),
+        game.start_fen.clone(),
+        game.time_control,
+    )
+}
+
 fn spec(
     id: EngineId,
     name: &str,
@@ -82,7 +93,8 @@ async fn stockfish_self_play_one_game() {
         handshake_timeout: Duration::from_secs(5),
     };
 
-    let report = run_game(game).await;
+    let live = live_for(&game);
+    let report = run_game(game, live).await;
 
     assert!(
         report.error.is_none(),
@@ -142,7 +154,8 @@ async fn game_pre_plays_opening_moves() {
         handshake_timeout: Duration::from_secs(5),
     };
 
-    let report = run_game(game).await;
+    let live = live_for(&game);
+    let report = run_game(game, live).await;
     assert!(report.error.is_none(), "engine error: {:?}", report.error);
     // The first three plies are exactly the assigned opening.
     assert!(
@@ -195,7 +208,8 @@ async fn game_starts_from_fen() {
         handshake_timeout: Duration::from_secs(5),
     };
 
-    let report = run_game(game).await;
+    let live = live_for(&game);
+    let report = run_game(game, live).await;
     assert!(report.error.is_none(), "engine error: {:?}", report.error);
     assert!(!report.san_moves.is_empty(), "no moves were played");
     // The PGN carries the start FEN tag for faithful replay.
@@ -242,7 +256,8 @@ async fn setup_failure_writes_incident() {
         handshake_timeout: Duration::from_secs(3),
     };
 
-    let report = run_game(game).await;
+    let live = live_for(&game);
+    let report = run_game(game, live).await;
     // White takes precedence when both fail → Black wins by White's crash.
     assert_eq!(report.result, GameResult::BlackWin);
     assert!(

@@ -21,7 +21,7 @@ colosseum-engine = { version = "0.1.0", path = "../colosseum-engine" }
 crossbeam-channel = "0.5.15"
 eframe = "0.34.3"
 egui = "0.34.3"
-egui_extras = "0.34.3"
+egui_extras = { version = "0.34.3", features = ["svg"] }
 raw-window-handle = "0.6"
 image = { version = "0.25", default-features = false, features = [
     "png",

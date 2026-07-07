@@ -51,6 +51,11 @@ Pre-built binaries for every release are on the
 
 ---
 
+## Bundled assets
+
+- Chess pieces: [cburnett](https://github.com/lichess-org/lila/tree/master/public/piece/cburnett) by Colin M.L. Burnett, CC BY-SA 3.0 (`crates/colosseum-gui/assets/pieces/cburnett/`)
+- Opening names: [lichess chess-openings](https://github.com/lichess-org/chess-openings), CC0 (`crates/colosseum-gui/assets/openings/`)
+
 ## Build & Run
 
 ### Prerequisites
