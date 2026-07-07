@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Results tab: every tournament — the live one and stored history — in one
+//! Arena tab: every tournament — the live one and stored history — in one
 //! place. A tournament list sits on the right; selecting the active tournament
-//! shows the live view (standings, head-to-head, games, transport controls),
-//! selecting a stored one shows its reconstructed results with Resume/Delete/
-//! Export actions.
+//! shows the live view (standings, head-to-head, live board, transport
+//! controls), selecting a stored one shows its reconstructed results with
+//! Resume/Delete/Export actions. Individual finished games aren't browsed here
+//! — export the PGN and open it in a dedicated viewer instead.
 //!
 //! The live Elo column always shows exactly what the configured rating
 //! writeback would store in the library: static library ratings ("Never"),
@@ -20,7 +21,7 @@ use colosseum_core::{
     TournamentConfig, TournamentId, performance_rating,
 };
 use colosseum_engine::{
-    EloEntry, GameRow, InFlightGame, TournamentResults, TournamentRow, TournamentStatus,
+    EloEntry, InFlightGame, TournamentResults, TournamentRow, TournamentStatus,
     store::STATUS_FINISHED,
 };
 
@@ -31,7 +32,7 @@ use crate::widgets;
 /// Per-engine display rating + delta against the library prior.
 type DisplayRatings = HashMap<EngineId, (f64, f64)>;
 
-/// Persistent state for the Results tab.
+/// Persistent state for the Arena tab.
 #[derive(Default)]
 pub struct ResultsTab {
     /// Cached tournament list (most recent first); `None` until first load.
@@ -46,17 +47,10 @@ pub struct ResultsTab {
     error: Option<String>,
     /// Transient note shown after an export action.
     export_note: Option<String>,
-    /// Cached games for the selected stored tournament (board viewer).
-    games: Option<(TournamentId, Vec<GameRow>)>,
-    /// The floating PGN/board viewer (shared by live + history views).
-    viewer: crate::viewer::GameViewer,
 
     // ── Live-view state ──
     sort: SortState,
     show_h2h: bool,
-    show_games: bool,
-    /// Cached games of a loaded tournament: (id, finished count, rows).
-    live_games_cache: Option<(TournamentId, usize, Vec<GameRow>)>,
     elo_note: Option<String>,
     /// Cached display ratings for the live table:
     /// (id, finished count when computed, engine → (rating, delta vs prior)).
@@ -65,6 +59,10 @@ pub struct ResultsTab {
     h2h_per_game: bool,
     /// Loaded-tournament ids last frame (a new one steals the selection).
     known_actives: Vec<TournamentId>,
+    /// The unfinished tournament we last auto-loaded on selection, so entering
+    /// the tab drops straight into the live view rather than the stored-detail
+    /// layer — without re-attempting the load every frame (or after a failure).
+    auto_loaded: Option<TournamentId>,
     /// When the list was last re-read from the database (auto-refresh).
     last_refresh: Option<std::time::Instant>,
     /// Per-tournament live-view (Standings | Live lens) states.
@@ -94,6 +92,12 @@ impl ResultsTab {
         }
         self.known_actives = active_ids;
 
+        // Drop straight into the live view: auto-load the selected tournament
+        // if it is unfinished and not yet loaded (same state as pressing Go's
+        // sibling, Resume). Attempted once per selection so a load failure — or
+        // the user deliberately not running it — doesn't loop.
+        self.auto_load_selected(backend);
+
         // Right: tournament list.
         egui::Panel::right("results_list")
             .default_size(280.0)
@@ -120,9 +124,34 @@ impl ResultsTab {
                     self.detail_panel(ui, backend);
                 }
             });
+    }
 
-        // The board viewer floats above everything.
-        self.viewer.ui(ui.ctx());
+    /// Load the selected tournament into the live view when it is unfinished
+    /// and not already loaded, so opening the tab shows the live view directly
+    /// instead of the stored-detail layer. Guarded by `auto_loaded` so each
+    /// selection is only tried once (a failed resume falls back to the detail
+    /// panel, which offers a manual Resume button).
+    fn auto_load_selected(&mut self, backend: &mut Backend) {
+        let Some(id) = self.selected else {
+            return;
+        };
+        if self.auto_loaded == Some(id) || backend.active(id).is_some() {
+            return;
+        }
+        let row = self
+            .list
+            .as_ref()
+            .and_then(|l| l.iter().find(|t| t.id == id))
+            .cloned();
+        let Some(row) = row else {
+            return;
+        };
+        self.auto_loaded = Some(id);
+        if row.status != STATUS_FINISHED
+            && let Err(e) = backend.try_resume(row)
+        {
+            self.error = Some(format!("Could not load: {e}"));
+        }
     }
 
     /// Reload the tournament list from the database. Detail caches stay —
@@ -317,18 +346,6 @@ impl ResultsTab {
     fn live_view(&mut self, ui: &mut Ui, backend: &mut Backend, id: TournamentId) {
         let live = self.capture_live(backend, id);
 
-        // Refresh the cached game list when expanded and a game has finished.
-        if self.show_games {
-            let stale = self
-                .live_games_cache
-                .as_ref()
-                .map(|(cid, n, _)| (*cid, *n))
-                != Some((id, live.finished));
-            if stale {
-                self.live_games_cache = Some((id, live.finished, backend.list_games(id)));
-            }
-        }
-
         // Control bar (top).
         egui::Panel::top("results_live_controls")
             .frame(
@@ -435,10 +452,6 @@ impl ResultsTab {
                             ui.add_space(18.0);
                             self.head_to_head_section(ui, &live);
                         }
-                        if self.show_games {
-                            ui.add_space(18.0);
-                            self.live_games_section(ui, &live);
-                        }
                         ui.add_space(8.0);
                     });
             });
@@ -454,7 +467,8 @@ impl ResultsTab {
         let snap = active.snapshot.lock().unwrap();
         let status = snap.status;
         let standings = snap.standings.clone();
-        let elo_incremental = snap.elo.clone();
+        // ML rating recompute published by the driver (rating, Δ, error bar).
+        let elo_model = snap.elo.clone();
         let finished = snap.games_finished;
         let total = snap.games_total;
         let errors = snap.recent_errors.clone();
@@ -467,7 +481,7 @@ impl ResultsTab {
         drop(snap);
 
         // Display ratings = exactly what the writeback mode would store.
-        let ratings = self.display_ratings(backend, id, &standings, finished, &elo_incremental);
+        let ratings = self.display_ratings(backend, id, &standings, finished, &elo_model);
 
         let ranked = standings.ranked_by_points();
         let rank_of = |id: EngineId| ranked.iter().position(|x| x == &id).map_or(0, |p| p + 1);
@@ -485,6 +499,7 @@ impl ResultsTab {
                     version: p.version.clone(),
                     elo,
                     elo_delta,
+                    elo_error: elo_model.get(&p.id).and_then(|e| e.error),
                     points: st.points(),
                     games: st.games(),
                     wins: st.wins,
@@ -542,7 +557,7 @@ impl ResultsTab {
         id: TournamentId,
         standings: &Standings,
         finished: usize,
-        incremental: &HashMap<EngineId, EloEntry>,
+        model: &HashMap<EngineId, EloEntry>,
     ) -> DisplayRatings {
         if let Some((cid, n, map)) = &self.elo_cache
             && *cid == id
@@ -557,12 +572,12 @@ impl ResultsTab {
 
         let map: DisplayRatings = match writeback {
             // Nothing will be written: show library ratings, no drift. The
-            // incremental model still feeds the Δ column so the run is
+            // driver's ML recompute still feeds the Δ column so the run is
             // informative — but only there, clearly marked as tournament-only.
             RatingWriteback::None => priors
                 .iter()
                 .map(|&(id, prior)| {
-                    let delta = incremental.get(&id).map_or(0.0, |e| e.delta);
+                    let delta = model.get(&id).map_or(0.0, |e| e.delta);
                     (id, (prior, delta))
                 })
                 .collect(),
@@ -751,8 +766,6 @@ impl ResultsTab {
         ui.horizontal_wrapped(|ui| {
             let new_enabled = !crate::backend::is_busy(status);
 
-            ui.toggle_value(&mut self.show_games, RichText::new("Games").size(13.0))
-                .on_hover_text("Browse finished games and open them in the board viewer.");
             ui.toggle_value(
                 &mut self.show_h2h,
                 RichText::new("Head-to-head").size(13.0),
@@ -828,27 +841,6 @@ impl ResultsTab {
                 }
             }
 
-            if ui
-                .add_enabled(
-                    new_enabled,
-                    egui::Button::new(RichText::new("Close").size(13.0))
-                        .fill(theme::bg_elevated())
-                        .stroke(egui::Stroke::new(1.0, theme::stroke())),
-                )
-                .on_hover_text(if new_enabled {
-                    "Unload this tournament (its results stay in the list; \
-                     resume any time by clicking it)."
-                } else {
-                    "Stop the tournament first."
-                })
-                .clicked()
-            {
-                backend.close_tournament(id);
-                self.live_games_cache = None;
-                self.elo_cache = None;
-                self.refresh(backend);
-            }
-
             if let Some(note) = &self.export_note {
                 ui.label(RichText::new(note).color(theme::text_weak()).size(12.0));
             }
@@ -884,7 +876,6 @@ impl ResultsTab {
                             Err(e) => self.error = Some(format!("Delete failed: {e}")),
                         }
                         self.pending_delete = None;
-                        self.live_games_cache = None;
                         self.elo_cache = None;
                         self.refresh(backend);
                     }
@@ -978,11 +969,7 @@ impl ResultsTab {
                             engine_name_label(ui, &row.name, &row.version);
                         });
                         tr.col(|ui| {
-                            ui.label(
-                                RichText::new(format!("{:.0}", row.elo))
-                                    .color(theme::text())
-                                    .monospace(),
-                            );
+                            elo_cell(ui, row.elo, row.elo_error);
                         });
                         tr.col(|ui| {
                             widgets::elo_delta_chip(ui, row.elo_delta);
@@ -1199,92 +1186,28 @@ impl ResultsTab {
         }
     }
 
-    /// Expandable list of the active tournament's games with a View button each.
-    fn live_games_section(&mut self, ui: &mut Ui, live: &LiveData) {
-        let order: Vec<usize> = self
-            .live_games_cache
-            .as_ref()
-            .map(|(_, _, games)| {
-                games
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, g)| g.pgn.as_deref().is_some_and(|p| !p.trim().is_empty()))
-                    .map(|(i, _)| i)
-                    .rev()
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        ui.label(
-            RichText::new(format!("Games ({})", order.len()))
-                .color(theme::text())
-                .font(theme::semibold(13.5)),
-        );
-        if order.is_empty() {
-            ui.label(
-                RichText::new("No finished games yet.")
-                    .color(theme::text_weak())
-                    .size(12.5),
-            );
-            return;
-        }
-        ui.add_space(6.0);
-
-        let mut view_idx: Option<usize> = None;
-        if let Some((_, _, games)) = &self.live_games_cache {
-            for &i in &order {
-                let g = &games[i];
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!("R{}", g.round))
-                            .color(theme::text_faint())
-                            .monospace()
-                            .size(12.0),
-                    );
-                    let result = g
-                        .result
-                        .map(|r| r.pgn().to_string())
-                        .unwrap_or_else(|| "…".to_string());
-                    ui.label(
-                        RichText::new(format!(
-                            "{} vs {}  {}",
-                            live.participant_label(g.white),
-                            live.participant_label(g.black),
-                            result
-                        ))
-                        .color(theme::text_weak())
-                        .size(12.5),
-                    );
-                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("View").clicked() {
-                            view_idx = Some(i);
-                        }
-                    });
-                });
-                ui.add_space(2.0);
-            }
-        }
-
-        if let Some(i) = view_idx
-            && let Some((_, _, games)) = &self.live_games_cache
-        {
-            let g = &games[i];
-            let white = live.participant_label(g.white);
-            let black = live.participant_label(g.black);
-            self.viewer.open_game(g, &white, &black);
-        }
-    }
-
     // ── Stored-tournament detail (history) ──────────────────────────────────
 
     fn detail_panel(&mut self, ui: &mut Ui, backend: &mut Backend) {
+        // A tournament is always auto-selected when one exists, so reaching here
+        // with no selection means the library is empty — greet accordingly.
         let Some(id) = self.selected else {
-            ui.add_space(40.0);
+            ui.add_space(80.0);
             ui.vertical_centered(|ui| {
+                ui.label(RichText::new("♟").color(theme::text_faint()).size(52.0));
+                ui.add_space(10.0);
                 ui.label(
-                    RichText::new("Select a tournament to view its results.")
+                    RichText::new("No tournaments yet")
                         .color(theme::text_weak())
-                        .size(13.0),
+                        .font(theme::semibold(17.0)),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(
+                        "Head to the Tournament tab to set engines up and start playing.",
+                    )
+                    .color(theme::text_faint())
+                    .size(13.0),
                 );
             });
             return;
@@ -1307,9 +1230,6 @@ impl ResultsTab {
                     self.results = None;
                 }
             }
-        }
-        if self.games.as_ref().map(|(rid, _)| *rid) != Some(id) {
-            self.games = Some((id, backend.list_games(id)));
         }
 
         ScrollArea::vertical()
@@ -1367,99 +1287,8 @@ impl ResultsTab {
                                     .size(13.0),
                             );
                         }
-                        self.games_section(ui);
                     });
             });
-    }
-
-    /// List the stored tournament's games with a View button each.
-    fn games_section(&mut self, ui: &mut Ui) {
-        let count = self.games.as_ref().map_or(0, |(_, g)| g.len());
-        if count == 0 {
-            return;
-        }
-
-        let names: Vec<(EngineId, String)> = self
-            .results
-            .as_ref()
-            .map(|(_, res)| {
-                res.participants
-                    .iter()
-                    .map(|p| (p.id, join_name_version(&p.name, &p.version)))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let name_of = |id: EngineId| -> String {
-            names
-                .iter()
-                .find(|(pid, _)| *pid == id)
-                .map(|(_, n)| n.clone())
-                .unwrap_or_else(|| "?".to_string())
-        };
-
-        ui.add_space(14.0);
-        ui.separator();
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new(format!("Games ({count})"))
-                .color(theme::text())
-                .font(theme::semibold(13.5)),
-        );
-        ui.add_space(6.0);
-
-        let mut view_idx: Option<usize> = None;
-        if let Some((_, games)) = &self.games {
-            ScrollArea::vertical()
-                .id_salt("results_games_scroll")
-                .auto_shrink([false, true])
-                .max_height(220.0)
-                .show(ui, |ui| {
-                    for (i, g) in games.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(format!("R{}", g.round))
-                                    .color(theme::text_faint())
-                                    .monospace()
-                                    .size(12.0),
-                            );
-                            let result = g
-                                .result
-                                .map(|r| r.pgn().to_string())
-                                .unwrap_or_else(|| "…".to_string());
-                            ui.label(
-                                RichText::new(format!(
-                                    "{} vs {}  {}",
-                                    name_of(g.white),
-                                    name_of(g.black),
-                                    result
-                                ))
-                                .color(theme::text_weak())
-                                .size(12.5),
-                            );
-                            let has_pgn =
-                                g.pgn.as_deref().is_some_and(|p| !p.trim().is_empty());
-                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui
-                                    .add_enabled(has_pgn, egui::Button::new("View"))
-                                    .clicked()
-                                {
-                                    view_idx = Some(i);
-                                }
-                            });
-                        });
-                        ui.add_space(2.0);
-                    }
-                });
-        }
-
-        if let Some(i) = view_idx
-            && let Some((_, games)) = &self.games
-        {
-            let g = &games[i];
-            let white = name_of(g.white);
-            let black = name_of(g.black);
-            self.viewer.open_game(g, &white, &black);
-        }
     }
 
     fn action_bar(&mut self, ui: &mut Ui, backend: &mut Backend, row: &TournamentRow) {
@@ -1588,6 +1417,8 @@ struct Row {
     version: String,
     elo: f64,
     elo_delta: f64,
+    /// ±95% confidence half-width of the ML rating (None before any games).
+    elo_error: Option<f64>,
     points: f64,
     games: u32,
     wins: u32,
@@ -1798,6 +1629,21 @@ fn engine_name_label(ui: &mut Ui, name: &str, version: &str) {
 /// collapses the label to a few characters).
 fn engine_name_label_full(ui: &mut Ui, name: &str, version: &str) {
     ui.add(egui::Label::new(engine_name_job(name, version)));
+}
+
+/// The Elo cell: the rating, with the ML estimate's ±95% interval on hover.
+fn elo_cell(ui: &mut Ui, elo: f64, error: Option<f64>) {
+    let resp = ui.label(
+        RichText::new(format!("{elo:.0}"))
+            .color(theme::text())
+            .monospace(),
+    );
+    if let Some(err) = error {
+        resp.on_hover_text(format!(
+            "{:.0} ± {:.0} (95% confidence, maximum-likelihood estimate)",
+            elo, err
+        ));
+    }
 }
 
 /// Forfeit summary ("2× time · 1× crash"), dim dash when clean.
@@ -2023,6 +1869,8 @@ struct ResultRow {
     version: String,
     elo: f64,
     elo_delta: f64,
+    /// ±95% confidence half-width of the ML rating (None before any games).
+    elo_error: Option<f64>,
     points: f64,
     games: u32,
     wins: u32,
@@ -2052,6 +1900,7 @@ fn build_rows(res: &TournamentResults) -> Vec<ResultRow> {
                 version: p.version.clone(),
                 elo: e.current,
                 elo_delta: e.delta,
+                elo_error: e.error,
                 points: st.points(),
                 games: st.games(),
                 wins: st.wins,
@@ -2168,11 +2017,7 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
                         engine_name_label(ui, &row.name, &row.version);
                     });
                     tr.col(|ui| {
-                        ui.label(
-                            RichText::new(format!("{:.0}", row.elo))
-                                .color(theme::text())
-                                .monospace(),
-                        );
+                        elo_cell(ui, row.elo, row.elo_error);
                     });
                     tr.col(|ui| widgets::elo_delta_chip(ui, row.elo_delta));
                     tr.col(|ui| {
@@ -2390,6 +2235,7 @@ mod tests {
             version: String::new(),
             elo,
             elo_delta: 0.0,
+            elo_error: None,
             points,
             games: 0,
             wins: 0,

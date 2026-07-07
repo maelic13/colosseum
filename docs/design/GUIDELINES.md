@@ -415,13 +415,30 @@ Keep current structure; adjust:
 - Bottom action bar: keep `BG_DARKEST`; Start button = primary (§3.3) height
   32; shows "N engines · G games · ~D"; error uses a tinted-danger chip.
 
-### 4.4 Tournament → Live
+### 4.4 Arena (standings + live game view)
+The Arena tab (tab order: Tournament · Arena · Engines) hosts every
+tournament — the live one and stored history — with a tournament list on the
+right. Opening the tab auto-loads the newest unfinished tournament straight
+into its live view; there is no "Close" (one tournament is always selected;
+an empty library shows an empty state per §3.10). Arena is **live-only**:
+finished games are not browsed in-app — export the PGN instead.
+
 - Control bar: status pill + tournament name 15 strong; Go/Stop/Force-Stop as
-  tinted buttons (§3.3); progress per §3.7; right side unchanged except
-  "Head-to-head" toggle becomes a secondary toggle button.
-- Results table per §3.5; H2H per §3.6.
+  tinted buttons (§3.3); progress per §3.7; `Standings | Live` lens switcher
+  (choice chips) pinned right.
+- Standings table per §3.5; H2H per §3.6. The Elo cell shows the ML rating
+  with its ±95% interval on hover.
 - Engine-errors panel: wrap in a tinted-danger card (fill `tint(DANGER,0.08)`,
   stroke `tint(DANGER,0.35)`, radius 8) instead of a bare bottom panel fill.
+- **Live game view** (the Live lens): games rail (2+ games) · moves column ·
+  square board (height-bound) · engine column. The engine column is
+  **elastic** — minimum 300, maximum 720 — absorbing the width the board
+  leaves over, so wide windows widen the eval graph instead of stranding a
+  margin. Both engine panels and the graph live in **one card** (radius 10,
+  hairline dividers between sections); the thinking engine gets a faint
+  accent wash (`tint(ACCENT, 0.10)`), not its own border. Panel heights are
+  equal top/bottom and sum exactly with the graph to the board height, so the
+  graph's 0-line sits on the board's midline.
 
 ### 4.5 Engines tab
 - Toolbar buttons: "Add engine…" = primary, "Scan folder…" = secondary,
@@ -530,7 +547,7 @@ these to every tab** so the app stays cohesive; most are already global via
   popups wrap their items in a `ScrollArea` that shows a phantom scrollbar
   even for tiny lists; `select` is a `MenuButton`-based dropdown (painted
   arrow, menu popup) that never scrolls unless it hits the screen edge.
-  All former combos (UCI combo options, tournament format/TC/Elo-policy/
+  All former combos (UCI combo options, tournament format/TC/writeback/
   time-unit, engines sort) use it.
 - Rarely-touched global settings pinned to a region: **collapsible bar**,
   collapsed by default, one-line header with a status summary (`●`/`○`) that
@@ -564,28 +581,11 @@ these to every tab** so the app stays cohesive; most are already global via
 - The window is created `visible(false)` and revealed after the first painted
   frame (`ViewportCommand::Visible(true)` + `Focus`) — no startup flash.
 
-## 8. Implementation plan (ordered, independently verifiable)
+## 8. Status
 
-Each step compiles and passes `cargo clippy --workspace` and `cargo test
---workspace` on its own.
-
-1. **Tokens + helpers.** Add `TEXT_FAINT`, `MEDAL_*`, `tint()` to `theme.rs`;
-   create `widgets.rs` with `pill_tab`, `status_pill`, `tinted_button`,
-   `section_card`, `rank_badge`; replace the `0x6c,0x76,0x86` literals with
-   `theme::TEXT_FAINT`. Update `interact_size.y = 28.0`,
-   `button_padding = (12,6)`.
-2. **Fonts.** Add `assets/fonts/` (Inter Regular/SemiBold, JetBrains Mono
-   Regular, OFL.txt), embed in `theme::apply`, set type scale per §2.2.
-3. **Chrome.** Header pill tabs + header status pill + status-bar pill (§4.1,
-   §4.2). Modal polish (§3.10).
-4. **Live view.** Tinted control buttons, progress bar, table (row height,
-   rank badges, Δ chips), H2H heatmap, error card (§4.4).
-5. **Setup view.** Section cards for the form, selectable engine card rows,
-   primary Start button (§4.3).
-6. **Engines tab.** Toolbar hierarchy, card rows, edit-panel cards, empty
-   state (§4.5).
-7. **Icon gradient** (§5) — optional, last.
-
-Acceptance for every step: screenshot the affected screen at 1280×800 and
-compare against `mockup-live.svg` / `components.svg`; verify no behavior
-changed (existing tests still pass).
+The modernization plan this document originally scheduled is **fully
+implemented** (tokens, fonts, chrome, Arena live view, setup cards, Engines
+tab, icon). Treat §§2–7 as the binding spec for any new UI work: reuse the
+`theme.rs` tokens and `widgets.rs` helpers, follow the interaction rules in
+§7, and verify changes with `cargo clippy --workspace` + `cargo test
+--workspace` plus a screenshot of the affected screen.

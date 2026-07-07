@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use eframe::egui::{self, Color32, DragValue, Layout, RichText, ScrollArea, Ui};
 
 use colosseum_core::{
-    AdjudicationConfig, CommonEngineOptions, DrawAdjudication, EloPolicy, EngineConfig, EngineId,
+    AdjudicationConfig, CommonEngineOptions, DrawAdjudication, EngineConfig, EngineId,
     Format, OpeningBook, OpeningFormat, OpeningOrder, RatingWriteback, ResignAdjudication,
     StartPosition, TimeControl, TimeUnit, TournamentConfig, UciOption, UciOptionValue,
 };
@@ -28,7 +28,7 @@ use crate::widgets;
 // ── Tab state ─────────────────────────────────────────────────────────────────
 
 /// All persistent state for the Tournament tab (setup only — the live view
-/// lives in the Results tab).
+/// lives in the Arena tab).
 pub struct TournamentTab {
     form: TournamentForm,
     /// Filter text for the engine-selection list.
@@ -41,7 +41,7 @@ pub struct TournamentTab {
     logos: crate::logo::LogoCache,
     start_error: Option<String>,
     /// Set when a tournament was just started or resumed; the app shell takes
-    /// it (via [`Self::take_started`]) to switch to the Results tab.
+    /// it (via [`Self::take_started`]) to switch to the Arena tab.
     just_started: bool,
     /// Manages preset files on disk.
     preset_manager: PresetManager,
@@ -85,7 +85,7 @@ impl TournamentTab {
     }
 
     /// True once, right after a tournament was started or resumed here — the
-    /// app shell switches to the Results tab in response.
+    /// app shell switches to the Arena tab in response.
     pub fn take_started(&mut self) -> bool {
         std::mem::take(&mut self.just_started)
     }
@@ -216,11 +216,8 @@ struct TournamentForm {
     resign_score_cp: i32,
 
     // Elo
-    /// Live in-tournament model cadence; not exposed in the UI (always
-    /// per-game so the standings Elo column ticks), kept for preset compat.
-    elo_policy: EloPolicy,
-    k_factor: f64,
-    /// How library ratings are updated when the tournament finishes.
+    /// How library ratings are updated when the tournament finishes. (The
+    /// live standings always show the ML recompute; no cadence/K to configure.)
     elo_writeback: WritebackKind,
     /// Target for [`WritebackKind::Estimate`]; falls back to the first
     /// selected engine (the gauntlet engine) when unset or deselected.
@@ -281,8 +278,6 @@ impl Default for TournamentForm {
             resign_on: false,
             resign_move_count: 4,
             resign_score_cp: 800,
-            elo_policy: EloPolicy::PerGame,
-            k_factor: 32.0,
             elo_writeback: WritebackKind::Never,
             estimate_target: None,
             overrides: HashMap::new(),
@@ -329,10 +324,6 @@ impl TournamentForm {
                     score_cp: self.resign_score_cp.max(0),
                 }),
             },
-            // Live model always ticks per game so the standings Elo column is
-            // informative; whether anything is *written back* is separate.
-            elo_policy: EloPolicy::PerGame,
-            k_factor: self.k_factor.max(1.0),
             rating_writeback: match self.elo_writeback {
                 WritebackKind::Never => RatingWriteback::None,
                 WritebackKind::All => RatingWriteback::All,
@@ -491,8 +482,6 @@ impl TournamentForm {
             resign_on: self.resign_on,
             resign_move_count: self.resign_move_count,
             resign_score_cp: self.resign_score_cp,
-            elo_policy: self.elo_policy,
-            k_factor: self.k_factor,
             elo_writeback: match self.elo_writeback {
                 WritebackKind::Never => "never",
                 WritebackKind::All => "all",
@@ -557,8 +546,6 @@ impl TournamentForm {
         self.resign_on = p.resign_on;
         self.resign_move_count = p.resign_move_count;
         self.resign_score_cp = p.resign_score_cp;
-        self.elo_policy = p.elo_policy;
-        self.k_factor = p.k_factor;
         self.elo_writeback = match p.elo_writeback.as_str() {
             "all" => WritebackKind::All,
             "estimate" => WritebackKind::Estimate,
@@ -2487,7 +2474,6 @@ mod tests {
         assert_eq!(cfg.common.hash_mb, None);
         assert!(!cfg.common.ponder);
         assert_eq!(cfg.time_control, TimeControl::PerMove { ms: 100 });
-        assert_eq!(cfg.elo_policy, EloPolicy::PerGame);
         assert!(cfg.adjudication.max_moves.is_none());
         assert!(cfg.adjudication.draw.is_none());
         assert!(cfg.adjudication.resign.is_none());

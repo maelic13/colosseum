@@ -1,61 +1,17 @@
-//! Engine rating. v1 uses classic incremental Elo behind the [`Rating`] trait so a
-//! future regression-based rating (Ordo/Bayeselo, with error bars) can drop in.
+//! Engine rating: Ordo-style joint maximum-likelihood ratings recomputed from
+//! the full set of game results ([`ml_ratings`]), single-engine performance
+//! ratings against fixed opponents ([`performance_rating`]), and asymptotic
+//! error bars for the ML estimates ([`rating_error`]). Recomputing from
+//! standings is order-independent and has no tuning knob, unlike incremental
+//! K-factor Elo — the same games always produce the same ratings.
 
 use std::collections::HashMap;
 
-use crate::{game::GameResult, ids::EngineId, standings::Standings};
+use crate::{ids::EngineId, standings::Standings};
 
-/// A rating change for a single engine produced by one game.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RatingDelta {
-    pub engine: EngineId,
-    pub delta: f64,
-}
-
-/// A pluggable rating model.
-pub trait Rating {
-    /// Apply one game's result and return the per-engine rating deltas.
-    fn update(&mut self, white: EngineId, black: EngineId, result: GameResult) -> Vec<RatingDelta>;
-    /// Current rating for an engine.
-    fn current(&self, engine: EngineId) -> f64;
-    /// Change in rating since this engine's baseline (tournament start). Drives the
-    /// "Elo Δ" column.
-    fn delta_since_start(&self, engine: EngineId) -> f64;
-}
-
-/// Classic incremental Elo with a fixed K-factor.
-#[derive(Debug, Clone)]
-pub struct IncrementalElo {
-    k: f64,
-    baseline: HashMap<EngineId, f64>,
-    current: HashMap<EngineId, f64>,
-}
-
-impl IncrementalElo {
-    /// Create an Elo model with the given K-factor and no seeded ratings.
-    #[must_use]
-    pub fn new(k: f64) -> Self {
-        Self {
-            k,
-            baseline: HashMap::new(),
-            current: HashMap::new(),
-        }
-    }
-
-    /// Create an Elo model seeded with starting ratings (used as the Δ baseline).
-    pub fn with_seed(k: f64, seeds: impl IntoIterator<Item = (EngineId, f64)>) -> Self {
-        let mut model = Self::new(k);
-        for (id, elo) in seeds {
-            model.baseline.insert(id, elo);
-            model.current.insert(id, elo);
-        }
-        model
-    }
-
-    /// Expected score for player A against player B under the logistic Elo model.
-    pub(crate) fn expected(ra: f64, rb: f64) -> f64 {
-        1.0 / (1.0 + 10f64.powf((rb - ra) / 400.0))
-    }
+/// Expected score for player A against player B under the logistic Elo model.
+fn expected(ra: f64, rb: f64) -> f64 {
+    1.0 / (1.0 + 10f64.powf((rb - ra) / 400.0))
 }
 
 /// Performance rating: the rating at which the expected score against the
@@ -88,7 +44,7 @@ pub fn performance_rating(results: &[(f64, f64, u32)]) -> Option<f64> {
     let expected_total = |r: f64| -> f64 {
         results
             .iter()
-            .map(|&(opp, _, games)| f64::from(games) * IncrementalElo::expected(r, opp))
+            .map(|&(opp, _, games)| f64::from(games) * expected(r, opp))
             .sum()
     };
     let mut lo = min_opp - 1000.0;
@@ -104,40 +60,6 @@ pub fn performance_rating(results: &[(f64, f64, u32)]) -> Option<f64> {
     Some(0.5 * (lo + hi))
 }
 
-impl Rating for IncrementalElo {
-    fn update(&mut self, white: EngineId, black: EngineId, result: GameResult) -> Vec<RatingDelta> {
-        let ra = *self.current.entry(white).or_insert(0.0);
-        let rb = *self.current.entry(black).or_insert(0.0);
-        self.baseline.entry(white).or_insert(ra);
-        self.baseline.entry(black).or_insert(rb);
-
-        let expected_white = Self::expected(ra, rb);
-        let delta = self.k * (result.white_score() - expected_white);
-
-        self.current.insert(white, ra + delta);
-        self.current.insert(black, rb - delta);
-
-        vec![
-            RatingDelta {
-                engine: white,
-                delta,
-            },
-            RatingDelta {
-                engine: black,
-                delta: -delta,
-            },
-        ]
-    }
-
-    fn current(&self, engine: EngineId) -> f64 {
-        self.current.get(&engine).copied().unwrap_or(0.0)
-    }
-
-    fn delta_since_start(&self, engine: EngineId) -> f64 {
-        self.current(engine) - self.baseline.get(&engine).copied().unwrap_or(0.0)
-    }
-}
-
 /// Joint maximum-likelihood ratings for a whole tournament (Ordo-style).
 ///
 /// Iteratively sets every engine's rating to its [`performance_rating`]
@@ -145,8 +67,8 @@ impl Rating for IncrementalElo {
 /// then re-centres so the mean rating of engines *that played* equals the
 /// mean of their priors — ML determines only rating differences, so the
 /// anchor keeps the numbers on the library's scale. Engines without games
-/// keep their prior untouched. Order-independent and K-free, unlike
-/// [`IncrementalElo`].
+/// keep their prior untouched. Order-independent and K-free: the same set of
+/// games always yields the same ratings, regardless of play order.
 #[must_use]
 pub fn ml_ratings(
     standings: &Standings,
@@ -202,50 +124,59 @@ pub fn ml_ratings(
     ratings
 }
 
+/// Asymptotic 95%-confidence half-width (± Elo) of an engine's ML rating.
+///
+/// The observed Fisher information of a rating under the logistic Elo model is
+/// `I = Σ_games e·(1−e)·(ln10/400)²`, where `e` is the expected score against
+/// that game's opponent at the given ratings; the standard error is `1/√I` and
+/// the 95% interval is `±1.96·SE`. Draws carry the same information as decisive
+/// games here (a slight underestimate of certainty in drawish play — acceptable
+/// for a live read; use the two-engine [`crate::elo_with_error`] card for
+/// match-precision intervals).
+///
+/// Returns `None` when the engine has no games, or when every game carries no
+/// information (expected score pinned at 0/1 — e.g. an 800-point cap).
+#[must_use]
+pub fn rating_error(
+    standings: &Standings,
+    ratings: &HashMap<EngineId, f64>,
+    engine: EngineId,
+) -> Option<f64> {
+    const SCALE: f64 = std::f64::consts::LN_10 / 400.0;
+    let r = *ratings.get(&engine)?;
+    let mut information = 0.0f64;
+    for (&opp, &opp_r) in ratings {
+        if opp == engine {
+            continue;
+        }
+        let games = standings.head_to_head(engine, opp).games();
+        if games == 0 {
+            continue;
+        }
+        let e = expected(r, opp_r);
+        information += f64::from(games) * e * (1.0 - e) * SCALE * SCALE;
+    }
+    if information <= 0.0 {
+        return None;
+    }
+    Some(1.96 / information.sqrt())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::Termination;
+    use crate::game::{GameResult, Termination};
     use crate::standings::GameOutcome;
 
     const EPS: f64 = 1e-9;
 
     #[test]
     fn expected_is_symmetric_and_centered() {
-        assert!((IncrementalElo::expected(1500.0, 1500.0) - 0.5).abs() < EPS);
-        let ea = IncrementalElo::expected(1600.0, 1400.0);
-        let eb = IncrementalElo::expected(1400.0, 1600.0);
+        assert!((expected(1500.0, 1500.0) - 0.5).abs() < EPS);
+        let ea = expected(1600.0, 1400.0);
+        let eb = expected(1400.0, 1600.0);
         assert!((ea + eb - 1.0).abs() < EPS);
         assert!(ea > 0.5 && eb < 0.5);
-    }
-
-    #[test]
-    fn draw_between_equals_is_no_change() {
-        let a = EngineId::new();
-        let b = EngineId::new();
-        let mut elo = IncrementalElo::with_seed(32.0, [(a, 1500.0), (b, 1500.0)]);
-        let deltas = elo.update(a, b, GameResult::Draw);
-        for d in deltas {
-            assert!(d.delta.abs() < EPS);
-        }
-        assert!((elo.current(a) - 1500.0).abs() < EPS);
-        assert!((elo.current(b) - 1500.0).abs() < EPS);
-    }
-
-    #[test]
-    fn win_is_zero_sum_and_signed_correctly() {
-        let a = EngineId::new();
-        let b = EngineId::new();
-        let mut elo = IncrementalElo::with_seed(32.0, [(a, 1500.0), (b, 1500.0)]);
-        let deltas = elo.update(a, b, GameResult::WhiteWin);
-        // Equal ratings, expected 0.5, K=32 -> winner +16, loser -16.
-        let da = deltas.iter().find(|d| d.engine == a).unwrap().delta;
-        let db = deltas.iter().find(|d| d.engine == b).unwrap().delta;
-        assert!((da - 16.0).abs() < EPS);
-        assert!((db + 16.0).abs() < EPS);
-        assert!((da + db).abs() < EPS); // zero-sum
-        assert!((elo.delta_since_start(a) - 16.0).abs() < EPS);
-        assert!((elo.delta_since_start(b) + 16.0).abs() < EPS);
     }
 
     #[test]
@@ -366,12 +297,34 @@ mod tests {
     }
 
     #[test]
-    fn unseeded_engines_default_to_zero_baseline() {
+    fn rating_error_shrinks_with_more_games() {
         let a = EngineId::new();
         let b = EngineId::new();
-        let mut elo = IncrementalElo::new(32.0);
-        elo.update(a, b, GameResult::WhiteWin);
-        // Baseline captured at first sighting (0.0), so delta reflects the full change.
-        assert!((elo.delta_since_start(a) - elo.current(a)).abs() < EPS);
+        let mut few = Standings::with_engines(&[a, b]);
+        let mut many = Standings::with_engines(&[a, b]);
+        for i in 0..40 {
+            let g = game(a, b, GameResult::Draw);
+            if i < 10 {
+                few.record(g);
+            }
+            many.record(g);
+        }
+        let ratings: HashMap<EngineId, f64> = [(a, 1500.0), (b, 1500.0)].into();
+        let e_few = rating_error(&few, &ratings, a).unwrap();
+        let e_many = rating_error(&many, &ratings, a).unwrap();
+        // 4× the games → half the standard error.
+        assert!((e_few / e_many - 2.0).abs() < 0.01, "{e_few} vs {e_many}");
+        // Sanity scale: 10 games between equals → SE ≈ 110 Elo, ±215 at 95%.
+        assert!((e_few - 215.3).abs() < 1.0, "got {e_few}");
+    }
+
+    #[test]
+    fn rating_error_none_without_games() {
+        let a = EngineId::new();
+        let b = EngineId::new();
+        let s = Standings::with_engines(&[a, b]);
+        let ratings: HashMap<EngineId, f64> = [(a, 1500.0), (b, 1500.0)].into();
+        assert_eq!(rating_error(&s, &ratings, a), None);
+        assert_eq!(rating_error(&s, &ratings, EngineId::new()), None);
     }
 }

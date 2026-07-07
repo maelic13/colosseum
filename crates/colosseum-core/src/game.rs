@@ -23,15 +23,6 @@ impl GameResult {
         }
     }
 
-    /// White's score in `[0, 1]` (1 win, 0.5 draw, 0 loss).
-    #[must_use]
-    pub fn white_score(self) -> f64 {
-        match self {
-            Self::WhiteWin => 1.0,
-            Self::BlackWin => 0.0,
-            Self::Draw => 0.5,
-        }
-    }
 }
 
 /// Why a game ended. Natural endings plus adjudication and error terminations.

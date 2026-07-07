@@ -25,7 +25,6 @@ mod results_tab;
 mod stats_ui;
 mod theme;
 mod tournament_tab;
-mod viewer;
 mod widgets;
 
 use colosseum_core::branding::DISPLAY_NAME;

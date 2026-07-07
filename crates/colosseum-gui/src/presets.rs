@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use colosseum_core::{EloPolicy, OpeningFormat, OpeningOrder, TimeUnit};
+use colosseum_core::{OpeningFormat, OpeningOrder, TimeUnit};
 
 // ── Mirror enums ────────────────────────────────────────────────────────────────
 
@@ -92,8 +92,6 @@ pub struct PresetData {
     pub resign_score_cp: i32,
 
     // Elo
-    pub elo_policy: EloPolicy,
-    pub k_factor: f64,
     /// Library-rating writeback mode: "never" (default), "all", "estimate".
     /// The estimate target engine is session state and is not persisted.
     #[serde(default)]
@@ -147,8 +145,6 @@ impl Default for PresetData {
             resign_on: false,
             resign_move_count: 4,
             resign_score_cp: 800,
-            elo_policy: EloPolicy::PerGame,
-            k_factor: 32.0,
             elo_writeback: String::new(),
             openings_on: false,
             openings_path: String::new(),

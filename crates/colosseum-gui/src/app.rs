@@ -23,7 +23,7 @@ enum Tab {
     #[default]
     Tournament,
     Engines,
-    Results,
+    Arena,
 }
 
 impl Tab {
@@ -31,7 +31,7 @@ impl Tab {
         match self {
             Tab::Tournament => "Tournament",
             Tab::Engines => "Engines",
-            Tab::Results => "Results",
+            Tab::Arena => "Arena",
         }
     }
 }
@@ -255,7 +255,7 @@ impl ColosseumApp {
                     );
                     ui.add_space(20.0);
 
-                    for tab in [Tab::Tournament, Tab::Results, Tab::Engines] {
+                    for tab in [Tab::Tournament, Tab::Arena, Tab::Engines] {
                         let selected = self.tab == tab;
                         if widgets::pill_tab(ui, tab.label(), selected) {
                             if self.tab == Tab::Engines && tab != Tab::Engines {
@@ -347,13 +347,13 @@ impl ColosseumApp {
                     self.tournament_tab.show(ui, &mut self.backend);
                     // A freshly started tournament switches to its live view.
                     if self.tournament_tab.take_started() {
-                        self.tab = Tab::Results;
+                        self.tab = Tab::Arena;
                     }
                 }
                 Tab::Engines => {
                     self.engines_tab.show(ui, &mut self.backend);
                 }
-                Tab::Results => {
+                Tab::Arena => {
                     self.results_tab.show(ui, &mut self.backend);
                 }
             });

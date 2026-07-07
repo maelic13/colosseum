@@ -1,10 +1,9 @@
 //! Colosseum core: pure domain types and logic. No I/O, no UI, no async.
 //!
 //! This crate defines the stable "seams" the rest of the app builds on:
-//! engine/option/time/tournament/adjudication config types, the [`rating::Rating`]
-//! trait, [`event::TournamentEvent`], and the game/result types. Full algorithms
-//! (Elo edge cases, round-robin color balancing, adjudication decisions) and their
-//! exhaustive tests are completed in Step 3.
+//! engine/option/time/tournament/adjudication config types, the rating math
+//! ([`rating::ml_ratings`] and friends), [`event::TournamentEvent`], and the
+//! game/result types.
 
 pub mod adjudication;
 pub mod branding;
@@ -32,11 +31,11 @@ pub use game::{GameResult, GameStats, Pairing, Termination};
 pub use ids::{EngineId, GameId, TournamentId};
 pub use options::{UciOption, UciOptionValue, is_hash_option, is_thread_option};
 pub use pairing::{gauntlet, generate_schedule, round_robin};
-pub use rating::{IncrementalElo, Rating, RatingDelta, ml_ratings, performance_rating};
+pub use rating::{ml_ratings, performance_rating, rating_error};
 pub use standings::{EngineStanding, GameOutcome, HeadToHead, PairGameResult, Standings};
 pub use stats::{EloEstimate, SprtDecision, SprtResult, elo_with_error, los, sprt};
 pub use time::{TimeControl, TimeUnit};
 pub use tournament::{
-    CommonEngineOptions, EloPolicy, Format, OpeningBook, OpeningFormat, OpeningOrder,
-    RatingWriteback, StartPosition, TournamentConfig,
+    CommonEngineOptions, Format, OpeningBook, OpeningFormat, OpeningOrder, RatingWriteback,
+    StartPosition, TournamentConfig,
 };

@@ -21,9 +21,9 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinSet;
 
 use colosseum_core::{
-    CommonEngineOptions, EloPolicy, EngineConfig, EngineId, GameId, GameResult, IncrementalElo,
-    Pairing, Rating, Standings, StartPosition, Termination, TournamentConfig, TournamentEvent,
-    TournamentId, UciOptionValue, generate_schedule, standings::GameOutcome,
+    CommonEngineOptions, EngineConfig, EngineId, GameId, GameResult, Pairing, Standings,
+    StartPosition, Termination, TournamentConfig, TournamentEvent, TournamentId, UciOptionValue,
+    generate_schedule, standings::GameOutcome,
 };
 use colosseum_uci::SpawnOptions;
 
@@ -67,11 +67,38 @@ pub enum TournamentStatus {
     Finished,
 }
 
-/// An engine's current rating and change since the tournament started.
+/// An engine's current rating, change since the tournament started, and the
+/// estimate's uncertainty. Always the joint maximum-likelihood recompute over
+/// every finished game ([`colosseum_core::ml_ratings`]) anchored to the
+/// participants' seed ratings — order-independent and free of K-factor tuning.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EloEntry {
     pub current: f64,
     pub delta: f64,
+    /// 95%-confidence half-width (± Elo) of the ML estimate; `None` until the
+    /// engine has informative games.
+    pub error: Option<f64>,
+}
+
+/// Recompute the ML rating snapshot from the standings: rating, delta vs the
+/// seed, and the asymptotic error bar, for every participant.
+fn elo_entries(standings: &Standings, seeds: &[(EngineId, f64)]) -> HashMap<EngineId, EloEntry> {
+    let ratings = colosseum_core::ml_ratings(standings, seeds);
+    seeds
+        .iter()
+        .map(|&(id, seed)| {
+            let current = ratings.get(&id).copied().unwrap_or(seed);
+            let error = colosseum_core::rating_error(standings, &ratings, id);
+            (
+                id,
+                EloEntry {
+                    current,
+                    delta: current - seed,
+                    error,
+                },
+            )
+        })
+        .collect()
 }
 
 /// A game currently being played (in-flight).
@@ -199,7 +226,7 @@ pub fn create_tournament(
             engine.id,
             EngineTemplate {
                 id: engine.id,
-                name: display_name(engine),
+                name: versioned_name(engine),
                 spawn: SpawnOptions {
                     path: engine.path.clone(),
                     args: engine.args.clone(),
@@ -222,7 +249,6 @@ pub fn create_tournament(
         .map(|eid| (*eid, templates[eid].start_elo))
         .collect();
     let init_standings = Standings::with_engines(&ids);
-    let init_elo = IncrementalElo::with_seed(config.k_factor, seeds.iter().copied());
 
     // Resolve the opening book once (if any). One opening is drawn per *encounter*
     // (a run of `games_per_pair` consecutive games), so both colours are played
@@ -274,22 +300,10 @@ pub fn create_tournament(
     );
 
     let total_games = schedule.len();
-    let elo_snapshot: HashMap<EngineId, EloEntry> = ids
-        .iter()
-        .map(|eid| {
-            (
-                *eid,
-                EloEntry {
-                    current: templates[eid].start_elo,
-                    delta: 0.0,
-                },
-            )
-        })
-        .collect();
     let snapshot = Arc::new(Mutex::new(TournamentSnapshot {
         status: TournamentStatus::Idle,
         standings: init_standings.clone(),
-        elo: elo_snapshot,
+        elo: elo_entries(&init_standings, &seeds),
         games_finished: 0,
         games_total: total_games,
         recent_errors: Vec::new(),
@@ -307,7 +321,6 @@ pub fn create_tournament(
         event_name: name.to_string(),
         config,
         templates,
-        ids,
         schedule,
         total_games,
         store,
@@ -316,8 +329,7 @@ pub fn create_tournament(
         commands: cmd_rx,
         seeds,
         init_standings,
-        init_elo,
-        init_finished: Vec::new(),
+        init_finished: 0,
     });
 
     Ok((
@@ -336,7 +348,6 @@ struct Driver {
     event_name: String,
     config: TournamentConfig,
     templates: HashMap<EngineId, EngineTemplate>,
-    ids: Vec<EngineId>,
     /// Games remaining to be played.  For fresh tournaments this is the full
     /// schedule; for resumed tournaments it contains only the unfinished games.
     schedule: Vec<ScheduledGame>,
@@ -347,15 +358,13 @@ struct Driver {
     events: Sender<TournamentEvent>,
     snapshot: Arc<Mutex<TournamentSnapshot>>,
     commands: UnboundedReceiver<Command>,
-    /// Original start Elos for `EndOfTournament` recompute.
+    /// Participants' start Elos — the anchor for the ML rating recompute.
     seeds: Vec<(EngineId, f64)>,
     /// Pre-initialized standings (empty for fresh tournaments, replayed from
     /// the database for resumed ones).
     init_standings: Standings,
-    /// Pre-initialized Elo model (seeded for fresh, replayed for resumed).
-    init_elo: IncrementalElo,
-    /// Pre-completed game results (empty for fresh, filled for resumed).
-    init_finished: Vec<(EngineId, EngineId, GameResult)>,
+    /// Games already finished before this driver started (0 fresh, >0 resumed).
+    init_finished: usize,
 }
 
 async fn drive(mut driver: Driver) {
@@ -364,9 +373,8 @@ async fn drive(mut driver: Driver) {
     // Take the init state out of `driver` using `mem::take`/`replace` so the
     // struct remains fully initialized and `&driver` borrows remain valid later.
     let seeds = std::mem::take(&mut driver.seeds);
-    let mut elo = std::mem::replace(&mut driver.init_elo, IncrementalElo::new(0.0));
     let mut standings = std::mem::replace(&mut driver.init_standings, Standings::with_engines(&[]));
-    let mut finished_results = std::mem::take(&mut driver.init_finished);
+    let mut finished_count = driver.init_finished;
     let mut recent_errors: Vec<String> = Vec::new();
 
     let mut games: JoinSet<crate::runner::GameReport> = JoinSet::new();
@@ -440,23 +448,14 @@ async fn drive(mut driver: Driver) {
         if running && games.is_empty() && next_index >= driver.schedule.len() {
             running = false;
             finished = true;
-            if driver.config.elo_policy == EloPolicy::EndOfTournament {
-                let mut recomputed =
-                    IncrementalElo::with_seed(driver.config.k_factor, seeds.iter().copied());
-                for (white, black, result) in &finished_results {
-                    recomputed.update(*white, *black, *result);
-                }
-                elo = recomputed;
-            }
             let _ = driver
                 .store
                 .set_tournament_status(driver.id, store::STATUS_FINISHED);
             publish(
                 &driver.snapshot,
                 &standings,
-                &elo,
-                &driver.ids,
-                finished_results.len(),
+                &seeds,
+                finished_count,
                 total,
                 TournamentStatus::Finished,
                 &recent_errors,
@@ -549,10 +548,7 @@ async fn drive(mut driver: Driver) {
                             white_move_ms: report.stats.white_move_ms,
                             black_move_ms: report.stats.black_move_ms,
                         });
-                        finished_results.push((report.white, report.black, report.result));
-                        if driver.config.elo_policy == EloPolicy::PerGame {
-                            elo.update(report.white, report.black, report.result);
-                        }
+                        finished_count += 1;
 
                         if let Some(message) = &report.error {
                             // Human-readable: which engine failed, how, and
@@ -614,9 +610,8 @@ async fn drive(mut driver: Driver) {
                         publish(
                             &driver.snapshot,
                             &standings,
-                            &elo,
-                            &driver.ids,
-                            finished_results.len(),
+                            &seeds,
+                            finished_count,
                             total,
                             status,
                             &recent_errors,
@@ -682,7 +677,7 @@ pub fn resume_tournament(
             p.engine,
             EngineTemplate {
                 id: p.engine,
-                name: display_name(engine),
+                name: versioned_name(engine),
                 spawn: SpawnOptions {
                     path: engine.path.clone(),
                     args: engine.args.clone(),
@@ -708,10 +703,10 @@ pub fn resume_tournament(
     // so they will be replayed in this session (one statement, not per-row).
     store.reset_unfinished_games(id)?;
 
-    // Replay finished games to reconstruct standings and Elo.
-    let mut elo = IncrementalElo::with_seed(config.k_factor, seeds.iter().copied());
+    // Replay finished games to reconstruct the standings (ratings are always
+    // recomputed from standings, so they need no replay of their own).
     let mut standings = Standings::with_engines(&ids);
-    let mut finished_results: Vec<(EngineId, EngineId, GameResult)> = Vec::new();
+    let mut finished_count = 0usize;
 
     // Build remaining schedule from non-finished games (preserving original DB order).
     let mut schedule: Vec<ScheduledGame> = Vec::new();
@@ -732,10 +727,7 @@ pub fn resume_tournament(
                     white_move_ms: game.white_move_ms,
                     black_move_ms: game.black_move_ms,
                 });
-                finished_results.push((game.white, game.black, result));
-                if config.elo_policy == EloPolicy::PerGame {
-                    elo.update(game.white, game.black, result);
-                }
+                finished_count += 1;
             }
         } else {
             schedule.push(ScheduledGame {
@@ -754,24 +746,11 @@ pub fn resume_tournament(
     // Mark the tournament as stopped; it becomes running again when Go is pressed.
     store.set_tournament_status(id, store::STATUS_STOPPED)?;
 
-    let elo_snapshot: HashMap<EngineId, EloEntry> = ids
-        .iter()
-        .map(|eid| {
-            (
-                *eid,
-                EloEntry {
-                    current: elo.current(*eid),
-                    delta: elo.delta_since_start(*eid),
-                },
-            )
-        })
-        .collect();
-
     let snapshot = Arc::new(Mutex::new(TournamentSnapshot {
         status: TournamentStatus::Stopped,
         standings: standings.clone(),
-        elo: elo_snapshot,
-        games_finished: finished_results.len(),
+        elo: elo_entries(&standings, &seeds),
+        games_finished: finished_count,
         games_total: total_games,
         recent_errors: Vec::new(),
         started_at: None,
@@ -789,7 +768,6 @@ pub fn resume_tournament(
         event_name: row.name,
         config,
         templates,
-        ids,
         schedule,
         total_games,
         store,
@@ -798,8 +776,7 @@ pub fn resume_tournament(
         commands: cmd_rx,
         seeds,
         init_standings: standings,
-        init_elo: elo,
-        init_finished: finished_results,
+        init_finished: finished_count,
     });
 
     Ok((
@@ -838,15 +815,14 @@ pub struct TournamentResults {
 
 /// Reconstruct a stored tournament's results without spawning any engines.
 ///
-/// Finished games are replayed in DB order to rebuild standings and Elo; the Elo
-/// reconstruction matches the live end-of-tournament state for both `PerGame` and
-/// `EndOfTournament` policies (and leaves ratings at their seeds for `Never`).
+/// Finished games are replayed in DB order to rebuild the standings; ratings
+/// are then the same ML recompute the live view shows, so history and live
+/// tables always agree.
 pub fn load_tournament_results(
     store: &Store,
     row: &TournamentRow,
 ) -> Result<TournamentResults, EngineError> {
     let id = row.id;
-    let config = &row.config;
 
     let participants_raw = store.list_tournament_engines(id)?;
     let mut ids = Vec::with_capacity(participants_raw.len());
@@ -869,7 +845,6 @@ pub fn load_tournament_results(
     let all_games = store.list_games(id)?;
     let total_games = all_games.len();
 
-    let mut elo = IncrementalElo::with_seed(config.k_factor, seeds.iter().copied());
     let mut standings = Standings::with_engines(&ids);
     let mut finished = 0usize;
     let mut decisive = 0usize;
@@ -892,9 +867,6 @@ pub fn load_tournament_results(
             white_move_ms: game.white_move_ms,
             black_move_ms: game.black_move_ms,
         });
-        if config.elo_policy != EloPolicy::Never {
-            elo.update(game.white, game.black, result);
-        }
         finished += 1;
         if result == GameResult::Draw {
             draws += 1;
@@ -903,22 +875,9 @@ pub fn load_tournament_results(
         }
     }
 
-    let elo_map = ids
-        .iter()
-        .map(|eid| {
-            (
-                *eid,
-                EloEntry {
-                    current: elo.current(*eid),
-                    delta: elo.delta_since_start(*eid),
-                },
-            )
-        })
-        .collect();
-
     Ok(TournamentResults {
+        elo: elo_entries(&standings, &seeds),
         standings,
-        elo: elo_map,
         participants,
         games_finished: finished,
         games_total: total_games,
@@ -1052,6 +1011,21 @@ fn display_name(engine: &EngineConfig) -> String {
     }
 }
 
+/// The engine's full identity — "name version" (e.g. `Basilisk 1.7.0`) — used
+/// wherever a single string must uniquely name an engine: PGN White/Black tags,
+/// the live game headers, and the games rail. Name and version are separate
+/// library fields, but together they are the identifier, so four `Rybka`s or
+/// two `Basilisk`s never collapse into indistinguishable entries.
+fn versioned_name(engine: &EngineConfig) -> String {
+    let name = display_name(engine);
+    let version = engine.meta.version.trim();
+    if version.is_empty() {
+        name
+    } else {
+        format!("{name} {version}")
+    }
+}
+
 fn time_control_label(config: &TournamentConfig) -> String {
     use colosseum_core::TimeControl;
     // Render seconds compactly: whole numbers without a trailing ".0".
@@ -1115,8 +1089,7 @@ fn today_pgn_date() -> String {
 fn publish(
     snapshot: &Arc<Mutex<TournamentSnapshot>>,
     standings: &Standings,
-    elo: &IncrementalElo,
-    ids: &[EngineId],
+    seeds: &[(EngineId, f64)],
     finished: usize,
     total: usize,
     status: TournamentStatus,
@@ -1127,18 +1100,10 @@ fn publish(
     in_flight_games: &[InFlightGame],
     termination_counts: &HashMap<Termination, usize>,
 ) {
-    let elo_map = ids
-        .iter()
-        .map(|id| {
-            (
-                *id,
-                EloEntry {
-                    current: elo.current(*id),
-                    delta: elo.delta_since_start(*id),
-                },
-            )
-        })
-        .collect();
+    // Recomputed from scratch every publish: for realistic fields this is
+    // sub-millisecond, and it guarantees the shown ratings never depend on
+    // game order or a K-factor.
+    let elo_map = elo_entries(standings, seeds);
     if let Ok(mut snap) = snapshot.lock() {
         snap.status = status;
         snap.standings = standings.clone();

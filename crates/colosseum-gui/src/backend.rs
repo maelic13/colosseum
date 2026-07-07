@@ -323,7 +323,7 @@ impl Backend {
     }
 
     /// Unload a tournament (after it has stopped or finished). Does not delete
-    /// persisted data — it stays in the Results list.
+    /// persisted data — it stays in the Arena list.
     pub fn close_tournament(&mut self, id: TournamentId) {
         self.actives.retain(|a| a.handle.id != id);
     }
@@ -345,14 +345,6 @@ impl Backend {
     pub fn delete_tournament(&self, id: TournamentId) -> anyhow::Result<()> {
         self.store.delete_tournament(id)?;
         Ok(())
-    }
-
-    /// List all games (any status) of a tournament, in play order.
-    pub fn list_games(&self, id: TournamentId) -> Vec<colosseum_engine::GameRow> {
-        self.store.list_games(id).unwrap_or_else(|e| {
-            tracing::warn!("failed to list games: {e}");
-            Vec::new()
-        })
     }
 
     /// Concatenate the PGN of every finished game in a tournament, in play

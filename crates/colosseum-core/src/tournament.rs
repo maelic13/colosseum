@@ -39,20 +39,9 @@ pub struct CommonEngineOptions {
     pub ponder: bool,
 }
 
-/// When Elo ratings are recomputed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum EloPolicy {
-    /// Update incrementally after every game.
-    #[default]
-    PerGame,
-    /// Recompute once when the tournament finishes.
-    EndOfTournament,
-    /// Never modify ratings.
-    Never,
-}
-
 /// How engine *library* ratings are updated when the tournament finishes.
-/// Independent of [`EloPolicy`], which controls the live in-tournament model.
+/// The live in-tournament ratings are always the joint maximum-likelihood
+/// recompute over all finished games (`colosseum_core::ml_ratings`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum RatingWriteback {
     /// Leave every engine's library rating untouched (default).
@@ -161,9 +150,6 @@ pub struct TournamentConfig {
     pub concurrency: usize,
     pub common: CommonEngineOptions,
     pub adjudication: AdjudicationConfig,
-    pub elo_policy: EloPolicy,
-    /// K-factor for incremental Elo updates.
-    pub k_factor: f64,
     pub start_position: StartPosition,
     /// Optional path to append finished games as PGN.
     pub pgn_output: Option<PathBuf>,
@@ -190,8 +176,6 @@ impl Default for TournamentConfig {
                 ..CommonEngineOptions::default()
             },
             adjudication: AdjudicationConfig::default(),
-            elo_policy: EloPolicy::default(),
-            k_factor: 32.0,
             start_position: StartPosition::default(),
             pgn_output: None,
             engine_overrides: HashMap::new(),

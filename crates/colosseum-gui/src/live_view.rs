@@ -31,11 +31,16 @@ use crate::{board, eco, logo, theme, widgets};
 
 const RAIL_W: f32 = 150.0;
 const MOVES_W: f32 = 200.0;
-const RIGHT_W: f32 = 264.0;
+/// The engine/graph column is elastic: at least this wide (so the panels stay
+/// legible), but it soaks up whatever horizontal space the board leaves rather
+/// than stranding it as dead margin — the wider it gets, the more room the eval
+/// graph has to breathe.
+const RIGHT_MIN: f32 = 300.0;
+const RIGHT_MAX: f32 = 720.0;
 const GAP: f32 = 10.0;
 /// The eval graph is a wide, shallow strip: cap its painted height and keep
 /// it centred so the 0-line stays on the board midline.
-const GRAPH_MAX_H: f32 = 240.0;
+const GRAPH_MAX_H: f32 = 300.0;
 /// Below this board size the body scrolls instead of shrinking further.
 const MIN_BOARD: f32 = 320.0;
 /// Hold the result banner this long before auto-following to the next game.
@@ -218,9 +223,20 @@ impl LiveViews {
         state.update_range(&snap);
 
         let rail = games.len() >= 2;
-        let side_cols = MOVES_W + RIGHT_W + GAP * 2.0 + if rail { RAIL_W + GAP } else { 0.0 };
+        // Fixed columns to the left of the elastic engine column: the games
+        // rail (only with 2+ games), the moves column, and the inter-column
+        // gaps (rail↔moves↔board↔right).
+        let gaps = GAP * if rail { 3.0 } else { 2.0 };
+        let left_cols = MOVES_W + gaps + if rail { RAIL_W } else { 0.0 };
         let avail = ui.available_size();
-        let board_side = (avail.y.min(avail.x - side_cols) - 4.0).max(MIN_BOARD);
+        // The board is square and height-bound; give it what height allows but
+        // never so much width that the engine column drops below its minimum.
+        let board_side = (avail.y - 4.0)
+            .min(avail.x - left_cols - RIGHT_MIN)
+            .max(MIN_BOARD);
+        // The engine column takes the remaining width (clamped), so a wide
+        // window widens the graph instead of leaving a blank strip on the right.
+        let right_w = (avail.x - left_cols - board_side).clamp(RIGHT_MIN, RIGHT_MAX);
 
         let mut clicked_game: Option<GameId> = None;
         ScrollArea::both()
@@ -256,9 +272,9 @@ impl LiveViews {
                     if let Some((result, termination)) = snap.finished {
                         result_banner(ui, board_rect, result, termination);
                     }
-                    ui.allocate_ui_with_layout(vec2(RIGHT_W, board_side), column, |ui| {
-                        ui.set_max_width(RIGHT_W);
-                        engine_column(ui, backend, id, logos, state, &snap, board_side);
+                    ui.allocate_ui_with_layout(vec2(right_w, board_side), column, |ui| {
+                        ui.set_max_width(right_w);
+                        engine_column(ui, backend, logos, state, &snap, right_w, board_side);
                     });
                 });
             });
@@ -729,58 +745,88 @@ fn termination_label(termination: Termination) -> &'static str {
 fn engine_column(
     ui: &mut Ui,
     backend: &Backend,
-    tournament: TournamentId,
     logos: &mut logo::LogoCache,
     state: &ViewState,
     snap: &Snap,
+    width: f32,
     height: f32,
 ) {
-    // Equal panels top and bottom keep the graph — and its 0-line — centred
-    // on the board's midline. Vertical item spacing is the only gap, so the
-    // three children sum exactly to the board height.
-    ui.spacing_mut().item_spacing.y = GAP;
-    let panel_h = ((height - 2.0 * GAP) * 0.36).clamp(118.0, 190.0);
-    let graph_h = (height - 2.0 * panel_h - 2.0 * GAP).max(40.0);
-
     let thinking_white = snap.finished.is_none() && snap.white_to_move;
     let thinking_black = snap.finished.is_none() && !snap.white_to_move;
     let pos = state.replay.as_ref().map(|r| &r.pos);
 
-    engine_panel(
-        ui,
-        backend,
-        tournament,
-        logos,
-        &PanelData {
-            engine: snap.black_id,
-            name: &snap.black_name,
-            is_white: false,
-            search: &snap.black_search,
-            clock_ms: snap.black_clock_ms,
-            thinking: thinking_black,
-            search_elapsed: snap.search_elapsed,
-            pos_hint: if thinking_black { pos } else { None },
-        },
-        panel_h,
-    );
-    let (graph_rect, _) = ui.allocate_exact_size(vec2(RIGHT_W, graph_h), Sense::hover());
-    draw_graph(ui, graph_rect, snap, state.range);
-    engine_panel(
-        ui,
-        backend,
-        tournament,
-        logos,
-        &PanelData {
-            engine: snap.white_id,
-            name: &snap.white_name,
-            is_white: true,
-            search: &snap.white_search,
-            clock_ms: snap.white_clock_ms,
-            thinking: thinking_white,
-            search_elapsed: snap.search_elapsed,
-            pos_hint: if thinking_white { pos } else { None },
-        },
-        panel_h,
+    // One card holds both engine panels and the graph, so the three read as a
+    // single connected unit rather than three floating boxes. The inner content
+    // spans the whole board height; equal top/bottom panels keep the graph —
+    // and its 0-line — centred on the board's midline.
+    const PAD: f32 = 12.0;
+    const DIVIDER_H: f32 = 9.0;
+    let inner_w = width - 2.0 * PAD;
+    let inner_h = height - 2.0 * PAD;
+    // Two equal panels, two dividers, and the graph sum to exactly the inner
+    // height (so nothing overflows the card even at the minimum board size),
+    // keeping the graph — hence its 0-line — on the board's midline.
+    let panel_h = ((inner_h - 80.0) * 0.5).clamp(96.0, 230.0);
+    let graph_h = (inner_h - 2.0 * panel_h - 2.0 * DIVIDER_H).max(60.0);
+
+    egui::Frame::new()
+        .fill(theme::bg_darkest())
+        .stroke(Stroke::new(1.0, theme::stroke()))
+        .corner_radius(egui::CornerRadius::same(10))
+        .inner_margin(egui::Margin::same(PAD as i8))
+        .show(ui, |ui| {
+            ui.set_min_size(vec2(inner_w, inner_h));
+            ui.set_max_size(vec2(inner_w, inner_h));
+            ui.spacing_mut().item_spacing.y = 0.0;
+
+            engine_panel(
+                ui,
+                backend,
+                logos,
+                &PanelData {
+                    engine: snap.black_id,
+                    name: &snap.black_name,
+                    is_white: false,
+                    search: &snap.black_search,
+                    clock_ms: snap.black_clock_ms,
+                    thinking: thinking_black,
+                    search_elapsed: snap.search_elapsed,
+                    pos_hint: if thinking_black { pos } else { None },
+                },
+                inner_w,
+                panel_h,
+            );
+            column_divider(ui, inner_w);
+            let (graph_rect, _) = ui.allocate_exact_size(vec2(inner_w, graph_h), Sense::hover());
+            draw_graph(ui, graph_rect, snap, state.range);
+            column_divider(ui, inner_w);
+            engine_panel(
+                ui,
+                backend,
+                logos,
+                &PanelData {
+                    engine: snap.white_id,
+                    name: &snap.white_name,
+                    is_white: true,
+                    search: &snap.white_search,
+                    clock_ms: snap.white_clock_ms,
+                    thinking: thinking_white,
+                    search_elapsed: snap.search_elapsed,
+                    pos_hint: if thinking_white { pos } else { None },
+                },
+                inner_w,
+                panel_h,
+            );
+        });
+}
+
+/// A hairline rule between the card's sections (engine panel ↔ graph).
+fn column_divider(ui: &mut Ui, width: f32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 9.0), Sense::hover());
+    let y = rect.center().y;
+    ui.painter().line_segment(
+        [pos2(rect.left() + 2.0, y), pos2(rect.right() - 2.0, y)],
+        Stroke::new(1.0, theme::stroke()),
     );
 }
 
@@ -800,9 +846,9 @@ struct PanelData<'a> {
 fn engine_panel(
     ui: &mut Ui,
     backend: &Backend,
-    tournament: TournamentId,
     logos: &mut logo::LogoCache,
     data: &PanelData<'_>,
+    width: f32,
     height: f32,
 ) {
     let series = if data.is_white {
@@ -810,65 +856,48 @@ fn engine_panel(
     } else {
         theme::graph_black()
     };
-    let stroke = if data.thinking {
-        Stroke::new(1.0, theme::accent())
+    // No border — the surrounding card supplies that. The active engine gets a
+    // faint accent wash so it's obvious at a glance whose clock is running.
+    let fill = if data.thinking {
+        theme::tint(theme::accent(), 0.10)
     } else {
-        Stroke::new(1.0, theme::stroke())
+        Color32::TRANSPARENT
     };
     egui::Frame::new()
-        .fill(theme::bg_darkest())
-        .stroke(stroke)
-        .corner_radius(egui::CornerRadius::same(8))
-        .inner_margin(egui::Margin::same(9))
+        .fill(fill)
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin::symmetric(6, 8))
         .show(ui, |ui| {
-            ui.set_min_size(vec2(RIGHT_W - 18.0, height - 18.0));
-            ui.set_max_height(height - 18.0);
-            // Compact rows regardless of the column's inherited gap spacing.
-            ui.spacing_mut().item_spacing.y = 6.0;
+            ui.set_min_size(vec2(width - 12.0, height - 16.0));
+            ui.set_max_size(vec2(width - 12.0, height - 16.0));
+            ui.spacing_mut().item_spacing.y = 8.0;
 
-            let version = backend
-                .active(tournament)
-                .and_then(|a| a.participants.iter().find(|p| p.id == data.engine))
-                .map(|p| p.version.clone())
-                .unwrap_or_default();
-
-            // Header: logo/avatar · series dot · name · version · clock.
+            // Header: logo/avatar · series dot · name (with version) · clock.
             ui.horizontal(|ui| {
-                // The logo is the first thing sacrificed when space is tight.
-                if ui.available_width() >= 170.0 {
-                    let (rect, _) = logo::slot(ui, 22.0, Sense::hover());
-                    let logo_file = backend
-                        .engines
-                        .iter()
-                        .find(|e| e.id == data.engine)
-                        .and_then(|e| e.meta.extra.get("logo").cloned());
-                    let drew = logo_file.is_some_and(|file| {
-                        logo::draw_fitted(ui, logos, &backend.dirs.logos_dir().join(file), rect, 4)
-                    });
-                    if !drew {
-                        widgets::draw_avatar_square_in(ui, rect, data.name, false, 4);
-                    }
+                let (rect, _) = logo::slot(ui, 24.0, Sense::hover());
+                let logo_file = backend
+                    .engines
+                    .iter()
+                    .find(|e| e.id == data.engine)
+                    .and_then(|e| e.meta.extra.get("logo").cloned());
+                let drew = logo_file.is_some_and(|file| {
+                    logo::draw_fitted(ui, logos, &backend.dirs.logos_dir().join(file), rect, 4)
+                });
+                if !drew {
+                    widgets::draw_avatar_square_in(ui, rect, data.name, false, 4);
                 }
-                let (dot, _) = ui.allocate_exact_size(vec2(8.0, 8.0), Sense::hover());
-                ui.painter().circle_filled(dot.center(), 4.0, series);
+                let (dot, _) = ui.allocate_exact_size(vec2(9.0, 9.0), Sense::hover());
+                ui.painter().circle_filled(dot.center(), 4.5, series);
                 ui.add(
                     egui::Label::new(
                         RichText::new(data.name)
                             .color(theme::text())
-                            .font(theme::semibold(12.5)),
+                            .font(theme::semibold(13.5)),
                     )
                     .truncate(),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     clock_chip(ui, data);
-                    if !version.is_empty() {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(version).color(theme::text_faint()).size(10.5),
-                            )
-                            .truncate(),
-                        );
-                    }
                 });
             });
 
@@ -884,7 +913,7 @@ fn engine_panel(
                 ui.label(
                     RichText::new(text)
                         .color(color)
-                        .font(egui::FontId::new(19.0, egui::FontFamily::Monospace)),
+                        .font(egui::FontId::new(22.0, egui::FontFamily::Monospace)),
                 );
                 if data.thinking {
                     ui.label(RichText::new("thinking…").color(theme::accent()).size(10.0));
