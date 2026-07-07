@@ -22,7 +22,6 @@ mod icon;
 mod logo;
 mod presets;
 mod results_tab;
-mod stats_ui;
 mod theme;
 mod tournament_tab;
 mod widgets;

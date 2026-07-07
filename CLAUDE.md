@@ -42,10 +42,15 @@ aborts).
   error messages (`versioned_name` in scheduler, `join_name_version` in GUI).
   Name and version are separate fields in the library/DB.
 - **Ratings are always a joint ML recompute** (`ml_ratings`, Ordo-style,
-  anchored to the participants' prior mean) from the standings — never
-  incremental K-factor Elo. Error bars via `rating_error` (Fisher
-  information). The live table's Elo column shows *exactly* what the
-  configured `RatingWriteback` would store in the library.
+  anchored to the participants' *tournament-start* mean — the DB `start_elo`
+  seeds, never the current library) from the standings — never incremental
+  K-factor Elo. Every engine carries `PRIOR_WEIGHT` virtual draws against
+  its own prior (Bayesian damping — one win must not produce a capped ±400
+  split). Error bars via `rating_error` (Fisher information). The
+  `RatingWriteback` (None / All / Chosen) is applied to the library **after
+  every finished game** (`Backend::apply_rating_writebacks`), and the Elo
+  column shows exactly what the library holds; Δ is always vs tournament
+  start. `Estimate(id)` survives only for deserializing old tournaments.
 - **UCI option mapping is allowlist-based**: thread/hash options are matched
   by exact (whitespace/case-insensitive) names (`is_thread_option`,
   `is_hash_option`) — substring heuristics corrupted options like Rybka's

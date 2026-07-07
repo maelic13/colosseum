@@ -60,15 +60,26 @@ pub fn performance_rating(results: &[(f64, f64, u32)]) -> Option<f64> {
     Some(0.5 * (lo + hi))
 }
 
+/// Weight of the Bayesian prior in [`ml_ratings`]: every engine carries this
+/// many *virtual draws against its own prior rating*. A tiny sample can no
+/// longer swing wildly (one real win against 3 virtual draws is a modest
+/// bump, not a capped +800 performance), while after a few dozen real games
+/// the prior's influence fades below the rating error. The same idea as
+/// Ordo's prior weight.
+const PRIOR_WEIGHT: u32 = 6;
+
 /// Joint maximum-likelihood ratings for a whole tournament (Ordo-style).
 ///
 /// Iteratively sets every engine's rating to its [`performance_rating`]
 /// against the others' current ratings (synchronous update with damping),
 /// then re-centres so the mean rating of engines *that played* equals the
 /// mean of their priors — ML determines only rating differences, so the
-/// anchor keeps the numbers on the library's scale. Engines without games
-/// keep their prior untouched. Order-independent and K-free: the same set of
-/// games always yields the same ratings, regardless of play order.
+/// anchor keeps the numbers on the library's scale. Each engine also plays
+/// [`PRIOR_WEIGHT`] virtual draws against its own prior, so early estimates
+/// are damped toward the prior instead of jumping to capped extremes.
+/// Engines without games keep their prior untouched. Order-independent and
+/// K-free: the same set of games always yields the same ratings, regardless
+/// of play order.
 #[must_use]
 pub fn ml_ratings(
     standings: &Standings,
@@ -96,7 +107,7 @@ pub fn ml_ratings(
         let mut next = ratings.clone();
         let mut max_change: f64 = 0.0;
         for &id in &played {
-            let results: Vec<(f64, f64, u32)> = played
+            let mut results: Vec<(f64, f64, u32)> = played
                 .iter()
                 .filter(|&&opp| opp != id)
                 .map(|&opp| {
@@ -104,6 +115,14 @@ pub fn ml_ratings(
                     (ratings[&opp], h2h.points(), h2h.games())
                 })
                 .collect();
+            // The Bayesian prior: virtual draws against the engine's own
+            // prior rating (not its current estimate — the prior is the
+            // anchor, otherwise it would drift with the iteration).
+            let prior = priors
+                .iter()
+                .find(|(pid, _)| *pid == id)
+                .map_or(1500.0, |(_, p)| *p);
+            results.push((prior, f64::from(PRIOR_WEIGHT) * 0.5, PRIOR_WEIGHT));
             if let Some(perf) = performance_rating(&results) {
                 let old = ratings[&id];
                 let new = 0.5 * old + 0.5 * perf;
@@ -233,16 +252,31 @@ mod tests {
     }
 
     #[test]
-    fn ml_even_score_equalizes_ratings_and_keeps_anchor() {
+    fn ml_even_score_converges_ratings_and_keeps_anchor() {
         let a = EngineId::new();
         let b = EngineId::new();
         let mut s = Standings::with_engines(&[a, b]);
         s.record(game(a, b, GameResult::WhiteWin));
         s.record(game(b, a, GameResult::WhiteWin));
-        // 50% each: equal ratings, mean preserved at (1500+1700)/2 = 1600.
+        // 50% each pulls the ratings together; the prior keeps them from
+        // collapsing entirely on two games. Mean preserved at 1600.
         let r = ml_ratings(&s, &[(a, 1500.0), (b, 1700.0)]);
-        assert!((r[&a] - 1600.0).abs() < 1.0, "a={}", r[&a]);
-        assert!((r[&b] - 1600.0).abs() < 1.0, "b={}", r[&b]);
+        assert!(r[&a] > 1500.0 && r[&a] < 1600.0, "a={}", r[&a]);
+        assert!(r[&b] < 1700.0 && r[&b] > 1600.0, "b={}", r[&b]);
+        assert!(((r[&a] + r[&b]) / 2.0 - 1600.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn ml_single_game_is_damped() {
+        let a = EngineId::new();
+        let b = EngineId::new();
+        let mut s = Standings::with_engines(&[a, b]);
+        s.record(game(a, b, GameResult::WhiteWin));
+        // One win must NOT produce a capped ±400 split — the prior draws
+        // keep it a modest bump (~±45).
+        let r = ml_ratings(&s, &[(a, 1500.0), (b, 1500.0)]);
+        let diff = r[&a] - r[&b];
+        assert!(diff > 10.0 && diff < 120.0, "diff={diff}");
     }
 
     #[test]
@@ -265,21 +299,38 @@ mod tests {
     }
 
     #[test]
-    fn ml_75_percent_is_about_191_apart() {
+    fn ml_75_percent_approaches_logistic_gap_with_volume() {
         let a = EngineId::new();
         let b = EngineId::new();
-        let mut s = Standings::with_engines(&[a, b]);
-        // a scores 7.5/10 against b: 7 wins, 1 draw, 2 losses.
+        // 75% over 10 games: noticeably damped by the prior.
+        let mut small = Standings::with_engines(&[a, b]);
         for _ in 0..7 {
-            s.record(game(a, b, GameResult::WhiteWin));
+            small.record(game(a, b, GameResult::WhiteWin));
         }
-        s.record(game(a, b, GameResult::Draw));
-        s.record(game(b, a, GameResult::WhiteWin));
-        s.record(game(b, a, GameResult::WhiteWin));
-        let r = ml_ratings(&s, &[(a, 1500.0), (b, 1500.0)]);
-        let diff = r[&a] - r[&b];
-        assert!((diff - 190.8).abs() < 3.0, "diff={diff}");
+        small.record(game(a, b, GameResult::Draw));
+        small.record(game(b, a, GameResult::WhiteWin));
+        small.record(game(b, a, GameResult::WhiteWin));
+        let r = ml_ratings(&small, &[(a, 1500.0), (b, 1500.0)]);
+        let small_diff = r[&a] - r[&b];
+        assert!(small_diff > 90.0 && small_diff < 190.0, "small={small_diff}");
         assert!(((r[&a] + r[&b]) / 2.0 - 1500.0).abs() < 0.5);
+
+        // 75% over 400 games: the prior washes out; the pure logistic gap
+        // for a 75% score is 190.8.
+        let mut large = Standings::with_engines(&[a, b]);
+        for _ in 0..280 {
+            large.record(game(a, b, GameResult::WhiteWin));
+        }
+        for _ in 0..40 {
+            large.record(game(a, b, GameResult::Draw));
+        }
+        for _ in 0..80 {
+            large.record(game(b, a, GameResult::WhiteWin));
+        }
+        let r = ml_ratings(&large, &[(a, 1500.0), (b, 1500.0)]);
+        let large_diff = r[&a] - r[&b];
+        assert!((large_diff - 190.8).abs() < 8.0, "large={large_diff}");
+        assert!(large_diff > small_diff);
     }
 
     #[test]
@@ -291,8 +342,9 @@ mod tests {
         s.record(game(a, b, GameResult::Draw));
         let r = ml_ratings(&s, &[(a, 1500.0), (b, 1600.0), (c, 2400.0)]);
         assert!((r[&c] - 2400.0).abs() < EPS);
-        // a and b drew: equal ratings at their prior mean 1550.
-        assert!((r[&a] - r[&b]).abs() < 1.0);
+        // a and b drew: pulled toward each other (one draw against six
+        // prior draws only nudges them), mean preserved at 1550.
+        assert!(r[&a] > 1500.0 && r[&b] < 1600.0 && r[&a] < r[&b]);
         assert!(((r[&a] + r[&b]) / 2.0 - 1550.0).abs() < 0.5);
     }
 

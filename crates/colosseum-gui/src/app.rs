@@ -56,6 +56,9 @@ pub struct ColosseumApp {
     engines_tab: EnginesTab,
     tournament_tab: TournamentTab,
     results_tab: ResultsTab,
+    /// About dialog: open + whether "check for updates" was pressed.
+    about_open: bool,
+    about_checked: bool,
     /// Frames painted so far while the window is still hidden. The window is
     /// revealed only after a couple of frames have actually been presented,
     /// so no unpainted surface is ever shown (startup flash).
@@ -97,6 +100,8 @@ impl ColosseumApp {
             engines_tab: EnginesTab::default(),
             tournament_tab,
             results_tab: ResultsTab::default(),
+            about_open: false,
+            about_checked: false,
             frames_before_reveal: 0,
             maximize_on_reveal,
         }
@@ -228,6 +233,104 @@ impl ColosseumApp {
         }
     }
 
+    /// The About dialog (Firefox-style): mark, name + version, update check.
+    /// The update check is a stub for now — it always reports up to date.
+    fn show_about(&mut self, ctx: &egui::Context) {
+        if !self.about_open {
+            return;
+        }
+        let modal = egui::Modal::new(egui::Id::new("about_dialog")).show(ctx, |ui| {
+            ui.set_width(360.0);
+            ui.vertical_centered(|ui| {
+                ui.add_space(10.0);
+                // The amphitheatre mark, painted large.
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(56.0, 56.0), egui::Sense::hover());
+                let painter = ui.painter();
+                painter.circle_stroke(
+                    rect.center(),
+                    24.0,
+                    egui::Stroke::new(5.0, theme::accent()),
+                );
+                painter.circle_stroke(
+                    rect.center(),
+                    11.0,
+                    egui::Stroke::new(4.0, theme::accent().gamma_multiply(0.8)),
+                );
+                ui.add_space(10.0);
+                ui.label(
+                    RichText::new(DISPLAY_NAME)
+                        .font(theme::semibold(22.0))
+                        .color(theme::text()),
+                );
+                ui.label(
+                    RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION")))
+                        .color(theme::text_weak())
+                        .size(13.0),
+                );
+                ui.add_space(14.0);
+
+                if self.about_checked {
+                    ui.label(
+                        RichText::new("✓ You're up to date")
+                            .color(theme::success())
+                            .font(theme::semibold(13.5)),
+                    );
+                    ui.label(
+                        RichText::new(format!(
+                            "{DISPLAY_NAME} v{} is the latest version.",
+                            env!("CARGO_PKG_VERSION")
+                        ))
+                        .color(theme::text_weak())
+                        .size(12.0),
+                    );
+                } else if widgets::tinted_button(
+                    ui,
+                    "Check for updates",
+                    theme::accent(),
+                    true,
+                )
+                .clicked()
+                {
+                    self.about_checked = true;
+                }
+
+                ui.add_space(14.0);
+                ui.separator();
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(
+                        "UCI chess-engine tournaments: round robin & gauntlet, \
+                         parallel games, live boards, ML ratings.",
+                    )
+                    .color(theme::text_weak())
+                    .size(12.0),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("Free software under GPL-3.0-or-later.")
+                        .color(theme::text_faint())
+                        .size(11.5),
+                );
+                ui.add_space(10.0);
+                if ui
+                    .add(
+                        egui::Button::new(RichText::new("Close").color(theme::text()))
+                            .fill(theme::bg_elevated())
+                            .stroke(egui::Stroke::new(1.0, theme::stroke())),
+                    )
+                    .clicked()
+                {
+                    self.about_open = false;
+                }
+                ui.add_space(6.0);
+            });
+        });
+        if modal.should_close() {
+            self.about_open = false;
+        }
+    }
+
     /// Persist state and request the window to actually close.
     fn finish_close(&mut self, ctx: &egui::Context) {
         self.close = CloseState::Closing;
@@ -245,14 +348,35 @@ impl ColosseumApp {
             )
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
-                    logo(ui);
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(DISPLAY_NAME)
-                            .size(17.0)
-                            .strong()
-                            .color(theme::text()),
+                    // The logo + name is the app's "menu": clicking it opens
+                    // the About dialog (version, update check).
+                    let brand = ui
+                        .scope(|ui| {
+                            ui.horizontal(|ui| {
+                                logo(ui);
+                                ui.add_space(8.0);
+                                ui.label(
+                                    RichText::new(DISPLAY_NAME)
+                                        .size(17.0)
+                                        .strong()
+                                        .color(theme::text()),
+                                );
+                            });
+                        })
+                        .response;
+                    let brand = ui.interact(
+                        brand.rect,
+                        egui::Id::new("about_brand"),
+                        egui::Sense::click(),
                     );
+                    if brand
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text("About Colosseum")
+                        .clicked()
+                    {
+                        self.about_open = true;
+                        self.about_checked = false;
+                    }
                     ui.add_space(20.0);
 
                     for tab in [Tab::Tournament, Tab::Arena, Tab::Engines] {
@@ -379,6 +503,7 @@ impl eframe::App for ColosseumApp {
         self.status_bar(ui);
         self.body(ui);
 
+        self.show_about(&ctx);
         self.handle_close(&ctx);
 
         // The window starts hidden (see `main.rs`); keep pumping frames and

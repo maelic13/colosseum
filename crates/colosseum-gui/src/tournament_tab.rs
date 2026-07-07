@@ -142,18 +142,17 @@ impl TcKind {
     }
 }
 
-/// How library ratings are updated when the tournament finishes (form-side
-/// mirror of [`RatingWriteback`], with the estimate target kept separately).
+/// Which engines' library ratings follow the tournament (form-side mirror of
+/// [`RatingWriteback`]; the chosen set is kept separately on the form).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum WritebackKind {
     /// Ratings are never written back (default).
     #[default]
     Never,
-    /// Every participant's final tournament rating is written back.
+    /// Every participant's library rating follows the tournament.
     All,
-    /// Only one engine is updated, to its performance rating against the
-    /// others' fixed library ratings.
-    Estimate,
+    /// Only a chosen subset of engines is updated (picked in a dialog).
+    Chosen,
 }
 
 impl WritebackKind {
@@ -161,7 +160,7 @@ impl WritebackKind {
         match self {
             Self::Never => "Never",
             Self::All => "All engines",
-            Self::Estimate => "Estimate one engine",
+            Self::Chosen => "Chosen engines…",
         }
     }
 }
@@ -216,12 +215,14 @@ struct TournamentForm {
     resign_score_cp: i32,
 
     // Elo
-    /// How library ratings are updated when the tournament finishes. (The
-    /// live standings always show the ML recompute; no cadence/K to configure.)
+    /// Which engines' library ratings follow the tournament (applied after
+    /// every finished game).
     elo_writeback: WritebackKind,
-    /// Target for [`WritebackKind::Estimate`]; falls back to the first
-    /// selected engine (the gauntlet engine) when unset or deselected.
-    estimate_target: Option<EngineId>,
+    /// The engines picked for [`WritebackKind::Chosen`]. Engines the user
+    /// hasn't explicitly unticked default to included (see `chosen_includes`).
+    chosen_excluded: std::collections::HashSet<EngineId>,
+    /// Whether the chosen-engines picker dialog is open.
+    chosen_dialog: bool,
 
     /// Per-engine UCI overrides for this tournament only (highest precedence;
     /// beats library options and the tournament's common options).
@@ -279,7 +280,8 @@ impl Default for TournamentForm {
             resign_move_count: 4,
             resign_score_cp: 800,
             elo_writeback: WritebackKind::Never,
-            estimate_target: None,
+            chosen_excluded: std::collections::HashSet::new(),
+            chosen_dialog: false,
             overrides: HashMap::new(),
             openings_on: false,
             openings_path: String::new(),
@@ -327,10 +329,13 @@ impl TournamentForm {
             rating_writeback: match self.elo_writeback {
                 WritebackKind::Never => RatingWriteback::None,
                 WritebackKind::All => RatingWriteback::All,
-                WritebackKind::Estimate => match self.estimate_engine() {
-                    Some(id) => RatingWriteback::Estimate(id),
-                    None => RatingWriteback::None,
-                },
+                WritebackKind::Chosen => RatingWriteback::Chosen(
+                    self.selected
+                        .iter()
+                        .copied()
+                        .filter(|id| !self.chosen_excluded.contains(id))
+                        .collect(),
+                ),
             },
             start_position: match self.opening_book() {
                 Some(book) => StartPosition::Book(book),
@@ -408,15 +413,6 @@ impl TournamentForm {
         });
     }
 
-    /// The engine whose rating the Estimate writeback updates: the explicit
-    /// pick while it stays selected, otherwise the first selected engine
-    /// (which is also the gauntlet engine).
-    fn estimate_engine(&self) -> Option<EngineId> {
-        self.estimate_target
-            .filter(|id| self.selected.contains(id))
-            .or_else(|| self.selected.first().copied())
-    }
-
     /// Resolve the selected engine ids to their library configs, in seed order.
     fn selected_engines(&self, library: &[EngineConfig]) -> Vec<EngineConfig> {
         self.selected
@@ -485,7 +481,9 @@ impl TournamentForm {
             elo_writeback: match self.elo_writeback {
                 WritebackKind::Never => "never",
                 WritebackKind::All => "all",
-                WritebackKind::Estimate => "estimate",
+                // The chosen set is session state (ids are meaningless across
+                // libraries); presets keep only the mode.
+                WritebackKind::Chosen => "chosen",
             }
             .to_string(),
             openings_on: self.openings_on,
@@ -548,7 +546,8 @@ impl TournamentForm {
         self.resign_score_cp = p.resign_score_cp;
         self.elo_writeback = match p.elo_writeback.as_str() {
             "all" => WritebackKind::All,
-            "estimate" => WritebackKind::Estimate,
+            // Legacy "estimate" presets map to Chosen (same idea: a subset).
+            "estimate" | "chosen" => WritebackKind::Chosen,
             _ => WritebackKind::Never,
         };
         self.openings_on = p.openings_on;
@@ -1873,7 +1872,7 @@ impl TournamentTab {
         widgets::section_card(
             ui,
             "Elo",
-            Some("Update engine library ratings from this tournament's results."),
+            Some("Library ratings follow the tournament, updated after every game."),
             |ui| {
                 egui::Grid::new("tc_elo_grid")
                     .num_columns(2)
@@ -1893,69 +1892,137 @@ impl TournamentTab {
                                     ),
                                     (
                                         WritebackKind::All,
-                                        "All participants are re-rated jointly from every \
-                                         result (maximum likelihood, anchored to their \
-                                         current average) when the tournament finishes.",
+                                        "Every participant's library rating follows the \
+                                         tournament's joint maximum-likelihood ratings, \
+                                         updated after each game.",
                                     ),
                                     (
-                                        WritebackKind::Estimate,
-                                        "Only one engine is rated, from its results \
-                                         against the others' fixed ratings. Ideal for \
-                                         gauntleting a new engine.",
+                                        WritebackKind::Chosen,
+                                        "Pick which engines' ratings follow the \
+                                         tournament; the others stay untouched. Ideal \
+                                         for gauntleting new engines against a rated \
+                                         field.",
                                     ),
                                 ] {
-                                    ui.selectable_value(&mut f.elo_writeback, kind, kind.label())
-                                        .on_hover_text(hint);
+                                    let clicked = ui
+                                        .selectable_value(
+                                            &mut f.elo_writeback,
+                                            kind,
+                                            kind.label(),
+                                        )
+                                        .on_hover_text(hint)
+                                        .clicked();
+                                    if clicked && kind == WritebackKind::Chosen {
+                                        f.chosen_dialog = true;
+                                    }
                                 }
                             },
                         );
                         ui.end_row();
 
-                        match f.elo_writeback {
-                            WritebackKind::Never | WritebackKind::All => {}
-                            WritebackKind::Estimate => {
-                                ui.label(
-                                    RichText::new("Engine")
-                                        .color(theme::text_weak())
-                                        .size(13.0),
+                        if f.elo_writeback == WritebackKind::Chosen {
+                            let included = f
+                                .selected
+                                .iter()
+                                .filter(|id| !f.chosen_excluded.contains(id))
+                                .count();
+                            ui.label(
+                                RichText::new(format!(
+                                    "{included} of {} selected",
+                                    f.selected.len()
+                                ))
+                                .color(theme::text_weak())
+                                .size(12.5),
+                            );
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new("Choose engines…").size(13.0),
+                                    )
+                                    .fill(theme::bg_elevated())
+                                    .stroke(egui::Stroke::new(1.0, theme::stroke())),
                                 )
-                                .on_hover_text(
-                                    "Gets its performance rating against the other \
-                                     engines' library ratings, which stay unchanged.",
-                                );
-                                let current = f
-                                    .estimate_engine()
-                                    .and_then(|id| engines.iter().find(|e| e.id == id))
-                                    .map_or_else(
-                                        || "select engines first".to_string(),
-                                        engine_display_name,
-                                    );
-                                widgets::select(ui, "estimate_target", &current, 200.0, |ui| {
-                                    let picked = f.estimate_engine();
-                                    for id in f.selected.clone() {
-                                        let Some(engine) =
-                                            engines.iter().find(|e| e.id == id)
-                                        else {
-                                            continue;
-                                        };
-                                        if ui
-                                            .selectable_label(
-                                                picked == Some(id),
-                                                engine_display_name(engine),
-                                            )
-                                            .clicked()
-                                        {
-                                            f.estimate_target = Some(id);
-                                            ui.close();
-                                        }
-                                    }
-                                });
-                                ui.end_row();
+                                .clicked()
+                            {
+                                f.chosen_dialog = true;
                             }
+                            ui.end_row();
                         }
                     });
             },
         );
+        if f.chosen_dialog {
+            Self::chosen_engines_dialog(ui, f, engines);
+        }
+    }
+
+    /// Modal checkbox list picking which engines' library ratings follow the
+    /// tournament (same shape as the duplicate-engines dialog in the Engines
+    /// tab). Everything is checked by default; unticks are remembered.
+    fn chosen_engines_dialog(ui: &mut Ui, f: &mut TournamentForm, engines: &[EngineConfig]) {
+        let modal = egui::Modal::new(egui::Id::new("chosen_engines")).show(ui.ctx(), |ui| {
+            ui.set_width(380.0);
+            ui.label(
+                RichText::new("Update ratings for…")
+                    .font(theme::semibold(16.0))
+                    .color(theme::text()),
+            );
+            ui.add_space(2.0);
+            ui.label(
+                RichText::new(
+                    "Ticked engines' library Elo follows this tournament, updated \
+                     after every game. The rest keep their current rating.",
+                )
+                .color(theme::text_weak())
+                .size(12.0),
+            );
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Select all").clicked() {
+                    f.chosen_excluded.clear();
+                }
+                if ui.button("Deselect all").clicked() {
+                    f.chosen_excluded.extend(f.selected.iter().copied());
+                }
+            });
+            ui.add_space(6.0);
+            ScrollArea::vertical()
+                .id_salt("chosen_engines_scroll")
+                .max_height(320.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    for id in f.selected.clone() {
+                        let Some(engine) = engines.iter().find(|e| e.id == id) else {
+                            continue;
+                        };
+                        let mut included = !f.chosen_excluded.contains(&id);
+                        if widgets::checkbox(ui, &mut included, &engine_display_name(engine))
+                            .changed()
+                        {
+                            if included {
+                                f.chosen_excluded.remove(&id);
+                            } else {
+                                f.chosen_excluded.insert(id);
+                            }
+                        }
+                    }
+                });
+            ui.add_space(10.0);
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(
+                        egui::Button::new(RichText::new("Done").color(theme::bg_darkest()))
+                            .fill(theme::accent()),
+                    )
+                    .clicked()
+                {
+                    f.chosen_dialog = false;
+                }
+            });
+        });
+        if modal.should_close() {
+            f.chosen_dialog = false;
+        }
     }
 
     /// Opening-book configuration + preview.

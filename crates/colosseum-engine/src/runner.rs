@@ -18,7 +18,7 @@ use shakmaty::uci::UciMove;
 use shakmaty::zobrist::Zobrist64;
 use shakmaty::{CastlingMode, Chess, Color, EnPassantMode, Position};
 
-use crate::live::{EvalPoint, LiveGameHandle, to_white_pov};
+use crate::live::{EvalPoint, LiveGameHandle, SEARCH_LOG_CAP, SearchLine, to_white_pov};
 use crate::pgn::{PgnTags, build_pgn};
 
 /// Centipawn magnitude used to represent mate scores for adjudication.
@@ -273,17 +273,45 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         if let Ok(mut lg) = live.lock() {
             lg.white_to_move = mover == Color::White;
             lg.search_started = Some(std::time::Instant::now());
+            // The log shows the *current* search only — clear at every start.
+            if mover == Color::White {
+                lg.white_log.clear();
+            } else {
+                lg.black_log.clear();
+            }
         }
+        // Live-view updates are throttled: fast engines emit hundreds of info
+        // lines per second, and taking the mutex + cloning the PV for each one
+        // is wasted work whether or not anyone is watching. A new depth always
+        // publishes (it also appends a search-log line); in between, updates
+        // are capped at ~10 Hz — the GUI repaints at 10 Hz anyway.
+        let search_begin = std::time::Instant::now();
+        let mut last_publish: Option<std::time::Instant> = None;
+        let mut last_log_depth: u32 = 0;
         let search = engine
             .search(&position, &limits, deadline, |info| {
+                let now = std::time::Instant::now();
+                let new_depth_line = !info.pv.is_empty()
+                    && info.depth.is_some_and(|d| d > last_log_depth);
+                let throttled = last_publish
+                    .is_some_and(|t| now.duration_since(t) < Duration::from_millis(100));
+                if throttled && !new_depth_line {
+                    return;
+                }
+                last_publish = Some(now);
                 let Ok(mut lg) = live.lock() else { return };
-                let side = if mover == Color::White {
-                    &mut lg.white_search
+                // Reborrow through the guard so the two fields can be split.
+                let lg = &mut *lg;
+                let white_pov_score = info
+                    .score
+                    .map(|s| to_white_pov(s, mover == Color::White));
+                let (side, log) = if mover == Color::White {
+                    (&mut lg.white_search, &mut lg.white_log)
                 } else {
-                    &mut lg.black_search
+                    (&mut lg.black_search, &mut lg.black_log)
                 };
-                if let Some(score) = info.score {
-                    side.score = Some(to_white_pov(score, mover == Color::White));
+                if white_pov_score.is_some() {
+                    side.score = white_pov_score;
                 }
                 if info.depth.is_some() {
                     side.depth = info.depth;
@@ -294,11 +322,30 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
                 if info.nodes.is_some() {
                     side.nodes = info.nodes;
                 }
-                if info.nps.is_some() {
-                    side.nps = info.nps;
+                if let Some(n) = info.nps
+                    && n > 0
+                {
+                    side.nps = Some(n);
                 }
                 if !info.pv.is_empty() {
                     side.pv = info.pv.clone();
+                }
+                if new_depth_line {
+                    last_log_depth = info.depth.unwrap_or(0);
+                    log.push(SearchLine {
+                        score: white_pov_score.or(side.score),
+                        depth: last_log_depth,
+                        seldepth: info.seldepth,
+                        nodes: info.nodes,
+                        elapsed_ms: info
+                            .time_ms
+                            .unwrap_or_else(|| search_begin.elapsed().as_millis() as u64),
+                        pv: info.pv.iter().take(16).cloned().collect(),
+                    });
+                    if log.len() > SEARCH_LOG_CAP {
+                        let overflow = log.len() - SEARCH_LOG_CAP;
+                        log.drain(0..overflow);
+                    }
                 }
             })
             .await;

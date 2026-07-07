@@ -124,8 +124,12 @@ pub struct TournamentSnapshot {
     pub games_finished: usize,
     pub games_total: usize,
     pub recent_errors: Vec<String>,
-    /// Wall-clock time when the first game was launched (None before any game starts).
-    pub started_at: Option<std::time::Instant>,
+    /// Play time accumulated while games were actually running (frozen the
+    /// moment a Force-Stop kills them or a Stop drains the last one).
+    pub elapsed_active: std::time::Duration,
+    /// When the current active stretch began (`None` while paused/stopped).
+    /// Live elapsed = `elapsed_active + running_since.elapsed()`.
+    pub running_since: Option<std::time::Instant>,
     /// Sum of `duration_ms` across all finished games with a measured duration.
     pub total_game_ms: u64,
     /// Count of finished games that have a measured duration (denominator for avg).
@@ -307,7 +311,8 @@ pub fn create_tournament(
         games_finished: 0,
         games_total: total_games,
         recent_errors: Vec::new(),
-        started_at: None,
+        elapsed_active: std::time::Duration::ZERO,
+        running_since: None,
         total_game_ms: 0,
         games_timed: 0,
         in_flight_games: Vec::new(),
@@ -330,6 +335,7 @@ pub fn create_tournament(
         seeds,
         init_standings,
         init_finished: 0,
+        init_terminations: HashMap::new(),
     });
 
     Ok((
@@ -365,6 +371,9 @@ struct Driver {
     init_standings: Standings,
     /// Games already finished before this driver started (0 fresh, >0 resumed).
     init_finished: usize,
+    /// Termination counts replayed from the database on resume, so the
+    /// Terminations breakdown covers the whole tournament, not this session.
+    init_terminations: HashMap<Termination, usize>,
 }
 
 async fn drive(mut driver: Driver) {
@@ -379,24 +388,37 @@ async fn drive(mut driver: Driver) {
 
     let mut games: JoinSet<crate::runner::GameReport> = JoinSet::new();
     let mut in_flight: HashMap<GameId, InFlightGame> = HashMap::new();
+    // The launch queue. Games leave it when launched and *return to the front*
+    // when a Force-Stop discards them mid-game — otherwise those games would be
+    // silently skipped for the rest of the session (and the next launch would
+    // show a later round number with nothing finished yet).
+    let mut pending: std::collections::VecDeque<ScheduledGame> =
+        std::mem::take(&mut driver.schedule).into();
+    // Launched-but-unfinished specs, kept so a Force-Stop can re-queue them.
+    let mut launched: HashMap<GameId, ScheduledGame> = HashMap::new();
     let mut launch_seq = 0u64;
-    let mut next_index = 0usize;
     let mut running = false;
     let mut finished = false;
-    let mut tournament_started_at: Option<std::time::Instant> = None;
+    // The tournament play clock: accumulates while games are in flight and
+    // freezes the moment they stop (Force-Stop, or the last game of a Stop
+    // draining). Live elapsed = `elapsed_active + running_since.elapsed()`.
+    let mut elapsed_active = std::time::Duration::ZERO;
+    let mut running_since: Option<std::time::Instant> = None;
     let mut total_game_ms: u64 = 0;
     let mut games_timed: usize = 0;
-    let mut termination_counts: HashMap<Termination, usize> = HashMap::new();
+    let mut termination_counts = std::mem::take(&mut driver.init_terminations);
 
     loop {
         // Launch while running, with spare capacity and pending games.
         let mut launched_any = false;
-        while running && games.len() < concurrency && next_index < driver.schedule.len() {
-            if tournament_started_at.is_none() {
-                tournament_started_at = Some(std::time::Instant::now());
+        while running && games.len() < concurrency {
+            let Some(scheduled) = pending.pop_front() else {
+                break;
+            };
+            if running_since.is_none() {
+                running_since = Some(std::time::Instant::now());
             }
-            let scheduled = driver.schedule[next_index].clone();
-            next_index += 1;
+            launched.insert(scheduled.game_id, scheduled.clone());
             let _ = driver.store.mark_game_running(scheduled.game_id);
             let _ = driver.events.send(TournamentEvent::GameStarted {
                 game_id: scheduled.game_id,
@@ -439,15 +461,16 @@ async fn drive(mut driver: Driver) {
         // `concurrency - 1` in steady state) until the next game finished.
         if launched_any && let Ok(mut snap) = driver.snapshot.lock() {
             snap.in_flight_games = in_flight.values().cloned().collect();
-            if snap.started_at.is_none() {
-                snap.started_at = tournament_started_at;
-            }
+            snap.running_since = running_since;
         }
 
         // All games launched and drained: the tournament is finished.
-        if running && games.is_empty() && next_index >= driver.schedule.len() {
+        if running && games.is_empty() && pending.is_empty() {
             running = false;
             finished = true;
+            if let Some(since) = running_since.take() {
+                elapsed_active += since.elapsed();
+            }
             let _ = driver
                 .store
                 .set_tournament_status(driver.id, store::STATUS_FINISHED);
@@ -459,7 +482,8 @@ async fn drive(mut driver: Driver) {
                 total,
                 TournamentStatus::Finished,
                 &recent_errors,
-                tournament_started_at,
+                elapsed_active,
+                running_since,
                 total_game_ms,
                 games_timed,
                 &[],
@@ -490,14 +514,31 @@ async fn drive(mut driver: Driver) {
                 }
                 Some(Command::ForceStop) => {
                     games.shutdown().await; // abort tasks -> drop engines -> kill_on_drop
-                    for (game_id, _) in in_flight.drain() {
+                    // Discarded games go back to the *front* of the queue in
+                    // their original launch order, so Go replays them next —
+                    // they were never finished, only aborted.
+                    let mut discarded: Vec<(u64, ScheduledGame)> = Vec::new();
+                    for (game_id, flight) in in_flight.drain() {
                         let _ = driver.store.discard_game(game_id);
+                        if let Some(spec) = launched.remove(&game_id) {
+                            discarded.push((flight.launch_seq, spec));
+                        }
+                    }
+                    discarded.sort_by_key(|(seq, _)| *seq);
+                    for (_, spec) in discarded.into_iter().rev() {
+                        pending.push_front(spec);
                     }
                     running = false;
+                    // Games are dead: freeze the play clock right now.
+                    if let Some(since) = running_since.take() {
+                        elapsed_active += since.elapsed();
+                    }
                     let _ = driver.store.set_tournament_status(driver.id, store::STATUS_STOPPED);
                     if let Ok(mut snap) = driver.snapshot.lock() {
                         snap.status = TournamentStatus::Stopped;
                         snap.in_flight_games.clear();
+                        snap.elapsed_active = elapsed_active;
+                        snap.running_since = None;
                     }
                 }
                 Some(Command::SetConcurrency(limit)) => {
@@ -516,6 +557,7 @@ async fn drive(mut driver: Driver) {
                 match joined {
                     Ok(report) => {
                         let flight = in_flight.remove(&report.game_id);
+                        launched.remove(&report.game_id);
                         *termination_counts.entry(report.termination).or_insert(0) += 1;
                         if let Some(dur_ms) = report.stats.duration_ms {
                             total_game_ms += dur_ms;
@@ -605,6 +647,14 @@ async fn drive(mut driver: Driver) {
                         } else {
                             TournamentStatus::Stopping
                         };
+                        // A graceful Stop finishes draining here: freeze the
+                        // play clock with the last in-flight game.
+                        if !running
+                            && in_flight.is_empty()
+                            && let Some(since) = running_since.take()
+                        {
+                            elapsed_active += since.elapsed();
+                        }
                         let in_flight_snap: Vec<InFlightGame> =
                             in_flight.values().cloned().collect();
                         publish(
@@ -615,7 +665,8 @@ async fn drive(mut driver: Driver) {
                             total,
                             status,
                             &recent_errors,
-                            tournament_started_at,
+                            elapsed_active,
+                            running_since,
                             total_game_ms,
                             games_timed,
                             &in_flight_snap,
@@ -703,10 +754,12 @@ pub fn resume_tournament(
     // so they will be replayed in this session (one statement, not per-row).
     store.reset_unfinished_games(id)?;
 
-    // Replay finished games to reconstruct the standings (ratings are always
-    // recomputed from standings, so they need no replay of their own).
+    // Replay finished games to reconstruct the standings and the termination
+    // breakdown (ratings are always recomputed from standings, so they need
+    // no replay of their own).
     let mut standings = Standings::with_engines(&ids);
     let mut finished_count = 0usize;
+    let mut termination_counts: HashMap<Termination, usize> = HashMap::new();
 
     // Build remaining schedule from non-finished games (preserving original DB order).
     let mut schedule: Vec<ScheduledGame> = Vec::new();
@@ -714,6 +767,9 @@ pub fn resume_tournament(
     for game in &all_games {
         if game.status == store::GAME_FINISHED {
             if let Some(result) = game.result {
+                if let Some(t) = game.termination {
+                    *termination_counts.entry(t).or_insert(0) += 1;
+                }
                 standings.record(GameOutcome {
                     white: game.white,
                     black: game.black,
@@ -753,11 +809,12 @@ pub fn resume_tournament(
         games_finished: finished_count,
         games_total: total_games,
         recent_errors: Vec::new(),
-        started_at: None,
+        elapsed_active: std::time::Duration::ZERO,
+        running_since: None,
         total_game_ms: 0,
         games_timed: 0,
         in_flight_games: Vec::new(),
-        termination_counts: HashMap::new(),
+        termination_counts: termination_counts.clone(),
         concurrency: config.concurrency.max(1),
     }));
 
@@ -777,6 +834,7 @@ pub fn resume_tournament(
         seeds,
         init_standings: standings,
         init_finished: finished_count,
+        init_terminations: termination_counts,
     });
 
     Ok((
@@ -1094,7 +1152,8 @@ fn publish(
     total: usize,
     status: TournamentStatus,
     recent_errors: &[String],
-    started_at: Option<std::time::Instant>,
+    elapsed_active: std::time::Duration,
+    running_since: Option<std::time::Instant>,
     total_game_ms: u64,
     games_timed: usize,
     in_flight_games: &[InFlightGame],
@@ -1111,7 +1170,8 @@ fn publish(
         snap.games_finished = finished;
         snap.games_total = total;
         snap.recent_errors = recent_errors.to_vec();
-        snap.started_at = started_at;
+        snap.elapsed_active = elapsed_active;
+        snap.running_since = running_since;
         snap.total_game_ms = total_game_ms;
         snap.games_timed = games_timed;
         snap.in_flight_games = in_flight_games.to_vec();

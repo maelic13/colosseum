@@ -996,10 +996,9 @@ impl EnginesTab {
                 }
             }
         }
-        let suffix = " (copy)";
-        if !cloned.meta.name.ends_with(suffix) {
-            cloned.meta.name.push_str(suffix);
-        }
+        // The clone keeps the exact name: engines are identified by their id
+        // (and disambiguated by name + version everywhere they're displayed),
+        // so a "(copy)" suffix would only pollute PGN tags and standings.
         let new_id = cloned.id;
         backend.engines.push(cloned);
         backend.save_engines();
@@ -1227,6 +1226,7 @@ impl EngineEditBuf {
             }
         }
         engine.meta.elo = self.elo_str.trim().parse::<i32>().ok();
+        engine.path = self.path.clone();
         engine.args = self
             .args_str
             .split_whitespace()
@@ -1584,6 +1584,23 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                 .show(ui, |ui| {
                     field_label(ui, "Path");
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Switch the executable in place: same library entry
+                        // (identity, options, rating, history) — new binary.
+                        if ui
+                            .add(egui::Button::new(RichText::new("Change…").color(theme::text_weak())))
+                            .on_hover_text(
+                                "Point this engine at a different executable. Identity, \
+                                 options and rating are kept; re-detect afterwards if the \
+                                 new binary declares different options.",
+                            )
+                            .clicked()
+                            && let Some(new_path) = crate::dialog::file_dialog()
+                                .set_title("Choose engine executable")
+                                .pick_file()
+                        {
+                            edit.path = new_path;
+                            edit.mark_dirty();
+                        }
                         if let Some(folder) = edit.path.parent() {
                             let folder = folder.to_path_buf();
                             if ui

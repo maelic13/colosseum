@@ -436,9 +436,26 @@ finished games are not browsed in-app — export the PGN instead.
   leaves over, so wide windows widen the eval graph instead of stranding a
   margin. Both engine panels and the graph live in **one card** (radius 10,
   hairline dividers between sections); the thinking engine gets a faint
-  accent wash (`tint(ACCENT, 0.10)`), not its own border. Panel heights are
-  equal top/bottom and sum exactly with the graph to the board height, so the
-  graph's 0-line sits on the board's midline.
+  accent wash (`tint(ACCENT, 0.10)`), not its own border. The graph is a
+  shallow band (~quarter height; the panels have priority) and its 0-line
+  sits on the board's midline; when empty it shows just the grid, no text.
+  Graph series: **white = the cool blue, black = the warm orange** (light
+  side ↔ cooler hue). Each engine panel: header-height logo (48) with name +
+  clock (14.5 mono chip) and eval beside it, labeled `DEPTH · NODES · NPS`
+  stat sections, then a divider and the **search log** — one monospace line
+  per completed depth (`score · d20/34 · time · nodes · pv…`), newest on
+  top, single-line truncating.
+- **No scrollbars until minimum**: the live body is laid out to exactly fit
+  the viewport and is only wrapped in a `ScrollArea` when the window is
+  below the minimum layout size. Never wrap an exactly-fitted layout in a
+  ScrollArea unconditionally — the first transient overflow shows a bar
+  whose lane shrinks the viewport below the content, and the bars never
+  disappear again.
+- **Collapsible side panels**: the tournaments list (right) and the games
+  rail (left, resizable) collapse to a 24-pt strip via `widgets::
+  collapse_button` (‹/› in the panel header) and expand by clicking the
+  strip (`widgets::expand_strip`). Use the same pair for any future side
+  panel.
 
 ### 4.5 Engines tab
 - Toolbar buttons: "Add engine…" = primary, "Scan folder…" = secondary,

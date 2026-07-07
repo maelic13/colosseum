@@ -225,6 +225,21 @@ async fn force_stop_discards_in_flight() {
         .count();
     assert!(discarded >= 1, "expected at least one discarded game");
 
+    // Regression (step 59): discarded games return to the front of the launch
+    // queue, so Go in the *same session* replays them — previously the driver's
+    // cursor had moved past them and they were skipped until a full resume.
+    tournament.go();
+    assert!(
+        wait_status(
+            &snapshot,
+            TournamentStatus::Finished,
+            Duration::from_secs(60)
+        )
+        .await,
+        "did not finish after resuming from force-stop"
+    );
+    assert_eq!(snapshot.lock().unwrap().games_finished, 6);
+
     handle.abort();
 }
 

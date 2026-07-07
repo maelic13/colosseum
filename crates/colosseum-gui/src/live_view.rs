@@ -19,30 +19,48 @@ use eframe::egui::{
 use shakmaty::zobrist::Zobrist64;
 use shakmaty::{
     CastlingMode, Chess, Color as ChessColor, EnPassantMode, Position, Role, Square, fen::Fen,
-    san::SanPlus, uci::UciMove,
+    uci::UciMove,
 };
 
 use colosseum_core::{EngineId, GameId, GameResult, Termination, TournamentId};
-use colosseum_engine::live::LiveSearch;
+use colosseum_engine::live::{LiveSearch, SearchLine};
 use colosseum_engine::{InFlightGame, LiveGameHandle, Score};
 
 use crate::backend::Backend;
 use crate::{board, eco, logo, theme, widgets};
 
 const RAIL_W: f32 = 150.0;
-const MOVES_W: f32 = 200.0;
-/// The engine/graph column is elastic: at least this wide (so the panels stay
-/// legible), but it soaks up whatever horizontal space the board leaves rather
-/// than stranding it as dead margin — the wider it gets, the more room the eval
-/// graph has to breathe.
-const RIGHT_MIN: f32 = 300.0;
+const MOVES_W: f32 = 240.0;
+/// The engine/graph column is elastic: at least this wide (so the header's
+/// four sections — logo, name+eval, stats, clock — never collide), but it
+/// soaks up whatever horizontal space the board leaves rather than stranding
+/// it as dead margin — the wider it gets, the more room the eval graph has.
+const RIGHT_MIN: f32 = 400.0;
 const RIGHT_MAX: f32 = 720.0;
 const GAP: f32 = 10.0;
+/// Safety margin subtracted from the available size before sizing the columns.
+/// An *exact* fit trips `ScrollArea` into showing bars (frame strokes overhang
+/// half a pixel), and one bar's lane then forces the other bar too.
+const FIT_EPS: f32 = 4.0;
 /// The eval graph is a wide, shallow strip: cap its painted height and keep
 /// it centred so the 0-line stays on the board midline.
-const GRAPH_MAX_H: f32 = 300.0;
+const GRAPH_MAX_H: f32 = 160.0;
+/// Engine-column card metrics (also drive the layout's minimum height).
+const CARD_PAD: f32 = 12.0;
+const DIVIDER_H: f32 = 9.0;
+const PANEL_MIN: f32 = 150.0;
+const PANEL_MAX: f32 = 320.0;
+const GRAPH_MIN: f32 = 60.0;
 /// Below this board size the body scrolls instead of shrinking further.
 const MIN_BOARD: f32 = 320.0;
+/// The real lower bound for the board/columns: every column must still render
+/// its minimum content (the engine card is the tallest constraint), so the
+/// board never shrinks below what the side sections need — and scrollbars only
+/// appear once *this* size no longer fits.
+const MIN_SIDE: f32 = {
+    let column = 2.0 * PANEL_MIN + GRAPH_MIN + 2.0 * DIVIDER_H + 2.0 * CARD_PAD;
+    if MIN_BOARD > column { MIN_BOARD } else { column }
+};
 /// Hold the result banner this long before auto-following to the next game.
 const FOLLOW_DELAY: Duration = Duration::from_secs(2);
 /// Graph range snap steps (pawns).
@@ -53,6 +71,8 @@ const RANGE_STEPS: [f32; 5] = [1.0, 2.0, 3.0, 5.0, 10.0];
 pub struct LiveViews {
     states: HashMap<TournamentId, ViewState>,
     logos: logo::LogoCache,
+    /// Whether the games rail (left) is collapsed to a slim strip.
+    rail_collapsed: bool,
 }
 
 struct ViewState {
@@ -116,6 +136,8 @@ struct Snap {
     search_elapsed: Option<Duration>,
     white_search: LiveSearch,
     black_search: LiveSearch,
+    white_log: Vec<SearchLine>,
+    black_log: Vec<SearchLine>,
     evals: Vec<colosseum_engine::EvalPoint>,
     finished: Option<(GameResult, Termination)>,
 }
@@ -137,6 +159,8 @@ fn snapshot(live: &LiveGameHandle) -> Option<Snap> {
         search_elapsed: lg.search_started.map(|t| t.elapsed()),
         white_search: lg.white_search.clone(),
         black_search: lg.black_search.clone(),
+        white_log: lg.white_log.clone(),
+        black_log: lg.black_log.clone(),
         evals: lg.evals.clone(),
         finished: lg.finished,
     })
@@ -149,8 +173,9 @@ impl LiveViews {
         self.states.get(&id).is_some_and(|s| s.watching)
     }
 
-    /// The `Standings | Live` lens switcher plus (when the rail is hidden)
-    /// the auto-follow toggle. Laid out right-to-left in the control bar.
+    /// The `Standings | Live` lens switcher plus the auto-follow toggle,
+    /// laid out left-to-right in the control bar. Always the same widgets in
+    /// the same order, so nothing shifts as games start and finish.
     pub fn header_controls(
         &mut self,
         ui: &mut Ui,
@@ -159,18 +184,20 @@ impl LiveViews {
         concurrency: usize,
     ) {
         let state = self.state(id, concurrency);
-        let live_label = if in_flight > 0 {
-            format!("● Live ({in_flight})")
-        } else {
-            "Live".to_string()
-        };
-        // Right-to-left: rightmost chip first.
-        widgets::choice_chip(ui, &mut state.watching, true, &live_label);
         widgets::choice_chip(ui, &mut state.watching, false, "Standings");
-        if state.watching && in_flight < 2 {
-            ui.add_space(8.0);
-            auto_follow_chip(ui, &mut state.auto_follow);
-        }
+        // The dot glows green while games are in flight — visible from the
+        // Standings lens too.
+        let (label, dot) = if in_flight > 0 {
+            (
+                format!("Live ({in_flight})"),
+                Some(theme::success()),
+            )
+        } else {
+            ("Live".to_string(), None)
+        };
+        widgets::choice_chip_dot(ui, &mut state.watching, true, &label, dot);
+        ui.add_space(8.0);
+        auto_follow_chip(ui, &mut state.auto_follow);
     }
 
     /// Switch to the Live lens with `game` selected (Playing-panel click).
@@ -197,6 +224,7 @@ impl LiveViews {
     ) {
         self.logos.begin_frame();
         let logos = &mut self.logos;
+        let rail_collapsed = &mut self.rail_collapsed;
         let state = self
             .states
             .entry(id)
@@ -222,67 +250,125 @@ impl LiveViews {
         state.update_replay(selected_id, &snap);
         state.update_range(&snap);
 
-        let rail = games.len() >= 2;
-        // Fixed columns to the left of the elastic engine column: the games
-        // rail (only with 2+ games), the moves column, and the inter-column
-        // gaps (rail↔moves↔board↔right).
-        let gaps = GAP * if rail { 3.0 } else { 2.0 };
-        let left_cols = MOVES_W + gaps + if rail { RAIL_W } else { 0.0 };
+        // Games rail (2+ games): a real side panel — resizable, and
+        // collapsible to a slim strip for more board space.
+        let mut clicked_game: Option<GameId> = None;
+        if games.len() >= 2 {
+            if *rail_collapsed {
+                egui::Panel::left("live_rail_collapsed")
+                    .exact_size(24.0)
+                    .resizable(false)
+                    .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(2, 6)))
+                    .show_inside(ui, |ui| {
+                        if widgets::expand_strip(ui, "›", &format!("Playing ({})", games.len()))
+                        {
+                            *rail_collapsed = false;
+                        }
+                    });
+            } else {
+                egui::Panel::left("live_rail")
+                    .default_size(RAIL_W)
+                    .size_range(110.0..=280.0)
+                    .resizable(true)
+                    .frame(egui::Frame::new().inner_margin(egui::Margin {
+                        left: 0,
+                        right: 8,
+                        top: 0,
+                        bottom: 0,
+                    }))
+                    .show_inside(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(format!("Playing ({})", games.len()))
+                                    .color(theme::text())
+                                    .font(theme::semibold(12.0)),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if widgets::collapse_button(ui, "‹")
+                                        .on_hover_text("Hide the games list.")
+                                        .clicked()
+                                    {
+                                        *rail_collapsed = true;
+                                    }
+                                },
+                            );
+                        });
+                        ui.add_space(4.0);
+                        clicked_game = games_rail(ui, &games, selected_id);
+                    });
+            }
+        }
+
+        // Fixed columns to the left of the elastic engine column: the moves
+        // column and the inter-column gaps (moves↔board↔right). The rail is
+        // a panel, already subtracted from the available size.
+        let left_cols = MOVES_W + GAP * 2.0;
         let avail = ui.available_size();
+        // Usable area (safety epsilon: an exact fit shows spurious scrollbars).
+        let usable_w = avail.x - FIT_EPS;
+        let usable_h = avail.y - FIT_EPS;
         // The board is square and height-bound; give it what height allows but
         // never so much width that the engine column drops below its minimum.
-        let board_side = (avail.y - 4.0)
-            .min(avail.x - left_cols - RIGHT_MIN)
-            .max(MIN_BOARD);
+        // Everything scales down together to `MIN_SIDE` (every column's
+        // minimum content still fits there); only below that do scrollbars
+        // appear, with the layout frozen at its minimum.
+        let board_side = usable_h
+            .min(usable_w - left_cols - RIGHT_MIN)
+            .max(MIN_SIDE);
         // The engine column takes the remaining width (clamped), so a wide
         // window widens the graph instead of leaving a blank strip on the right.
-        let right_w = (avail.x - left_cols - board_side).clamp(RIGHT_MIN, RIGHT_MAX);
+        let right_w = (usable_w - left_cols - board_side).clamp(RIGHT_MIN, RIGHT_MAX);
 
-        let mut clicked_game: Option<GameId> = None;
-        ScrollArea::both()
-            .id_salt("live_view_scroll")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.horizontal_top(|ui| {
-                    // The item spacing IS the column gap — explicit spacers on
-                    // top of it would make the row wider than the computed
-                    // board size and spill into scrollbars.
-                    ui.spacing_mut().item_spacing.x = GAP;
-                    // Columns get explicit top-down layouts: `allocate_ui`
-                    // would inherit the surrounding left-to-right flow and
-                    // spill their contents sideways.
-                    let column = egui::Layout::top_down(egui::Align::Min);
-                    if rail {
-                        ui.allocate_ui_with_layout(vec2(RAIL_W, board_side), column, |ui| {
-                            ui.set_min_width(RAIL_W);
-                            ui.set_max_width(RAIL_W);
-                            clicked_game =
-                                games_rail(ui, &games, selected_id, &mut state.auto_follow);
-                        });
-                    }
-                    ui.allocate_ui_with_layout(vec2(MOVES_W, board_side), column, |ui| {
-                        ui.set_max_width(MOVES_W);
-                        moves_column(ui, &snap, state.replay.as_ref(), board_side);
-                    });
-                    let (board_rect, _) =
-                        ui.allocate_exact_size(vec2(board_side, board_side), Sense::hover());
-                    if let Some(replay) = &state.replay {
-                        board::draw(ui, board_rect, replay.pos.board(), replay.last_move);
-                    }
-                    if let Some((result, termination)) = snap.finished {
-                        result_banner(ui, board_rect, result, termination);
-                    }
-                    ui.allocate_ui_with_layout(vec2(right_w, board_side), column, |ui| {
-                        ui.set_max_width(right_w);
-                        engine_column(ui, backend, logos, state, &snap, right_w, board_side);
-                    });
+        let body = |ui: &mut Ui, state: &ViewState, logos: &mut logo::LogoCache| {
+            ui.horizontal_top(|ui| {
+                // The item spacing IS the column gap — explicit spacers on
+                // top of it would make the row wider than the computed
+                // board size and spill into scrollbars.
+                ui.spacing_mut().item_spacing.x = GAP;
+                // Columns get explicit top-down layouts: `allocate_ui`
+                // would inherit the surrounding left-to-right flow and
+                // spill their contents sideways.
+                let column = egui::Layout::top_down(egui::Align::Min);
+                ui.allocate_ui_with_layout(vec2(MOVES_W, board_side), column, |ui| {
+                    ui.set_max_width(MOVES_W);
+                    moves_column(ui, &snap, state.replay.as_ref(), board_side);
+                });
+                let (board_rect, _) =
+                    ui.allocate_exact_size(vec2(board_side, board_side), Sense::hover());
+                if let Some(replay) = &state.replay {
+                    board::draw(ui, board_rect, replay.pos.board(), replay.last_move);
+                }
+                if let Some((result, termination)) = snap.finished {
+                    result_banner(ui, board_rect, result, termination);
+                }
+                ui.allocate_ui_with_layout(vec2(right_w, board_side), column, |ui| {
+                    ui.set_max_width(right_w);
+                    engine_column(ui, backend, logos, state, &snap, right_w, board_side);
                 });
             });
+        };
+        // A ScrollArea only when the window is genuinely below the minimum
+        // layout. Wrapping unconditionally trapped the view in permanent
+        // scrollbars: content was sized from the pre-bar available size, so
+        // the moment a transient overflow showed a bar, its lane shrank the
+        // viewport below the content and the bars never went away.
+        let fits = usable_h >= MIN_SIDE && usable_w >= left_cols + MIN_SIDE + RIGHT_MIN;
+        if fits {
+            body(ui, state, logos);
+        } else {
+            ScrollArea::both()
+                .id_salt("live_view_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| body(ui, state, logos));
+        }
 
         if let Some(gid) = clicked_game
             && let Some(game) = games.iter().find(|g| g.game_id == gid)
         {
             let game = (*game).clone();
+            let state = self.states.get_mut(&id).expect("state just used");
             state.select(&game);
         }
     }
@@ -453,20 +539,9 @@ fn auto_follow_chip(ui: &mut Ui, auto_follow: &mut bool) {
 
 // ── Games rail ──────────────────────────────────────────────────────────────
 
-fn games_rail(
-    ui: &mut Ui,
-    games: &[&InFlightGame],
-    selected: GameId,
-    auto_follow: &mut bool,
-) -> Option<GameId> {
+fn games_rail(ui: &mut Ui, games: &[&InFlightGame], selected: GameId) -> Option<GameId> {
+    // The panel header already carries the "Playing (n)" caption.
     let mut clicked = None;
-    ui.label(
-        RichText::new(format!("Playing ({})", games.len()))
-            .color(theme::text())
-            .font(theme::semibold(12.0)),
-    );
-    auto_follow_chip(ui, auto_follow);
-    ui.add_space(4.0);
     ScrollArea::vertical()
         .id_salt("live_rail_scroll")
         .auto_shrink([false, true])
@@ -553,13 +628,13 @@ fn moves_column(ui: &mut Ui, snap: &Snap, replay: Option<&Replay>, height: f32) 
             ui.set_min_size(vec2(MOVES_W - 20.0, height - 20.0));
             ui.set_max_height(height - 20.0);
 
-            // Matchup header.
+            // Matchup header: the players are the headline.
             ui.vertical_centered(|ui| {
                 ui.add(
                     egui::Label::new(
                         RichText::new(&snap.white_name)
                             .color(theme::text())
-                            .font(theme::semibold(13.0)),
+                            .font(theme::semibold(15.0)),
                     )
                     .truncate(),
                 );
@@ -568,24 +643,26 @@ fn moves_column(ui: &mut Ui, snap: &Snap, replay: Option<&Replay>, height: f32) 
                     egui::Label::new(
                         RichText::new(&snap.black_name)
                             .color(theme::text())
-                            .font(theme::semibold(13.0)),
+                            .font(theme::semibold(15.0)),
                     )
                     .truncate(),
                 );
+                ui.add_space(2.0);
                 ui.label(
                     RichText::new(format!("Round {}", snap.round))
                         .color(theme::text_faint())
-                        .size(10.0),
+                        .size(10.5),
                 );
             });
             if let Some(op) = replay.and_then(|r| r.opening) {
-                ui.add_space(4.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 5.0;
+                ui.add_space(6.0);
+                // ECO chip on its own line, name below — both centred, so the
+                // block reads as part of the centred matchup header above it.
+                ui.vertical_centered(|ui| {
                     egui::Frame::new()
                         .stroke(Stroke::new(1.0, theme::stroke()))
                         .corner_radius(egui::CornerRadius::same(4))
-                        .inner_margin(egui::Margin::symmetric(4, 1))
+                        .inner_margin(egui::Margin::symmetric(5, 1))
                         .show(ui, |ui| {
                             ui.label(
                                 RichText::new(op.eco)
@@ -594,14 +671,15 @@ fn moves_column(ui: &mut Ui, snap: &Snap, replay: Option<&Replay>, height: f32) 
                                     .monospace(),
                             );
                         });
-                    ui.label(RichText::new(op.name).color(theme::text_weak()).size(11.0));
+                    ui.add_space(2.0);
+                    ui.label(RichText::new(op.name).color(theme::text_weak()).size(11.5));
                 });
             }
 
             ui.separator();
 
             // Move list (auto-follows the tail), leaving room for material.
-            let list_height = (ui.available_height() - 44.0).max(40.0);
+            let list_height = (ui.available_height() - 52.0).max(40.0);
             ScrollArea::vertical()
                 .id_salt("live_moves_scroll")
                 .max_height(list_height)
@@ -651,53 +729,68 @@ fn moves_grid(ui: &mut Ui, san: &[String]) {
 }
 
 /// Lichess-style material imbalance: the leading side shows the material it
-/// is up (as the opponent's piece glyphs) plus the point difference.
+/// is up — as the opponent's captured pieces, drawn with the real board piece
+/// set — plus the point difference.
 fn material_row(ui: &mut Ui, board: &shakmaty::Board) {
-    const ROLES: [(Role, i32, char, char); 5] = [
-        (Role::Queen, 9, '♛', '♕'),
-        (Role::Rook, 5, '♜', '♖'),
-        (Role::Bishop, 3, '♝', '♗'),
-        (Role::Knight, 3, '♞', '♘'),
-        (Role::Pawn, 1, '♟', '♙'),
+    const ROLES: [(Role, i32); 5] = [
+        (Role::Queen, 9),
+        (Role::Rook, 5),
+        (Role::Bishop, 3),
+        (Role::Knight, 3),
+        (Role::Pawn, 1),
     ];
-    let mut white_up = String::new();
-    let mut black_up = String::new();
+    const PIECE: f32 = 22.0;
+    // (owner is up, shown as the opponent's piece image).
+    let mut white_up: Vec<Role> = Vec::new();
+    let mut black_up: Vec<Role> = Vec::new();
     let mut points = 0i32;
-    for (role, value, black_glyph, white_glyph) in ROLES {
+    for (role, value) in ROLES {
         let w = i32::from(*board.material_side(ChessColor::White).get(role));
         let b = i32::from(*board.material_side(ChessColor::Black).get(role));
         let d = w - b;
         points += d * value;
         for _ in 0..d.abs() {
             if d > 0 {
-                white_up.push(black_glyph);
+                white_up.push(role);
             } else {
-                black_up.push(white_glyph);
+                black_up.push(role);
             }
         }
     }
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Material").color(theme::text_faint()).size(10.0));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if white_up.is_empty() && black_up.is_empty() {
-                ui.label(RichText::new("even").color(theme::text_faint()).size(10.5));
-                return;
-            }
-            if points != 0 {
-                ui.label(
-                    RichText::new(format!("{points:+}"))
-                        .color(theme::text_weak())
-                        .size(11.0)
-                        .monospace(),
-                );
-            }
-            if !black_up.is_empty() {
-                ui.label(RichText::new(black_up).color(theme::text_weak()).size(13.0));
-            }
-            if !white_up.is_empty() {
-                ui.label(RichText::new(white_up).color(theme::text()).size(13.0));
-            }
+
+    if white_up.is_empty() && black_up.is_empty() {
+        ui.vertical_centered(|ui| {
+            ui.label(RichText::new("material even").color(theme::text_faint()).size(12.0));
         });
+        return;
+    }
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let pieces = (white_up.len() + black_up.len()) as f32;
+        // Centre the run (pieces overlap slightly, like lichess).
+        let run_w = pieces * (PIECE - 6.0) + 6.0 + 34.0;
+        ui.add_space(((ui.available_width() - run_w) / 2.0).max(0.0));
+        let draw = |ui: &mut Ui, roles: &[Role], color: ChessColor| {
+            for &role in roles {
+                let (rect, _) =
+                    ui.allocate_exact_size(vec2(PIECE - 6.0, PIECE), Sense::hover());
+                let rect = Rect::from_min_size(rect.min, vec2(PIECE, PIECE));
+                egui::Image::new(board::piece_source(color, role)).paint_at(ui, rect);
+            }
+        };
+        // White is up: show black's captured pieces, and vice versa.
+        draw(ui, &white_up, ChessColor::Black);
+        draw(ui, &black_up, ChessColor::White);
+        ui.add_space(8.0);
+        if points != 0 {
+            ui.label(
+                RichText::new(format!("{points:+}"))
+                    .color(theme::text())
+                    .size(15.0)
+                    .monospace(),
+            );
+        }
     });
 }
 
@@ -753,71 +846,92 @@ fn engine_column(
 ) {
     let thinking_white = snap.finished.is_none() && snap.white_to_move;
     let thinking_black = snap.finished.is_none() && !snap.white_to_move;
-    let pos = state.replay.as_ref().map(|r| &r.pos);
 
     // One card holds both engine panels and the graph, so the three read as a
     // single connected unit rather than three floating boxes. The inner content
     // spans the whole board height; equal top/bottom panels keep the graph —
     // and its 0-line — centred on the board's midline.
-    const PAD: f32 = 12.0;
-    const DIVIDER_H: f32 = 9.0;
-    let inner_w = width - 2.0 * PAD;
-    let inner_h = height - 2.0 * PAD;
-    // Two equal panels, two dividers, and the graph sum to exactly the inner
-    // height (so nothing overflows the card even at the minimum board size),
-    // keeping the graph — hence its 0-line — on the board's midline.
-    let panel_h = ((inner_h - 80.0) * 0.5).clamp(96.0, 230.0);
-    let graph_h = (inner_h - 2.0 * panel_h - 2.0 * DIVIDER_H).max(60.0);
+    let inner_w = width - 2.0 * CARD_PAD;
+    let inner_h = height - 2.0 * CARD_PAD;
+    // The engine panels are the stars: the graph is a shallow band (~quarter
+    // of the height, panels have priority at the minimum), the panels split
+    // the rest. Everything sums to exactly the inner height so nothing
+    // overflows the card, and the graph's 0-line stays on the board midline.
+    let graph_h = (inner_h * 0.24)
+        .clamp(GRAPH_MIN, GRAPH_MAX_H)
+        .min(inner_h - 2.0 * PANEL_MIN - 2.0 * DIVIDER_H)
+        .max(GRAPH_MIN);
+    let panel_h = ((inner_h - graph_h - 2.0 * DIVIDER_H) * 0.5).min(PANEL_MAX);
+    let graph_h = inner_h - 2.0 * panel_h - 2.0 * DIVIDER_H;
 
     egui::Frame::new()
         .fill(theme::bg_darkest())
         .stroke(Stroke::new(1.0, theme::stroke()))
         .corner_radius(egui::CornerRadius::same(10))
-        .inner_margin(egui::Margin::same(PAD as i8))
+        .inner_margin(egui::Margin::same(CARD_PAD as i8))
         .show(ui, |ui| {
             ui.set_min_size(vec2(inner_w, inner_h));
             ui.set_max_size(vec2(inner_w, inner_h));
             ui.spacing_mut().item_spacing.y = 0.0;
 
-            engine_panel(
-                ui,
-                backend,
-                logos,
-                &PanelData {
-                    engine: snap.black_id,
-                    name: &snap.black_name,
-                    is_white: false,
-                    search: &snap.black_search,
-                    clock_ms: snap.black_clock_ms,
-                    thinking: thinking_black,
-                    search_elapsed: snap.search_elapsed,
-                    pos_hint: if thinking_black { pos } else { None },
-                },
-                inner_w,
-                panel_h,
-            );
+            panel_slot(ui, inner_w, panel_h, false, |ui| {
+                engine_panel(
+                    ui,
+                    backend,
+                    logos,
+                    &PanelData {
+                        engine: snap.black_id,
+                        name: &snap.black_name,
+                        is_white: false,
+                        search: &snap.black_search,
+                        log: &snap.black_log,
+                        clock_ms: snap.black_clock_ms,
+                        thinking: thinking_black,
+                        search_elapsed: snap.search_elapsed,
+                    },
+                    inner_w,
+                    panel_h,
+                );
+            });
             column_divider(ui, inner_w);
             let (graph_rect, _) = ui.allocate_exact_size(vec2(inner_w, graph_h), Sense::hover());
             draw_graph(ui, graph_rect, snap, state.range);
             column_divider(ui, inner_w);
-            engine_panel(
-                ui,
-                backend,
-                logos,
-                &PanelData {
-                    engine: snap.white_id,
-                    name: &snap.white_name,
-                    is_white: true,
-                    search: &snap.white_search,
-                    clock_ms: snap.white_clock_ms,
-                    thinking: thinking_white,
-                    search_elapsed: snap.search_elapsed,
-                    pos_hint: if thinking_white { pos } else { None },
-                },
-                inner_w,
-                panel_h,
-            );
+            panel_slot(ui, inner_w, panel_h, true, |ui| {
+                engine_panel(
+                    ui,
+                    backend,
+                    logos,
+                    &PanelData {
+                        engine: snap.white_id,
+                        name: &snap.white_name,
+                        is_white: true,
+                        search: &snap.white_search,
+                        log: &snap.white_log,
+                        clock_ms: snap.white_clock_ms,
+                        thinking: thinking_white,
+                        search_elapsed: snap.search_elapsed,
+                    },
+                    inner_w,
+                    panel_h,
+                );
+            });
         });
+}
+
+/// Allocate exactly `w`×`h` for one engine panel and build it in a clipped
+/// child `Ui`, so the panel can never paint past its slot — the card (and
+/// therefore the column) is always exactly board-height.
+fn panel_slot(ui: &mut Ui, w: f32, h: f32, is_white: bool, body: impl FnOnce(&mut Ui)) {
+    let (rect, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .id_salt(("engine_panel_slot", is_white))
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    child.set_clip_rect(rect.intersect(ui.clip_rect()));
+    body(&mut child);
 }
 
 /// A hairline rule between the card's sections (engine panel ↔ graph).
@@ -835,12 +949,11 @@ struct PanelData<'a> {
     name: &'a str,
     is_white: bool,
     search: &'a LiveSearch,
+    /// Rolling search log (one line per completed depth), oldest first.
+    log: &'a [SearchLine],
     clock_ms: Option<u64>,
     thinking: bool,
     search_elapsed: Option<Duration>,
-    /// Current position for PV → SAN conversion (thinking side only — the
-    /// idle side's PV is from an earlier position and shows as raw UCI).
-    pos_hint: Option<&'a Chess>,
 }
 
 fn engine_panel(
@@ -863,120 +976,183 @@ fn engine_panel(
     } else {
         Color32::TRANSPARENT
     };
+    // Header: four sections side by side — logo · name+eval · search stats ·
+    // clock — with the divided search log below.
+    const HEADER_H: f32 = 72.0;
     egui::Frame::new()
         .fill(fill)
         .corner_radius(egui::CornerRadius::same(6))
-        .inner_margin(egui::Margin::symmetric(6, 8))
+        .inner_margin(egui::Margin::symmetric(8, 8))
         .show(ui, |ui| {
-            ui.set_min_size(vec2(width - 12.0, height - 16.0));
-            ui.set_max_size(vec2(width - 12.0, height - 16.0));
+            ui.set_min_size(vec2(width - 16.0, height - 16.0));
+            ui.set_max_size(vec2(width - 16.0, height - 16.0));
             ui.spacing_mut().item_spacing.y = 8.0;
 
-            // Header: logo/avatar · series dot · name (with version) · clock.
-            ui.horizontal(|ui| {
-                let (rect, _) = logo::slot(ui, 24.0, Sense::hover());
-                let logo_file = backend
-                    .engines
-                    .iter()
-                    .find(|e| e.id == data.engine)
-                    .and_then(|e| e.meta.extra.get("logo").cloned());
-                let drew = logo_file.is_some_and(|file| {
-                    logo::draw_fitted(ui, logos, &backend.dirs.logos_dir().join(file), rect, 4)
-                });
-                if !drew {
-                    widgets::draw_avatar_square_in(ui, rect, data.name, false, 4);
-                }
-                let (dot, _) = ui.allocate_exact_size(vec2(9.0, 9.0), Sense::hover());
-                ui.painter().circle_filled(dot.center(), 4.5, series);
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(data.name)
-                            .color(theme::text())
-                            .font(theme::semibold(13.5)),
-                    )
-                    .truncate(),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    clock_chip(ui, data);
-                });
-            });
-
-            // Eval + state.
-            ui.horizontal(|ui| {
-                let (text, color) = match data.search.score {
-                    Some(score) => (
-                        format_score(score),
-                        if data.thinking { series } else { theme::text_weak() },
-                    ),
-                    None => ("—".to_string(), theme::text_faint()),
-                };
-                ui.label(
-                    RichText::new(text)
-                        .color(color)
-                        .font(egui::FontId::new(22.0, egui::FontFamily::Monospace)),
-                );
-                if data.thinking {
-                    ui.label(RichText::new("thinking…").color(theme::accent()).size(10.0));
-                } else {
-                    ui.label(
-                        RichText::new("last search")
-                            .color(theme::text_faint())
-                            .size(10.0),
-                    );
-                }
-            });
-
-            // Depth / nodes / nps.
-            ui.horizontal(|ui| {
-                let depth = match (data.search.depth, data.search.seldepth) {
-                    (Some(d), Some(s)) => format!("{d}/{s}"),
-                    (Some(d), None) => d.to_string(),
-                    _ => "—".to_string(),
-                };
-                ui.label(
-                    RichText::new(format!("Depth {depth}"))
-                        .color(theme::text_weak())
-                        .size(11.0),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(format!(
-                            "{} · {} nps",
-                            format_count(data.search.nodes),
-                            format_count(data.search.nps)
-                        ))
-                        .color(theme::text_weak())
-                        .size(11.0)
-                        .monospace(),
-                    );
-                });
-            });
-
-            // Principal variation (SAN when convertible, else raw UCI).
-            if !data.search.pv.is_empty() {
-                let pv_text = data
-                    .pos_hint
-                    .and_then(|pos| pv_to_san(pos, &data.search.pv, 8))
-                    .unwrap_or_else(|| {
-                        data.search
-                            .pv
-                            .iter()
-                            .take(8)
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join(" ")
+            ui.allocate_ui_with_layout(
+                vec2(width - 16.0, HEADER_H),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    // 1 · Logo, the full header height.
+                    let (rect, _) = logo::slot(ui, HEADER_H, Sense::hover());
+                    let logo_file = backend
+                        .engines
+                        .iter()
+                        .find(|e| e.id == data.engine)
+                        .and_then(|e| e.meta.extra.get("logo").cloned());
+                    let drew = logo_file.is_some_and(|file| {
+                        logo::draw_fitted(ui, logos, &backend.dirs.logos_dir().join(file), rect, 6)
                     });
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(pv_text)
-                            .color(theme::text_faint())
-                            .size(10.0)
-                            .monospace(),
-                    )
-                    .truncate(),
-                );
+                    if !drew {
+                        widgets::draw_avatar_square_in(ui, rect, data.name, false, 6);
+                    }
+                    ui.add_space(4.0);
+
+                    // 4 · Clock, pinned right (laid out first so the name
+                    // truncates against it, but drawn at the right edge).
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        clock_chip(ui, data);
+                        ui.add_space(8.0);
+
+                        // 3 · Search stats stacked: depth / nodes / nps.
+                        // Fixed width — a `with_layout` child would claim all
+                        // remaining space and overlap the name/eval section.
+                        ui.allocate_ui_with_layout(
+                            vec2(96.0, HEADER_H),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.set_max_width(96.0);
+                                ui.spacing_mut().item_spacing.y = 3.0;
+                                ui.add_space(8.0);
+                                let depth = match (data.search.depth, data.search.seldepth) {
+                                    (Some(d), Some(s)) => format!("{d}/{s}"),
+                                    (Some(d), None) => d.to_string(),
+                                    _ => "—".to_string(),
+                                };
+                                stat_row(ui, "depth", &depth);
+                                stat_row(ui, "nodes", &format_count(data.search.nodes));
+                                stat_row(ui, "nps", &format_count(data.search.nps));
+                            },
+                        );
+                        ui.add_space(10.0);
+
+                        // 2 · Name + version over the big eval, filling the rest.
+                        ui.with_layout(
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.spacing_mut().item_spacing.y = 3.0;
+                                ui.horizontal(|ui| {
+                                    let (dot, _) = ui
+                                        .allocate_exact_size(vec2(9.0, 9.0), Sense::hover());
+                                    ui.painter().circle_filled(dot.center(), 4.5, series);
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(data.name)
+                                                .color(theme::text())
+                                                .font(theme::semibold(15.0)),
+                                        )
+                                        .truncate(),
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    let (text, color) = match data.search.score {
+                                        Some(score) => (
+                                            format_score(score),
+                                            if data.thinking {
+                                                series
+                                            } else {
+                                                theme::text_weak()
+                                            },
+                                        ),
+                                        None => ("—".to_string(), theme::text_faint()),
+                                    };
+                                    // Truncating label: a long eval ("−16.02")
+                                    // in a narrow card elides instead of
+                                    // painting over the stats section.
+                                    ui.add(
+                                        egui::Label::new(RichText::new(text).color(color).font(
+                                            egui::FontId::new(24.0, egui::FontFamily::Monospace),
+                                        ))
+                                        .truncate(),
+                                    );
+                                    if data.thinking && ui.available_width() >= 56.0 {
+                                        ui.label(
+                                            RichText::new("thinking…")
+                                                .color(theme::accent())
+                                                .size(10.5),
+                                        );
+                                    }
+                                });
+                            },
+                        );
+                    });
+                },
+            );
+
+            // The engine's search output: one line per completed depth of the
+            // current search, newest on top, filling the remaining height.
+            if ui.available_height() >= 30.0 {
+                column_divider(ui, ui.available_width());
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ScrollArea::vertical()
+                    .id_salt(("engine_log", data.engine, data.is_white))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for line in data.log.iter().rev() {
+                            search_log_line(ui, line, series);
+                        }
+                    });
             }
         });
+}
+
+/// One small `label value` search-stat row (label faint, value mono).
+fn stat_row(ui: &mut Ui, label: &str, value: &str) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.add_sized(
+            vec2(34.0, 12.0),
+            egui::Label::new(RichText::new(label).color(theme::text_faint()).size(9.5)),
+        );
+        ui.label(
+            RichText::new(value)
+                .color(theme::text())
+                .size(11.5)
+                .monospace(),
+        );
+    });
+}
+
+/// One search-log line: `+0.35  d20/34  0:01  1.4M  <pv…>`, single line,
+/// truncating with an ellipsis when the PV doesn't fit.
+fn search_log_line(ui: &mut Ui, line: &SearchLine, series: Color32) {
+    let score = line.score.map_or("—".to_string(), format_score);
+    let depth = match line.seldepth {
+        Some(s) => format!("d{}/{}", line.depth, s),
+        None => format!("d{}", line.depth),
+    };
+    let time = format_clock(line.elapsed_ms);
+    let nodes = format_count(line.nodes);
+    let head = format!("{score:>7}  {depth:<7} {time:>5}  {nodes:>5}  ");
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        &head,
+        0.0,
+        egui::TextFormat {
+            font_id: egui::FontId::new(11.0, egui::FontFamily::Monospace),
+            color: series.gamma_multiply(0.9),
+            ..Default::default()
+        },
+    );
+    job.append(
+        &line.pv.join(" "),
+        0.0,
+        egui::TextFormat {
+            font_id: egui::FontId::new(11.0, egui::FontFamily::Monospace),
+            color: theme::text_weak(),
+            ..Default::default()
+        },
+    );
+    ui.add(egui::Label::new(job).truncate());
 }
 
 /// Clock (ticking down while thinking) for clock controls, or time spent on
@@ -1008,9 +1184,9 @@ fn clock_chip(ui: &mut Ui, data: &PanelData<'_>) {
             if active { theme::accent() } else { theme::stroke() },
         ))
         .corner_radius(egui::CornerRadius::same(4))
-        .inner_margin(egui::Margin::symmetric(5, 1))
+        .inner_margin(egui::Margin::symmetric(10, 6))
         .show(ui, |ui| {
-            ui.label(RichText::new(text).color(color).size(12.0).monospace());
+            ui.label(RichText::new(text).color(color).size(18.0).monospace());
         });
 }
 
@@ -1040,25 +1216,6 @@ fn format_count(value: Option<u64>) -> String {
         Some(n) if n >= 1_000 => format!("{:.0}k", n as f64 / 1e3),
         Some(n) => n.to_string(),
     }
-}
-
-/// Convert a UCI principal variation to SAN from `pos`; `None` if no move
-/// applies (stale PV from an earlier position).
-fn pv_to_san(pos: &Chess, pv: &[String], max: usize) -> Option<String> {
-    let mut pos = pos.clone();
-    let mut out: Vec<String> = Vec::new();
-    for uci in pv.iter().take(max) {
-        let Some(m) = uci
-            .parse::<UciMove>()
-            .ok()
-            .and_then(|m| m.to_move(&pos).ok())
-        else {
-            break;
-        };
-        out.push(SanPlus::from_move(pos.clone(), m).to_string());
-        pos.play_unchecked(m);
-    }
-    if out.is_empty() { None } else { Some(out.join(" ")) }
 }
 
 // ── Eval graph ──────────────────────────────────────────────────────────────
@@ -1118,13 +1275,7 @@ fn draw_graph(ui: &Ui, rect: Rect, snap: &Snap, range: f32) {
     }
 
     if snap.evals.is_empty() {
-        painter.text(
-            plot.center(),
-            Align2::CENTER_CENTER,
-            "eval · white POV",
-            egui::FontId::proportional(9.5),
-            theme::text_faint(),
-        );
+        // No evals yet: just the empty grid — no placeholder text.
         return;
     }
 

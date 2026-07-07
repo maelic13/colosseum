@@ -31,6 +31,25 @@ pub struct LiveSearch {
     pub pv: Vec<String>,
 }
 
+/// One completed depth iteration in an engine's search log (the Fritz-style
+/// output pane): pushed when the engine reports a deeper PV, kept across
+/// moves as a rolling per-engine log.
+#[derive(Debug, Clone)]
+pub struct SearchLine {
+    /// White-POV score (same convention as [`LiveSearch::score`]).
+    pub score: Option<Score>,
+    pub depth: u32,
+    pub seldepth: Option<u32>,
+    pub nodes: Option<u64>,
+    /// Time into the search when this line was reported, in ms.
+    pub elapsed_ms: u64,
+    /// Principal variation as UCI moves (capped — it's a one-line display).
+    pub pv: Vec<String>,
+}
+
+/// Rolling cap for each side's search log.
+pub const SEARCH_LOG_CAP: usize = 80;
+
 /// One eval-history point for the live graph: the final white-POV score of the
 /// search that produced a move.
 #[derive(Debug, Clone, Copy)]
@@ -68,6 +87,10 @@ pub struct LiveGameState {
     pub search_started: Option<Instant>,
     pub white_search: LiveSearch,
     pub black_search: LiveSearch,
+    /// Per-side search logs (one line per completed depth), newest last,
+    /// capped at [`SEARCH_LOG_CAP`].
+    pub white_log: Vec<SearchLine>,
+    pub black_log: Vec<SearchLine>,
     /// Eval history for the graph, in move order.
     pub evals: Vec<EvalPoint>,
     /// Set once when the game ends; the state then stops changing.
@@ -104,6 +127,8 @@ impl LiveGameState {
             search_started: None,
             white_search: LiveSearch::default(),
             black_search: LiveSearch::default(),
+            white_log: Vec::new(),
+            black_log: Vec::new(),
             evals: Vec::new(),
             finished: None,
         }

@@ -140,8 +140,10 @@ static DARK: Palette = Palette {
     success: rgb(0x5f, 0xb8, 0x73),
     warn: rgb(0xd9, 0xa5, 0x4f),
     danger: rgb(0xdb, 0x5d, 0x52),
-    graph_white: rgb(0xef, 0x9f, 0x27),
-    graph_black: rgb(0x37, 0x8a, 0xdd),
+    // White = the cool light line, black = the warm dark one — matching the
+    // piece colours' intuition (light side ↔ lighter/cooler hue).
+    graph_white: rgb(0x37, 0x8a, 0xdd),
+    graph_black: rgb(0xef, 0x9f, 0x27),
     medal_silver: rgb(0xaa, 0xb4, 0xc4),
     medal_bronze: rgb(0xc0, 0x82, 0x55),
     avatar: [
@@ -173,8 +175,8 @@ static LIGHT: Palette = Palette {
     success: rgb(0x2f, 0x8f, 0x4e),
     warn: rgb(0xa4, 0x76, 0x1f),
     danger: rgb(0xc0, 0x4a, 0x40),
-    graph_white: rgb(0xba, 0x75, 0x17),
-    graph_black: rgb(0x18, 0x5f, 0xa5),
+    graph_white: rgb(0x18, 0x5f, 0xa5),
+    graph_black: rgb(0xba, 0x75, 0x17),
     medal_silver: rgb(0x7f, 0x8a, 0x9c),
     medal_bronze: rgb(0x9d, 0x64, 0x37),
     avatar: [
@@ -200,6 +202,13 @@ pub fn palette() -> &'static Palette {
     } else {
         &LIGHT
     }
+}
+
+/// Whether the dark palette is currently active (for the few paint sites that
+/// pick between theme-specific constants, e.g. the board wood tones).
+#[must_use]
+pub fn is_dark() -> bool {
+    DARK_ACTIVE.load(Ordering::Relaxed)
 }
 
 // Accessors mirroring the palette fields, so call sites read as

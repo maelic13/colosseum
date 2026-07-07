@@ -39,19 +39,35 @@ pub struct CommonEngineOptions {
     pub ponder: bool,
 }
 
-/// How engine *library* ratings are updated when the tournament finishes.
-/// The live in-tournament ratings are always the joint maximum-likelihood
-/// recompute over all finished games (`colosseum_core::ml_ratings`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// Which engines' *library* ratings follow the tournament. Applied after
+/// every finished game (not just at the end): the affected engines' library
+/// Elo tracks the tournament's live maximum-likelihood ratings
+/// (`colosseum_core::ml_ratings`, anchored at the tournament-start values).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum RatingWriteback {
     /// Leave every engine's library rating untouched (default).
     #[default]
     None,
-    /// Write every participant's final tournament rating to the library.
+    /// Every participant's library rating follows the tournament.
     All,
-    /// Update only this engine, set to its performance rating against the
-    /// other participants' fixed library ratings (they stay anchored).
+    /// Only the listed engines' ratings follow; the others stay untouched.
+    Chosen(Vec<EngineId>),
+    /// Legacy single-engine variant (pre-"Chosen" tournaments deserialize to
+    /// this); treated exactly as `Chosen` with one engine.
     Estimate(EngineId),
+}
+
+impl RatingWriteback {
+    /// Whether `engine`'s library rating is updated under this mode.
+    #[must_use]
+    pub fn applies_to(&self, engine: EngineId) -> bool {
+        match self {
+            Self::None => false,
+            Self::All => true,
+            Self::Chosen(ids) => ids.contains(&engine),
+            Self::Estimate(id) => *id == engine,
+        }
+    }
 }
 
 /// File format of an opening book.

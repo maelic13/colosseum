@@ -459,6 +459,92 @@ pub fn engine_sort_select(ui: &mut Ui, id_salt: &str, config_value: &mut String)
     }
 }
 
+/// A small frameless chevron button that collapses a side panel.
+pub fn collapse_button(ui: &mut Ui, chevron: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(
+            RichText::new(chevron)
+                .color(theme::text_weak())
+                .font(theme::semibold(13.0)),
+        )
+        .frame(false),
+    )
+    .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// The slim strip shown in place of a collapsed side panel: a chevron on top,
+/// clickable anywhere along the strip to expand. Returns true when clicked.
+pub fn expand_strip(ui: &mut Ui, chevron: &str, tooltip: &str) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), ui.available_height()),
+        egui::Sense::click(),
+    );
+    if resp.hovered() {
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(4), theme::bg_hover());
+    }
+    ui.painter().text(
+        egui::pos2(rect.center().x, rect.top() + 12.0),
+        egui::Align2::CENTER_CENTER,
+        chevron,
+        theme::semibold(13.0),
+        theme::text_weak(),
+    );
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(tooltip)
+        .clicked()
+}
+
+/// A [`choice_chip`] whose label carries a leading status dot in its own
+/// color (e.g. the Live lens showing green while games are in flight).
+pub fn choice_chip_dot<T: PartialEq>(
+    ui: &mut Ui,
+    current: &mut T,
+    value: T,
+    label: &str,
+    dot: Option<Color32>,
+) -> egui::Response {
+    let selected = *current == value;
+    let text_color = if selected {
+        theme::accent_bright()
+    } else {
+        theme::text_weak()
+    };
+    let mut job = egui::text::LayoutJob::default();
+    if let Some(c) = dot {
+        job.append(
+            "● ",
+            0.0,
+            egui::TextFormat {
+                font_id: egui::FontId::proportional(12.5),
+                color: c,
+                ..Default::default()
+            },
+        );
+    }
+    job.append(
+        label,
+        0.0,
+        egui::TextFormat {
+            font_id: egui::FontId::proportional(12.5),
+            color: text_color,
+            ..Default::default()
+        },
+    );
+    let mut button = egui::Button::new(job).corner_radius(egui::CornerRadius::same(4));
+    if selected {
+        button = button
+            .fill(theme::tint(theme::accent(), 0.15))
+            .stroke(egui::Stroke::new(1.0, theme::tint(theme::accent(), 0.4)));
+    }
+    let mut resp = ui.add(button);
+    if resp.clicked() && !selected {
+        *current = value;
+        resp.mark_changed();
+    }
+    resp
+}
+
 /// A small always-framed choice chip for inline either/or pickers.
 ///
 /// Never use `ui.selectable_value` / `selectable_label` in a row layout:

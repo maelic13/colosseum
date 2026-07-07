@@ -274,18 +274,28 @@ impl EngineProcess {
         let until = start + deadline;
         let mut score = None;
         let mut nps = None;
+        let mut nodes = None;
         let mut depth = None;
 
         loop {
             let line = self.read_line_until(until, UciError::MoveTimeout).await?;
             let line = line.trim();
             if let Some(best_move) = parse::parse_bestmove(line) {
+                let elapsed = start.elapsed();
+                // Some engines report a literal `nps 0` on every info line
+                // (Fruit 2.1 does) — treat that as unreported and derive the
+                // real speed from nodes over wall-clock time instead.
+                let nps = nps.or_else(|| {
+                    nodes.map(|n: u64| {
+                        (n as f64 / elapsed.as_secs_f64().max(0.001)).round() as u64
+                    })
+                });
                 return Ok(SearchOutput {
                     best_move,
                     score,
                     nps,
                     depth,
-                    elapsed: start.elapsed(),
+                    elapsed,
                 });
             }
             if line.starts_with("info ")
@@ -294,8 +304,13 @@ impl EngineProcess {
                 if info.score.is_some() {
                     score = info.score;
                 }
-                if info.nps.is_some() {
-                    nps = info.nps;
+                if let Some(n) = info.nps
+                    && n > 0
+                {
+                    nps = Some(n);
+                }
+                if info.nodes.is_some() {
+                    nodes = info.nodes;
                 }
                 if info.depth.is_some() {
                     depth = info.depth;

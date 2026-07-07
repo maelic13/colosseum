@@ -12,25 +12,31 @@
 //! rating with everyone else anchored ("Estimate one engine").
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use eframe::egui::{self, Color32, DragValue, Layout, RichText, ScrollArea, Ui};
 use egui_extras::{Column, TableBuilder};
 
 use colosseum_core::{
     EngineId, Format, PairGameResult, RatingWriteback, Standings, Termination, TimeControl,
-    TournamentConfig, TournamentId, performance_rating,
+    TournamentConfig, TournamentId,
 };
 use colosseum_engine::{
-    EloEntry, InFlightGame, TournamentResults, TournamentRow, TournamentStatus,
-    store::STATUS_FINISHED,
+    InFlightGame, TournamentResults, TournamentRow, TournamentStatus, store::STATUS_FINISHED,
 };
 
 use crate::backend::Backend;
 use crate::theme;
 use crate::widgets;
 
-/// Per-engine display rating + delta against the library prior.
-type DisplayRatings = HashMap<EngineId, (f64, f64)>;
+/// The heavy per-tournament live state, rebuilt only when a game finishes
+/// (see [`ResultsTab::capture_live`]).
+struct CachedLive {
+    rows: Rc<Vec<Row>>,
+    standings: Rc<Standings>,
+    errors: Rc<Vec<String>>,
+    termination_counts: Rc<HashMap<Termination, usize>>,
+}
 
 /// Persistent state for the Arena tab.
 #[derive(Default)]
@@ -50,11 +56,15 @@ pub struct ResultsTab {
 
     // ── Live-view state ──
     sort: SortState,
-    show_h2h: bool,
+    /// Whether the engine-errors bar is expanded (collapsed summary otherwise).
+    errors_expanded: bool,
+    /// Whether the tournaments list panel is collapsed to a slim strip.
+    list_collapsed: bool,
     elo_note: Option<String>,
-    /// Cached display ratings for the live table:
-    /// (id, finished count when computed, engine → (rating, delta vs prior)).
-    elo_cache: Option<(TournamentId, usize, DisplayRatings)>,
+    /// The heavy per-tournament state (standings, rows, errors), rebuilt only
+    /// when a game finishes — cloning `Standings` every frame at 30 Hz was
+    /// the live view's biggest per-frame cost.
+    live_cache: Option<(TournamentId, usize, CachedLive)>,
     /// Head-to-head cell format: `false` = W-D-L counts, `true` = per-game results.
     h2h_per_game: bool,
     /// Loaded-tournament ids last frame (a new one steals the selection).
@@ -98,20 +108,33 @@ impl ResultsTab {
         // the user deliberately not running it — doesn't loop.
         self.auto_load_selected(backend);
 
-        // Right: tournament list.
-        egui::Panel::right("results_list")
-            .default_size(280.0)
-            .size_range(220.0..=400.0)
-            .resizable(true)
-            .frame(egui::Frame::new().inner_margin(egui::Margin {
-                left: 12,
-                right: 8,
-                top: 10,
-                bottom: 8,
-            }))
-            .show_inside(ui, |ui| {
-                self.list_panel(ui, backend);
-            });
+        // Right: tournament list — collapsible to a slim strip for more room.
+        if self.list_collapsed {
+            egui::Panel::right("results_list_collapsed")
+                .exact_size(24.0)
+                .resizable(false)
+                .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(2, 6)))
+                .show_inside(ui, |ui| {
+                    let count = self.list.as_ref().map_or(0, Vec::len);
+                    if widgets::expand_strip(ui, "‹", &format!("Tournaments ({count})")) {
+                        self.list_collapsed = false;
+                    }
+                });
+        } else {
+            egui::Panel::right("results_list")
+                .default_size(280.0)
+                .size_range(220.0..=400.0)
+                .resizable(true)
+                .frame(egui::Frame::new().inner_margin(egui::Margin {
+                    left: 12,
+                    right: 8,
+                    top: 10,
+                    bottom: 8,
+                }))
+                .show_inside(ui, |ui| {
+                    self.list_panel(ui, backend);
+                });
+        }
 
         // Centre: live view for loaded tournaments, stored results otherwise.
         let live_id = self.selected.filter(|id| backend.active(*id).is_some());
@@ -185,6 +208,14 @@ impl ResultsTab {
                     .color(theme::text_faint())
                     .size(12.0),
             );
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if widgets::collapse_button(ui, "›")
+                    .on_hover_text("Hide the tournaments list.")
+                    .clicked()
+                {
+                    self.list_collapsed = true;
+                }
+            });
         });
         if let Some(err) = &self.error {
             ui.label(
@@ -276,14 +307,26 @@ impl ResultsTab {
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(&row.name)
-                            .color(if selected {
-                                theme::accent_bright()
-                            } else {
-                                theme::text()
-                            })
-                            .font(theme::semibold(13.5)),
+                    // Truncate the name so it never collides with the status
+                    // label on the right (status ≈ 56 pt at 11 pt semibold).
+                    let name_w = (ui.available_width() - 64.0).max(40.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(name_w, 18.0),
+                        Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&row.name)
+                                        .color(if selected {
+                                            theme::accent_bright()
+                                        } else {
+                                            theme::text()
+                                        })
+                                        .font(theme::semibold(13.5)),
+                                )
+                                .truncate(),
+                            );
+                        },
                     );
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                         // Live = games in flight; Finished = all played;
@@ -357,7 +400,9 @@ impl ResultsTab {
                 self.live_control_bar(ui, backend, id, &live);
             });
 
-        // Errors panel (bottom), only when there are errors.
+        // Errors panel (bottom), only when there are errors. Collapsed by
+        // default to a one-line summary — same pattern as the Engines tab's
+        // tablebases bar — so crashes don't permanently eat vertical space.
         if !live.errors.is_empty() {
             egui::Panel::bottom("results_live_errors")
                 .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(14, 8)))
@@ -369,22 +414,60 @@ impl ResultsTab {
                         .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
-                            ui.label(
-                                RichText::new(format!("Engine errors ({})", live.errors.len()))
-                                    .color(theme::danger())
-                                    .font(theme::semibold(12.5)),
-                            );
-                            ScrollArea::vertical()
-                                .id_salt("results_errors_scroll")
-                                .max_height(80.0)
-                                .auto_shrink([false, true])
-                                .show(ui, |ui| {
-                                    for err in live.errors.iter().rev().take(20) {
-                                        ui.label(
-                                            RichText::new(err).color(theme::text_weak()).size(12.0),
+                            let header = ui
+                                .horizontal(|ui| {
+                                    widgets::disclosure_triangle(
+                                        ui,
+                                        self.errors_expanded,
+                                        theme::danger(),
+                                    );
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "Engine errors ({})",
+                                            live.errors.len()
+                                        ))
+                                        .color(theme::danger())
+                                        .font(theme::semibold(12.5)),
+                                    );
+                                    if !self.errors_expanded
+                                        && let Some(last) = live.errors.last()
+                                    {
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(last)
+                                                    .color(theme::text_faint())
+                                                    .size(11.5),
+                                            )
+                                            .truncate(),
                                         );
                                     }
-                                });
+                                })
+                                .response;
+                            let click = ui.interact(
+                                header.rect,
+                                egui::Id::new("errors_header"),
+                                egui::Sense::click(),
+                            );
+                            if click.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+                            {
+                                self.errors_expanded = !self.errors_expanded;
+                            }
+                            if self.errors_expanded {
+                                ui.add_space(4.0);
+                                ScrollArea::vertical()
+                                    .id_salt("results_errors_scroll")
+                                    .max_height(80.0)
+                                    .auto_shrink([false, true])
+                                    .show(ui, |ui| {
+                                        for err in live.errors.iter().rev().take(20) {
+                                            ui.label(
+                                                RichText::new(err)
+                                                    .color(theme::text_weak())
+                                                    .size(12.0),
+                                            );
+                                        }
+                                    });
+                            }
                         });
                 });
         }
@@ -440,25 +523,20 @@ impl ResultsTab {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         self.results_table(ui, &live);
-                        if live.rows.len() == 2 {
-                            ui.add_space(14.0);
-                            crate::stats_ui::match_stats_card(
-                                ui,
-                                &live.crosstable_order(),
-                                &live.standings,
-                            );
-                        }
-                        if self.show_h2h {
-                            ui.add_space(18.0);
-                            self.head_to_head_section(ui, &live);
-                        }
+                        ui.add_space(18.0);
+                        self.head_to_head_section(ui, &live);
                         ui.add_space(8.0);
                     });
             });
     }
 
-    /// Snapshot the backend state into owned data, releasing the lock quickly,
-    /// and join in the display ratings for the configured writeback mode.
+    /// Snapshot the backend state into owned data, releasing the lock quickly.
+    ///
+    /// Volatile fields (status, clocks, in-flight games) are read every frame;
+    /// the heavy derived state (standings clone, rating rows, errors) only
+    /// changes when a game finishes, so it is cached per finished-game count
+    /// and shared via `Rc` — this keeps the per-frame cost flat even for
+    /// tournaments with tens of thousands of recorded games.
     fn capture_live(&mut self, backend: &Backend, id: TournamentId) -> LiveData {
         let active = backend
             .active(id)
@@ -466,54 +544,95 @@ impl ResultsTab {
 
         let snap = active.snapshot.lock().unwrap();
         let status = snap.status;
-        let standings = snap.standings.clone();
-        // ML rating recompute published by the driver (rating, Δ, error bar).
-        let elo_model = snap.elo.clone();
         let finished = snap.games_finished;
         let total = snap.games_total;
-        let errors = snap.recent_errors.clone();
-        let started_at = snap.started_at;
+        // Play clock: frozen accumulation + the live stretch when running.
+        let elapsed = snap.elapsed_active
+            + snap
+                .running_since
+                .map_or(std::time::Duration::ZERO, |t| t.elapsed());
         let total_game_ms = snap.total_game_ms;
         let games_timed = snap.games_timed;
         let in_flight_games = snap.in_flight_games.clone();
-        let termination_counts = snap.termination_counts.clone();
         let concurrency = snap.concurrency;
-        drop(snap);
 
-        // Display ratings = exactly what the writeback mode would store.
-        let ratings = self.display_ratings(backend, id, &standings, finished, &elo_model);
+        let cache_hit = self
+            .live_cache
+            .as_ref()
+            .is_some_and(|(cid, n, _)| *cid == id && *n == finished);
+        if !cache_hit {
+            let standings = Rc::new(snap.standings.clone());
+            let elo_model = snap.elo.clone();
+            let errors = Rc::new(snap.recent_errors.clone());
+            let termination_counts = Rc::new(snap.termination_counts.clone());
+            drop(snap);
 
-        let ranked = standings.ranked_by_points();
-        let rank_of = |id: EngineId| ranked.iter().position(|x| x == &id).map_or(0, |p| p + 1);
+            // Display ratings = exactly what the writeback mode stores in the
+            // library after each game (`None` keeps the start rating on
+            // display and shows the tournament-only movement in Δ).
+            let prior_of = |eid: EngineId| {
+                active
+                    .priors
+                    .iter()
+                    .find(|(pid, _)| *pid == eid)
+                    .map_or(1500.0, |(_, p)| *p)
+            };
+            let ranked = standings.ranked_by_points();
+            let rank_of =
+                |id: EngineId| ranked.iter().position(|x| x == &id).map_or(0, |p| p + 1);
 
-        let mut rows: Vec<Row> = active
-            .participants
-            .iter()
-            .map(|p| {
-                let st = standings.standing(p.id);
-                let (elo, elo_delta) = ratings.get(&p.id).copied().unwrap_or((1500.0, 0.0));
-                Row {
-                    id: p.id,
-                    rank: rank_of(p.id),
-                    name: p.name.clone(),
-                    version: p.version.clone(),
-                    elo,
-                    elo_delta,
-                    elo_error: elo_model.get(&p.id).and_then(|e| e.error),
-                    points: st.points(),
-                    games: st.games(),
-                    wins: st.wins,
-                    draws: st.draws,
-                    losses: st.losses,
-                    time_losses: st.time_losses,
-                    crash_losses: st.crash_losses,
-                    nps: st.avg_nps(),
-                    depth: st.avg_depth(),
-                    move_ms: st.avg_move_ms(),
-                }
-            })
-            .collect();
-        rows.sort_by_key(|r| r.rank);
+            let mut rows: Vec<Row> = active
+                .participants
+                .iter()
+                .map(|p| {
+                    let st = standings.standing(p.id);
+                    let entry = elo_model.get(&p.id).copied().unwrap_or_default();
+                    let followed = matches!(active.rating_writeback, RatingWriteback::All)
+                        || active.rating_writeback.applies_to(p.id);
+                    let (elo, elo_delta, elo_error) = if followed {
+                        (entry.current, entry.delta, entry.error)
+                    } else {
+                        // Library untouched: show the start rating; the Δ
+                        // column still tracks the tournament-only movement.
+                        (prior_of(p.id), entry.delta, entry.error)
+                    };
+                    Row {
+                        id: p.id,
+                        rank: rank_of(p.id),
+                        name: p.name.clone(),
+                        version: p.version.clone(),
+                        elo,
+                        elo_delta,
+                        elo_error,
+                        points: st.points(),
+                        games: st.games(),
+                        wins: st.wins,
+                        draws: st.draws,
+                        losses: st.losses,
+                        time_losses: st.time_losses,
+                        crash_losses: st.crash_losses,
+                        nps: st.avg_nps(),
+                        depth: st.avg_depth(),
+                        move_ms: st.avg_move_ms(),
+                    }
+                })
+                .collect();
+            rows.sort_by_key(|r| r.rank);
+
+            self.live_cache = Some((
+                id,
+                finished,
+                CachedLive {
+                    rows: Rc::new(rows),
+                    standings,
+                    errors,
+                    termination_counts,
+                },
+            ));
+        } else {
+            drop(snap);
+        }
+        let cache = &self.live_cache.as_ref().expect("just ensured").2;
 
         // Gauntlet: the seed engines are the first N participants.
         let gauntlet_seeds: Vec<EngineId> = match active.config.format {
@@ -528,92 +647,23 @@ impl ResultsTab {
 
         LiveData {
             name: active.name.clone(),
+            summary: live_config_summary(&active.config),
             status,
             finished,
             total,
-            rows,
-            standings,
-            errors,
-            started_at,
+            rows: Rc::clone(&cache.rows),
+            standings: Rc::clone(&cache.standings),
+            errors: Rc::clone(&cache.errors),
+            elapsed,
             total_game_ms,
             games_timed,
             in_flight_games,
-            termination_counts,
+            termination_counts: Rc::clone(&cache.termination_counts),
             concurrency,
             gauntlet_seeds,
             per_game_estimate: estimate_game_secs(&active.config.time_control),
-            writeback: active.rating_writeback,
+            writeback: active.rating_writeback.clone(),
         }
-    }
-
-    /// Ratings for the live Elo column, cached per finished-game count.
-    ///
-    /// The invariant that matters: these are *exactly* the numbers the
-    /// configured writeback stores in the library, so the table is never
-    /// misleading about what the engines will end up with.
-    fn display_ratings(
-        &mut self,
-        backend: &Backend,
-        id: TournamentId,
-        standings: &Standings,
-        finished: usize,
-        model: &HashMap<EngineId, EloEntry>,
-    ) -> DisplayRatings {
-        if let Some((cid, n, map)) = &self.elo_cache
-            && *cid == id
-            && *n == finished
-        {
-            return map.clone();
-        }
-        let priors = backend.active_priors(id);
-        let writeback = backend
-            .active(id)
-            .map_or(RatingWriteback::None, |a| a.rating_writeback);
-
-        let map: DisplayRatings = match writeback {
-            // Nothing will be written: show library ratings, no drift. The
-            // driver's ML recompute still feeds the Δ column so the run is
-            // informative — but only there, clearly marked as tournament-only.
-            RatingWriteback::None => priors
-                .iter()
-                .map(|&(id, prior)| {
-                    let delta = model.get(&id).map_or(0.0, |e| e.delta);
-                    (id, (prior, delta))
-                })
-                .collect(),
-            RatingWriteback::All => {
-                let ml = colosseum_core::ml_ratings(standings, &priors);
-                priors
-                    .iter()
-                    .map(|&(id, prior)| {
-                        let r = ml.get(&id).copied().unwrap_or(prior);
-                        (id, (r, r - prior))
-                    })
-                    .collect()
-            }
-            RatingWriteback::Estimate(target) => priors
-                .iter()
-                .map(|&(id, prior)| {
-                    if id == target {
-                        let results: Vec<(f64, f64, u32)> = priors
-                            .iter()
-                            .filter(|(opp, _)| *opp != target)
-                            .map(|&(opp, opp_prior)| {
-                                let h2h = standings.head_to_head(target, opp);
-                                (opp_prior, h2h.points(), h2h.games())
-                            })
-                            .collect();
-                        let perf = performance_rating(&results).unwrap_or(prior);
-                        (id, (perf, perf - prior))
-                    } else {
-                        // Anchored: never moves, not even in the live view.
-                        (id, (prior, 0.0))
-                    }
-                })
-                .collect(),
-        };
-        self.elo_cache = Some((id, finished, map.clone()));
-        map
     }
 
     fn live_control_bar(
@@ -624,10 +674,9 @@ impl ResultsTab {
         live: &LiveData,
     ) {
         let status = live.status;
-        let live_views = &mut self.live_views;
         let (in_flight, concurrency) = (live.in_flight_games.len(), live.concurrency);
 
-        // ── Row 1: status + name + transport + progress + lens switcher ──
+        // ── Row 1: status + name + transport + progress ──
         ui.horizontal_wrapped(|ui| {
             let (label, dot, color) = status_pill_parts(status);
             widgets::status_pill(ui, label, dot, color);
@@ -636,6 +685,13 @@ impl ResultsTab {
                 RichText::new(&live.name)
                     .color(theme::text())
                     .font(theme::semibold(15.0)),
+            );
+            ui.add_space(6.0);
+            // The tournament's shape at a glance: format · TC · games/pair.
+            ui.label(
+                RichText::new(&live.summary)
+                    .color(theme::text_weak())
+                    .size(12.0),
             );
             ui.add_space(10.0);
 
@@ -709,8 +765,8 @@ impl ResultsTab {
             // Timing: elapsed / avg / ETA (measured average once available,
             // configured time control as the estimate before that, both
             // divided by the parallel-games limit).
-            if let Some(started) = live.started_at {
-                let elapsed_secs = started.elapsed().as_secs_f64();
+            if !live.elapsed.is_zero() {
+                let elapsed_secs = live.elapsed.as_secs_f64();
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(format!("⏱ {}", format_duration(elapsed_secs)))
@@ -754,22 +810,19 @@ impl ResultsTab {
                 }
             }
 
-            // Lens switcher (Standings | Live) pinned to the row's right edge.
-            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                live_views.header_controls(ui, id, in_flight, concurrency);
-            });
         });
 
         ui.add_space(8.0);
 
-        // ── Row 2: view toggles + actions ──
+        // ── Row 2: lens switcher (stable, always leftmost) + actions ──
         ui.horizontal_wrapped(|ui| {
             let new_enabled = !crate::backend::is_busy(status);
 
-            ui.toggle_value(
-                &mut self.show_h2h,
-                RichText::new("Head-to-head").size(13.0),
-            );
+            // The Standings|Live switcher and Auto-follow live here — in the
+            // normal flow, always in the same place — because a right-pinned
+            // layout paints over the wrapped row-1 content in narrow windows.
+            self.live_views.header_controls(ui, id, in_flight, concurrency);
+            ui.add_space(12.0);
 
             // Export menu: CSV standings / crosstable / game PGN.
             let export_resp = ui.menu_button(RichText::new("Export    ").size(13.0), |ui| {
@@ -797,48 +850,19 @@ impl ResultsTab {
 
             ui.add_space(16.0);
 
-            // Manual writeback — label matches the configured mode so it never
-            // writes something different from what the table shows.
-            match live.writeback {
-                RatingWriteback::Estimate(target) => {
-                    let target_name = live.participant_label(target);
-                    if widgets::tinted_button(
-                        ui,
-                        &format!("Apply {target_name} estimate → Library"),
-                        theme::accent(),
-                        new_enabled,
-                    )
+            // With a writeback mode configured, the library follows the
+            // tournament after every game automatically — the manual push
+            // only exists for "Never".
+            if matches!(live.writeback, RatingWriteback::None)
+                && widgets::tinted_button(ui, "Apply Elo → Library", theme::accent(), new_enabled)
                     .on_hover_text(
-                        "Write the estimated rating to the library now. The \
-                         other engines' ratings stay untouched.",
+                        "One-time push: write the current tournament ratings \
+                         to the engine library.",
                     )
                     .clicked()
-                    {
-                        match backend.apply_estimate_to_library(id, target) {
-                            Some(elo) => {
-                                self.elo_cache = None;
-                                self.elo_note =
-                                    Some(format!("{target_name} rated {elo} in the library"));
-                            }
-                            None => {
-                                self.elo_note = Some("No games to estimate from yet.".to_string());
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    if widgets::tinted_button(ui, "Apply Elo → Library", theme::accent(), new_enabled)
-                        .on_hover_text(
-                            "Write the maximum-likelihood ratings shown in the Elo \
-                             column to the engine library.",
-                        )
-                        .clicked()
-                    {
-                        let n = backend.apply_active_elo_to_library(id);
-                        self.elo_cache = None;
-                        self.elo_note = Some(format!("Elo applied ({n} engines updated)"));
-                    }
-                }
+            {
+                let n = backend.apply_ratings_to_library(id);
+                self.elo_note = Some(format!("Elo applied ({n} engines updated)"));
             }
 
             if let Some(note) = &self.export_note {
@@ -876,7 +900,7 @@ impl ResultsTab {
                             Err(e) => self.error = Some(format!("Delete failed: {e}")),
                         }
                         self.pending_delete = None;
-                        self.elo_cache = None;
+                        self.live_cache = None;
                         self.refresh(backend);
                     }
                 } else if widgets::tinted_button(ui, "Delete", theme::danger(), true)
@@ -900,13 +924,16 @@ impl ResultsTab {
             return;
         }
 
-        let mut rows = live.rows.clone();
+        let mut rows: Vec<Row> = live.rows.as_ref().clone();
         sort_rows(&mut rows, self.sort);
 
         let header_h = 30.0;
         let row_h = 30.0;
 
         TableBuilder::new(ui)
+            // The page scrolls as a whole; a nested table scroll area would
+            // add a second scrollbar inside the standings.
+            .vscroll(false)
             .striped(true)
             .cell_layout(Layout::left_to_right(egui::Align::Center))
             // Fixed widths (not Column::auto): auto re-measures cell content every
@@ -918,10 +945,10 @@ impl ResultsTab {
             .column(Column::exact(60.0)) // points
             .column(Column::exact(52.0)) // games
             .column(Column::exact(92.0)) // w-d-l
-            .column(Column::exact(110.0)) // forfeits (time / crash losses)
             .column(Column::exact(90.0)) // nps
             .column(Column::exact(84.0)) // avg depth
-            .column(Column::remainder().at_least(84.0)) // avg time/move
+            .column(Column::exact(84.0)) // avg time/move
+            .column(Column::remainder().at_least(110.0)) // forfeits (far right)
             .header(header_h, |mut header| {
                 header.col(|ui| {
                     ui.label(strong_header("#"));
@@ -945,11 +972,6 @@ impl ResultsTab {
                     ui.label(strong_header("W-D-L"));
                 });
                 header.col(|ui| {
-                    ui.label(strong_header("Forfeits")).on_hover_text(
-                        "Losses on time and by crash / illegal move.",
-                    );
-                });
-                header.col(|ui| {
                     sortable_header(ui, "Avg nps", SortKey::Nps, &mut self.sort);
                 });
                 header.col(|ui| {
@@ -957,6 +979,11 @@ impl ResultsTab {
                 });
                 header.col(|ui| {
                     sortable_header(ui, "Time/move", SortKey::MoveTime, &mut self.sort)
+                });
+                header.col(|ui| {
+                    ui.label(strong_header("Forfeits")).on_hover_text(
+                        "Losses on time and by crash / illegal move.",
+                    );
                 });
             })
             .body(|mut body| {
@@ -1000,9 +1027,6 @@ impl ResultsTab {
                             );
                         });
                         tr.col(|ui| {
-                            forfeit_cell(ui, row.time_losses, row.crash_losses);
-                        });
-                        tr.col(|ui| {
                             ui.label(
                                 RichText::new(format_nps(row.nps))
                                     .color(theme::text_weak())
@@ -1022,6 +1046,9 @@ impl ResultsTab {
                                     .color(theme::text_weak())
                                     .monospace(),
                             );
+                        });
+                        tr.col(|ui| {
+                            forfeit_cell(ui, row.time_losses, row.crash_losses);
                         });
                     });
                 }
@@ -1272,14 +1299,6 @@ impl ResultsTab {
                             results_summary(ui, res);
                             ui.add_space(8.0);
                             standings_table(ui, res);
-                            if res.participants.len() == 2 {
-                                ui.add_space(12.0);
-                                crate::stats_ui::match_stats_card(
-                                    ui,
-                                    &crosstable_order(res),
-                                    &res.standings,
-                                );
-                            }
                         } else {
                             ui.label(
                                 RichText::new("No results to show.")
@@ -1431,20 +1450,24 @@ struct Row {
     move_ms: Option<f64>,
 }
 
-/// An owned snapshot of everything the live view renders this frame.
+/// An owned snapshot of everything the live view renders this frame. The
+/// heavy fields are `Rc`-shared from the per-finished-game cache.
 struct LiveData {
     name: String,
+    /// One-line config summary (format · time control · games/pair).
+    summary: String,
     status: TournamentStatus,
     finished: usize,
     total: usize,
-    rows: Vec<Row>,
-    standings: Standings,
-    errors: Vec<String>,
-    started_at: Option<std::time::Instant>,
+    rows: Rc<Vec<Row>>,
+    standings: Rc<Standings>,
+    errors: Rc<Vec<String>>,
+    /// Play time while games were running (frozen when stopped).
+    elapsed: std::time::Duration,
     total_game_ms: u64,
     games_timed: usize,
     in_flight_games: Vec<InFlightGame>,
-    termination_counts: HashMap<Termination, usize>,
+    termination_counts: Rc<HashMap<Termination, usize>>,
     /// Current parallel-games limit.
     concurrency: usize,
     /// Gauntlet seed engines (empty for round robin).
@@ -1982,6 +2005,8 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
     let header_h = 28.0;
     let row_h = 28.0;
     TableBuilder::new(ui)
+        // The page scrolls as a whole — no nested table scrollbar.
+        .vscroll(false)
         .striped(true)
         .cell_layout(Layout::left_to_right(egui::Align::Center))
         .column(Column::exact(40.0)) // rank
@@ -1991,14 +2016,14 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
         .column(Column::exact(60.0)) // points
         .column(Column::exact(52.0)) // games
         .column(Column::exact(92.0)) // w-d-l
-        .column(Column::exact(110.0)) // forfeits
         .column(Column::exact(90.0)) // nps
         .column(Column::exact(84.0)) // avg depth
-        .column(Column::remainder().at_least(84.0)) // avg time/move
+        .column(Column::exact(84.0)) // avg time/move
+        .column(Column::remainder().at_least(110.0)) // forfeits (far right)
         .header(header_h, |mut header| {
             for label in [
-                "#", "Engine", "Elo", "Δ", "Pts", "Gms", "W-D-L", "Forfeits", "Avg nps",
-                "Avg depth", "Time/move",
+                "#", "Engine", "Elo", "Δ", "Pts", "Gms", "W-D-L", "Avg nps", "Avg depth",
+                "Time/move", "Forfeits",
             ] {
                 header.col(|ui| {
                     ui.label(
@@ -2043,9 +2068,6 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
                         );
                     });
                     tr.col(|ui| {
-                        forfeit_cell(ui, row.time_losses, row.crash_losses);
-                    });
-                    tr.col(|ui| {
                         ui.label(
                             RichText::new(format_nps(row.nps))
                                 .color(theme::text_weak())
@@ -2065,6 +2087,9 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
                                 .color(theme::text_weak())
                                 .monospace(),
                         );
+                    });
+                    tr.col(|ui| {
+                        forfeit_cell(ui, row.time_losses, row.crash_losses);
                     });
                 });
             }
@@ -2092,9 +2117,8 @@ fn status_parts(status: &str) -> (&'static str, Color32) {
     }
 }
 
-/// Compact one-line config description for the detail header.
-fn config_summary(row: &TournamentRow) -> String {
-    let c: &TournamentConfig = &row.config;
+/// Compact one-line config description: format · time control · games/pair.
+fn live_config_summary(c: &TournamentConfig) -> String {
     let format = match c.format {
         Format::RoundRobin { cycles } if cycles > 1 => format!("Round Robin ×{cycles}"),
         Format::RoundRobin { .. } => "Round Robin".to_string(),
@@ -2112,9 +2136,14 @@ fn config_summary(row: &TournamentRow) -> String {
         TimeControl::Nodes { nodes } => format!("{nodes} nodes/move"),
         TimeControl::Depth { depth } => format!("depth {depth}/move"),
     };
+    format!("{format} · {tc} · {} games/pair", c.games_per_pair)
+}
+
+/// The stored-detail header summary: config plus when it was created.
+fn config_summary(row: &TournamentRow) -> String {
     format!(
-        "{format} · {tc} · {} games/pair · started {}",
-        c.games_per_pair,
+        "{} · started {}",
+        live_config_summary(&row.config),
         format_timestamp(&row.created_at)
     )
 }
