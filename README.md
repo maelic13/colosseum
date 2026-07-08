@@ -1,8 +1,4 @@
-<p align="center">
-  <img src="docs/design/logo.svg" width="96" alt="Colosseum logo">
-</p>
-
-# Colosseum ♟ Chess Engine Testing Suite
+# Colosseum <img src="docs/design/logo.svg" width="28" alt="" align="center"> Chess Engine Testing Suite
 
 A cross-platform desktop application for running UCI engine-vs-engine chess
 tournaments — parallel games, a live board view, and maximum-likelihood Elo
