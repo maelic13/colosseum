@@ -36,6 +36,7 @@ struct CachedLive {
     standings: Rc<Standings>,
     errors: Rc<Vec<String>>,
     termination_counts: Rc<HashMap<Termination, usize>>,
+    config: Rc<TournamentConfig>,
 }
 
 /// Persistent state for the Arena tab.
@@ -49,6 +50,13 @@ pub struct ResultsTab {
     results: Option<(TournamentId, TournamentResults)>,
     /// Tournament awaiting delete confirmation (two-step inline confirm).
     pending_delete: Option<TournamentId>,
+    /// Rows highlighted for bulk actions (ctrl/shift click). The *current*
+    /// tournament (`selected`, shown in the main area) is independent.
+    multi_selected: std::collections::HashSet<TournamentId>,
+    /// Anchor row for shift-range selection.
+    select_anchor: Option<TournamentId>,
+    /// Bulk delete awaiting modal confirmation.
+    bulk_delete: Option<Vec<TournamentId>>,
     /// Last error message from a DB action.
     error: Option<String>,
     /// Transient note shown after an export action.
@@ -60,7 +68,6 @@ pub struct ResultsTab {
     errors_expanded: bool,
     /// Whether the tournaments list panel is collapsed to a slim strip.
     list_collapsed: bool,
-    elo_note: Option<String>,
     /// The heavy per-tournament state (standings, rows, errors), rebuilt only
     /// when a game finishes — cloning `Standings` every frame at 30 Hz was
     /// the live view's biggest per-frame cost.
@@ -109,6 +116,7 @@ impl ResultsTab {
         self.auto_load_selected(backend);
 
         // Right: tournament list — collapsible to a slim strip for more room.
+        let mut list_rect: Option<egui::Rect> = None;
         if self.list_collapsed {
             egui::Panel::right("results_list_collapsed")
                 .exact_size(24.0)
@@ -121,7 +129,7 @@ impl ResultsTab {
                     }
                 });
         } else {
-            egui::Panel::right("results_list")
+            let panel = egui::Panel::right("results_list")
                 .default_size(280.0)
                 .size_range(220.0..=400.0)
                 .resizable(true)
@@ -134,7 +142,25 @@ impl ResultsTab {
                 .show_inside(ui, |ui| {
                     self.list_panel(ui, backend);
                 });
+            list_rect = Some(panel.response.rect);
         }
+
+        // A click anywhere outside the list drops the bulk selection (the
+        // current tournament stays). Skipped while a popup/modal is open, so
+        // choosing a context-menu action doesn't wipe its own target set.
+        if !self.multi_selected.is_empty()
+            && self.bulk_delete.is_none()
+            && !egui::Popup::is_any_open(ui.ctx())
+            && let Some(rect) = list_rect
+            && ui.input(|i| {
+                i.pointer.any_click()
+                    && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))
+            })
+        {
+            self.multi_selected.clear();
+        }
+
+        self.bulk_delete_modal(ui, backend);
 
         // Centre: live view for loaded tournaments, stored results otherwise.
         let live_id = self.selected.filter(|id| backend.active(*id).is_some());
@@ -257,6 +283,7 @@ impl ResultsTab {
             .show(ui, |ui| {
                 for row in &list {
                     let selected = self.selected == Some(row.id);
+                    let in_multi = self.multi_selected.contains(&row.id);
                     // Live status + progress for loaded tournaments.
                     let live = backend.active(row.id).and_then(|a| {
                         a.snapshot
@@ -264,35 +291,232 @@ impl ResultsTab {
                             .ok()
                             .map(|s| (s.status, s.games_finished, s.games_total))
                     });
-                    if self.list_row(ui, row, selected, live) {
-                        self.selected = Some(row.id);
-                        self.pending_delete = None;
-                        // Unfinished tournaments load immediately — same
-                        // state as pressing Resume (stopped, ready to Go).
-                        if row.status != STATUS_FINISHED
-                            && backend.active(row.id).is_none()
-                            && let Err(e) = backend.try_resume(row.clone())
-                        {
-                            self.error = Some(format!("Could not load: {e}"));
+                    let resp = self.list_row(ui, row, selected, in_multi, live);
+                    if resp.clicked() {
+                        let mods = ui.input(|i| i.modifiers);
+                        if mods.ctrl {
+                            // Toggle in the bulk set. Starting a bulk selection
+                            // implicitly includes the current tournament — it
+                            // reads as selected, so ctrl-click *adds* to it.
+                            if self.multi_selected.is_empty()
+                                && let Some(cur) = self.selected
+                                && cur != row.id
+                            {
+                                self.multi_selected.insert(cur);
+                            }
+                            if !self.multi_selected.remove(&row.id) {
+                                self.multi_selected.insert(row.id);
+                            }
+                            self.select_anchor = Some(row.id);
+                        } else if mods.shift {
+                            let anchor = self
+                                .select_anchor
+                                .or(self.selected)
+                                .unwrap_or(row.id);
+                            let (mut a, mut b) = (None, None);
+                            for (i, r) in list.iter().enumerate() {
+                                if r.id == anchor {
+                                    a = Some(i);
+                                }
+                                if r.id == row.id {
+                                    b = Some(i);
+                                }
+                            }
+                            if let (Some(a), Some(b)) = (a, b) {
+                                let (lo, hi) = (a.min(b), a.max(b));
+                                for r in &list[lo..=hi] {
+                                    self.multi_selected.insert(r.id);
+                                }
+                            }
+                        } else {
+                            self.select_anchor = Some(row.id);
+                            self.multi_selected.clear();
+                            self.selected = Some(row.id);
+                            self.pending_delete = None;
+                            // Unfinished tournaments load immediately — same
+                            // state as pressing Resume (stopped, ready).
+                            if row.status != STATUS_FINISHED
+                                && backend.active(row.id).is_none()
+                                && let Err(e) = backend.try_resume(row.clone())
+                            {
+                                self.error = Some(format!("Could not load: {e}"));
+                            }
                         }
                     }
+                    // Right-click selects (into the bulk set when not already
+                    // part of it) and opens the actions menu.
+                    if resp.secondary_clicked() && !in_multi {
+                        self.multi_selected.clear();
+                        self.multi_selected.insert(row.id);
+                        self.select_anchor = Some(row.id);
+                    }
+                    let row_id = row.id;
+                    resp.context_menu(|ui| {
+                        self.tournament_context_menu(ui, backend, row_id, &list);
+                    });
                     ui.add_space(4.0);
                 }
             });
     }
 
-    /// One selectable tournament card; returns true when clicked.
+    /// Right-click actions applied to the whole bulk selection (or just the
+    /// clicked row when nothing else is selected).
+    fn tournament_context_menu(
+        &mut self,
+        ui: &mut Ui,
+        backend: &mut Backend,
+        clicked: TournamentId,
+        list: &[TournamentRow],
+    ) {
+        ui.set_min_width(150.0);
+        let targets: Vec<TournamentId> = if self.multi_selected.contains(&clicked) {
+            // List order, so bulk actions run top to bottom.
+            list.iter()
+                .map(|r| r.id)
+                .filter(|id| self.multi_selected.contains(id))
+                .collect()
+        } else {
+            vec![clicked]
+        };
+        let n = targets.len();
+        let suffix = if n > 1 {
+            format!(" ({n})")
+        } else {
+            String::new()
+        };
+
+        if ui.button(format!("Start{suffix}")).clicked() {
+            for id in &targets {
+                let row = list.iter().find(|r| r.id == *id);
+                if backend.active(*id).is_none()
+                    && let Some(row) = row
+                    && row.status != STATUS_FINISHED
+                    && let Err(e) = backend.try_resume(row.clone())
+                {
+                    self.error = Some(format!("Could not load: {e}"));
+                    continue;
+                }
+                if let Some(active) = backend.active(*id) {
+                    active.handle.go();
+                }
+            }
+            ui.close();
+        }
+        if ui.button(format!("Stop{suffix}")).clicked() {
+            for id in &targets {
+                if let Some(active) = backend.active(*id) {
+                    active.handle.stop();
+                }
+            }
+            ui.close();
+        }
+        if ui.button(format!("Force-stop{suffix}")).clicked() {
+            for id in &targets {
+                if let Some(active) = backend.active(*id) {
+                    active.handle.force_stop();
+                }
+            }
+            ui.close();
+        }
+        ui.separator();
+        if ui
+            .button(RichText::new(format!("Delete{suffix}…")).color(theme::danger()))
+            .clicked()
+        {
+            self.bulk_delete = Some(targets);
+            ui.close();
+        }
+    }
+
+    /// The bulk-delete confirmation modal (right-click → Delete).
+    fn bulk_delete_modal(&mut self, ui: &Ui, backend: &mut Backend) {
+        let Some(targets) = self.bulk_delete.clone() else {
+            return;
+        };
+        let names: Vec<String> = self
+            .list
+            .as_ref()
+            .map(|l| {
+                l.iter()
+                    .filter(|r| targets.contains(&r.id))
+                    .map(|r| r.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut done = false;
+        let modal = egui::Modal::new(egui::Id::new("bulk_delete")).show(ui.ctx(), |ui| {
+            ui.set_width(360.0);
+            ui.label(
+                RichText::new(format!(
+                    "Delete {} tournament{}?",
+                    targets.len(),
+                    if targets.len() == 1 { "" } else { "s" }
+                ))
+                .font(theme::semibold(16.0))
+                .color(theme::text()),
+            );
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(names.join(", "))
+                    .color(theme::text_weak())
+                    .size(12.5),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new("Running games are aborted; all results are removed permanently.")
+                    .color(theme::text_faint())
+                    .size(12.0),
+            );
+            ui.add_space(12.0);
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if widgets::tinted_button(ui, "Delete", theme::danger(), true).clicked() {
+                    for id in &targets {
+                        if let Some(active) = backend.active(*id) {
+                            active.handle.force_stop();
+                        }
+                        backend.close_tournament(*id);
+                        if let Err(e) = backend.delete_tournament(*id) {
+                            self.error = Some(format!("Delete failed: {e}"));
+                        }
+                    }
+                    self.multi_selected.clear();
+                    self.live_cache = None;
+                    self.refresh(backend);
+                    done = true;
+                }
+                ui.add_space(4.0);
+                if ui
+                    .button(RichText::new("Cancel").color(theme::text()))
+                    .clicked()
+                {
+                    done = true;
+                }
+            });
+        });
+        if done || modal.should_close() {
+            self.bulk_delete = None;
+        }
+    }
+
+    /// One selectable tournament card; returns the row's interact response.
     fn list_row(
         &self,
         ui: &mut Ui,
         row: &TournamentRow,
         selected: bool,
+        in_multi: bool,
         live: Option<(TournamentStatus, usize, usize)>,
-    ) -> bool {
+    ) -> egui::Response {
         let (fill, stroke) = if selected {
             (
                 theme::tint(theme::accent(), 0.12),
                 egui::Stroke::new(1.0, theme::tint(theme::accent(), 0.4)),
+            )
+        } else if in_multi {
+            // Bulk-selected but not the current one: a weaker wash.
+            (
+                theme::tint(theme::accent(), 0.06),
+                egui::Stroke::new(1.0, theme::tint(theme::accent(), 0.25)),
             )
         } else {
             (Color32::TRANSPARENT, egui::Stroke::NONE)
@@ -381,7 +605,7 @@ impl ResultsTab {
                 egui::Shape::rect_filled(resp.rect, egui::CornerRadius::same(6), theme::bg_hover()),
             );
         }
-        interact.clicked()
+        interact
     }
 
     // ── Live view (active tournament) ───────────────────────────────────────
@@ -488,26 +712,26 @@ impl ResultsTab {
             return;
         }
 
-        // Side panel: in-flight games + termination breakdown.
-        if !live.in_flight_games.is_empty() || !live.termination_counts.is_empty() {
-            egui::Panel::right("results_live_side")
-                .default_size(210.0)
-                .resizable(false)
-                .frame(
-                    egui::Frame::new()
-                        .fill(theme::bg_darkest())
-                        .stroke(egui::Stroke::new(1.0, theme::stroke()))
-                        .inner_margin(egui::Margin::same(10)),
-                )
-                .show_inside(ui, |ui| {
-                    if let Some(game_id) = live_side_panel(ui, &live)
-                        && let Some(game) =
-                            live.in_flight_games.iter().find(|g| g.game_id == game_id)
-                    {
-                        self.live_views.watch_game(id, game, live.concurrency);
-                    }
-                });
-        }
+        // Side rail (right): in-flight games, termination breakdown, and the
+        // tournament's settings — one consistent column instead of a card
+        // floating in the table's whitespace.
+        egui::Panel::right("results_live_side")
+            .default_size(230.0)
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::bg_darkest())
+                    .stroke(egui::Stroke::new(1.0, theme::stroke()))
+                    .inner_margin(egui::Margin::same(10)),
+            )
+            .show_inside(ui, |ui| {
+                if let Some(game_id) = live_side_panel(ui, &live)
+                    && let Some(game) =
+                        live.in_flight_games.iter().find(|g| g.game_id == game_id)
+                {
+                    self.live_views.watch_game(id, game, live.concurrency);
+                }
+            });
 
         // Results table (centre) with breathing room on both sides.
         egui::CentralPanel::default()
@@ -587,15 +811,16 @@ impl ResultsTab {
                 .map(|p| {
                     let st = standings.standing(p.id);
                     let entry = elo_model.get(&p.id).copied().unwrap_or_default();
-                    let followed = matches!(active.rating_writeback, RatingWriteback::All)
-                        || active.rating_writeback.applies_to(p.id);
-                    let (elo, elo_delta, elo_error) = if followed {
-                        (entry.current, entry.delta, entry.error)
-                    } else {
-                        // Library untouched: show the start rating; the Δ
-                        // column still tracks the tournament-only movement.
-                        (prior_of(p.id), entry.delta, entry.error)
-                    };
+                    // The driver's entries already reflect the writeback mode
+                    // (anchored engines sit exactly at their start rating).
+                    // Under "Never" the Elo column shows the start rating and
+                    // the Δ chip carries the informational movement only.
+                    let (elo, elo_delta, elo_error) =
+                        if matches!(active.rating_writeback, RatingWriteback::None) {
+                            (prior_of(p.id), entry.delta, entry.error)
+                        } else {
+                            (entry.current, entry.delta, entry.error)
+                        };
                     Row {
                         id: p.id,
                         rank: rank_of(p.id),
@@ -627,6 +852,7 @@ impl ResultsTab {
                     standings,
                     errors,
                     termination_counts,
+                    config: Rc::new(active.config.clone()),
                 },
             ));
         } else {
@@ -647,7 +873,7 @@ impl ResultsTab {
 
         LiveData {
             name: active.name.clone(),
-            summary: live_config_summary(&active.config),
+            config: Rc::clone(&cache.config),
             status,
             finished,
             total,
@@ -686,13 +912,6 @@ impl ResultsTab {
                     .color(theme::text())
                     .font(theme::semibold(15.0)),
             );
-            ui.add_space(6.0);
-            // The tournament's shape at a glance: format · TC · games/pair.
-            ui.label(
-                RichText::new(&live.summary)
-                    .color(theme::text_weak())
-                    .size(12.0),
-            );
             ui.add_space(10.0);
 
             let go_enabled = matches!(status, TournamentStatus::Stopped | TournamentStatus::Idle);
@@ -702,8 +921,8 @@ impl ResultsTab {
                 TournamentStatus::Running | TournamentStatus::Stopping
             );
 
-            if widgets::tinted_button(ui, "Go", theme::success(), go_enabled)
-                .on_hover_text("Resume the tournament.")
+            if widgets::tinted_button(ui, "Start", theme::success(), go_enabled)
+                .on_hover_text("Start the tournament (or resume where it stopped).")
                 .clicked()
                 && let Some(active) = backend.active(id)
             {
@@ -816,8 +1035,6 @@ impl ResultsTab {
 
         // ── Row 2: lens switcher (stable, always leftmost) + actions ──
         ui.horizontal_wrapped(|ui| {
-            let new_enabled = !crate::backend::is_busy(status);
-
             // The Standings|Live switcher and Auto-follow live here — in the
             // normal flow, always in the same place — because a right-pinned
             // layout paints over the wrapped row-1 content in narrow windows.
@@ -848,28 +1065,12 @@ impl ResultsTab {
             });
             widgets::dropdown_arrow(ui, export_resp.response.rect);
 
-            ui.add_space(16.0);
-
-            // With a writeback mode configured, the library follows the
-            // tournament after every game automatically — the manual push
-            // only exists for "Never".
-            if matches!(live.writeback, RatingWriteback::None)
-                && widgets::tinted_button(ui, "Apply Elo → Library", theme::accent(), new_enabled)
-                    .on_hover_text(
-                        "One-time push: write the current tournament ratings \
-                         to the engine library.",
-                    )
-                    .clicked()
-            {
-                let n = backend.apply_ratings_to_library(id);
-                self.elo_note = Some(format!("Elo applied ({n} engines updated)"));
-            }
+            // No manual Elo button: the writeback mode set at tournament
+            // creation is applied automatically after every game ("Never"
+            // means the library is never touched).
 
             if let Some(note) = &self.export_note {
                 ui.label(RichText::new(note).color(theme::text_weak()).size(12.0));
-            }
-            if let Some(note) = &self.elo_note {
-                ui.label(RichText::new(note).color(theme::success()).size(12.0));
             }
 
             // Delete — available even while running (force-stops first), for
@@ -1454,8 +1655,8 @@ struct Row {
 /// heavy fields are `Rc`-shared from the per-finished-game cache.
 struct LiveData {
     name: String,
-    /// One-line config summary (format · time control · games/pair).
-    summary: String,
+    /// The tournament's full configuration (settings card, gauntlet layout).
+    config: Rc<TournamentConfig>,
     status: TournamentStatus,
     finished: usize,
     total: usize,
@@ -1800,6 +2001,14 @@ fn live_side_panel(ui: &mut Ui, live: &LiveData) -> Option<colosseum_core::GameI
                 ui.add_space(4.0);
                 termination_breakdown(ui, &live.termination_counts);
             }
+
+            // The tournament's configuration, always at hand.
+            if !live.in_flight_games.is_empty() || !live.termination_counts.is_empty() {
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(6.0);
+            }
+            settings_section(ui, live);
         });
     clicked
 }
@@ -2115,6 +2324,102 @@ fn status_parts(status: &str) -> (&'static str, Color32) {
         "finished" => ("Finished", theme::accent()),
         _ => ("Stopped", theme::warn()),
     }
+}
+
+/// The tournament-settings card shown beside the live standings: everything
+/// configured in the Tournament tab, at a glance. Rendered as a section of
+/// the standings side rail (Playing · Terminations · Settings).
+fn settings_section(ui: &mut Ui, live: &LiveData) {
+    let c: &TournamentConfig = &live.config;
+    let name_of = |id: EngineId| live.participant_label(id);
+
+    let format = match c.format {
+        Format::RoundRobin { cycles } if cycles > 1 => format!("Round Robin ×{cycles}"),
+        Format::RoundRobin { .. } => "Round Robin".to_string(),
+        Format::Gauntlet { seeds, cycles } if cycles > 1 => {
+            format!("Gauntlet ({seeds} seed) ×{cycles}")
+        }
+        Format::Gauntlet { seeds, .. } => format!("Gauntlet ({seeds} seed)"),
+    };
+    let tc = match c.time_control {
+        TimeControl::PerMove { ms } => format!("{ms} ms/move"),
+        TimeControl::SuddenDeath { base_ms } => format!("{} sudden death", clock_str(base_ms)),
+        TimeControl::Increment { base_ms, inc_ms } => {
+            format!("{} + {}", clock_str(base_ms), clock_str(inc_ms))
+        }
+        TimeControl::Nodes { nodes } => format!("{nodes} nodes/move"),
+        TimeControl::Depth { depth } => format!("depth {depth}/move"),
+    };
+    let draw = c.adjudication.draw.map_or("off".to_string(), |d| {
+        format!("|cp| ≤ {} for {} moves (ply ≥ {})", d.score_cp, d.move_count, d.min_ply)
+    });
+    let resign = c.adjudication.resign.map_or("off".to_string(), |r| {
+        format!("|cp| ≥ {} for {} moves", r.score_cp, r.move_count)
+    });
+    let max_moves = c
+        .adjudication
+        .max_moves
+        .map_or("off".to_string(), |m| m.to_string());
+    let openings = match &c.start_position {
+        colosseum_core::StartPosition::Startpos => "standard start".to_string(),
+        colosseum_core::StartPosition::Book(book) => book
+            .path
+            .file_name()
+            .map_or_else(|| "book".to_string(), |f| f.to_string_lossy().into_owned()),
+    };
+    let ratings = match &live.writeback {
+        RatingWriteback::None => "never updated".to_string(),
+        RatingWriteback::All => "all engines follow".to_string(),
+        RatingWriteback::Chosen(ids) => {
+            if ids.is_empty() {
+                "chosen: none".to_string()
+            } else {
+                let names: Vec<String> = ids.iter().map(|id| name_of(*id)).collect();
+                format!("follow: {}", names.join(", "))
+            }
+        }
+        RatingWriteback::Estimate(id) => format!("follow: {}", name_of(*id)),
+    };
+    let pgn = c
+        .pgn_output
+        .as_ref()
+        .map(|p| {
+            p.file_name()
+                .map_or_else(|| p.to_string_lossy().into_owned(), |f| {
+                    f.to_string_lossy().into_owned()
+                })
+        });
+
+    ui.label(
+        RichText::new("Settings")
+            .color(theme::text())
+            .font(theme::semibold(12.5)),
+    );
+    ui.add_space(4.0);
+    let row = |ui: &mut Ui, label: &str, value: &str| {
+        ui.horizontal_top(|ui| {
+            ui.add_sized(
+                egui::vec2(72.0, 15.0),
+                egui::Label::new(RichText::new(label).color(theme::text_faint()).size(11.0)),
+            );
+            ui.add(
+                egui::Label::new(RichText::new(value).color(theme::text_weak()).size(11.0))
+                    .wrap(),
+            );
+        });
+    };
+    row(ui, "Format", &format);
+    row(ui, "Time control", &tc);
+    row(ui, "Games/pair", &c.games_per_pair.to_string());
+    row(ui, "Parallel", &live.concurrency.to_string());
+    row(ui, "Max moves", &max_moves);
+    row(ui, "Draw adj.", &draw);
+    row(ui, "Resign adj.", &resign);
+    row(ui, "Openings", &openings);
+    if let Some(pgn) = &pgn {
+        row(ui, "PGN file", pgn);
+    }
+    row(ui, "Ratings", &ratings);
 }
 
 /// Compact one-line config description: format · time control · games/pair.

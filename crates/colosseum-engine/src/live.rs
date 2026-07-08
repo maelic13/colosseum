@@ -83,6 +83,10 @@ pub struct LiveGameState {
     pub black_clock_ms: Option<u64>,
     /// Which side is to move (and thinking, while `finished` is `None`).
     pub white_to_move: bool,
+    /// Set while a side has an active `go ponder` search (thinking on the
+    /// opponent's time); cleared when the ponder resolves.
+    pub white_pondering: bool,
+    pub black_pondering: bool,
     /// When the current search started (drives the "time on move" display).
     pub search_started: Option<Instant>,
     pub white_search: LiveSearch,
@@ -124,6 +128,8 @@ impl LiveGameState {
             white_clock_ms: None,
             black_clock_ms: None,
             white_to_move: true,
+            white_pondering: false,
+            black_pondering: false,
             search_started: None,
             white_search: LiveSearch::default(),
             black_search: LiveSearch::default(),

@@ -89,6 +89,7 @@ async fn stockfish_self_play_one_game() {
                 score_cp: 900,
             }),
         },
+        ponder: false,
         timeout_tolerance: Duration::from_secs(2),
         handshake_timeout: Duration::from_secs(5),
     };
@@ -150,6 +151,7 @@ async fn game_pre_plays_opening_moves() {
                 score_cp: 600,
             }),
         },
+        ponder: false,
         timeout_tolerance: Duration::from_secs(2),
         handshake_timeout: Duration::from_secs(5),
     };
@@ -204,6 +206,7 @@ async fn game_starts_from_fen() {
                 score_cp: 600,
             }),
         },
+        ponder: false,
         timeout_tolerance: Duration::from_secs(2),
         handshake_timeout: Duration::from_secs(5),
     };
@@ -252,6 +255,7 @@ async fn setup_failure_writes_incident() {
         time_control: TimeControl::PerMove { ms: 20 },
         time_control_label: "movetime/20ms".into(),
         adjudication: AdjudicationConfig::default(),
+        ponder: false,
         timeout_tolerance: Duration::from_secs(2),
         handshake_timeout: Duration::from_secs(3),
     };

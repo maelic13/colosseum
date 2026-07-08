@@ -28,6 +28,90 @@ const MAX_PLIES: usize = 6000;
 /// Wall-clock safety cutoff for node-/depth-limited searches, which carry no clock
 /// of their own. A search that blows past this is treated as a crash-class hang.
 const FIXED_SEARCH_DEADLINE: Duration = Duration::from_secs(600);
+/// How long an engine gets to answer `stop` when its ponder prediction missed.
+const PONDER_STOP_DEADLINE: Duration = Duration::from_secs(5);
+
+fn color_idx(color: Color) -> usize {
+    if color == Color::White { 0 } else { 1 }
+}
+
+/// Build the live-view `info` sink for one side (used for real searches and
+/// ponder searches alike). Fast engines emit hundreds of info lines per
+/// second, and taking the mutex + cloning the PV for each one is wasted work
+/// whether or not anyone is watching — so a new depth always publishes (it
+/// also appends a search-log line) and in between updates are capped at
+/// ~10 Hz, which is the GUI's repaint rate anyway. `begin` anchors the log's
+/// elapsed column for engines that report no `time`.
+fn live_info_sink<'a>(
+    live: &'a LiveGameHandle,
+    is_white: bool,
+    begin: std::time::Instant,
+) -> impl FnMut(&colosseum_uci::InfoLine) + 'a {
+    let mut last_publish: Option<std::time::Instant> = None;
+    // Seed from the existing log so a sink created mid-search (ponderhit
+    // continues the ponder's log) doesn't re-log an already-shown depth.
+    let mut last_log_depth: u32 = live.lock().map_or(0, |lg| {
+        let log = if is_white { &lg.white_log } else { &lg.black_log };
+        log.last().map_or(0, |l| l.depth)
+    });
+    move |info| {
+        let now = std::time::Instant::now();
+        let new_depth_line =
+            !info.pv.is_empty() && info.depth.is_some_and(|d| d > last_log_depth);
+        let throttled =
+            last_publish.is_some_and(|t| now.duration_since(t) < Duration::from_millis(100));
+        if throttled && !new_depth_line {
+            return;
+        }
+        last_publish = Some(now);
+        let Ok(mut lg) = live.lock() else { return };
+        // Reborrow through the guard so the two fields can be split.
+        let lg = &mut *lg;
+        let white_pov_score = info.score.map(|s| to_white_pov(s, is_white));
+        let (side, log) = if is_white {
+            (&mut lg.white_search, &mut lg.white_log)
+        } else {
+            (&mut lg.black_search, &mut lg.black_log)
+        };
+        if white_pov_score.is_some() {
+            side.score = white_pov_score;
+        }
+        if info.depth.is_some() {
+            side.depth = info.depth;
+        }
+        if info.seldepth.is_some() {
+            side.seldepth = info.seldepth;
+        }
+        if info.nodes.is_some() {
+            side.nodes = info.nodes;
+        }
+        if let Some(n) = info.nps
+            && n > 0
+        {
+            side.nps = Some(n);
+        }
+        if !info.pv.is_empty() {
+            side.pv = info.pv.clone();
+        }
+        if new_depth_line {
+            last_log_depth = info.depth.unwrap_or(0);
+            log.push(SearchLine {
+                score: white_pov_score.or(side.score),
+                depth: last_log_depth,
+                seldepth: info.seldepth,
+                nodes: info.nodes,
+                elapsed_ms: info
+                    .time_ms
+                    .unwrap_or_else(|| begin.elapsed().as_millis() as u64),
+                pv: info.pv.iter().take(16).cloned().collect(),
+            });
+            if log.len() > SEARCH_LOG_CAP {
+                let overflow = log.len() - SEARCH_LOG_CAP;
+                log.drain(0..overflow);
+            }
+        }
+    }
+}
 
 /// How to launch and configure one side.
 #[derive(Debug, Clone)]
@@ -56,6 +140,9 @@ pub struct GameSpec {
     pub time_control: TimeControl,
     pub time_control_label: String,
     pub adjudication: AdjudicationConfig,
+    /// Drive the UCI ponder protocol: engines think on the opponent's time
+    /// (`go ponder` / `ponderhit` / `stop`).
+    pub ponder: bool,
     pub timeout_tolerance: Duration,
     pub handshake_timeout: Duration,
 }
@@ -226,6 +313,11 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
     let mut black_depth = DepthAccumulator::default();
     let mut white_move_time = MoveTimeAccumulator::default();
     let mut black_move_time = MoveTimeAccumulator::default();
+    // Per color: the predicted reply the engine is currently pondering on
+    // (canonical UCI) and when that ponder search started. `Some` means a
+    // `go ponder` is outstanding and must be resolved before the engine's
+    // next search.
+    let mut ponder_pred: [Option<(String, std::time::Instant)>; 2] = [None, None];
 
     // Pre-play the assigned opening moves before the engines take over. These
     // were validated when the book was loaded, but we re-validate defensively.
@@ -260,95 +352,85 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         }
 
         let mover = pos.turn();
-        let engine = if mover == Color::White {
-            &mut white
+        let (engine, opponent) = if mover == Color::White {
+            (&mut white, &mut black)
         } else {
-            &mut black
+            (&mut black, &mut white)
         };
         let position = build_uci_position(spec.start_fen.as_deref(), &uci_moves);
 
         let (limits, deadline) =
             move_limits(&spec.time_control, &clocks, mover, spec.timeout_tolerance);
 
+        // Resolve the mover's outstanding ponder: a correct prediction turns
+        // it into the real search (`ponderhit`); a miss aborts it first.
+        let predicted = ponder_pred[color_idx(mover)].take();
+        let hit = predicted
+            .as_ref()
+            .is_some_and(|(m, _)| Some(m.as_str()) == uci_moves.last().map(String::as_str));
+        if predicted.is_some()
+            && !hit
+            && let Err(err) = engine.stop_ponder(PONDER_STOP_DEADLINE).await
+        {
+            break Outcome::loss(
+                mover,
+                Termination::EngineCrash,
+                Some(format!("failed to abort ponder search: {err}")),
+            );
+        }
+
         if let Ok(mut lg) = live.lock() {
             lg.white_to_move = mover == Color::White;
             lg.search_started = Some(std::time::Instant::now());
-            // The log shows the *current* search only — clear at every start.
             if mover == Color::White {
-                lg.white_log.clear();
+                lg.white_pondering = false;
             } else {
-                lg.black_log.clear();
+                lg.black_pondering = false;
+            }
+            // The log shows the *current* search only — clear at every fresh
+            // start. A ponderhit continues the running ponder search, so the
+            // log it accumulated while pondering is kept.
+            if !hit {
+                if mover == Color::White {
+                    lg.white_log.clear();
+                } else {
+                    lg.black_log.clear();
+                }
             }
         }
-        // Live-view updates are throttled: fast engines emit hundreds of info
-        // lines per second, and taking the mutex + cloning the PV for each one
-        // is wasted work whether or not anyone is watching. A new depth always
-        // publishes (it also appends a search-log line); in between, updates
-        // are capped at ~10 Hz — the GUI repaints at 10 Hz anyway.
         let search_begin = std::time::Instant::now();
-        let mut last_publish: Option<std::time::Instant> = None;
-        let mut last_log_depth: u32 = 0;
-        let search = engine
-            .search(&position, &limits, deadline, |info| {
-                let now = std::time::Instant::now();
-                let new_depth_line = !info.pv.is_empty()
-                    && info.depth.is_some_and(|d| d > last_log_depth);
-                let throttled = last_publish
-                    .is_some_and(|t| now.duration_since(t) < Duration::from_millis(100));
-                if throttled && !new_depth_line {
-                    return;
-                }
-                last_publish = Some(now);
-                let Ok(mut lg) = live.lock() else { return };
-                // Reborrow through the guard so the two fields can be split.
-                let lg = &mut *lg;
-                let white_pov_score = info
-                    .score
-                    .map(|s| to_white_pov(s, mover == Color::White));
-                let (side, log) = if mover == Color::White {
-                    (&mut lg.white_search, &mut lg.white_log)
-                } else {
-                    (&mut lg.black_search, &mut lg.black_log)
-                };
-                if white_pov_score.is_some() {
-                    side.score = white_pov_score;
-                }
-                if info.depth.is_some() {
-                    side.depth = info.depth;
-                }
-                if info.seldepth.is_some() {
-                    side.seldepth = info.seldepth;
-                }
-                if info.nodes.is_some() {
-                    side.nodes = info.nodes;
-                }
-                if let Some(n) = info.nps
-                    && n > 0
-                {
-                    side.nps = Some(n);
-                }
-                if !info.pv.is_empty() {
-                    side.pv = info.pv.clone();
-                }
-                if new_depth_line {
-                    last_log_depth = info.depth.unwrap_or(0);
-                    log.push(SearchLine {
-                        score: white_pov_score.or(side.score),
-                        depth: last_log_depth,
-                        seldepth: info.seldepth,
-                        nodes: info.nodes,
-                        elapsed_ms: info
-                            .time_ms
-                            .unwrap_or_else(|| search_begin.elapsed().as_millis() as u64),
-                        pv: info.pv.iter().take(16).cloned().collect(),
-                    });
-                    if log.len() > SEARCH_LOG_CAP {
-                        let overflow = log.len() - SEARCH_LOG_CAP;
-                        log.drain(0..overflow);
+        let mover_search = async {
+            let sink = live_info_sink(&live, mover == Color::White, search_begin);
+            if hit {
+                engine.ponderhit(deadline, sink).await
+            } else {
+                engine.search(&position, &limits, deadline, sink).await
+            }
+        };
+        // While the mover thinks, keep pumping the pondering opponent's
+        // output so its pipe never backs up and the live view streams it.
+        // `drain_ponder` never completes; it is dropped (cancel-safe read)
+        // when the mover's search resolves. The ponderer's latest score is
+        // kept so the eval graph can plot both engines every ply.
+        let mut opp_ponder_score: Option<colosseum_uci::Score> = None;
+        let opp_is_white = mover != Color::White;
+        let search = match &ponder_pred[color_idx(mover.other())] {
+            Some((_, ponder_begin)) => {
+                let mut opp_sink = live_info_sink(&live, opp_is_white, *ponder_begin);
+                tokio::select! {
+                    result = mover_search => result,
+                    () = opponent.drain_ponder(|info| {
+                        if let Some(s) = info.score {
+                            opp_ponder_score = Some(to_white_pov(s, opp_is_white));
+                        }
+                        opp_sink(info);
+                    }) => {
+                        unreachable!("drain_ponder never completes")
                     }
                 }
-            })
-            .await;
+            }
+            None => mover_search.await,
+        };
 
         let output = match search {
             Ok(output) => output,
@@ -426,6 +508,15 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
                     score: to_white_pov(score, mover == Color::White),
                 });
             }
+            // The opponent thought on the mover's time (pondering): plot its
+            // latest eval at the same ply so both lines advance every move.
+            if let Some(score) = opp_ponder_score {
+                lg.evals.push(EvalPoint {
+                    ply: san_moves.len() as u32,
+                    by_white: opp_is_white,
+                    score,
+                });
+            }
         }
 
         // Natural endings take precedence over adjudication.
@@ -450,6 +541,39 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
 
         if let Some(adjudication) = adjudicate(&white_pov, &spec.adjudication) {
             break Outcome::natural(adjudication.result, adjudication.termination);
+        }
+
+        // Arm the mover's next ponder: think on the opponent's time about its
+        // own predicted continuation. Only when the hint is legal in the new
+        // position — engines occasionally send junk hints, and a failed arm
+        // simply means no ponder this move.
+        if spec.ponder
+            && let Some(hint) = output
+                .ponder
+                .as_deref()
+                .and_then(|h| h.parse::<UciMove>().ok())
+                .and_then(|m| m.to_move(&pos).ok())
+        {
+            let hint_uci = hint.to_uci(CastlingMode::Standard).to_string();
+            let mut ponder_moves = uci_moves.clone();
+            ponder_moves.push(hint_uci.clone());
+            let ponder_pos = build_uci_position(spec.start_fen.as_deref(), &ponder_moves);
+            let (ponder_limits, _) =
+                move_limits(&spec.time_control, &clocks, mover, spec.timeout_tolerance);
+            if engine.start_ponder(&ponder_pos, &ponder_limits).await.is_ok() {
+                ponder_pred[color_idx(mover)] =
+                    Some((hint_uci, std::time::Instant::now()));
+                if let Ok(mut lg) = live.lock() {
+                    // The ponder is a fresh search: its log starts clean.
+                    if mover == Color::White {
+                        lg.white_pondering = true;
+                        lg.white_log.clear();
+                    } else {
+                        lg.black_pondering = true;
+                        lg.black_log.clear();
+                    }
+                }
+            }
         }
     };
 
@@ -478,6 +602,8 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
     if let Ok(mut lg) = live.lock() {
         lg.finished = Some((outcome.result, outcome.termination));
         lg.search_started = None;
+        lg.white_pondering = false;
+        lg.black_pondering = false;
     }
 
     // Shut engines down gracefully (kill_on_drop covers anything left).

@@ -746,10 +746,13 @@ pub fn uci_option_row(
                 _ => default.clone(),
             };
             let mut val = current;
+            // Stretch to the grid column: string options are usually paths
+            // (EvalFile, SyzygyPath, …) — a fixed width either wastes space
+            // or gets clipped at the column edge.
             if ui
                 .add(
                     egui::TextEdit::singleline(&mut val)
-                        .desired_width(240.0)
+                        .desired_width(ui.available_width().max(120.0) - 30.0)
                         .hint_text(default),
                 )
                 .changed()

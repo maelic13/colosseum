@@ -218,9 +218,10 @@ struct TournamentForm {
     /// Which engines' library ratings follow the tournament (applied after
     /// every finished game).
     elo_writeback: WritebackKind,
-    /// The engines picked for [`WritebackKind::Chosen`]. Engines the user
-    /// hasn't explicitly unticked default to included (see `chosen_includes`).
-    chosen_excluded: std::collections::HashSet<EngineId>,
+    /// The engines picked for [`WritebackKind::Chosen`]. Deliberately NOT
+    /// remembered across tournaments or restarts — every new setup starts
+    /// with nothing ticked, so a rating update is always an explicit choice.
+    chosen_included: std::collections::HashSet<EngineId>,
     /// Whether the chosen-engines picker dialog is open.
     chosen_dialog: bool,
 
@@ -280,7 +281,7 @@ impl Default for TournamentForm {
             resign_move_count: 4,
             resign_score_cp: 800,
             elo_writeback: WritebackKind::Never,
-            chosen_excluded: std::collections::HashSet::new(),
+            chosen_included: std::collections::HashSet::new(),
             chosen_dialog: false,
             overrides: HashMap::new(),
             openings_on: false,
@@ -333,7 +334,7 @@ impl TournamentForm {
                     self.selected
                         .iter()
                         .copied()
-                        .filter(|id| !self.chosen_excluded.contains(id))
+                        .filter(|id| self.chosen_included.contains(id))
                         .collect(),
                 ),
             },
@@ -1062,14 +1063,18 @@ impl TournamentTab {
                         .min_scrolled_height(max_h)
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
+                            ui.set_min_width(200.0);
                             for (i, preset) in cache.iter().enumerate() {
                                 ui.horizontal(|ui| {
+                                    // No min_size: a wide button centres its
+                                    // text, so names of different lengths
+                                    // looked scattered. Hugging the text
+                                    // left-aligns every name to the same edge.
                                     if ui
                                         .add(
                                             egui::Button::new(
                                                 RichText::new(&preset.preset_name).size(12.5),
                                             )
-                                            .min_size(egui::vec2(160.0, 0.0))
                                             .frame(false),
                                         )
                                         .on_hover_text("Load this preset")
@@ -1136,6 +1141,9 @@ impl TournamentTab {
             Ok(()) => {
                 self.start_error = None;
                 self.just_started = true;
+                // The chosen-engines set applies to the tournament just
+                // started only — the next setup begins with a clean slate.
+                self.form.chosen_included.clear();
                 // Persist the current form so the next session starts with the
                 // same settings.
                 let last = self.form.to_preset(String::new());
@@ -1924,7 +1932,7 @@ impl TournamentTab {
                             let included = f
                                 .selected
                                 .iter()
-                                .filter(|id| !f.chosen_excluded.contains(id))
+                                .filter(|id| f.chosen_included.contains(id))
                                 .count();
                             ui.label(
                                 RichText::new(format!(
@@ -1958,7 +1966,8 @@ impl TournamentTab {
 
     /// Modal checkbox list picking which engines' library ratings follow the
     /// tournament (same shape as the duplicate-engines dialog in the Engines
-    /// tab). Everything is checked by default; unticks are remembered.
+    /// tab). Nothing is ticked by default and the choice is never remembered
+    /// across tournaments — updating a rating is always an explicit act.
     fn chosen_engines_dialog(ui: &mut Ui, f: &mut TournamentForm, engines: &[EngineConfig]) {
         let modal = egui::Modal::new(egui::Id::new("chosen_engines")).show(ui.ctx(), |ui| {
             ui.set_width(380.0);
@@ -1977,47 +1986,50 @@ impl TournamentTab {
                 .size(12.0),
             );
             ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.button("Select all").clicked() {
-                    f.chosen_excluded.clear();
-                }
-                if ui.button("Deselect all").clicked() {
-                    f.chosen_excluded.extend(f.selected.iter().copied());
-                }
-            });
-            ui.add_space(6.0);
+            // Sorted by display name, like every other engine list.
+            let mut listed: Vec<&EngineConfig> = f
+                .selected
+                .iter()
+                .filter_map(|id| engines.iter().find(|e| e.id == *id))
+                .collect();
+            listed.sort_by_key(|e| engine_display_name(e).to_lowercase());
             ScrollArea::vertical()
                 .id_salt("chosen_engines_scroll")
                 .max_height(320.0)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    for id in f.selected.clone() {
-                        let Some(engine) = engines.iter().find(|e| e.id == id) else {
-                            continue;
-                        };
-                        let mut included = !f.chosen_excluded.contains(&id);
+                    for engine in listed {
+                        let mut included = f.chosen_included.contains(&engine.id);
                         if widgets::checkbox(ui, &mut included, &engine_display_name(engine))
                             .changed()
                         {
                             if included {
-                                f.chosen_excluded.remove(&id);
+                                f.chosen_included.insert(engine.id);
                             } else {
-                                f.chosen_excluded.insert(id);
+                                f.chosen_included.remove(&engine.id);
                             }
                         }
                     }
                 });
             ui.add_space(10.0);
-            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("Done").color(theme::bg_darkest()))
-                            .fill(theme::accent()),
-                    )
-                    .clicked()
-                {
-                    f.chosen_dialog = false;
+            ui.horizontal(|ui| {
+                if ui.button("Select all").clicked() {
+                    f.chosen_included.extend(f.selected.iter().copied());
                 }
+                if ui.button("Deselect all").clicked() {
+                    f.chosen_included.clear();
+                }
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(RichText::new("Done").color(theme::bg_darkest()))
+                                .fill(theme::accent()),
+                        )
+                        .clicked()
+                    {
+                        f.chosen_dialog = false;
+                    }
+                });
             });
         });
         if modal.should_close() {

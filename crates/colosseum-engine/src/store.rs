@@ -112,6 +112,10 @@ impl Store {
     fn init(conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
+        // GUI and driver connections write concurrently; without a busy
+        // timeout a write that lands mid-transaction fails instantly with
+        // SQLITE_BUSY (seen as bulk-delete skipping the running tournament).
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA)?;
         // Migration: add `engine_config_json` to `tournament_engines` if absent.
         // This column was introduced in Step 6; databases from Step 5 lack it.

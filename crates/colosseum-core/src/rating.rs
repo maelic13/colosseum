@@ -143,6 +143,61 @@ pub fn ml_ratings(
     ratings
 }
 
+/// [`ml_ratings`] with an *anchor set*: only `updatable` engines move; every
+/// other participant stays pinned at its prior — visually and inside the
+/// computation, exactly like rating a newcomer against an established, fixed
+/// field. Updatable engines are estimated jointly against the mixture of
+/// anchored opponents and each other (with the same prior damping); no
+/// re-centring is applied — the anchors pin the scale.
+#[must_use]
+pub fn ml_ratings_anchored(
+    standings: &Standings,
+    priors: &[(EngineId, f64)],
+    updatable: &[EngineId],
+) -> HashMap<EngineId, f64> {
+    let mut ratings: HashMap<EngineId, f64> = priors.iter().copied().collect();
+    let moving: Vec<EngineId> = priors
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| updatable.contains(id) && standings.standing(*id).games() > 0)
+        .collect();
+    if moving.is_empty() {
+        return ratings;
+    }
+    let all: Vec<EngineId> = priors.iter().map(|(id, _)| *id).collect();
+
+    for _ in 0..200 {
+        let mut next = ratings.clone();
+        let mut max_change: f64 = 0.0;
+        for &id in &moving {
+            let mut results: Vec<(f64, f64, u32)> = all
+                .iter()
+                .filter(|&&opp| opp != id)
+                .map(|&opp| {
+                    let h2h = standings.head_to_head(id, opp);
+                    (ratings[&opp], h2h.points(), h2h.games())
+                })
+                .collect();
+            let prior = priors
+                .iter()
+                .find(|(pid, _)| *pid == id)
+                .map_or(1500.0, |(_, p)| *p);
+            results.push((prior, f64::from(PRIOR_WEIGHT) * 0.5, PRIOR_WEIGHT));
+            if let Some(perf) = performance_rating(&results) {
+                let old = ratings[&id];
+                let new = 0.5 * old + 0.5 * perf;
+                max_change = max_change.max((new - old).abs());
+                next.insert(id, new);
+            }
+        }
+        ratings = next;
+        if max_change < 0.01 {
+            break;
+        }
+    }
+    ratings
+}
+
 /// Asymptotic 95%-confidence half-width (± Elo) of an engine's ML rating.
 ///
 /// The observed Fisher information of a rating under the logistic Elo model is
@@ -346,6 +401,25 @@ mod tests {
         // prior draws only nudges them), mean preserved at 1550.
         assert!(r[&a] > 1500.0 && r[&b] < 1600.0 && r[&a] < r[&b]);
         assert!(((r[&a] + r[&b]) / 2.0 - 1550.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn anchored_ml_moves_only_the_updatable_engine() {
+        let a = EngineId::new();
+        let b = EngineId::new();
+        let mut s = Standings::with_engines(&[a, b]);
+        // a crushes b 8-0-2 (80%).
+        for _ in 0..8 {
+            s.record(game(a, b, GameResult::WhiteWin));
+        }
+        s.record(game(b, a, GameResult::WhiteWin));
+        s.record(game(b, a, GameResult::WhiteWin));
+        let priors = [(a, 1500.0), (b, 1500.0)];
+        let r = ml_ratings_anchored(&s, &priors, &[a]);
+        // b is anchored, exactly at its prior.
+        assert!((r[&b] - 1500.0).abs() < EPS, "b={}", r[&b]);
+        // a moved up against the fixed opponent (damped by the prior draws).
+        assert!(r[&a] > 1550.0 && r[&a] < 1500.0 + 260.0, "a={}", r[&a]);
     }
 
     #[test]

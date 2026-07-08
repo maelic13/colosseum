@@ -64,6 +64,8 @@ pub struct SearchOutput {
     pub nps: Option<u64>,
     /// Last reported depth, if any.
     pub depth: Option<u32>,
+    /// The engine's predicted reply (`bestmove … ponder <move>`), if any.
+    pub ponder: Option<String>,
     /// Wall-clock time actually spent on this search.
     pub elapsed: Duration,
 }
@@ -86,6 +88,9 @@ pub struct EngineProcess {
     /// Recent stderr output, collected by a background task — engines print
     /// their panic/assert messages there.
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
+    /// A `bestmove` that arrived while pondering (an engine bailing out of
+    /// `go ponder` early); consumed by `ponderhit`/`stop_ponder`.
+    ponder_early: Option<(String, Option<String>)>,
 }
 
 impl EngineProcess {
@@ -147,6 +152,7 @@ impl EngineProcess {
             info: HandshakeInfo::default(),
             transcript: VecDeque::new(),
             stderr_tail,
+            ponder_early: None,
         })
     }
 
@@ -265,12 +271,106 @@ impl EngineProcess {
         position: &UciPosition,
         limits: &GoLimits,
         deadline: Duration,
-        mut on_info: impl FnMut(&parse::InfoLine),
+        on_info: impl FnMut(&parse::InfoLine),
     ) -> Result<SearchOutput, UciError> {
         self.send(&position.to_command()).await?;
         self.send(&limits.to_command()).await?;
+        self.await_bestmove(Instant::now(), deadline, on_info).await
+    }
 
-        let start = Instant::now();
+    /// Start pondering: set the position (played move + predicted reply
+    /// included) and issue `go ponder …`. Returns immediately; the search
+    /// output stream should then be pumped with [`Self::drain_ponder`] and
+    /// resolved with [`Self::ponderhit`] or [`Self::stop_ponder`].
+    pub async fn start_ponder(
+        &mut self,
+        position: &UciPosition,
+        limits: &GoLimits,
+    ) -> Result<(), UciError> {
+        self.send(&position.to_command()).await?;
+        let go = limits.to_command();
+        let go_ponder = format!("go ponder{}", go.strip_prefix("go").unwrap_or_default());
+        self.send(&go_ponder).await?;
+        self.ponder_early = None;
+        Ok(())
+    }
+
+    /// Pump the engine's output while it ponders, feeding `info` lines to
+    /// `on_info`. Never completes normally — it is meant to be raced
+    /// (`tokio::select!`) against the opponent's search and dropped. If the
+    /// engine sends a premature `bestmove` (some engines bail out of ponder),
+    /// it is stashed for [`Self::ponderhit`]/[`Self::stop_ponder`] and the
+    /// future then parks forever.
+    pub async fn drain_ponder(&mut self, mut on_info: impl FnMut(&parse::InfoLine)) {
+        loop {
+            // Effectively no deadline: pondering lasts as long as the
+            // opponent thinks.
+            let far = Instant::now() + Duration::from_secs(24 * 3600);
+            match self.read_line_until(far, UciError::MoveTimeout).await {
+                Ok(line) => {
+                    let line = line.trim();
+                    if let Some(best) = parse::parse_bestmove_ponder(line) {
+                        self.ponder_early = Some(best);
+                        break;
+                    }
+                    if line.starts_with("info ")
+                        && let Some(info) = parse::parse_info_line(line)
+                    {
+                        on_info(&info);
+                    }
+                }
+                Err(_) => break, // terminated/IO: surface via the next command
+            }
+        }
+        std::future::pending::<()>().await;
+    }
+
+    /// The predicted move was played: convert the ponder search into the real
+    /// one (`ponderhit`) and await its result. `deadline` covers from now —
+    /// the engine has been thinking for free until this moment.
+    pub async fn ponderhit(
+        &mut self,
+        deadline: Duration,
+        on_info: impl FnMut(&parse::InfoLine),
+    ) -> Result<SearchOutput, UciError> {
+        if let Some((best_move, ponder)) = self.ponder_early.take() {
+            // The engine already finished during ponder; its move is free.
+            return Ok(SearchOutput {
+                best_move,
+                score: None,
+                nps: None,
+                depth: None,
+                ponder,
+                elapsed: Duration::ZERO,
+            });
+        }
+        self.send("ponderhit").await?;
+        self.await_bestmove(Instant::now(), deadline, on_info).await
+    }
+
+    /// The prediction missed: abort the ponder search and discard its result.
+    pub async fn stop_ponder(&mut self, deadline: Duration) -> Result<(), UciError> {
+        if self.ponder_early.take().is_some() {
+            return Ok(());
+        }
+        self.send("stop").await?;
+        let until = Instant::now() + deadline;
+        loop {
+            let line = self.read_line_until(until, UciError::MoveTimeout).await?;
+            if parse::parse_bestmove(line.trim()).is_some() {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Read engine output until `bestmove`, tracking the last
+    /// score/nps/depth and feeding `info` lines to `on_info`.
+    async fn await_bestmove(
+        &mut self,
+        start: Instant,
+        deadline: Duration,
+        mut on_info: impl FnMut(&parse::InfoLine),
+    ) -> Result<SearchOutput, UciError> {
         let until = start + deadline;
         let mut score = None;
         let mut nps = None;
@@ -280,7 +380,7 @@ impl EngineProcess {
         loop {
             let line = self.read_line_until(until, UciError::MoveTimeout).await?;
             let line = line.trim();
-            if let Some(best_move) = parse::parse_bestmove(line) {
+            if let Some((best_move, ponder)) = parse::parse_bestmove_ponder(line) {
                 let elapsed = start.elapsed();
                 // Some engines report a literal `nps 0` on every info line
                 // (Fruit 2.1 does) — treat that as unreported and derive the
@@ -295,6 +395,7 @@ impl EngineProcess {
                     score,
                     nps,
                     depth,
+                    ponder,
                     elapsed,
                 });
             }

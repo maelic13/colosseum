@@ -186,11 +186,23 @@ pub fn parse_info_line(line: &str) -> Option<InfoLine> {
 /// (e.g. `e2e4`, `0000`, or `(none)`).
 #[must_use]
 pub fn parse_bestmove(line: &str) -> Option<String> {
+    parse_bestmove_ponder(line).map(|(best, _)| best)
+}
+
+/// Parse a `bestmove <move> [ponder <move>]` line into the best move and the
+/// engine's predicted reply (its ponder hint), if any.
+#[must_use]
+pub fn parse_bestmove_ponder(line: &str) -> Option<(String, Option<String>)> {
     let mut tokens = line.split_whitespace();
     if tokens.next() != Some("bestmove") {
         return None;
     }
-    tokens.next().map(str::to_string)
+    let best = tokens.next()?.to_string();
+    let ponder = match (tokens.next(), tokens.next()) {
+        (Some("ponder"), Some(m)) => Some(m.to_string()),
+        _ => None,
+    };
+    Some((best, ponder))
 }
 
 #[cfg(test)]

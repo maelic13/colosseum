@@ -82,6 +82,9 @@ struct ViewState {
     selected: Option<Selected>,
     /// When the selected game was first seen finished (auto-follow delay).
     finished_since: Option<Instant>,
+    /// Highest `launch_seq` in flight when the watched game finished; the
+    /// auto-follow target must be launched *after* this (a fresh game).
+    finish_watermark: Option<u64>,
     replay: Option<Replay>,
     /// Current eval-graph range ±R (monotonic per game, see `update_range`).
     range: f32,
@@ -96,6 +99,7 @@ impl ViewState {
             auto_follow: concurrency <= 1,
             selected: None,
             finished_since: None,
+            finish_watermark: None,
             replay: None,
             range: RANGE_STEPS[0],
         }
@@ -133,6 +137,8 @@ struct Snap {
     white_clock_ms: Option<u64>,
     black_clock_ms: Option<u64>,
     white_to_move: bool,
+    white_pondering: bool,
+    black_pondering: bool,
     search_elapsed: Option<Duration>,
     white_search: LiveSearch,
     black_search: LiveSearch,
@@ -156,6 +162,8 @@ fn snapshot(live: &LiveGameHandle) -> Option<Snap> {
         white_clock_ms: lg.white_clock_ms,
         black_clock_ms: lg.black_clock_ms,
         white_to_move: lg.white_to_move,
+        white_pondering: lg.white_pondering,
+        black_pondering: lg.black_pondering,
         search_elapsed: lg.search_started.map(|t| t.elapsed()),
         white_search: lg.white_search.clone(),
         black_search: lg.black_search.clone(),
@@ -382,6 +390,7 @@ impl ViewState {
             live: game.live.clone(),
         });
         self.finished_since = None;
+        self.finish_watermark = None;
         self.replay = None;
         self.range = RANGE_STEPS[0];
     }
@@ -411,20 +420,34 @@ impl ViewState {
                     return;
                 }
                 if finished {
-                    let since = *self.finished_since.get_or_insert(now);
+                    if self.finished_since.is_none() {
+                        self.finished_since = Some(now);
+                        // Watermark: whatever is already in flight at the
+                        // moment the watched game ends is mid-game — the
+                        // *replacement* is the first game launched after this
+                        // point, and that one can be watched from move 1.
+                        self.finish_watermark =
+                            Some(games.iter().map(|g| g.launch_seq).max().unwrap_or(0));
+                    }
+                    let since = self.finished_since.unwrap_or(now);
                     if self.auto_follow && now.duration_since(since) >= FOLLOW_DELAY {
-                        // The replacement: the earliest game launched after it.
+                        let watermark = self.finish_watermark.unwrap_or(sel.launch_seq);
                         let next = games
                             .iter()
-                            .filter(|g| g.launch_seq > sel.launch_seq)
+                            .filter(|g| g.launch_seq > watermark)
                             .min_by_key(|g| g.launch_seq)
                             .map(|g| (*g).clone());
                         if let Some(next) = next {
                             self.select(&next);
                         }
+                        // No fresh launch yet (e.g. the scheduler is between
+                        // games, or the tournament is winding down): stay on
+                        // the finished board rather than jumping into the
+                        // middle of an older sibling game.
                     }
                 } else {
                     self.finished_since = None;
+                    self.finish_watermark = None;
                 }
             }
         }
@@ -507,7 +530,7 @@ fn empty_state(ui: &mut Ui) {
     ui.vertical_centered(|ui| {
         ui.add_space(ui.available_height() * 0.35);
         ui.label(
-            RichText::new("No games in flight")
+            RichText::new("No live games")
                 .color(theme::text_weak())
                 .font(theme::semibold(15.0)),
         );
@@ -521,16 +544,24 @@ fn empty_state(ui: &mut Ui) {
 }
 
 /// The compact auto-follow toggle chip with its explanation on hover.
+/// Always framed (never `selectable_label`, which gains frame padding on
+/// hover and shifts the row).
 fn auto_follow_chip(ui: &mut Ui, auto_follow: &mut bool) {
+    let text = RichText::new("Auto-follow")
+        .size(12.5)
+        .color(if *auto_follow {
+            theme::accent_bright()
+        } else {
+            theme::text_weak()
+        });
+    let mut button = egui::Button::new(text).corner_radius(egui::CornerRadius::same(4));
+    if *auto_follow {
+        button = button
+            .fill(theme::tint(theme::accent(), 0.15))
+            .stroke(Stroke::new(1.0, theme::tint(theme::accent(), 0.4)));
+    }
     let resp = ui
-        .selectable_label(
-            *auto_follow,
-            RichText::new("Auto-follow").size(12.0).color(if *auto_follow {
-                theme::accent()
-            } else {
-                theme::text_weak()
-            }),
-        )
+        .add(button)
         .on_hover_text("When the watched game ends, switch to the game that replaces it.");
     if resp.clicked() {
         *auto_follow = !*auto_follow;
@@ -846,6 +877,8 @@ fn engine_column(
 ) {
     let thinking_white = snap.finished.is_none() && snap.white_to_move;
     let thinking_black = snap.finished.is_none() && !snap.white_to_move;
+    let pondering_white = snap.finished.is_none() && !thinking_white && snap.white_pondering;
+    let pondering_black = snap.finished.is_none() && !thinking_black && snap.black_pondering;
 
     // One card holds both engine panels and the graph, so the three read as a
     // single connected unit rather than three floating boxes. The inner content
@@ -887,6 +920,7 @@ fn engine_column(
                         log: &snap.black_log,
                         clock_ms: snap.black_clock_ms,
                         thinking: thinking_black,
+                        pondering: pondering_black,
                         search_elapsed: snap.search_elapsed,
                     },
                     inner_w,
@@ -910,6 +944,7 @@ fn engine_column(
                         log: &snap.white_log,
                         clock_ms: snap.white_clock_ms,
                         thinking: thinking_white,
+                        pondering: pondering_white,
                         search_elapsed: snap.search_elapsed,
                     },
                     inner_w,
@@ -953,6 +988,8 @@ struct PanelData<'a> {
     log: &'a [SearchLine],
     clock_ms: Option<u64>,
     thinking: bool,
+    /// Searching on the opponent's time (`go ponder` active).
+    pondering: bool,
     search_elapsed: Option<Duration>,
 }
 
@@ -988,25 +1025,38 @@ fn engine_panel(
             ui.set_max_size(vec2(width - 16.0, height - 16.0));
             ui.spacing_mut().item_spacing.y = 8.0;
 
-            ui.allocate_ui_with_layout(
-                vec2(width - 16.0, HEADER_H),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    // 1 · Logo, the full header height.
-                    let (rect, _) = logo::slot(ui, HEADER_H, Sense::hover());
-                    let logo_file = backend
-                        .engines
-                        .iter()
-                        .find(|e| e.id == data.engine)
-                        .and_then(|e| e.meta.extra.get("logo").cloned());
-                    let drew = logo_file.is_some_and(|file| {
-                        logo::draw_fitted(ui, logos, &backend.dirs.logos_dir().join(file), rect, 6)
-                    });
-                    if !drew {
-                        widgets::draw_avatar_square_in(ui, rect, data.name, false, 6);
-                    }
-                    ui.add_space(4.0);
-
+            // The header is an exact rect: the logo is painted at the full
+            // header height (its bottom lands on the divider below), and the
+            // content beside it lives in a clipped child so nothing can ever
+            // extend past the header block.
+            let (header_rect, _) =
+                ui.allocate_exact_size(vec2(width - 16.0, HEADER_H), Sense::hover());
+            // 1 · Logo, exactly the header height.
+            let logo_rect = Rect::from_min_size(header_rect.min, vec2(HEADER_H, HEADER_H));
+            let logo_file = backend
+                .engines
+                .iter()
+                .find(|e| e.id == data.engine)
+                .and_then(|e| e.meta.extra.get("logo").cloned());
+            let drew = logo_file.is_some_and(|file| {
+                logo::draw_fitted(ui, logos, &backend.dirs.logos_dir().join(file), logo_rect, 6)
+            });
+            if !drew {
+                widgets::draw_avatar_square_in(ui, logo_rect, data.name, false, 6);
+            }
+            let content_rect = Rect::from_min_max(
+                pos2(header_rect.left() + HEADER_H + 8.0, header_rect.top()),
+                header_rect.max,
+            );
+            let mut header = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(content_rect)
+                    .id_salt(("engine_header", data.is_white))
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            header.set_clip_rect(content_rect.intersect(ui.clip_rect()));
+            {
+                    let ui = &mut header;
                     // 4 · Clock, pinned right (laid out first so the name
                     // truncates against it, but drawn at the right edge).
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1021,8 +1071,10 @@ fn engine_panel(
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
                                 ui.set_max_width(96.0);
-                                ui.spacing_mut().item_spacing.y = 3.0;
-                                ui.add_space(8.0);
+                                // Three rows must fit the 72-pt header: keep
+                                // them tight or the last one clips.
+                                ui.spacing_mut().item_spacing.y = 2.0;
+                                ui.add_space(6.0);
                                 let depth = match (data.search.depth, data.search.seldepth) {
                                     (Some(d), Some(s)) => format!("{d}/{s}"),
                                     (Some(d), None) => d.to_string(),
@@ -1080,13 +1132,18 @@ fn engine_panel(
                                                 .color(theme::accent())
                                                 .size(10.5),
                                         );
+                                    } else if data.pondering && ui.available_width() >= 64.0 {
+                                        ui.label(
+                                            RichText::new("pondering…")
+                                                .color(theme::text_weak())
+                                                .size(10.5),
+                                        );
                                     }
                                 });
                             },
                         );
                     });
-                },
-            );
+            }
 
             // The engine's search output: one line per completed depth of the
             // current search, newest on top, filling the remaining height.
@@ -1105,21 +1162,26 @@ fn engine_panel(
         });
 }
 
-/// One small `label value` search-stat row (label faint, value mono).
+/// One small `label value` search-stat row (label faint, value mono). Fixed
+/// height so three rows always fit the engine-card header.
 fn stat_row(ui: &mut Ui, label: &str, value: &str) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        ui.add_sized(
-            vec2(34.0, 12.0),
-            egui::Label::new(RichText::new(label).color(theme::text_faint()).size(9.5)),
-        );
-        ui.label(
-            RichText::new(value)
-                .color(theme::text())
-                .size(11.5)
-                .monospace(),
-        );
-    });
+    ui.allocate_ui_with_layout(
+        vec2(96.0, 17.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.add_sized(
+                vec2(34.0, 12.0),
+                egui::Label::new(RichText::new(label).color(theme::text_faint()).size(9.5)),
+            );
+            ui.label(
+                RichText::new(value)
+                    .color(theme::text())
+                    .size(11.5)
+                    .monospace(),
+            );
+        },
+    );
 }
 
 /// One search-log line: `+0.35  d20/34  0:01  1.4M  <pv…>`, single line,

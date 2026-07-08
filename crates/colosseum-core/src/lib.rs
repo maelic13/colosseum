@@ -31,7 +31,7 @@ pub use game::{GameResult, GameStats, Pairing, Termination};
 pub use ids::{EngineId, GameId, TournamentId};
 pub use options::{UciOption, UciOptionValue, is_hash_option, is_thread_option};
 pub use pairing::{gauntlet, generate_schedule, round_robin};
-pub use rating::{ml_ratings, performance_rating, rating_error};
+pub use rating::{ml_ratings, ml_ratings_anchored, performance_rating, rating_error};
 pub use standings::{EngineStanding, GameOutcome, HeadToHead, PairGameResult, Standings};
 pub use stats::{EloEstimate, SprtDecision, SprtResult, elo_with_error, los, sprt};
 pub use time::{TimeControl, TimeUnit};

@@ -82,8 +82,28 @@ pub struct EloEntry {
 
 /// Recompute the ML rating snapshot from the standings: rating, delta vs the
 /// seed, and the asymptotic error bar, for every participant.
-fn elo_entries(standings: &Standings, seeds: &[(EngineId, f64)]) -> HashMap<EngineId, EloEntry> {
-    let ratings = colosseum_core::ml_ratings(standings, seeds);
+///
+/// The writeback mode shapes the *model*: under `Chosen`/`Estimate` only the
+/// covered engines move — the rest are anchored at their seeds, in the
+/// numbers shown and inside the estimation (a newcomer rated against a fixed
+/// field). `None` and `All` are the full joint recompute.
+fn elo_entries(
+    standings: &Standings,
+    seeds: &[(EngineId, f64)],
+    writeback: &colosseum_core::RatingWriteback,
+) -> HashMap<EngineId, EloEntry> {
+    use colosseum_core::RatingWriteback;
+    let ratings = match writeback {
+        RatingWriteback::None | RatingWriteback::All => {
+            colosseum_core::ml_ratings(standings, seeds)
+        }
+        RatingWriteback::Chosen(ids) => {
+            colosseum_core::ml_ratings_anchored(standings, seeds, ids)
+        }
+        RatingWriteback::Estimate(id) => {
+            colosseum_core::ml_ratings_anchored(standings, seeds, &[*id])
+        }
+    };
     seeds
         .iter()
         .map(|&(id, seed)| {
@@ -307,7 +327,7 @@ pub fn create_tournament(
     let snapshot = Arc::new(Mutex::new(TournamentSnapshot {
         status: TournamentStatus::Idle,
         standings: init_standings.clone(),
-        elo: elo_entries(&init_standings, &seeds),
+        elo: elo_entries(&init_standings, &seeds, &config.rating_writeback),
         games_finished: 0,
         games_total: total_games,
         recent_errors: Vec::new(),
@@ -478,6 +498,7 @@ async fn drive(mut driver: Driver) {
                 &driver.snapshot,
                 &standings,
                 &seeds,
+                &driver.config.rating_writeback,
                 finished_count,
                 total,
                 TournamentStatus::Finished,
@@ -661,6 +682,7 @@ async fn drive(mut driver: Driver) {
                             &driver.snapshot,
                             &standings,
                             &seeds,
+                            &driver.config.rating_writeback,
                             finished_count,
                             total,
                             status,
@@ -805,7 +827,7 @@ pub fn resume_tournament(
     let snapshot = Arc::new(Mutex::new(TournamentSnapshot {
         status: TournamentStatus::Stopped,
         standings: standings.clone(),
-        elo: elo_entries(&standings, &seeds),
+        elo: elo_entries(&standings, &seeds, &config.rating_writeback),
         games_finished: finished_count,
         games_total: total_games,
         recent_errors: Vec::new(),
@@ -934,7 +956,7 @@ pub fn load_tournament_results(
     }
 
     Ok(TournamentResults {
-        elo: elo_entries(&standings, &seeds),
+        elo: elo_entries(&standings, &seeds, &row.config.rating_writeback),
         standings,
         participants,
         games_finished: finished,
@@ -961,6 +983,7 @@ fn build_game_spec(driver: &Driver, scheduled: &ScheduledGame) -> GameSpec {
         time_control: driver.config.time_control,
         time_control_label: time_control_label(&driver.config),
         adjudication: driver.config.adjudication,
+        ponder: driver.config.common.ponder,
         timeout_tolerance: TIMEOUT_TOLERANCE,
         handshake_timeout: HANDSHAKE_TIMEOUT,
     }
@@ -1148,6 +1171,7 @@ fn publish(
     snapshot: &Arc<Mutex<TournamentSnapshot>>,
     standings: &Standings,
     seeds: &[(EngineId, f64)],
+    writeback: &colosseum_core::RatingWriteback,
     finished: usize,
     total: usize,
     status: TournamentStatus,
@@ -1162,7 +1186,7 @@ fn publish(
     // Recomputed from scratch every publish: for realistic fields this is
     // sub-millisecond, and it guarantees the shown ratings never depend on
     // game order or a K-factor.
-    let elo_map = elo_entries(standings, seeds);
+    let elo_map = elo_entries(standings, seeds, writeback);
     if let Ok(mut snap) = snapshot.lock() {
         snap.status = status;
         snap.standings = standings.clone();

@@ -45,9 +45,16 @@ pub struct EnginesTab {
     filter_text: String,
     /// Pending two-step "Delete All" confirmation.
     delete_all_confirm: bool,
-    /// Engine awaiting delete confirmation in a modal (from the panel button
-    /// or the card context menu).
-    pending_delete: Option<EngineId>,
+    /// Engines awaiting delete confirmation in a modal (from the panel
+    /// button or the card context menu; empty = no modal).
+    pending_delete: Vec<EngineId>,
+    /// Cards highlighted for bulk actions (ctrl/shift click); the edited
+    /// engine (`selected_id`) is independent.
+    multi_selected: std::collections::HashSet<EngineId>,
+    /// Anchor card for shift-range selection (visible order).
+    select_anchor: Option<EngineId>,
+    /// Bulk re-detect queue — engines re-detect one at a time.
+    redetect_queue: Vec<EngineId>,
     /// Whether the global tablebases panel is expanded (collapsed by default —
     /// it's a set-once setting that shouldn't hold prime space hostage).
     tb_expanded: bool,
@@ -80,8 +87,6 @@ const SAVED_FLASH: Duration = Duration::from_millis(1600);
 /// and copy-path are handled inline in the menu; they don't touch tab state.)
 enum CardAction {
     Clone,
-    Redetect,
-    Delete,
 }
 
 impl EnginesTab {
@@ -91,6 +96,22 @@ impl EnginesTab {
         // Poll any background work first so results are visible this frame.
         self.poll_detect(backend);
         self.poll_redetect();
+        // Bulk re-detects run one at a time: start the next queued engine
+        // whenever the pipeline is free.
+        if self.redetect_rx.is_none() && !self.redetect_queue.is_empty() {
+            let id = self.redetect_queue.remove(0);
+            if backend.engines.iter().any(|e| e.id == id) {
+                self.select_engine(id, backend);
+                if let Some(edit) = &mut self.edit
+                    && edit.engine_id == id
+                    && !edit.redetect_pending
+                {
+                    edit.redetect_pending = true;
+                    let path = edit.path.clone();
+                    self.start_redetect(path, id, backend);
+                }
+            }
+        }
         self.autosave_tick(ui.ctx(), backend);
         self.show_delete_modal(ui.ctx(), backend);
         self.show_duplicate_modals(ui.ctx(), backend);
@@ -110,7 +131,7 @@ impl EnginesTab {
 
         // ── Left: engine grid (fixed ~50% so the split tracks window size
         // rather than persisting an absolute width that breaks on resize) ──
-        egui::Panel::left("engines_grid_panel")
+        let grid_panel = egui::Panel::left("engines_grid_panel")
             .resizable(false)
             .exact_size((avail.x * 0.5).max(320.0))
             .frame(egui::Frame::new().inner_margin(egui::Margin {
@@ -122,6 +143,22 @@ impl EnginesTab {
             .show_inside(ui, |ui| {
                 self.show_grid(ui, backend);
             });
+
+        // A click outside the grid drops the bulk selection (the edited
+        // engine stays). Skipped while a popup/modal is open so context-menu
+        // actions don't wipe their own target set.
+        if !self.multi_selected.is_empty()
+            && self.pending_delete.is_empty()
+            && !egui::Popup::is_any_open(ui.ctx())
+        {
+            let rect = grid_panel.response.rect;
+            if ui.input(|i| {
+                i.pointer.any_click()
+                    && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))
+            }) {
+                self.multi_selected.clear();
+            }
+        }
 
         // ── Bottom-right: global tablebase paths (collapsible, collapsed by
         // default so the engine panel keeps the vertical space) ──
@@ -189,19 +226,26 @@ impl EnginesTab {
         }
     }
 
-    /// The delete-confirmation modal, shown while `pending_delete` is set.
+    /// The delete-confirmation modal, shown while `pending_delete` is
+    /// non-empty (one engine or a bulk selection).
     fn show_delete_modal(&mut self, ctx: &egui::Context, backend: &mut Backend) {
-        let Some(id) = self.pending_delete else { return };
-        let Some(engine) = backend.engines.iter().find(|e| e.id == id) else {
-            self.pending_delete = None;
+        if self.pending_delete.is_empty() {
             return;
-        };
-        let name = widgets::engine_base_name(engine);
-        let version = engine.meta.version.trim().to_string();
-        let label = if version.is_empty() {
-            name
+        }
+        let labels: Vec<String> = self
+            .pending_delete
+            .iter()
+            .filter_map(|id| backend.engines.iter().find(|e| e.id == *id))
+            .map(engine_display_label)
+            .collect();
+        if labels.is_empty() {
+            self.pending_delete.clear();
+            return;
+        }
+        let title = if labels.len() == 1 {
+            format!("Delete {}?", labels[0])
         } else {
-            format!("{name} {version}")
+            format!("Delete {} engines?", labels.len())
         };
 
         let mut confirmed = false;
@@ -209,12 +253,20 @@ impl EnginesTab {
         let modal = egui::Modal::new(egui::Id::new("engine_delete_confirm")).show(ctx, |ui| {
             ui.set_width(360.0);
             ui.label(
-                RichText::new(format!("Delete {label}?"))
+                RichText::new(title)
                     .size(16.0)
                     .strong()
                     .color(theme::text()),
             );
             ui.add_space(6.0);
+            if labels.len() > 1 {
+                ui.label(
+                    RichText::new(labels.join(", "))
+                        .color(theme::text_weak())
+                        .size(12.5),
+                );
+                ui.add_space(4.0);
+            }
             ui.label(
                 RichText::new(
                     "This removes the engine from the library. The executable on disk \
@@ -238,18 +290,31 @@ impl EnginesTab {
             });
         });
         if modal.should_close() || cancelled {
-            self.pending_delete = None;
+            self.pending_delete.clear();
         }
         if confirmed {
-            logo::remove(&backend.dirs.logos_dir(), id);
-            backend.engines.retain(|e| e.id != id);
-            backend.save_engines();
-            if self.selected_id == Some(id) {
-                self.selected_id = None;
-                self.edit = None;
+            for id in std::mem::take(&mut self.pending_delete) {
+                logo::remove(&backend.dirs.logos_dir(), id);
+                backend.engines.retain(|e| e.id != id);
+                if self.selected_id == Some(id) {
+                    self.selected_id = None;
+                    self.edit = None;
+                }
+                self.multi_selected.remove(&id);
             }
-            self.pending_delete = None;
+            backend.save_engines();
         }
+    }
+}
+
+/// "Name version" display label for an engine config.
+fn engine_display_label(engine: &EngineConfig) -> String {
+    let name = widgets::engine_base_name(engine);
+    let version = engine.meta.version.trim();
+    if version.is_empty() {
+        name
+    } else {
+        format!("{name} {version}")
     }
 }
 
@@ -895,19 +960,46 @@ impl EnginesTab {
                 let card_h = 98.0;
 
                 ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
-                let mut clicked: Option<EngineId> = None;
+                // Visible engine ids in display order (for shift ranges and
+                // list-ordered bulk actions).
+                let visible_ids: Vec<EngineId> =
+                    visible.iter().map(|&i| backend.engines[i].id).collect();
+                let mut clicked: Option<(EngineId, egui::Modifiers)> = None;
+                let mut secondary: Option<EngineId> = None;
                 let mut action: Option<(EngineId, CardAction)> = None;
+                let mut open_dirs: Vec<std::path::PathBuf> = Vec::new();
+                let mut queue_redetect: Vec<EngineId> = Vec::new();
+                let mut queue_delete: Vec<EngineId> = Vec::new();
                 for chunk in visible.chunks(cols) {
                     ui.horizontal(|ui| {
                         for &i in chunk {
                             let engine = &backend.engines[i];
                             let id = engine.id;
                             let path = engine.path.clone();
+                            let in_multi = self.multi_selected.contains(&id);
+                            let bulk: Vec<EngineId> = if in_multi {
+                                visible_ids
+                                    .iter()
+                                    .copied()
+                                    .filter(|v| self.multi_selected.contains(v))
+                                    .collect()
+                            } else {
+                                vec![id]
+                            };
+                            let bulk_paths: Vec<std::path::PathBuf> = bulk
+                                .iter()
+                                .filter_map(|b| backend.engines.iter().find(|e| e.id == *b))
+                                .map(|e| e.path.clone())
+                                .collect();
+                            let n = bulk.len();
+                            let suffix =
+                                if n > 1 { format!(" ({n})") } else { String::new() };
                             let resp = self.engine_card(ui, engine, &logos_dir, card_w, card_h);
-                            // Right-click selects too, so the context menu's
-                            // target is always the visible selection.
-                            if resp.clicked() || resp.secondary_clicked() {
-                                clicked = Some(id);
+                            if resp.clicked() {
+                                clicked = Some((id, ui.input(|inp| inp.modifiers)));
+                            }
+                            if resp.secondary_clicked() {
+                                secondary = Some(id);
                             }
                             resp.context_menu(|ui| {
                                 // Menus default to tight spacing; give the
@@ -915,39 +1007,102 @@ impl EnginesTab {
                                 // of the UI.
                                 ui.spacing_mut().item_spacing.y = 4.0;
                                 ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
-                                if ui.button("Clone").clicked() {
+                                if n == 1 && ui.button("Clone").clicked() {
                                     action = Some((id, CardAction::Clone));
                                     ui.close();
                                 }
-                                if ui.button("Re-detect").clicked() {
-                                    action = Some((id, CardAction::Redetect));
+                                if ui.button(format!("Re-detect{suffix}")).clicked() {
+                                    queue_redetect.extend(bulk.iter().copied());
                                     ui.close();
                                 }
                                 ui.separator();
-                                if ui.button("Open containing folder").clicked() {
-                                    if let Some(dir) = path.parent() {
-                                        open_folder(dir);
-                                    }
+                                let folder_label = if n > 1 {
+                                    "Open containing folders"
+                                } else {
+                                    "Open containing folder"
+                                };
+                                if ui.button(folder_label).clicked() {
+                                    // One window per unique folder — most
+                                    // engines share the same directory.
+                                    let mut dirs: Vec<std::path::PathBuf> = bulk_paths
+                                        .iter()
+                                        .filter_map(|p| {
+                                            p.parent().map(std::path::Path::to_path_buf)
+                                        })
+                                        .collect();
+                                    dirs.sort();
+                                    dirs.dedup();
+                                    open_dirs.extend(dirs);
                                     ui.close();
                                 }
-                                if ui.button("Copy path").clicked() {
+                                if n == 1 && ui.button("Copy path").clicked() {
                                     ui.ctx().copy_text(path.to_string_lossy().to_string());
                                     ui.close();
                                 }
                                 ui.separator();
                                 if ui
-                                    .button(RichText::new("Delete Engine…").color(theme::danger()))
+                                    .button(
+                                        RichText::new(format!("Delete{suffix}…"))
+                                            .color(theme::danger()),
+                                    )
                                     .clicked()
                                 {
-                                    action = Some((id, CardAction::Delete));
+                                    queue_delete = bulk.clone();
                                     ui.close();
                                 }
                             });
                         }
                     });
                 }
-                if let Some(id) = clicked {
-                    self.select_engine(id, backend);
+                for dir in open_dirs {
+                    open_folder(&dir);
+                }
+                if !queue_redetect.is_empty() {
+                    self.redetect_queue.extend(queue_redetect);
+                }
+                if !queue_delete.is_empty() {
+                    self.pending_delete = queue_delete;
+                }
+                if let Some((id, mods)) = clicked {
+                    if mods.ctrl {
+                        // Starting a bulk selection implicitly includes the
+                        // engine open in the detail view — it reads as
+                        // selected, so ctrl-click *adds* to it.
+                        if self.multi_selected.is_empty()
+                            && let Some(cur) = self.selected_id
+                            && cur != id
+                        {
+                            self.multi_selected.insert(cur);
+                        }
+                        if !self.multi_selected.remove(&id) {
+                            self.multi_selected.insert(id);
+                        }
+                        self.select_anchor = Some(id);
+                    } else if mods.shift {
+                        let anchor = self
+                            .select_anchor
+                            .or(self.selected_id)
+                            .unwrap_or(id);
+                        let a = visible_ids.iter().position(|v| *v == anchor);
+                        let b = visible_ids.iter().position(|v| *v == id);
+                        if let (Some(a), Some(b)) = (a, b) {
+                            let (lo, hi) = (a.min(b), a.max(b));
+                            self.multi_selected.extend(&visible_ids[lo..=hi]);
+                        }
+                    } else {
+                        self.multi_selected.clear();
+                        self.select_anchor = Some(id);
+                        self.select_engine(id, backend);
+                    }
+                }
+                if let Some(id) = secondary {
+                    // Right-click selects; within an existing bulk selection
+                    // it leaves the set alone so the menu targets all of it.
+                    if !self.multi_selected.contains(&id) {
+                        self.multi_selected.clear();
+                        self.select_anchor = Some(id);
+                        self.select_engine(id, backend);
+                    }
                 }
                 if let Some((id, act)) = action {
                     self.handle_card_action(id, act, backend);
@@ -959,19 +1114,6 @@ impl EnginesTab {
     fn handle_card_action(&mut self, id: EngineId, action: CardAction, backend: &mut Backend) {
         match action {
             CardAction::Clone => self.clone_engine(id, backend),
-            CardAction::Redetect => {
-                self.select_engine(id, backend);
-                if self.redetect_rx.is_none()
-                    && let Some(edit) = &mut self.edit
-                    && edit.engine_id == id
-                    && !edit.redetect_pending
-                {
-                    edit.redetect_pending = true;
-                    let path = edit.path.clone();
-                    self.start_redetect(path, id, backend);
-                }
-            }
-            CardAction::Delete => self.pending_delete = Some(id),
         }
     }
 
@@ -1017,6 +1159,7 @@ impl EnginesTab {
         h: f32,
     ) -> egui::Response {
         let is_sel = self.selected_id == Some(engine.id);
+        let in_multi = self.multi_selected.contains(&engine.id);
         let name = widgets::engine_base_name(engine);
         let version = engine.meta.version.trim().to_string();
         let subtitle = widgets::engine_subtitle(engine);
@@ -1031,6 +1174,8 @@ impl EnginesTab {
 
         let fill = if is_sel {
             theme::tint(theme::accent(), 0.12)
+        } else if in_multi {
+            theme::tint(theme::accent(), 0.06)
         } else if resp.hovered() {
             theme::bg_hover()
         } else {
@@ -1038,6 +1183,8 @@ impl EnginesTab {
         };
         let stroke = if is_sel {
             egui::Stroke::new(1.0, theme::tint(theme::accent(), 0.45))
+        } else if in_multi {
+            egui::Stroke::new(1.0, theme::tint(theme::accent(), 0.25))
         } else {
             egui::Stroke::new(1.0, theme::stroke())
         };
@@ -1351,7 +1498,7 @@ impl EnginesTab {
         }
 
         if do_delete {
-            self.pending_delete = Some(edit.engine_id);
+            self.pending_delete = vec![edit.engine_id];
         }
 
         if do_redetect {
@@ -1893,7 +2040,8 @@ fn option_row_width(ui: &Ui, opt: &UciOption) -> f32 {
             56.0 + 10.0 + text_w(&format!("({min}–{max})"), 11.5)
         }
         UciOption::Combo { .. } => 200.0,
-        UciOption::Str { .. } => 240.0,
+        // Path-like fields need real room; bias toward fewer, wider columns.
+        UciOption::Str { .. } => 300.0,
         UciOption::Check { .. } => 24.0,
         UciOption::Button { .. } => 150.0,
     };
