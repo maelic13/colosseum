@@ -2415,6 +2415,12 @@ fn settings_section(ui: &mut Ui, live: &LiveData) {
     row(ui, "Max moves", &max_moves);
     row(ui, "Draw adj.", &draw);
     row(ui, "Resign adj.", &resign);
+    row(ui, "Ponder", if c.common.ponder { "on" } else { "off" });
+    row(
+        ui,
+        "Tablebases",
+        if c.common.tablebases { "on" } else { "off" },
+    );
     row(ui, "Openings", &openings);
     if let Some(pgn) = &pgn {
         row(ui, "PGN file", pgn);

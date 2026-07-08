@@ -202,6 +202,7 @@ struct TournamentForm {
     syzygy50_on: bool,
     syzygy50: bool,
     ponder: bool,
+    tablebases: bool,
 
     // Adjudication
     max_moves_on: bool,
@@ -271,6 +272,7 @@ impl Default for TournamentForm {
             syzygy50_on: false,
             syzygy50: true,
             ponder: false,
+            tablebases: true,
             max_moves_on: false,
             max_moves: 300,
             draw_on: false,
@@ -314,6 +316,7 @@ impl TournamentForm {
                 // Managed globally with the tablebase paths (Engines tab).
                 syzygy_50_move_rule: None,
                 ponder: self.ponder,
+                tablebases: self.tablebases,
             },
             adjudication: AdjudicationConfig {
                 max_moves: self.max_moves_on.then_some(self.max_moves.max(1)),
@@ -470,6 +473,7 @@ impl TournamentForm {
             syzygy50_on: self.syzygy50_on,
             syzygy50: self.syzygy50,
             ponder: self.ponder,
+            tablebases: self.tablebases,
             max_moves_on: self.max_moves_on,
             max_moves: self.max_moves,
             draw_on: self.draw_on,
@@ -536,6 +540,7 @@ impl TournamentForm {
         self.syzygy50_on = p.syzygy50_on;
         self.syzygy50 = p.syzygy50;
         self.ponder = p.ponder;
+        self.tablebases = p.tablebases;
         self.max_moves_on = p.max_moves_on;
         self.max_moves = p.max_moves;
         self.draw_on = p.draw_on;
@@ -1129,8 +1134,12 @@ impl TournamentTab {
             return;
         }
         // Inject the global endgame-tablebase paths (managed in the Engines tab)
-        // into each engine that declares a matching UCI option.
-        apply_global_tablebases(&mut engines, &backend.config);
+        // into each engine that declares a matching UCI option — unless this
+        // tournament runs without tablebases (the scheduler additionally
+        // strips any tablebase options already stored on the engines).
+        if self.form.tablebases {
+            apply_global_tablebases(&mut engines, &backend.config);
+        }
         let config = self.form.build_config();
         let name = if self.form.name.trim().is_empty() {
             "Tournament"
@@ -1784,12 +1793,24 @@ impl TournamentTab {
                         );
                         ui.end_row();
 
+                        widgets::checkbox(ui, &mut f.ponder, "");
+                        field_label(ui, "Ponder").on_hover_text(
+                            "Let engines think on the opponent's time. \
+                             Off keeps fast games fair.",
+                        );
+                        ui.end_row();
+
+                        widgets::checkbox(ui, &mut f.tablebases, "");
+                        field_label(ui, "Use endgame tablebases").on_hover_text(
+                            "Forward the globally configured tablebase paths \
+                             (Engines tab) to the engines. Off runs this \
+                             tournament without tablebases — no tablebase \
+                             option reaches any engine, and the global paths \
+                             stay untouched.",
+                        );
+                        ui.end_row();
                     });
 
-                ui.add_space(4.0);
-                widgets::checkbox(ui, &mut f.ponder, "Ponder").on_hover_text(
-                    "Let engines think on the opponent's time. Off keeps fast games fair.",
-                );
                 ui.add_space(6.0);
                 ui.label(
                     RichText::new(
@@ -2233,8 +2254,8 @@ impl TournamentTab {
 
 // ── Small helpers ───────────────────────────────────────────────────────────────
 
-fn field_label(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).color(theme::text_weak()).size(13.0));
+fn field_label(ui: &mut Ui, text: &str) -> egui::Response {
+    ui.label(RichText::new(text).color(theme::text_weak()).size(13.0))
 }
 
 /// The one-line explanation under the time-control fields.

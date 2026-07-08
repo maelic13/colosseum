@@ -79,6 +79,8 @@ pub struct PresetData {
     pub syzygy50_on: bool,
     pub syzygy50: bool,
     pub ponder: bool,
+    #[serde(default = "default_true")]
+    pub tablebases: bool,
 
     // Adjudication
     pub max_moves_on: bool,
@@ -111,6 +113,10 @@ pub struct PresetData {
     pub pgn_path: String,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl Default for PresetData {
     fn default() -> Self {
         Self {
@@ -136,6 +142,7 @@ impl Default for PresetData {
             syzygy50_on: false,
             syzygy50: true,
             ponder: false,
+            tablebases: true,
             max_moves_on: false,
             max_moves: 300,
             draw_on: false,

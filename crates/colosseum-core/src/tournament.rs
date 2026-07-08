@@ -29,7 +29,7 @@ impl Default for Format {
 
 /// Options applied uniformly to every engine in the tournament (forwarded as UCI
 /// options). `None`/false means "leave the engine's own default".
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommonEngineOptions {
     pub threads: Option<u32>,
     pub hash_mb: Option<u32>,
@@ -37,6 +37,28 @@ pub struct CommonEngineOptions {
     pub syzygy_50_move_rule: Option<bool>,
     /// Forwarded as the UCI `Ponder` option. Default off for fair fast games.
     pub ponder: bool,
+    /// Whether engines receive endgame-tablebase configuration at all. Off
+    /// withholds every tablebase option (paths, caches, policies) so the
+    /// globally configured paths stay untouched but unused this tournament.
+    #[serde(default = "default_true")]
+    pub tablebases: bool,
+}
+
+impl Default for CommonEngineOptions {
+    fn default() -> Self {
+        Self {
+            threads: None,
+            hash_mb: None,
+            syzygy_path: None,
+            syzygy_50_move_rule: None,
+            ponder: false,
+            tablebases: true,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Which engines' *library* ratings follow the tournament. Applied after

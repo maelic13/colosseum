@@ -1031,13 +1031,15 @@ fn resolve_options(
     if let Some(hash) = common.hash_mb {
         insert_matched(&mut values, engine, colosseum_core::is_hash_option, i64::from(hash));
     }
-    if let Some(path) = &common.syzygy_path
-        && !path.is_empty()
-    {
-        values.insert("SyzygyPath".into(), Some(path.clone()));
-    }
-    if let Some(rule) = common.syzygy_50_move_rule {
-        values.insert("Syzygy50MoveRule".into(), Some(rule.to_string()));
+    if common.tablebases {
+        if let Some(path) = &common.syzygy_path
+            && !path.is_empty()
+        {
+            values.insert("SyzygyPath".into(), Some(path.clone()));
+        }
+        if let Some(rule) = common.syzygy_50_move_rule {
+            values.insert("Syzygy50MoveRule".into(), Some(rule.to_string()));
+        }
     }
     // Ponder is always forwarded (default off keeps fast games fair).
     values.insert("Ponder".into(), Some(common.ponder.to_string()));
@@ -1051,6 +1053,14 @@ fn resolve_options(
             };
             values.insert(name.clone(), v);
         }
+    }
+
+    // Tablebases off is a tournament-wide statement: withhold every
+    // tablebase option regardless of where it came from (library config,
+    // the globally injected paths, or an override), so the engines never
+    // learn the paths exist.
+    if !common.tablebases {
+        values.retain(|name, _| !colosseum_core::is_tablebase_option(name));
     }
 
     values.into_iter().collect()
@@ -1319,5 +1329,46 @@ mod tests {
         );
         // …and the boolean toggle is left alone too.
         assert!(!resolved.iter().any(|(n, _)| n == "Busy Threads"));
+    }
+
+    /// Tablebases off withholds every tablebase option, no matter whether it
+    /// came from the engine's stored options, the common tournament options,
+    /// or a per-engine override.
+    #[test]
+    fn tablebases_off_strips_all_tablebase_options() {
+        let mut engine = test_engine();
+        engine
+            .options
+            .insert("SyzygyPath".into(), UciOptionValue::Str("D:/tb".into()));
+        engine
+            .options
+            .insert("NalimovCache".into(), UciOptionValue::Spin(32));
+        let mut ov = std::collections::BTreeMap::new();
+        ov.insert(
+            "GaviotaTbPath".to_string(),
+            UciOptionValue::Str("D:/gtb".into()),
+        );
+        let common = CommonEngineOptions {
+            syzygy_path: Some("D:/tb".into()),
+            syzygy_50_move_rule: Some(true),
+            tablebases: false,
+            ..CommonEngineOptions::default()
+        };
+        let resolved = resolve_options(&engine, &common, Some(&ov));
+        assert!(
+            !resolved
+                .iter()
+                .any(|(n, _)| colosseum_core::is_tablebase_option(n)),
+            "no tablebase option may reach the engine: {resolved:?}"
+        );
+
+        // With tablebases on (default), the same setup forwards them.
+        let common = CommonEngineOptions {
+            syzygy_path: Some("D:/tb".into()),
+            ..CommonEngineOptions::default()
+        };
+        let resolved = resolve_options(&engine, &common, Some(&ov));
+        assert!(resolved.iter().any(|(n, _)| n == "SyzygyPath"));
+        assert!(resolved.iter().any(|(n, _)| n == "GaviotaTbPath"));
     }
 }

@@ -29,7 +29,7 @@ pub use event::TournamentEvent;
 pub use export::{ExportRow, crosstable_csv, standings_csv};
 pub use game::{GameResult, GameStats, Pairing, Termination};
 pub use ids::{EngineId, GameId, TournamentId};
-pub use options::{UciOption, UciOptionValue, is_hash_option, is_thread_option};
+pub use options::{UciOption, UciOptionValue, is_hash_option, is_tablebase_option, is_thread_option};
 pub use pairing::{gauntlet, generate_schedule, round_robin};
 pub use rating::{ml_ratings, ml_ratings_anchored, performance_rating, rating_error};
 pub use standings::{EngineStanding, GameOutcome, HeadToHead, PairGameResult, Standings};
