@@ -38,6 +38,10 @@ pub struct TournamentRow {
     pub pgn_path: Option<String>,
     pub created_at: String,
     pub finished_at: Option<String>,
+    /// Games finished / scheduled, counted at load time (the Arena list
+    /// shows progress for stored tournaments too, not just loaded ones).
+    pub games_finished: usize,
+    pub games_total: usize,
 }
 
 /// A game row, as stored.
@@ -230,7 +234,10 @@ impl Store {
     /// List tournaments, most recent first (for the future History tab).
     pub fn list_tournaments(&self) -> Result<Vec<TournamentRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, status, config_json, pgn_path, created_at, finished_at
+            "SELECT id, name, status, config_json, pgn_path, created_at, finished_at,
+                    (SELECT COUNT(*) FROM games g
+                      WHERE g.tournament_id = tournaments.id AND g.status = 'finished'),
+                    (SELECT COUNT(*) FROM games g WHERE g.tournament_id = tournaments.id)
              FROM tournaments ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -242,11 +249,14 @@ impl Store {
                 row.get::<_, Option<String>>(4)?,
                 row.get::<_, String>(5)?,
                 row.get::<_, Option<String>>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, i64>(8)?,
             ))
         })?;
         let mut tournaments = Vec::new();
         for row in rows {
-            let (id, name, status, config_json, pgn_path, created_at, finished_at) = row?;
+            let (id, name, status, config_json, pgn_path, created_at, finished_at, done, total) =
+                row?;
             tournaments.push(TournamentRow {
                 id: TournamentId(parse_uuid(&id)?),
                 name,
@@ -255,6 +265,8 @@ impl Store {
                 pgn_path,
                 created_at,
                 finished_at,
+                games_finished: done.max(0) as usize,
+                games_total: total.max(0) as usize,
             });
         }
         Ok(tournaments)
@@ -265,7 +277,10 @@ impl Store {
         let row = self
             .conn
             .query_row(
-                "SELECT id, name, status, config_json, pgn_path, created_at, finished_at
+                "SELECT id, name, status, config_json, pgn_path, created_at, finished_at,
+                        (SELECT COUNT(*) FROM games g
+                          WHERE g.tournament_id = tournaments.id AND g.status = 'finished'),
+                        (SELECT COUNT(*) FROM games g WHERE g.tournament_id = tournaments.id)
                  FROM tournaments WHERE id = ?1",
                 params![id.to_string()],
                 |row| {
@@ -277,11 +292,15 @@ impl Store {
                         row.get::<_, Option<String>>(4)?,
                         row.get::<_, String>(5)?,
                         row.get::<_, Option<String>>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((id, name, status, config_json, pgn_path, created_at, finished_at)) = row else {
+        let Some((id, name, status, config_json, pgn_path, created_at, finished_at, done, total)) =
+            row
+        else {
             return Ok(None);
         };
         Ok(Some(TournamentRow {
@@ -292,6 +311,8 @@ impl Store {
             pgn_path,
             created_at,
             finished_at,
+            games_finished: done.max(0) as usize,
+            games_total: total.max(0) as usize,
         }))
     }
 

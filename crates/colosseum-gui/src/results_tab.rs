@@ -717,23 +717,23 @@ impl ResultsTab {
                         );
                     });
                 });
-                // Second line: progress for loaded tournaments, date otherwise.
-                match live {
-                    Some((_, finished, total)) if total > 0 => {
-                        ui.label(
-                            RichText::new(format!("{finished} / {total} games"))
-                                .color(theme::text_weak())
-                                .size(11.5),
-                        );
-                    }
-                    _ => {
-                        ui.label(
-                            RichText::new(format_timestamp(&row.created_at))
-                                .color(theme::text_weak())
-                                .size(11.5),
-                        );
-                    }
-                }
+                // Second line: games progress (live counts when loaded,
+                // stored counts otherwise). Third line: creation date.
+                let (finished, total) = match live {
+                    Some((_, finished, total)) if total > 0 => (finished, total),
+                    _ => (row.games_finished, row.games_total),
+                };
+                ui.spacing_mut().item_spacing.y = 1.0;
+                ui.label(
+                    RichText::new(format!("{finished} / {total} games"))
+                        .color(theme::text_weak())
+                        .size(11.5),
+                );
+                ui.label(
+                    RichText::new(format_timestamp(&row.created_at))
+                        .color(theme::text_faint())
+                        .size(10.5),
+                );
             })
             .response;
 
@@ -1009,8 +1009,16 @@ impl ResultsTab {
             Format::RoundRobin { .. } => Vec::new(),
         };
 
+        let created_at = self
+            .list
+            .as_ref()
+            .and_then(|l| l.iter().find(|r| r.id == id))
+            .map(|r| r.created_at.clone())
+            .unwrap_or_default();
+
         LiveData {
             name: active.name.clone(),
+            created_at,
             config: Rc::clone(&cache.config),
             status,
             finished,
@@ -1779,6 +1787,8 @@ struct Row {
 /// heavy fields are `Rc`-shared from the per-finished-game cache.
 struct LiveData {
     name: String,
+    /// ISO-8601 creation timestamp (Information section).
+    created_at: String,
     /// The tournament's full configuration (settings card, gauntlet layout).
     config: Rc<TournamentConfig>,
     status: TournamentStatus,
@@ -2521,7 +2531,7 @@ fn settings_section(ui: &mut Ui, live: &LiveData) {
     });
 
     ui.label(
-        RichText::new("Settings")
+        RichText::new("Information")
             .color(theme::text())
             .font(theme::semibold(12.5)),
     );
@@ -2537,6 +2547,9 @@ fn settings_section(ui: &mut Ui, live: &LiveData) {
             );
         });
     };
+    if !live.created_at.is_empty() {
+        row(ui, "Created", &format_timestamp(&live.created_at));
+    }
     row(ui, "Format", &format);
     row(ui, "Time control", &tc);
     row(ui, "Games/pair", &c.games_per_pair.to_string());
