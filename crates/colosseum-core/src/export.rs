@@ -14,7 +14,9 @@ pub struct ExportRow {
     pub name: String,
     pub version: String,
     pub elo: f64,
-    pub elo_delta: f64,
+    /// `None` when the tournament does not update this engine's rating
+    /// (exports as an empty field).
+    pub elo_delta: Option<f64>,
     pub points: f64,
     pub games: u32,
     pub wins: u32,
@@ -62,7 +64,7 @@ pub fn standings_csv(rows: &[ExportRow]) -> String {
             csv_field(&r.name),
             csv_field(&r.version),
             format!("{:.1}", r.elo),
-            format!("{:+.1}", r.elo_delta),
+            r.elo_delta.map_or(String::new(), |d| format!("{d:+.1}")),
             format!("{:.1}", r.points),
             r.games.to_string(),
             r.wins.to_string(),
@@ -111,7 +113,7 @@ mod tests {
             name: name.to_string(),
             version: String::new(),
             elo: 1500.0,
-            elo_delta: 0.0,
+            elo_delta: Some(0.0),
             points: pts,
             games: w + d + l,
             wins: w,

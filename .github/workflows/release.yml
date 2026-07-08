@@ -127,10 +127,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          dotnet tool install --global wix
+          # Pin WiX 5: an unpinned install pulls WiX 7, which fails on CI
+          # (WIX7015: Open Source Maintenance Fee EULA not accepted) and
+          # whose extension resolution rejects the unversioned name (WIX0144).
+          dotnet tool install --global wix --version 5.0.2
           # Ensure the global tools dir is on PATH for this step.
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
-          wix extension add -g WixToolset.UI.wixext
+          wix extension add -g WixToolset.UI.wixext/5.0.2
 
           $tag    = '${{ github.ref_name }}'
           # MSI ProductVersion must be numeric x.y.z — strip the leading 'v' and

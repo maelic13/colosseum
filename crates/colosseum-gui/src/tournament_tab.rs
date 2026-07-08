@@ -1474,10 +1474,22 @@ impl TournamentTab {
     fn settings_form(&mut self, ui: &mut Ui, engines: &[EngineConfig]) {
         let f = &mut self.form;
 
-        // Two balanced card columns when there's room, so the options and the
-        // Start bar fit without scrolling on a normal window; stacked on
-        // narrow panels.
-        if ui.available_width() >= 720.0 {
+        // Balanced card columns: three on a wide window (the two-column
+        // layout stranded the whole lower half of the screen), two on a
+        // normal one, stacked on narrow panels. Columns are grouped so
+        // their heights roughly match.
+        let w = ui.available_width();
+        if w >= 1150.0 {
+            ui.columns(3, |cols| {
+                Self::section_tournament(&mut cols[0], f, engines);
+                Self::section_engine_options(&mut cols[0], f);
+                Self::section_time_control(&mut cols[1], f);
+                Self::section_adjudication(&mut cols[1], f);
+                Self::section_openings(&mut cols[2], f);
+                Self::section_elo(&mut cols[2], f, engines);
+                Self::section_output(&mut cols[2], f);
+            });
+        } else if w >= 720.0 {
             ui.columns(2, |cols| {
                 Self::section_tournament(&mut cols[0], f, engines);
                 Self::section_engine_options(&mut cols[0], f);
@@ -2322,12 +2334,22 @@ fn compatibility_notes(form: &TournamentForm, engines: &[EngineConfig]) -> Vec<S
                 "{name}: executable not found — its games will fail"
             ));
         }
-        let overridden = |pred: fn(&str) -> bool| {
+        // What actually applies to this engine's option: its per-engine
+        // override when set, the tournament-wide value otherwise. A note only
+        // appears when *that* value doesn't fit — so explicitly overriding an
+        // option into range clears the note, while an override that is still
+        // out of range keeps it.
+        let effective_spin = |opt_name: &str, common: i64| -> i64 {
             form.overrides
                 .get(&e.id)
-                .is_some_and(|m| m.keys().any(|k| pred(k)))
+                .and_then(|m| m.get(opt_name))
+                .and_then(|v| match v {
+                    UciOptionValue::Spin(n) => Some(*n),
+                    _ => None,
+                })
+                .unwrap_or(common)
         };
-        if form.threads_on && form.threads > 1 && !overridden(is_thread_option) {
+        if form.threads_on && form.threads > 1 {
             let thread_opts: Vec<&UciOption> = e
                 .detected_options
                 .iter()
@@ -2341,19 +2363,19 @@ fn compatibility_notes(form: &TournamentForm, engines: &[EngineConfig]) -> Vec<S
                 ));
             } else {
                 for o in thread_opts {
-                    if let UciOption::Spin { max, .. } = o
-                        && i64::from(form.threads) > *max
-                    {
-                        notes.push(format!(
-                            "{name}: {} will be capped at {max} (Threads {} requested)",
-                            o.name(),
-                            form.threads
-                        ));
+                    if let UciOption::Spin { max, .. } = o {
+                        let requested = effective_spin(o.name(), i64::from(form.threads));
+                        if requested > *max {
+                            notes.push(format!(
+                                "{name}: {} will be capped at {max} ({requested} requested)",
+                                o.name(),
+                            ));
+                        }
                     }
                 }
             }
         }
-        if form.hash_on && !overridden(is_hash_option) {
+        if form.hash_on {
             let hash_opts: Vec<&UciOption> = e
                 .detected_options
                 .iter()
@@ -2367,19 +2389,18 @@ fn compatibility_notes(form: &TournamentForm, engines: &[EngineConfig]) -> Vec<S
             } else {
                 for o in hash_opts {
                     if let UciOption::Spin { min, max, .. } = o {
-                        if i64::from(form.hash_mb) > *max {
+                        let requested = effective_spin(o.name(), i64::from(form.hash_mb));
+                        if requested > *max {
                             notes.push(format!(
                                 "{name}: {} will be capped at {max} MB \
-                                 (Hash {} requested)",
+                                 ({requested} MB requested)",
                                 o.name(),
-                                form.hash_mb
                             ));
-                        } else if i64::from(form.hash_mb) < *min {
+                        } else if requested < *min {
                             notes.push(format!(
                                 "{name}: {} will be raised to {min} MB \
-                                 (Hash {} requested)",
+                                 ({requested} MB requested)",
                                 o.name(),
-                                form.hash_mb
                             ));
                         }
                     }
@@ -2422,21 +2443,21 @@ fn effective_options(
             // …then the tournament-wide values on top (matching what the
             // scheduler forwards, including the range clamp).
             match &mut opt {
-                UciOption::Spin {
-                    name,
-                    default,
-                    min,
-                    max,
-                } => {
+                UciOption::Spin { name, default, .. } => {
+                    // Deliberately NOT clamped to the option's range: the row
+                    // shows what the tournament *requests*, so an out-of-range
+                    // value is visible next to the "(min–max)" hint and
+                    // explicitly setting an in-range value registers as an
+                    // override (which also clears the compatibility note).
                     if let Some(t) = common_threads
                         && is_thread_option(name)
                     {
-                        *default = i64::from(t).clamp(*min, *max);
+                        *default = i64::from(t);
                     }
                     if let Some(h) = common_hash
                         && is_hash_option(name)
                     {
-                        *default = i64::from(h).clamp(*min, *max);
+                        *default = i64::from(h);
                     }
                 }
                 UciOption::Check { name, default } if name == "Ponder" => {

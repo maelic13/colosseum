@@ -923,6 +923,7 @@ fn engine_column(
                     &PanelData {
                         engine: snap.black_id,
                         name: &snap.black_name,
+                        elo: engine_elo(backend, snap.black_id),
                         is_white: false,
                         search: &snap.black_search,
                         log: &snap.black_log,
@@ -947,6 +948,7 @@ fn engine_column(
                     &PanelData {
                         engine: snap.white_id,
                         name: &snap.white_name,
+                        elo: engine_elo(backend, snap.white_id),
                         is_white: true,
                         search: &snap.white_search,
                         log: &snap.white_log,
@@ -960,6 +962,15 @@ fn engine_column(
                 );
             });
         });
+}
+
+/// The engine's current library Elo (kept live by the ratings write-back).
+fn engine_elo(backend: &Backend, id: EngineId) -> Option<i32> {
+    backend
+        .engines
+        .iter()
+        .find(|e| e.id == id)
+        .and_then(|e| e.meta.elo)
 }
 
 /// Allocate exactly `w`×`h` for one engine panel and build it in a clipped
@@ -990,6 +1001,8 @@ fn column_divider(ui: &mut Ui, width: f32) {
 struct PanelData<'a> {
     engine: EngineId,
     name: &'a str,
+    /// Library Elo (what the ratings write-back maintains), if configured.
+    elo: Option<i32>,
     is_white: bool,
     search: &'a LiveSearch,
     /// Rolling search log (one line per completed depth), oldest first.
@@ -1107,14 +1120,40 @@ fn engine_panel(
                         ui.horizontal(|ui| {
                             let (dot, _) = ui.allocate_exact_size(vec2(9.0, 9.0), Sense::hover());
                             ui.painter().circle_filled(dot.center(), 4.5, series);
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(data.name)
-                                        .color(theme::text())
-                                        .font(theme::semibold(15.0)),
-                                )
-                                .truncate(),
+                            // Elo sits right-aligned in the name row (same
+                            // pattern as the engine-library rows); the name
+                            // truncates against a reserved slot so a long
+                            // name never pushes the rating out.
+                            let elo_text = data.elo.map(|e| e.to_string());
+                            let elo_w = elo_text.as_ref().map_or(0.0, |t| {
+                                ui.painter()
+                                    .layout_no_wrap(
+                                        t.clone(),
+                                        egui::FontId::proportional(12.0),
+                                        Color32::WHITE,
+                                    )
+                                    .size()
+                                    .x
+                                    + 8.0
+                            });
+                            let name_w = (ui.available_width() - elo_w).max(40.0);
+                            ui.allocate_ui_with_layout(
+                                vec2(name_w, 18.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(data.name)
+                                                .color(theme::text())
+                                                .font(theme::semibold(15.0)),
+                                        )
+                                        .truncate(),
+                                    );
+                                },
                             );
+                            if let Some(text) = elo_text {
+                                ui.label(RichText::new(text).color(theme::text_faint()).size(12.0));
+                            }
                         });
                         ui.horizontal(|ui| {
                             let (text, color) = match data.search.score {

@@ -757,8 +757,14 @@ pub fn disclosure_triangle(ui: &mut Ui, open: bool, color: Color32) {
     ));
 }
 
-/// Small tinted chip for Elo Δ values. Zero-ish delta shows a plain dim zero.
-pub fn elo_delta_chip(ui: &mut Ui, delta: f64) {
+/// Small tinted chip for Elo Δ values. `None` (the engine's rating is not
+/// updated by this tournament) shows a dim dash; a zero-ish delta a plain
+/// dim zero.
+pub fn elo_delta_chip(ui: &mut Ui, delta: Option<f64>) {
+    let Some(delta) = delta else {
+        ui.label(RichText::new("—").color(theme::text_faint()));
+        return;
+    };
     if delta.abs() <= 0.05 {
         ui.label(RichText::new("0").color(theme::text_faint()).monospace());
         return;
@@ -820,7 +826,16 @@ pub fn uci_option_row(
                 _ => *default,
             };
             let mut val = current;
-            let resp = ui.add(DragValue::new(&mut val).range(*min..=*max).speed(1.0));
+            // The default may deliberately sit outside the range (a
+            // tournament-wide value the engine can't take) — keep showing it
+            // instead of silently snapping, so the mismatch is visible and
+            // any edit lands in range and registers as an override.
+            let resp = ui.add(
+                DragValue::new(&mut val)
+                    .range(*min..=*max)
+                    .clamp_existing_to_range(false)
+                    .speed(1.0),
+            );
             if resp.changed() {
                 overrides.insert(name.clone(), UciOptionValue::Spin(val));
                 *dirty = true;
@@ -858,13 +873,16 @@ pub fn uci_option_row(
                 _ => default.clone(),
             };
             let mut val = current;
-            // Stretch to the grid column: string options are usually paths
-            // (EvalFile, SyzygyPath, …) — a fixed width either wastes space
-            // or gets clipped at the column edge.
+            // A generous fixed width: string options are usually paths or
+            // file names (EvalFile, SyzygyPath, …). Deliberately NOT sized
+            // from the content (UCI_EngineAbout would explode the row) nor
+            // from `available_width()` (unreliable inside grid cells — it
+            // collapsed the field to a sliver). The options-grid column
+            // budget reserves ~300 pt for string rows, so this always fits.
             if ui
                 .add(
                     egui::TextEdit::singleline(&mut val)
-                        .desired_width(ui.available_width().max(120.0) - 30.0)
+                        .desired_width(260.0)
                         .hint_text(default),
                 )
                 .changed()

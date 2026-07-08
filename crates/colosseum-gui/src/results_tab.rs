@@ -951,13 +951,19 @@ impl ResultsTab {
                     let entry = elo_model.get(&p.id).copied().unwrap_or_default();
                     // The driver's entries already reflect the writeback mode
                     // (anchored engines sit exactly at their start rating).
-                    // Under "Never" the Elo column shows the start rating and
-                    // the Δ chip carries the informational movement only.
+                    // The Δ chip only shows for engines whose rating this
+                    // tournament actually updates — under "Never" no rating
+                    // moves, so no engine gets a delta.
+                    let show_delta = active.rating_writeback.applies_to(p.id);
                     let (elo, elo_delta, elo_error) =
                         if matches!(active.rating_writeback, RatingWriteback::None) {
-                            (prior_of(p.id), entry.delta, entry.error)
+                            (prior_of(p.id), None, entry.error)
                         } else {
-                            (entry.current, entry.delta, entry.error)
+                            (
+                                entry.current,
+                                show_delta.then_some(entry.delta),
+                                entry.error,
+                            )
                         };
                     Row {
                         id: p.id,
@@ -1768,7 +1774,8 @@ struct Row {
     name: String,
     version: String,
     elo: f64,
-    elo_delta: f64,
+    /// `None` when this tournament does not update the engine's rating.
+    elo_delta: Option<f64>,
     /// ±95% confidence half-width of the ML rating (None before any games).
     elo_error: Option<f64>,
     points: f64,
@@ -1894,7 +1901,8 @@ fn sort_rows(rows: &mut [Row], sort: SortState) {
             SortKey::Elo => a.elo.partial_cmp(&b.elo).unwrap_or(Ordering::Equal),
             SortKey::EloDelta => a
                 .elo_delta
-                .partial_cmp(&b.elo_delta)
+                .unwrap_or(0.0)
+                .partial_cmp(&b.elo_delta.unwrap_or(0.0))
                 .unwrap_or(Ordering::Equal),
             SortKey::Points => a.points.partial_cmp(&b.points).unwrap_or(Ordering::Equal),
             SortKey::Games => a.games.cmp(&b.games),
@@ -2231,7 +2239,7 @@ struct ResultRow {
     name: String,
     version: String,
     elo: f64,
-    elo_delta: f64,
+    elo_delta: Option<f64>,
     /// ±95% confidence half-width of the ML rating (None before any games).
     elo_error: Option<f64>,
     points: f64,
@@ -2250,6 +2258,12 @@ fn build_rows(res: &TournamentResults) -> Vec<ResultRow> {
     let standings: &Standings = &res.standings;
     let ranked = standings.ranked_by_points();
     let rank_of = |id| ranked.iter().position(|x| x == &id).map_or(0, |p| p + 1);
+    let seed_of = |id: EngineId| {
+        res.seeds
+            .iter()
+            .find(|(sid, _)| *sid == id)
+            .map_or(1500.0, |(_, s)| *s)
+    };
 
     let mut rows: Vec<ResultRow> = res
         .participants
@@ -2257,12 +2271,23 @@ fn build_rows(res: &TournamentResults) -> Vec<ResultRow> {
         .map(|p| {
             let st = standings.standing(p.id);
             let e = res.elo.get(&p.id).copied().unwrap_or_default();
+            // Same writeback semantics as the live table: under "Never" the
+            // Elo column keeps the start rating and no engine gets a Δ;
+            // otherwise only engines the tournament updates show one.
+            let (elo, elo_delta) = if matches!(res.rating_writeback, RatingWriteback::None) {
+                (seed_of(p.id), None)
+            } else {
+                (
+                    e.current,
+                    res.rating_writeback.applies_to(p.id).then_some(e.delta),
+                )
+            };
             ResultRow {
                 rank: rank_of(p.id),
                 name: p.name.clone(),
                 version: p.version.clone(),
-                elo: e.current,
-                elo_delta: e.delta,
+                elo,
+                elo_delta,
                 elo_error: e.error,
                 points: st.points(),
                 games: st.games(),
@@ -2716,7 +2741,7 @@ mod tests {
             name: "E".to_string(),
             version: String::new(),
             elo,
-            elo_delta: 0.0,
+            elo_delta: Some(0.0),
             elo_error: None,
             points,
             games: 0,

@@ -883,6 +883,10 @@ pub struct TournamentResults {
     pub standings: Standings,
     pub elo: HashMap<EngineId, EloEntry>,
     pub participants: Vec<ResultParticipant>,
+    /// The tournament's rating-writeback mode (which engines' deltas count).
+    pub rating_writeback: colosseum_core::RatingWriteback,
+    /// Tournament-start ratings per participant.
+    pub seeds: Vec<(EngineId, f64)>,
     pub games_finished: usize,
     pub games_total: usize,
     /// Finished games with a decisive (non-draw) result.
@@ -957,6 +961,8 @@ pub fn load_tournament_results(
         elo: elo_entries(&standings, &seeds, &row.config.rating_writeback),
         standings,
         participants,
+        rating_writeback: row.config.rating_writeback.clone(),
+        seeds,
         games_finished: finished,
         games_total: total_games,
         decisive,
