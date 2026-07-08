@@ -59,7 +59,11 @@ const MIN_BOARD: f32 = 320.0;
 /// appear once *this* size no longer fits.
 const MIN_SIDE: f32 = {
     let column = 2.0 * PANEL_MIN + GRAPH_MIN + 2.0 * DIVIDER_H + 2.0 * CARD_PAD;
-    if MIN_BOARD > column { MIN_BOARD } else { column }
+    if MIN_BOARD > column {
+        MIN_BOARD
+    } else {
+        column
+    }
 };
 /// Hold the result banner this long before auto-following to the next game.
 const FOLLOW_DELAY: Duration = Duration::from_secs(2);
@@ -196,10 +200,7 @@ impl LiveViews {
         // The dot glows green while games are in flight — visible from the
         // Standings lens too.
         let (label, dot) = if in_flight > 0 {
-            (
-                format!("Live ({in_flight})"),
-                Some(theme::success()),
-            )
+            (format!("Live ({in_flight})"), Some(theme::success()))
         } else {
             ("Live".to_string(), None)
         };
@@ -267,9 +268,8 @@ impl LiveViews {
                     .exact_size(24.0)
                     .resizable(false)
                     .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(2, 6)))
-                    .show_inside(ui, |ui| {
-                        if widgets::expand_strip(ui, "›", &format!("Playing ({})", games.len()))
-                        {
+                    .show(ui, |ui| {
+                        if widgets::expand_strip(ui, "›", &format!("Playing ({})", games.len())) {
                             *rail_collapsed = false;
                         }
                     });
@@ -284,7 +284,7 @@ impl LiveViews {
                         top: 0,
                         bottom: 0,
                     }))
-                    .show_inside(ui, |ui| {
+                    .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
                                 RichText::new(format!("Playing ({})", games.len()))
@@ -322,9 +322,7 @@ impl LiveViews {
         // Everything scales down together to `MIN_SIDE` (every column's
         // minimum content still fits there); only below that do scrollbars
         // appear, with the layout frozen at its minimum.
-        let board_side = usable_h
-            .min(usable_w - left_cols - RIGHT_MIN)
-            .max(MIN_SIDE);
+        let board_side = usable_h.min(usable_w - left_cols - RIGHT_MIN).max(MIN_SIDE);
         // The engine column takes the remaining width (clamped), so a wide
         // window widens the graph instead of leaving a blank strip on the right.
         let right_w = (usable_w - left_cols - board_side).clamp(RIGHT_MIN, RIGHT_MAX);
@@ -460,8 +458,8 @@ impl ViewState {
             .as_ref()
             .is_none_or(|r| r.game_id != game_id || r.applied > snap.uci.len());
         if rebuild {
-            let standard = snap.start_fen.is_none()
-                || snap.start_fen.as_deref().is_some_and(is_standard_fen);
+            let standard =
+                snap.start_fen.is_none() || snap.start_fen.as_deref().is_some_and(is_standard_fen);
             let pos = snap
                 .start_fen
                 .as_deref()
@@ -791,7 +789,11 @@ fn material_row(ui: &mut Ui, board: &shakmaty::Board) {
 
     if white_up.is_empty() && black_up.is_empty() {
         ui.vertical_centered(|ui| {
-            ui.label(RichText::new("material even").color(theme::text_faint()).size(12.0));
+            ui.label(
+                RichText::new("material even")
+                    .color(theme::text_faint())
+                    .size(12.0),
+            );
         });
         return;
     }
@@ -804,8 +806,7 @@ fn material_row(ui: &mut Ui, board: &shakmaty::Board) {
         ui.add_space(((ui.available_width() - run_w) / 2.0).max(0.0));
         let draw = |ui: &mut Ui, roles: &[Role], color: ChessColor| {
             for &role in roles {
-                let (rect, _) =
-                    ui.allocate_exact_size(vec2(PIECE - 6.0, PIECE), Sense::hover());
+                let (rect, _) = ui.allocate_exact_size(vec2(PIECE - 6.0, PIECE), Sense::hover());
                 let rect = Rect::from_min_size(rect.min, vec2(PIECE, PIECE));
                 egui::Image::new(board::piece_source(color, role)).paint_at(ui, rect);
             }
@@ -828,13 +829,20 @@ fn material_row(ui: &mut Ui, board: &shakmaty::Board) {
 // ── Board extras ────────────────────────────────────────────────────────────
 
 fn result_banner(ui: &Ui, board_rect: Rect, result: GameResult, termination: Termination) {
-    let text = format!("{} · {}", result_label(result), termination_label(termination));
+    let text = format!(
+        "{} · {}",
+        result_label(result),
+        termination_label(termination)
+    );
     let painter = ui.painter();
     let galley = painter.layout_no_wrap(text, theme::semibold(15.0), theme::text());
     let pad = vec2(14.0, 8.0);
     let size = galley.size() + pad * 2.0;
     let rect = Rect::from_center_size(
-        pos2(board_rect.center().x, board_rect.top() + size.y / 2.0 + 12.0),
+        pos2(
+            board_rect.center().x,
+            board_rect.top() + size.y / 2.0 + 12.0,
+        ),
         size,
     );
     painter.rect(
@@ -1039,7 +1047,13 @@ fn engine_panel(
                 .find(|e| e.id == data.engine)
                 .and_then(|e| e.meta.extra.get("logo").cloned());
             let drew = logo_file.is_some_and(|file| {
-                logo::draw_fitted(ui, logos, &backend.dirs.logos_dir().join(file), logo_rect, 6)
+                logo::draw_fitted(
+                    ui,
+                    logos,
+                    &backend.dirs.logos_dir().join(file),
+                    logo_rect,
+                    6,
+                )
             });
             if !drew {
                 widgets::draw_avatar_square_in(ui, logo_rect, data.name, false, 6);
@@ -1056,93 +1070,89 @@ fn engine_panel(
             );
             header.set_clip_rect(content_rect.intersect(ui.clip_rect()));
             {
-                    let ui = &mut header;
-                    // 4 · Clock, pinned right (laid out first so the name
-                    // truncates against it, but drawn at the right edge).
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        clock_chip(ui, data);
-                        ui.add_space(8.0);
+                let ui = &mut header;
+                // 4 · Clock, pinned right (laid out first so the name
+                // truncates against it, but drawn at the right edge).
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    clock_chip(ui, data);
+                    ui.add_space(8.0);
 
-                        // 3 · Search stats stacked: depth / nodes / nps.
-                        // Fixed width — a `with_layout` child would claim all
-                        // remaining space and overlap the name/eval section.
-                        ui.allocate_ui_with_layout(
-                            vec2(96.0, HEADER_H),
-                            egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                ui.set_max_width(96.0);
-                                // Three rows must fit the 72-pt header: keep
-                                // them tight or the last one clips.
-                                ui.spacing_mut().item_spacing.y = 2.0;
-                                ui.add_space(6.0);
-                                let depth = match (data.search.depth, data.search.seldepth) {
-                                    (Some(d), Some(s)) => format!("{d}/{s}"),
-                                    (Some(d), None) => d.to_string(),
-                                    _ => "—".to_string(),
-                                };
-                                stat_row(ui, "depth", &depth);
-                                stat_row(ui, "nodes", &format_count(data.search.nodes));
-                                stat_row(ui, "nps", &format_count(data.search.nps));
-                            },
-                        );
-                        ui.add_space(10.0);
+                    // 3 · Search stats stacked: depth / nodes / nps.
+                    // Fixed width — a `with_layout` child would claim all
+                    // remaining space and overlap the name/eval section.
+                    ui.allocate_ui_with_layout(
+                        vec2(96.0, HEADER_H),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_max_width(96.0);
+                            // Three rows must fit the 72-pt header: keep
+                            // them tight or the last one clips.
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            ui.add_space(6.0);
+                            let depth = match (data.search.depth, data.search.seldepth) {
+                                (Some(d), Some(s)) => format!("{d}/{s}"),
+                                (Some(d), None) => d.to_string(),
+                                _ => "—".to_string(),
+                            };
+                            stat_row(ui, "depth", &depth);
+                            stat_row(ui, "nodes", &format_count(data.search.nodes));
+                            stat_row(ui, "nps", &format_count(data.search.nps));
+                        },
+                    );
+                    ui.add_space(10.0);
 
-                        // 2 · Name + version over the big eval, filling the rest.
-                        ui.with_layout(
-                            egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                ui.spacing_mut().item_spacing.y = 3.0;
-                                ui.horizontal(|ui| {
-                                    let (dot, _) = ui
-                                        .allocate_exact_size(vec2(9.0, 9.0), Sense::hover());
-                                    ui.painter().circle_filled(dot.center(), 4.5, series);
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(data.name)
-                                                .color(theme::text())
-                                                .font(theme::semibold(15.0)),
-                                        )
-                                        .truncate(),
-                                    );
-                                });
-                                ui.horizontal(|ui| {
-                                    let (text, color) = match data.search.score {
-                                        Some(score) => (
-                                            format_score(score),
-                                            if data.thinking {
-                                                series
-                                            } else {
-                                                theme::text_weak()
-                                            },
-                                        ),
-                                        None => ("—".to_string(), theme::text_faint()),
-                                    };
-                                    // Truncating label: a long eval ("−16.02")
-                                    // in a narrow card elides instead of
-                                    // painting over the stats section.
-                                    ui.add(
-                                        egui::Label::new(RichText::new(text).color(color).font(
-                                            egui::FontId::new(24.0, egui::FontFamily::Monospace),
-                                        ))
-                                        .truncate(),
-                                    );
-                                    if data.thinking && ui.available_width() >= 56.0 {
-                                        ui.label(
-                                            RichText::new("thinking…")
-                                                .color(theme::accent())
-                                                .size(10.5),
-                                        );
-                                    } else if data.pondering && ui.available_width() >= 64.0 {
-                                        ui.label(
-                                            RichText::new("pondering…")
-                                                .color(theme::text_weak())
-                                                .size(10.5),
-                                        );
-                                    }
-                                });
-                            },
-                        );
+                    // 2 · Name + version over the big eval, filling the rest.
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.spacing_mut().item_spacing.y = 3.0;
+                        ui.horizontal(|ui| {
+                            let (dot, _) = ui.allocate_exact_size(vec2(9.0, 9.0), Sense::hover());
+                            ui.painter().circle_filled(dot.center(), 4.5, series);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(data.name)
+                                        .color(theme::text())
+                                        .font(theme::semibold(15.0)),
+                                )
+                                .truncate(),
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            let (text, color) = match data.search.score {
+                                Some(score) => (
+                                    format_score(score),
+                                    if data.thinking {
+                                        series
+                                    } else {
+                                        theme::text_weak()
+                                    },
+                                ),
+                                None => ("—".to_string(), theme::text_faint()),
+                            };
+                            // Truncating label: a long eval ("−16.02")
+                            // in a narrow card elides instead of
+                            // painting over the stats section.
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(text)
+                                        .color(color)
+                                        .font(egui::FontId::new(24.0, egui::FontFamily::Monospace)),
+                                )
+                                .truncate(),
+                            );
+                            if data.thinking && ui.available_width() >= 56.0 {
+                                ui.label(
+                                    RichText::new("thinking…").color(theme::accent()).size(10.5),
+                                );
+                            } else if data.pondering && ui.available_width() >= 64.0 {
+                                ui.label(
+                                    RichText::new("pondering…")
+                                        .color(theme::text_weak())
+                                        .size(10.5),
+                                );
+                            }
+                        });
                     });
+                });
             }
 
             // The engine's search output: one line per completed depth of the
@@ -1243,7 +1253,11 @@ fn clock_chip(ui: &mut Ui, data: &PanelData<'_>) {
         .fill(fill)
         .stroke(Stroke::new(
             1.0,
-            if active { theme::accent() } else { theme::stroke() },
+            if active {
+                theme::accent()
+            } else {
+                theme::stroke()
+            },
         ))
         .corner_radius(egui::CornerRadius::same(4))
         .inner_margin(egui::Margin::symmetric(10, 6))

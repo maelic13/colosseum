@@ -97,9 +97,7 @@ fn elo_entries(
         RatingWriteback::None | RatingWriteback::All => {
             colosseum_core::ml_ratings(standings, seeds)
         }
-        RatingWriteback::Chosen(ids) => {
-            colosseum_core::ml_ratings_anchored(standings, seeds, ids)
-        }
+        RatingWriteback::Chosen(ids) => colosseum_core::ml_ratings_anchored(standings, seeds, ids),
         RatingWriteback::Estimate(id) => {
             colosseum_core::ml_ratings_anchored(standings, seeds, &[*id])
         }
@@ -1026,10 +1024,20 @@ fn resolve_options(
     // engine that only knows "Max CPUs" would be ignored, and sending an
     // out-of-range Hash can crash engines (e.g. Rybka 3).
     if let Some(threads) = common.threads {
-        insert_matched(&mut values, engine, colosseum_core::is_thread_option, i64::from(threads));
+        insert_matched(
+            &mut values,
+            engine,
+            colosseum_core::is_thread_option,
+            i64::from(threads),
+        );
     }
     if let Some(hash) = common.hash_mb {
-        insert_matched(&mut values, engine, colosseum_core::is_hash_option, i64::from(hash));
+        insert_matched(
+            &mut values,
+            engine,
+            colosseum_core::is_hash_option,
+            i64::from(hash),
+        );
     }
     if common.tablebases {
         if let Some(path) = &common.syzygy_path

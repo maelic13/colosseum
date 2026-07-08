@@ -36,8 +36,7 @@ static BOOK: LazyLock<HashMap<u64, Opening>> = LazyLock::new(|| {
     for tsv in TSV {
         for line in tsv.lines().skip(1) {
             let mut cols = line.split('\t');
-            let (Some(eco), Some(name), Some(pgn)) = (cols.next(), cols.next(), cols.next())
-            else {
+            let (Some(eco), Some(name), Some(pgn)) = (cols.next(), cols.next(), cols.next()) else {
                 continue;
             };
             let mut pos = Chess::default();
@@ -118,10 +117,12 @@ mod tests {
 
     #[test]
     fn classifies_najdorf() {
-        let moves: Vec<String> = ["e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6", "b1c3", "a7a6"]
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect();
+        let moves: Vec<String> = [
+            "e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6", "b1c3", "a7a6",
+        ]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
         let op = classify(None, &moves).expect("known opening");
         assert_eq!(op.eco, "B90");
         assert!(op.name.contains("Najdorf"), "got {}", op.name);
@@ -140,6 +141,9 @@ mod tests {
     #[test]
     fn custom_fen_is_not_classified() {
         let moves = vec!["e2e4".to_string()];
-        assert_eq!(classify(Some("4k3/8/8/8/8/8/8/4K3 w - - 0 1"), &moves), None);
+        assert_eq!(
+            classify(Some("4k3/8/8/8/8/8/8/4K3 w - - 0 1"), &moves),
+            None
+        );
     }
 }

@@ -61,7 +61,12 @@ pub fn round_robin(engines: &[EngineId], cycles: u32, games_per_pair: u32) -> Ve
 /// Returns an empty schedule if there are fewer than two engines, if `seeds` is zero
 /// or leaves no opponents (`seeds >= n`), or if `cycles`/`games_per_pair` is zero.
 #[must_use]
-pub fn gauntlet(engines: &[EngineId], seeds: u32, cycles: u32, games_per_pair: u32) -> Vec<Pairing> {
+pub fn gauntlet(
+    engines: &[EngineId],
+    seeds: u32,
+    cycles: u32,
+    games_per_pair: u32,
+) -> Vec<Pairing> {
     let n = engines.len();
     let seeds = seeds as usize;
     if n < 2 || cycles == 0 || games_per_pair == 0 || seeds == 0 || seeds >= n {

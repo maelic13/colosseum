@@ -386,9 +386,7 @@ impl EngineProcess {
                 // (Fruit 2.1 does) — treat that as unreported and derive the
                 // real speed from nodes over wall-clock time instead.
                 let nps = nps.or_else(|| {
-                    nodes.map(|n: u64| {
-                        (n as f64 / elapsed.as_secs_f64().max(0.001)).round() as u64
-                    })
+                    nodes.map(|n: u64| (n as f64 / elapsed.as_secs_f64().max(0.001)).round() as u64)
                 });
                 return Ok(SearchOutput {
                     best_move,

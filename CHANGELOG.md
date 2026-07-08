@@ -6,17 +6,92 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased]
+## [1.0.0] — 2026-07-08
+
+The first stable release. Since 0.1.0 the app has been redesigned around the
+**Arena** tab (live standings + live game view), gained real ratings math,
+UCI pondering, and Linux packages.
 
 ### Added
-- Live game view: the Results tab gains a `Standings | Live` switcher for running tournaments — full-size board (bundled cburnett pieces, CC BY-SA 3.0), move list with ECO opening name (embedded lichess openings database, CC0), material imbalance, per-engine panels (logo, live eval/depth/nodes/nps/PV, ticking clocks) and a raw-eval graph with adaptive ±1…±10 range whose zero line sits level with the board midline; games rail with auto-follow for parallel play; clicking a game in the "Playing" panel jumps straight to it
-- "Time/move" column in the live and history results tables: mean wall-clock time per move per engine
-- "Avg depth" column in the live and history results tables: mean search depth per engine (averaged per move within a game, then across games), persisted per game in the database
-- Theme setting: Dark / Light / System (follows the OS), switchable from the status bar and persisted in `config.toml`
-- One-step build scripts (`build_macos.sh`, `build_linux.sh`, `build_windows.ps1`) that place the distributable in `dist/`; the macOS one assembles a double-clickable `Colosseum.app` (no Terminal window)
+
+#### Arena (replaces the Results tab)
+- Live game view with a `Standings | Live` switcher: full-size board
+  (bundled cburnett pieces), move list with ECO opening names (embedded
+  lichess openings database), material balance, and per-engine panels —
+  logo, live eval, depth/nodes/nps, big ticking clocks, and a Fritz-style
+  per-depth search output log
+- Evaluation graph between the engine panels, fed by **both** engines every
+  ply — including the eval of the engine pondering on its opponent's time
+- Games rail for parallel play with auto-follow; when a watched game ends,
+  auto-follow jumps to the newly launched replacement game from move one
+- Standings lens: sortable table (Elo, Δ, points, W-D-L, avg nps, avg depth,
+  time/move, forfeits), head-to-head matrix (counts or per-game results),
+  termination breakdown, and a settings summary in the side rail
+- Tournament management: rename (inline in the header or via the list's
+  right-click menu), multi-select with ctrl/shift click, context-menu
+  Start / Stop / Force-stop / Delete for single or bulk selections
+- Collapsible tournaments list and games rail; auto-load of the newest
+  tournament on entry
+- Incident forensics: engine crashes/timeouts/illegal moves write a per-game
+  report (UCI transcript + stderr) under `data/logs/incidents/`
+
+#### Ratings
+- Ordo-style joint maximum-likelihood ratings, recomputed from the full
+  standings after every game (never incremental K-factor), anchored to the
+  participants' tournament-start ratings, with Fisher-information error bars
+- Bayesian damping: virtual draws against each engine's prior keep a single
+  upset from producing absurd rating swings
+- Library write-back modes: **Never**, **All engines**, or **Chosen
+  engines** (checkbox picker); applied after every finished game — the
+  non-chosen engines stay anchored, visually and in the math
+
+#### Engines & tournament setup
+- Full UCI **pondering**: engines think on the opponent's time
+  (`go ponder` / `ponderhit`), bail-outs and prediction misses handled;
+  the live view shows "pondering…" with streaming search output
+- **Use endgame tablebases** tournament option: off withholds every
+  tablebase option from the engines without touching the global paths
+- Gauntlet format (seeds vs. the field) alongside round robin
+- Time controls: sudden death, base + increment, fixed nodes, fixed depth —
+  in addition to time per move
+- Global endgame-tablebase configuration (Syzygy / Nalimov / Gaviota paths,
+  probe caches, 50-move rule, compression) shared by all engines
+- Engine logos (auto-matched from a logo folder), change-executable, clone,
+  multi-select with context menu (re-detect, open containing folder, delete)
+- Allowlist-based UCI option mapping: thread/hash values are forwarded to
+  whatever the engine actually calls them, clamped to declared ranges —
+  and never to look-alikes (Rybka's "CPU Usage" throttle stays untouched)
+- Config presets + last-used configuration restored on start
+- Per-engine tournament overrides (beat library and common options)
+
+#### App
+- About dialog with a real **Check for updates** (queries GitHub releases,
+  opens the download page; degrades gracefully offline)
+- Theme setting: Dark / Light / System, persisted
+- Avg depth and time/move statistics per engine, persisted per game
+- One-transaction schedule inserts (large tournaments no longer freeze the
+  UI on start)
+
+### Changed
+- Engine identity is "name version" everywhere a single string names an
+  engine (PGN tags, live view, standings, error messages)
+- Tournament deletion force-stops and unloads a running tournament first;
+  bulk delete handles the currently loaded tournament correctly
+- Store connections use WAL plus a busy timeout — concurrent GUI/driver
+  writes no longer fail spuriously
+- Force-stopped games are requeued at the front of the schedule and replay
+  in launch order on resume; round numbering stays correct
+- Termination counts and play clocks survive stop/resume
+- Linux packaging: `.deb` and `.rpm` packages (with desktop entry and icon)
+  replace the Flatpak manifest
 
 ### Fixed
-- The live "Playing" panel now shows all in-flight games; it previously lagged one behind the parallel-games limit and kept killed games listed after Force-Stop
+- Engines reporting `nps 0` (e.g. Fruit) get their speed derived from
+  nodes/time
+- Live "Playing" panel shows all in-flight games and drops killed ones
+  after Force-Stop
+- Countless live-view layout fixes: no stray scrollbars above the minimum
+  size, stable engine-card headers at any width, hover-stable widgets
 
 ---
 

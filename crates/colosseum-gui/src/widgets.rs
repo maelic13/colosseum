@@ -146,8 +146,7 @@ pub fn rank_badge(ui: &mut Ui, rank: usize) {
     };
     match medal {
         Some(c) => {
-            let (rect, _) =
-                ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
             ui.painter().circle(
                 rect.center(),
                 9.0,
@@ -300,7 +299,7 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, label: &str) -> egui::Response 
 /// edge. Returns the closure result while the popup is open.
 pub fn select<R>(
     ui: &mut Ui,
-    id_salt: impl std::hash::Hash,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
     current: &str,
     min_width: f32,
     add_contents: impl FnOnce(&mut Ui) -> R,
@@ -309,13 +308,12 @@ pub fn select<R>(
         // Trailing spaces reserve room for the painted dropdown arrow.
         let button = egui::Button::new(RichText::new(format!("{current}    ")))
             .min_size(egui::vec2(min_width, ui.spacing().interact_size.y));
-        let (resp, inner) =
-            egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
-                ui.set_min_width((min_width - 8.0).max(60.0));
-                ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
-                ui.spacing_mut().item_spacing.y = 2.0;
-                add_contents(ui)
-            });
+        let (resp, inner) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
+            ui.set_min_width((min_width - 8.0).max(60.0));
+            ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
+            ui.spacing_mut().item_spacing.y = 2.0;
+            add_contents(ui)
+        });
         dropdown_arrow(ui, resp.rect);
         inner.map(|i| i.inner)
     })
@@ -343,7 +341,108 @@ pub fn dropdown_arrow(ui: &Ui, rect: egui::Rect) {
 /// Place it to the right of the field it clears; show it only when there is
 /// something to clear.
 pub fn clear_button(ui: &mut Ui) -> egui::Response {
-    ui.add(egui::Button::new(RichText::new("×").color(theme::text_weak())))
+    ui.add(egui::Button::new(
+        RichText::new("×").color(theme::text_weak()),
+    ))
+}
+
+/// One "side + engine" row for compact game cards: a *painted* color square
+/// (the ⬜/⬛ glyphs come from the emoji fallback font at different sizes,
+/// misaligning the two rows) followed by a truncating engine name.
+pub fn side_engine_row(ui: &mut Ui, is_white: bool, name: &str, color: Color32, size: f32) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 5.0;
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 12.0), egui::Sense::hover());
+        let square = egui::Rect::from_center_size(rect.center(), egui::vec2(9.0, 9.0));
+        let fill = if is_white {
+            Color32::from_gray(225)
+        } else {
+            Color32::from_gray(28)
+        };
+        ui.painter().rect(
+            square,
+            egui::CornerRadius::same(2),
+            fill,
+            egui::Stroke::new(1.0, Color32::from_gray(120)),
+            egui::StrokeKind::Inside,
+        );
+        ui.add(egui::Label::new(RichText::new(name).color(color).size(size)).truncate());
+    });
+}
+
+/// Shared chrome for the painted icon buttons below: a fixed 22-pt square
+/// with the standard widget frame, returning the response and the icon color
+/// (weak at rest, full text color on hover — color only, size never changes).
+fn icon_button(ui: &mut Ui) -> (egui::Rect, egui::Response, Color32) {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+    let visuals = ui.style().interact(&resp);
+    ui.painter().rect(
+        rect,
+        visuals.corner_radius,
+        visuals.bg_fill,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+    let color = if resp.hovered() {
+        theme::text()
+    } else {
+        theme::text_weak()
+    };
+    (rect, resp, color)
+}
+
+/// A confirm button with a *painted* checkmark (the ✓ glyph is not in the
+/// embedded fonts — GUIDELINES §7.1: paint shapes instead of typing them).
+pub fn confirm_button(ui: &mut Ui) -> egui::Response {
+    let (rect, resp, _) = icon_button(ui);
+    let c = rect.center();
+    let stroke = egui::Stroke::new(1.8, theme::success());
+    ui.painter().line_segment(
+        [c + egui::vec2(-4.5, 0.5), c + egui::vec2(-1.5, 3.5)],
+        stroke,
+    );
+    ui.painter().line_segment(
+        [c + egui::vec2(-1.5, 3.5), c + egui::vec2(4.5, -3.5)],
+        stroke,
+    );
+    resp
+}
+
+/// A cancel button with a painted × (matches `confirm_button`'s size, unlike
+/// the text-glyph `clear_button`).
+pub fn cancel_button(ui: &mut Ui) -> egui::Response {
+    let (rect, resp, color) = icon_button(ui);
+    let c = rect.center();
+    let stroke = egui::Stroke::new(1.6, color);
+    ui.painter().line_segment(
+        [c + egui::vec2(-3.5, -3.5), c + egui::vec2(3.5, 3.5)],
+        stroke,
+    );
+    ui.painter().line_segment(
+        [c + egui::vec2(-3.5, 3.5), c + egui::vec2(3.5, -3.5)],
+        stroke,
+    );
+    resp
+}
+
+/// An edit button with a painted pencil (no pencil glyph in the embedded
+/// fonts): a diagonal body with a nib triangle at the lower-left end.
+pub fn edit_button(ui: &mut Ui) -> egui::Response {
+    let (rect, resp, color) = icon_button(ui);
+    let c = rect.center();
+    // Body: thick diagonal stroke from lower-left to upper-right.
+    let body_from = c + egui::vec2(-1.6, 1.6);
+    let body_to = c + egui::vec2(4.2, -4.2);
+    ui.painter()
+        .line_segment([body_from, body_to], egui::Stroke::new(2.6, color));
+    // Nib: small triangle pointing to the lower-left corner.
+    let tip = c + egui::vec2(-4.6, 4.6);
+    ui.painter().add(egui::Shape::convex_polygon(
+        vec![tip, c + egui::vec2(-3.4, 0.6), c + egui::vec2(-0.6, 3.4)],
+        color,
+        egui::Stroke::NONE,
+    ));
+    resp
 }
 
 /// The standard filter/search field: fixed 28 pt height with comfortable
@@ -443,14 +542,20 @@ pub fn sort_engine_indices(engines: &[EngineConfig], indices: &mut [usize], sort
 pub fn engine_sort_select(ui: &mut Ui, id_salt: &str, config_value: &mut String) -> bool {
     let mut sort = EngineSort::from_config(config_value);
     let prev = sort;
-    select(ui, id_salt, &format!("Sort: {}", sort.label()), 110.0, |ui| {
-        for s in EngineSort::ALL {
-            if ui.selectable_label(sort == s, s.label()).clicked() {
-                sort = s;
-                ui.close();
+    select(
+        ui,
+        id_salt,
+        &format!("Sort: {}", sort.label()),
+        110.0,
+        |ui| {
+            for s in EngineSort::ALL {
+                if ui.selectable_label(sort == s, s.label()).clicked() {
+                    sort = s;
+                    ui.close();
+                }
             }
-        }
-    });
+        },
+    );
     if sort != prev {
         *config_value = sort.as_config().to_string();
         true
@@ -585,7 +690,7 @@ pub fn choice_chip<T: PartialEq>(
 pub fn dots_button(
     ui: &mut Ui,
     rect: egui::Rect,
-    id_salt: impl std::hash::Hash,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
     emphasized: bool,
 ) -> egui::Response {
     let resp = ui.interact(rect, ui.id().with(id_salt), egui::Sense::click());
@@ -645,8 +750,11 @@ pub fn disclosure_triangle(ui: &mut Ui, open: bool, color: Color32) {
             c + egui::vec2(-r * 0.5, r),
         ]
     };
-    ui.painter()
-        .add(egui::Shape::convex_polygon(points, color, egui::Stroke::NONE));
+    ui.painter().add(egui::Shape::convex_polygon(
+        points,
+        color,
+        egui::Stroke::NONE,
+    ));
 }
 
 /// Small tinted chip for Elo Δ values. Zero-ish delta shows a plain dim zero.
@@ -684,7 +792,11 @@ pub fn uci_option_row(
     overrides: &mut BTreeMap<String, UciOptionValue>,
     dirty: &mut bool,
 ) {
-    ui.label(RichText::new(opt.name()).color(theme::text_weak()).size(13.0));
+    ui.label(
+        RichText::new(opt.name())
+            .color(theme::text_weak())
+            .size(13.0),
+    );
 
     match opt {
         UciOption::Check { name, default } => {
@@ -772,7 +884,11 @@ pub fn uci_option_row(
             } else {
                 "run at game start"
             };
-            let color = if armed { theme::success() } else { theme::text_weak() };
+            let color = if armed {
+                theme::success()
+            } else {
+                theme::text_weak()
+            };
             if ui
                 .add(egui::Button::new(RichText::new(label).color(color)))
                 .on_hover_text(if armed {

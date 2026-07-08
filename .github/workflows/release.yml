@@ -38,8 +38,7 @@ jobs:
             arch: arm64
             wix_arch: arm64
 
-          # Linux x86-64 → .tar.gz
-          # (Flatpak is built separately — see flatpak/ directory)
+          # Linux x86-64 → .tar.gz + .deb + .rpm
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             platform: linux
@@ -163,6 +162,27 @@ jobs:
           tar -C staging -czf "${name}.tar.gz" "${name}"
           echo "ARTIFACT_TGZ=${name}.tar.gz" >> "$GITHUB_ENV"
 
+      # ── Linux: .deb + .rpm ──────────────────────────────────────────────────
+      # Package the binary already built above (--no-build); asset lists and
+      # metadata live in crates/colosseum-gui/Cargo.toml
+      # ([package.metadata.deb] / [package.metadata.generate-rpm]).
+      - name: Package .deb and .rpm (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cargo install cargo-deb cargo-generate-rpm --locked
+          tag='${{ github.ref_name }}'
+          base="colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}"
+
+          cargo deb -p colosseum-gui --no-build --target ${{ matrix.target }} \
+            -o "${base}.deb"
+          test -f "${base}.deb" || { echo "ERROR: .deb not produced"; exit 1; }
+          echo "ARTIFACT_DEB=${base}.deb" >> "$GITHUB_ENV"
+
+          cargo generate-rpm -p crates/colosseum-gui --target ${{ matrix.target }} \
+            -o "${base}.rpm"
+          test -f "${base}.rpm" || { echo "ERROR: .rpm not produced"; exit 1; }
+          echo "ARTIFACT_RPM=${base}.rpm" >> "$GITHUB_ENV"
+
       # ── macOS: tar.gz ───────────────────────────────────────────────────────
       - name: Package tar.gz (macOS)
         if: runner.os == 'macOS'
@@ -243,6 +263,20 @@ jobs:
         with:
           name: tgz-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_TGZ }}
+
+      - name: Upload DEB
+        if: env.ARTIFACT_DEB != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ env.ARTIFACT_DEB }}
+
+      - name: Upload RPM
+        if: env.ARTIFACT_RPM != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ env.ARTIFACT_RPM }}
 
       - name: Upload DMG
         if: env.ARTIFACT_DMG != ''

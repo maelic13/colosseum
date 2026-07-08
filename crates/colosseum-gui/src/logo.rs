@@ -12,7 +12,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use eframe::egui::{self, Color32, ColorImage, Rect, Sense, TextureHandle, TextureOptions, Ui, Vec2, pos2};
+use eframe::egui::{
+    self, Color32, ColorImage, Rect, Sense, TextureHandle, TextureOptions, Ui, Vec2, pos2,
+};
 use image::RgbaImage;
 use image::imageops::FilterType;
 

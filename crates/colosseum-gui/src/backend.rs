@@ -126,7 +126,6 @@ impl Backend {
         self.actives.iter().find(|a| a.handle.id == id)
     }
 
-
     /// Drain pending tournament events and return the repaint interval the UI
     /// should request this frame (`Some` while live, `None` when idle).
     ///
@@ -342,6 +341,22 @@ impl Backend {
         Ok(())
     }
 
+    /// Rename a tournament, in the database and in the loaded state. (A
+    /// running tournament's PGN `Event` tag keeps the old name for games
+    /// already in flight; games launched after the next resume use the new
+    /// one.)
+    pub fn rename_tournament(&mut self, id: TournamentId, name: &str) -> anyhow::Result<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            anyhow::bail!("The name cannot be empty.");
+        }
+        self.store.rename_tournament(id, name)?;
+        if let Some(active) = self.actives.iter_mut().find(|a| a.handle.id == id) {
+            active.name = name.to_string();
+        }
+        Ok(())
+    }
+
     /// Concatenate the PGN of every finished game in a tournament, in play
     /// order, separated by blank lines. Empty if no games have finished yet.
     pub fn collect_pgn(&self, id: TournamentId) -> anyhow::Result<String> {
@@ -433,7 +448,6 @@ impl Backend {
             active.handle.set_concurrency(limit);
         }
     }
-
 }
 
 /// The repaint interval for a given tournament status: a steady ~30 Hz while

@@ -517,8 +517,11 @@ these to every tab** so the app stays cohesive; most are already global via
   headers, section titles.
 - **Glyph policy**: only use glyphs verified present in the embedded/fallback
   fonts — `● ○ × ⚠ ♟ 🔍 ⏳ ▾ …`. Known-missing (render as tofu): `✕ ✓ ▶ ▼`.
-  For arrows/icons beyond the safe set, **paint the shape**
-  (`widgets::disclosure_triangle`) instead of typing a character.
+  Known-inconsistent (emoji fallback, mismatched metrics): `⬜ ⬛` — the two
+  render at different sizes and misalign adjacent rows. For arrows/icons
+  beyond the safe set, **paint the shape** (`widgets::disclosure_triangle`,
+  `widgets::side_engine_row`, `widgets::confirm_button`…) instead of typing
+  a character.
 
 ### 7.2 Interaction rules (theme-global)
 - `WidgetVisuals.expansion = 0` for hovered/active — growing widgets on hover

@@ -164,7 +164,11 @@ impl LiveGameState {
     /// The engine name for one side.
     #[must_use]
     pub fn name(&self, white: bool) -> &str {
-        if white { &self.white_name } else { &self.black_name }
+        if white {
+            &self.white_name
+        } else {
+            &self.black_name
+        }
     }
 }
 

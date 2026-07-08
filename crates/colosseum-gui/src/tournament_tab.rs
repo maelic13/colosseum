@@ -14,9 +14,9 @@ use std::path::{Path, PathBuf};
 use eframe::egui::{self, Color32, DragValue, Layout, RichText, ScrollArea, Ui};
 
 use colosseum_core::{
-    AdjudicationConfig, CommonEngineOptions, DrawAdjudication, EngineConfig, EngineId,
-    Format, OpeningBook, OpeningFormat, OpeningOrder, RatingWriteback, ResignAdjudication,
-    StartPosition, TimeControl, TimeUnit, TournamentConfig, UciOption, UciOptionValue,
+    AdjudicationConfig, CommonEngineOptions, DrawAdjudication, EngineConfig, EngineId, Format,
+    OpeningBook, OpeningFormat, OpeningOrder, RatingWriteback, ResignAdjudication, StartPosition,
+    TimeControl, TimeUnit, TournamentConfig, UciOption, UciOptionValue,
 };
 use colosseum_engine::{AppConfig, summarize};
 
@@ -639,7 +639,11 @@ fn format_duration(secs: f64) -> String {
     } else if s < 3600 {
         let m = s / 60;
         let rs = s % 60;
-        if rs == 0 { format!("{m}m") } else { format!("{m}m {rs:02}s") }
+        if rs == 0 {
+            format!("{m}m")
+        } else {
+            format!("{m}m {rs:02}s")
+        }
     } else if s < 86_400 {
         format!("{}h {:02}m", s / 3600, (s % 3600) / 60)
     } else {
@@ -718,7 +722,9 @@ impl TournamentTab {
                                     widgets::uci_option_row(ui, opt, overrides, &mut _dirty);
                                     if overrides.contains_key(opt.name()) {
                                         if ui
-                                            .add(egui::Button::new(RichText::new("×").color(theme::text_faint())))
+                                            .add(egui::Button::new(
+                                                RichText::new("×").color(theme::text_faint()),
+                                            ))
                                             .on_hover_text("Remove this override.")
                                             .clicked()
                                         {
@@ -741,7 +747,11 @@ impl TournamentTab {
                         "{n} option{} overridden",
                         if n == 1 { "" } else { "s" }
                     ))
-                    .color(if n > 0 { theme::accent() } else { theme::text_faint() })
+                    .color(if n > 0 {
+                        theme::accent()
+                    } else {
+                        theme::text_faint()
+                    })
                     .size(12.0),
                 );
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
@@ -762,12 +772,12 @@ impl TournamentTab {
                     if ui
                         .add_enabled(
                             n > 0,
-                            egui::Button::new(
-                                RichText::new("Reset all").color(theme::text_weak()),
-                            ),
+                            egui::Button::new(RichText::new("Reset all").color(theme::text_weak())),
                         )
-                        .on_hover_text("Remove every override — the engine plays with its \
-                             saved options and the tournament-wide settings.")
+                        .on_hover_text(
+                            "Remove every override — the engine plays with its \
+                             saved options and the tournament-wide settings.",
+                        )
                         .clicked()
                     {
                         overrides.clear();
@@ -865,7 +875,7 @@ impl TournamentTab {
                     .fill(theme::bg_darkest())
                     .inner_margin(egui::Margin::symmetric(14, 10)),
             )
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 self.setup_action_bar(ui, backend);
             });
 
@@ -878,7 +888,7 @@ impl TournamentTab {
                 right: 12,
                 ..Default::default()
             }))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 self.engine_selection(ui, backend);
             });
 
@@ -889,7 +899,7 @@ impl TournamentTab {
                 left: 12,
                 ..Default::default()
             }))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ScrollArea::vertical()
                     .id_salt("tournament_settings_scroll")
                     .auto_shrink([false, false])
@@ -917,7 +927,9 @@ impl TournamentTab {
                         .size(13.0),
                 );
                 if ui
-                    .add(egui::Button::new(RichText::new("×").color(theme::text_weak())))
+                    .add(egui::Button::new(
+                        RichText::new("×").color(theme::text_weak()),
+                    ))
                     .clicked()
                 {
                     self.start_error = None;
@@ -1002,115 +1014,112 @@ impl TournamentTab {
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
         )
         .ui(ui, |ui| {
-                // Fixed width: the preset list's ScrollArea doesn't shrink
-                // horizontally (`auto_shrink[0] = false`), so without a
-                // ceiling the popup expands all the way to the screen edge.
-                ui.set_width(300.0);
+            // Fixed width: the preset list's ScrollArea doesn't shrink
+            // horizontally (`auto_shrink[0] = false`), so without a
+            // ceiling the popup expands all the way to the screen edge.
+            ui.set_width(300.0);
 
-                // ── Save section ──────────────────────────────────────────
-                ui.label(
-                    RichText::new("Save current config as:")
-                        .color(theme::text_weak())
-                        .size(11.5),
-                );
-                ui.horizontal(|ui| {
-                    // Let the name field take the row minus the Save button.
-                    let save_w = 52.0;
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.preset_save_name)
-                            .desired_width(ui.available_width() - save_w - ui.spacing().item_spacing.x)
-                            .hint_text(if self.form.name.is_empty() {
-                                "Preset name"
-                            } else {
-                                &self.form.name
-                            }),
-                    );
-                    let effective = if self.preset_save_name.trim().is_empty() {
-                        self.form.name.trim().to_string()
-                    } else {
-                        self.preset_save_name.trim().to_string()
-                    };
-                    if ui
-                        .add_enabled(!effective.is_empty(), egui::Button::new("Save"))
-                        .clicked()
-                    {
-                        let data = self.form.to_preset(effective);
-                        if let Err(e) = self.preset_manager.save_preset(&data) {
-                            tracing::warn!("failed to save preset: {e}");
+            // ── Save section ──────────────────────────────────────────
+            ui.label(
+                RichText::new("Save current config as:")
+                    .color(theme::text_weak())
+                    .size(11.5),
+            );
+            ui.horizontal(|ui| {
+                // Let the name field take the row minus the Save button.
+                let save_w = 52.0;
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.preset_save_name)
+                        .desired_width(ui.available_width() - save_w - ui.spacing().item_spacing.x)
+                        .hint_text(if self.form.name.is_empty() {
+                            "Preset name"
                         } else {
-                            self.presets_cache = self.preset_manager.load_all();
-                            self.preset_save_name.clear();
-                            saved = true;
-                        }
-                    }
-                });
-
-                // ── Saved presets list ────────────────────────────────────
-                ui.separator();
-
-                let cache: Vec<PresetData> = self.presets_cache.clone();
-                if cache.is_empty() {
-                    ui.label(
-                        RichText::new("No presets saved yet.")
-                            .color(theme::text_faint())
-                            .size(12.0),
-                    );
+                            &self.form.name
+                        }),
+                );
+                let effective = if self.preset_save_name.trim().is_empty() {
+                    self.form.name.trim().to_string()
                 } else {
-                    // Let the list grow with its content up to roughly half the
-                    // window before scrolling. `min_scrolled_height` matters:
-                    // its 64 px default let the upward-opening popup squeeze
-                    // the list to a couple of rows plus a scrollbar even
-                    // though there was plenty of screen space to grow into.
-                    let max_h = (ui.ctx().content_rect().height() * 0.5).max(200.0);
-                    ScrollArea::vertical()
-                        .id_salt("preset_list_scroll")
-                        .max_height(max_h)
-                        .min_scrolled_height(max_h)
-                        .auto_shrink([false, true])
-                        .show(ui, |ui| {
-                            ui.set_min_width(200.0);
-                            for (i, preset) in cache.iter().enumerate() {
-                                ui.horizontal(|ui| {
-                                    // No min_size: a wide button centres its
-                                    // text, so names of different lengths
-                                    // looked scattered. Hugging the text
-                                    // left-aligns every name to the same edge.
-                                    if ui
-                                        .add(
-                                            egui::Button::new(
-                                                RichText::new(&preset.preset_name).size(12.5),
-                                            )
-                                            .frame(false),
+                    self.preset_save_name.trim().to_string()
+                };
+                if ui
+                    .add_enabled(!effective.is_empty(), egui::Button::new("Save"))
+                    .clicked()
+                {
+                    let data = self.form.to_preset(effective);
+                    if let Err(e) = self.preset_manager.save_preset(&data) {
+                        tracing::warn!("failed to save preset: {e}");
+                    } else {
+                        self.presets_cache = self.preset_manager.load_all();
+                        self.preset_save_name.clear();
+                        saved = true;
+                    }
+                }
+            });
+
+            // ── Saved presets list ────────────────────────────────────
+            ui.separator();
+
+            let cache: Vec<PresetData> = self.presets_cache.clone();
+            if cache.is_empty() {
+                ui.label(
+                    RichText::new("No presets saved yet.")
+                        .color(theme::text_faint())
+                        .size(12.0),
+                );
+            } else {
+                // Let the list grow with its content up to roughly half the
+                // window before scrolling. `min_scrolled_height` matters:
+                // its 64 px default let the upward-opening popup squeeze
+                // the list to a couple of rows plus a scrollbar even
+                // though there was plenty of screen space to grow into.
+                let max_h = (ui.ctx().content_rect().height() * 0.5).max(200.0);
+                ScrollArea::vertical()
+                    .id_salt("preset_list_scroll")
+                    .max_height(max_h)
+                    .min_scrolled_height(max_h)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.set_min_width(200.0);
+                        for (i, preset) in cache.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                // No min_size: a wide button centres its
+                                // text, so names of different lengths
+                                // looked scattered. Hugging the text
+                                // left-aligns every name to the same edge.
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            RichText::new(&preset.preset_name).size(12.5),
                                         )
-                                        .on_hover_text("Load this preset")
+                                        .frame(false),
+                                    )
+                                    .on_hover_text("Load this preset")
+                                    .clicked()
+                                {
+                                    load_idx = Some(i);
+                                    ui.close();
+                                }
+                                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui
+                                        .add(egui::Button::new(
+                                            RichText::new("×").color(theme::text_weak()),
+                                        ))
+                                        .on_hover_text("Delete preset")
                                         .clicked()
                                     {
-                                        load_idx = Some(i);
-                                        ui.close();
+                                        delete_name = Some(preset.preset_name.clone());
                                     }
-                                    ui.with_layout(
-                                        Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            if ui
-                                                .add(egui::Button::new(RichText::new("×").color(theme::text_weak())))
-                                                .on_hover_text("Delete preset")
-                                                .clicked()
-                                            {
-                                                delete_name =
-                                                    Some(preset.preset_name.clone());
-                                            }
-                                        },
-                                    );
                                 });
-                            }
-                        });
-                }
+                            });
+                        }
+                    });
+            }
 
-                if saved {
-                    ui.close();
-                }
-            },
-        );
+            if saved {
+                ui.close();
+            }
+        });
         widgets::dropdown_arrow(ui, menu_resp.rect);
 
         // Apply deferred actions.
@@ -1150,9 +1159,15 @@ impl TournamentTab {
             Ok(()) => {
                 self.start_error = None;
                 self.just_started = true;
-                // The chosen-engines set applies to the tournament just
-                // started only — the next setup begins with a clean slate.
+                // These settings apply to the tournament just started only —
+                // the next setup begins with a clean slate: rating updates
+                // back to Never with no chosen-engines leftovers (a lingering
+                // "chosen 0/n" would silently update nothing), and no PGN
+                // path that would append new games to the previous
+                // tournament's file.
                 self.form.chosen_included.clear();
+                self.form.elo_writeback = WritebackKind::Never;
+                self.form.pgn_path.clear();
                 // Persist the current form so the next session starts with the
                 // same settings.
                 let last = self.form.to_preset(String::new());
@@ -1263,8 +1278,7 @@ impl TournamentTab {
                 // comparator with the Engines tab).
                 let mut visible: Vec<usize> = (0..backend.engines.len())
                     .filter(|&i| {
-                        filter.is_empty()
-                            || widgets::engine_matches(&backend.engines[i], &filter)
+                        filter.is_empty() || widgets::engine_matches(&backend.engines[i], &filter)
                     })
                     .collect();
                 widgets::sort_engine_indices(
@@ -1376,8 +1390,9 @@ impl TournamentTab {
             // stays as the power-user path.
             let (slot, _) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
             if row_hovered || n_overrides > 0 {
-                let dots = widgets::dots_button(ui, slot, ("engine_opts", engine.id), n_overrides > 0)
-                    .on_hover_text("Tournament UCI options");
+                let dots =
+                    widgets::dots_button(ui, slot, ("engine_opts", engine.id), n_overrides > 0)
+                        .on_hover_text("Tournament UCI options");
                 if dots.clicked() {
                     open_overrides = true;
                 }
@@ -1501,26 +1516,26 @@ impl TournamentTab {
 
                     field_label(ui, "Format");
                     widgets::select(ui, "format_kind", f.format_kind.label(), 200.0, |ui| {
-                            for kind in [
-                                FormatKind::RoundRobin,
-                                FormatKind::Gauntlet,
-                                FormatKind::Knockout,
-                                FormatKind::Sprt,
-                            ] {
-                                if kind.is_supported() {
-                                    ui.selectable_value(&mut f.format_kind, kind, kind.label());
-                                } else {
-                                    ui.add_enabled(
-                                        false,
-                                        egui::Button::selectable(false, kind.label()),
-                                    )
-                                    .on_hover_text(
-                                        "Needs a result-dependent (dynamic) scheduler — \
+                        for kind in [
+                            FormatKind::RoundRobin,
+                            FormatKind::Gauntlet,
+                            FormatKind::Knockout,
+                            FormatKind::Sprt,
+                        ] {
+                            if kind.is_supported() {
+                                ui.selectable_value(&mut f.format_kind, kind, kind.label());
+                            } else {
+                                ui.add_enabled(
+                                    false,
+                                    egui::Button::selectable(false, kind.label()),
+                                )
+                                .on_hover_text(
+                                    "Needs a result-dependent (dynamic) scheduler — \
                                          planned for a future step.",
-                                    );
-                                }
+                                );
                             }
-                        });
+                        }
+                    });
                     ui.end_row();
 
                     if f.format_kind == FormatKind::Gauntlet {
@@ -1641,12 +1656,9 @@ impl TournamentTab {
                     );
                     dot(ui);
                     ui.label(
-                        RichText::new(format!(
-                            "{games} game{}",
-                            if games == 1 { "" } else { "s" }
-                        ))
-                        .color(theme::text())
-                        .font(theme::semibold(12.5)),
+                        RichText::new(format!("{games} game{}", if games == 1 { "" } else { "s" }))
+                            .color(theme::text())
+                            .font(theme::semibold(12.5)),
                     );
                     if let Some(total) = f.estimated_duration_secs() {
                         let lanes = f.concurrency.max(1);
@@ -1934,11 +1946,7 @@ impl TournamentTab {
                                     ),
                                 ] {
                                     let clicked = ui
-                                        .selectable_value(
-                                            &mut f.elo_writeback,
-                                            kind,
-                                            kind.label(),
-                                        )
+                                        .selectable_value(&mut f.elo_writeback, kind, kind.label())
                                         .on_hover_text(hint)
                                         .clicked();
                                     if clicked && kind == WritebackKind::Chosen {
@@ -1965,11 +1973,9 @@ impl TournamentTab {
                             );
                             if ui
                                 .add(
-                                    egui::Button::new(
-                                        RichText::new("Choose engines…").size(13.0),
-                                    )
-                                    .fill(theme::bg_elevated())
-                                    .stroke(egui::Stroke::new(1.0, theme::stroke())),
+                                    egui::Button::new(RichText::new("Choose engines…").size(13.0))
+                                        .fill(theme::bg_elevated())
+                                        .stroke(egui::Stroke::new(1.0, theme::stroke())),
                                 )
                                 .clicked()
                             {
@@ -2086,7 +2092,9 @@ impl TournamentTab {
                         f.refresh_openings_preview();
                     }
                     if ui
-                        .add(egui::Button::new(RichText::new("Browse…").color(theme::text_weak())))
+                        .add(egui::Button::new(
+                            RichText::new("Browse…").color(theme::text_weak()),
+                        ))
                         .clicked()
                         && let Some(path) = crate::dialog::file_dialog()
                             .set_title("Choose opening book")
@@ -2238,7 +2246,9 @@ impl TournamentTab {
                 )
                 .on_hover_text("Finished games are appended to this PGN file as they end.");
                 if ui
-                    .add(egui::Button::new(RichText::new("Browse…").color(theme::text_weak())))
+                    .add(egui::Button::new(
+                        RichText::new("Browse…").color(theme::text_weak()),
+                    ))
                     .clicked()
                     && let Some(path) = crate::dialog::file_dialog()
                         .set_title("Choose PGN output file")
@@ -2305,11 +2315,7 @@ fn compatibility_notes(form: &TournamentForm, engines: &[EngineConfig]) -> Vec<S
         let name = {
             let n = widgets::engine_base_name(e);
             let v = e.meta.version.trim();
-            if v.is_empty() {
-                n
-            } else {
-                format!("{n} {v}")
-            }
+            if v.is_empty() { n } else { format!("{n} {v}") }
         };
         if !e.path.exists() {
             notes.push(format!(
@@ -2445,13 +2451,7 @@ fn effective_options(
 
 /// A labelled value + unit row for entering a duration (value DragValue, unit
 /// dropdown, and a resolved "= N ms" hint).
-fn time_value_row(
-    ui: &mut Ui,
-    label: &str,
-    value: &mut f64,
-    unit: &mut TimeUnit,
-    id_salt: &str,
-) {
+fn time_value_row(ui: &mut Ui, label: &str, value: &mut f64, unit: &mut TimeUnit, id_salt: &str) {
     ui.horizontal(|ui| {
         field_label(ui, label);
         ui.add(DragValue::new(value).range(0.0..=600_000.0).speed(1.0));
@@ -2469,8 +2469,7 @@ fn time_value_row(
 /// path is set, the matching probe-cache size (`NalimovCache` /
 /// `GaviotaTbCache`) is forwarded too, clamped to the option's declared range.
 fn apply_global_tablebases(engines: &mut [EngineConfig], config: &AppConfig) {
-    let path_set =
-        |p: &Option<String>| p.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+    let path_set = |p: &Option<String>| p.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
 
     for engine in engines {
         let inserts: Vec<(String, UciOptionValue)> = engine

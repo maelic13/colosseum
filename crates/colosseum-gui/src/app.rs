@@ -36,6 +36,18 @@ impl Tab {
     }
 }
 
+/// The About dialog's update-check flow.
+#[derive(Default)]
+enum AboutUpdate {
+    /// Nothing checked yet; the button is showing.
+    #[default]
+    Idle,
+    /// A background check is running; polled every frame.
+    Checking(crate::update::UpdateCheck),
+    /// The check finished with this result.
+    Done(crate::update::UpdateStatus),
+}
+
 /// Where the close-confirm flow currently stands.
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum CloseState {
@@ -56,9 +68,9 @@ pub struct ColosseumApp {
     engines_tab: EnginesTab,
     tournament_tab: TournamentTab,
     results_tab: ResultsTab,
-    /// About dialog: open + whether "check for updates" was pressed.
+    /// About dialog: open + the state of the "check for updates" flow.
     about_open: bool,
-    about_checked: bool,
+    about_update: AboutUpdate,
     /// Frames painted so far while the window is still hidden. The window is
     /// revealed only after a couple of frames have actually been presented,
     /// so no unpainted surface is ever shown (startup flash).
@@ -101,7 +113,7 @@ impl ColosseumApp {
             tournament_tab,
             results_tab: ResultsTab::default(),
             about_open: false,
-            about_checked: false,
+            about_update: AboutUpdate::Idle,
             frames_before_reveal: 0,
             maximize_on_reveal,
         }
@@ -160,7 +172,12 @@ impl ColosseumApp {
 
         let modal = egui::Modal::new(egui::Id::new("close_confirm")).show(ctx, |ui| {
             ui.set_width(400.0);
-            ui.label(RichText::new("Quit Colosseum?").size(18.0).strong().color(theme::text()));
+            ui.label(
+                RichText::new("Quit Colosseum?")
+                    .size(18.0)
+                    .strong()
+                    .color(theme::text()),
+            );
             ui.add_space(8.0);
             ui.label(
                 RichText::new(
@@ -233,11 +250,20 @@ impl ColosseumApp {
         }
     }
 
-    /// The About dialog (Firefox-style): mark, name + version, update check.
-    /// The update check is a stub for now — it always reports up to date.
+    /// The About dialog (Firefox-style): mark, name + version, update check
+    /// against the GitHub releases (see [`crate::update`]).
     fn show_about(&mut self, ctx: &egui::Context) {
         if !self.about_open {
             return;
+        }
+        // Collect a finished background check before drawing.
+        if let AboutUpdate::Checking(check) = &self.about_update {
+            if let Some(status) = check.poll() {
+                self.about_update = AboutUpdate::Done(status);
+            } else {
+                // Keep polling while the request is in flight.
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            }
         }
         let modal = egui::Modal::new(egui::Id::new("about_dialog")).show(ctx, |ui| {
             ui.set_width(360.0);
@@ -247,11 +273,7 @@ impl ColosseumApp {
                 let (rect, _) =
                     ui.allocate_exact_size(egui::vec2(56.0, 56.0), egui::Sense::hover());
                 let painter = ui.painter();
-                painter.circle_stroke(
-                    rect.center(),
-                    24.0,
-                    egui::Stroke::new(5.0, theme::accent()),
-                );
+                painter.circle_stroke(rect.center(), 24.0, egui::Stroke::new(5.0, theme::accent()));
                 painter.circle_stroke(
                     rect.center(),
                     11.0,
@@ -270,29 +292,71 @@ impl ColosseumApp {
                 );
                 ui.add_space(14.0);
 
-                if self.about_checked {
-                    ui.label(
-                        RichText::new("✓ You're up to date")
-                            .color(theme::success())
-                            .font(theme::semibold(13.5)),
-                    );
-                    ui.label(
-                        RichText::new(format!(
-                            "{DISPLAY_NAME} v{} is the latest version.",
-                            env!("CARGO_PKG_VERSION")
-                        ))
-                        .color(theme::text_weak())
-                        .size(12.0),
-                    );
-                } else if widgets::tinted_button(
-                    ui,
-                    "Check for updates",
-                    theme::accent(),
-                    true,
-                )
-                .clicked()
-                {
-                    self.about_checked = true;
+                match &self.about_update {
+                    AboutUpdate::Idle => {
+                        if widgets::tinted_button(ui, "Check for updates", theme::accent(), true)
+                            .clicked()
+                        {
+                            self.about_update =
+                                AboutUpdate::Checking(crate::update::UpdateCheck::start());
+                        }
+                    }
+                    AboutUpdate::Checking(_) => {
+                        ui.horizontal(|ui| {
+                            // Center the pair inside the fixed-width dialog.
+                            ui.add_space((ui.available_width() - 160.0).max(0.0) / 2.0);
+                            ui.add(egui::Spinner::new().size(14.0));
+                            ui.label(
+                                RichText::new("Checking for updates…")
+                                    .color(theme::text_weak())
+                                    .size(12.5),
+                            );
+                        });
+                    }
+                    AboutUpdate::Done(crate::update::UpdateStatus::UpToDate) => {
+                        ui.label(
+                            RichText::new("You're up to date")
+                                .color(theme::success())
+                                .font(theme::semibold(13.5)),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "{DISPLAY_NAME} v{} is the latest version.",
+                                env!("CARGO_PKG_VERSION")
+                            ))
+                            .color(theme::text_weak())
+                            .size(12.0),
+                        );
+                    }
+                    AboutUpdate::Done(crate::update::UpdateStatus::UpdateAvailable {
+                        version,
+                        url,
+                    }) => {
+                        ui.label(
+                            RichText::new(format!("Version {version} is available"))
+                                .color(theme::accent())
+                                .font(theme::semibold(13.5)),
+                        );
+                        ui.add_space(6.0);
+                        if widgets::tinted_button(ui, "Open download page", theme::accent(), true)
+                            .clicked()
+                        {
+                            ctx.open_url(egui::OpenUrl::new_tab(url));
+                        }
+                    }
+                    AboutUpdate::Done(crate::update::UpdateStatus::Failed) => {
+                        ui.label(
+                            RichText::new("Couldn't check for updates — are you online?")
+                                .color(theme::text_weak())
+                                .size(12.5),
+                        );
+                        ui.add_space(6.0);
+                        if widgets::tinted_button(ui, "Try again", theme::accent(), true).clicked()
+                        {
+                            self.about_update =
+                                AboutUpdate::Checking(crate::update::UpdateCheck::start());
+                        }
+                    }
                 }
 
                 ui.add_space(14.0);
@@ -311,6 +375,20 @@ impl ColosseumApp {
                     RichText::new("Free software under GPL-3.0-or-later.")
                         .color(theme::text_faint())
                         .size(11.5),
+                );
+                ui.hyperlink_to(
+                    RichText::new("github.com/maelic13/colosseum").size(11.5),
+                    "https://github.com/maelic13/colosseum",
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(
+                        "Chess pieces by Colin M.L. Burnett (CC BY-SA 3.0) · \
+                         opening names from the Lichess openings database (CC0) · \
+                         Inter and JetBrains Mono fonts (SIL OFL 1.1).",
+                    )
+                    .color(theme::text_faint())
+                    .size(10.5),
                 );
                 ui.add_space(10.0);
                 if ui
@@ -346,7 +424,7 @@ impl ColosseumApp {
                     .fill(theme::bg_darkest())
                     .inner_margin(egui::Margin::symmetric(16, 8)),
             )
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     // The logo + name is the app's "menu": clicking it opens
                     // the About dialog (version, update check).
@@ -375,7 +453,7 @@ impl ColosseumApp {
                         .clicked()
                     {
                         self.about_open = true;
-                        self.about_checked = false;
+                        self.about_update = AboutUpdate::Idle;
                     }
                     ui.add_space(20.0);
 
@@ -398,7 +476,9 @@ impl ColosseumApp {
                             Some(TournamentStatus::Stopping) => ("Stopping", "●", theme::warn()),
                             Some(TournamentStatus::Stopped) => ("Stopped", "●", theme::text_weak()),
                             Some(TournamentStatus::Finished) => ("Finished", "●", theme::accent()),
-                            Some(TournamentStatus::Idle) | None => ("Idle", "○", theme::text_faint()),
+                            Some(TournamentStatus::Idle) | None => {
+                                ("Idle", "○", theme::text_faint())
+                            }
                         };
                         widgets::status_pill(ui, label, dot, color);
                     });
@@ -416,7 +496,7 @@ impl ColosseumApp {
                     .fill(theme::bg_darkest())
                     .inner_margin(egui::Margin::symmetric(14, 6)),
             )
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     self.theme_switcher(ui);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -466,7 +546,7 @@ impl ColosseumApp {
                     .fill(theme::bg_panel())
                     .inner_margin(egui::Margin::same(16)),
             )
-            .show_inside(ui, |ui| match self.tab {
+            .show(ui, |ui| match self.tab {
                 Tab::Tournament => {
                     self.tournament_tab.show(ui, &mut self.backend);
                     // A freshly started tournament switches to its live view.

@@ -17,13 +17,14 @@ mod dialog;
 mod eco;
 mod engines_tab;
 mod export_ui;
-mod live_view;
 mod icon;
+mod live_view;
 mod logo;
 mod presets;
 mod results_tab;
 mod theme;
 mod tournament_tab;
+mod update;
 mod widgets;
 
 use colosseum_core::branding::DISPLAY_NAME;

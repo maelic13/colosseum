@@ -57,6 +57,12 @@ pub struct ResultsTab {
     select_anchor: Option<TournamentId>,
     /// Bulk delete awaiting modal confirmation.
     bulk_delete: Option<Vec<TournamentId>>,
+    /// Rename dialog opened from the list context menu: (target, buffer).
+    rename_dialog: Option<(TournamentId, String)>,
+    /// Inline rename buffer for the current tournament's header title.
+    title_edit: Option<String>,
+    /// Focus the inline title editor on the frame it opens.
+    title_edit_focus: bool,
     /// Last error message from a DB action.
     error: Option<String>,
     /// Transient note shown after an export action.
@@ -122,7 +128,7 @@ impl ResultsTab {
                 .exact_size(24.0)
                 .resizable(false)
                 .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(2, 6)))
-                .show_inside(ui, |ui| {
+                .show(ui, |ui| {
                     let count = self.list.as_ref().map_or(0, Vec::len);
                     if widgets::expand_strip(ui, "‹", &format!("Tournaments ({count})")) {
                         self.list_collapsed = false;
@@ -139,7 +145,7 @@ impl ResultsTab {
                     top: 10,
                     bottom: 8,
                 }))
-                .show_inside(ui, |ui| {
+                .show(ui, |ui| {
                     self.list_panel(ui, backend);
                 });
             list_rect = Some(panel.response.rect);
@@ -153,20 +159,20 @@ impl ResultsTab {
             && !egui::Popup::is_any_open(ui.ctx())
             && let Some(rect) = list_rect
             && ui.input(|i| {
-                i.pointer.any_click()
-                    && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))
+                i.pointer.any_click() && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))
             })
         {
             self.multi_selected.clear();
         }
 
         self.bulk_delete_modal(ui, backend);
+        self.rename_modal(ui, backend);
 
         // Centre: live view for loaded tournaments, stored results otherwise.
         let live_id = self.selected.filter(|id| backend.active(*id).is_some());
         egui::CentralPanel::default()
             .frame(egui::Frame::new())
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 if let Some(id) = live_id {
                     self.live_view(ui, backend, id);
                 } else {
@@ -309,10 +315,7 @@ impl ResultsTab {
                             }
                             self.select_anchor = Some(row.id);
                         } else if mods.shift {
-                            let anchor = self
-                                .select_anchor
-                                .or(self.selected)
-                                .unwrap_or(row.id);
+                            let anchor = self.select_anchor.or(self.selected).unwrap_or(row.id);
                             let (mut a, mut b) = (None, None);
                             for (i, r) in list.iter().enumerate() {
                                 if r.id == anchor {
@@ -418,6 +421,15 @@ impl ResultsTab {
             }
             ui.close();
         }
+        if n == 1 && ui.button("Rename…").clicked() {
+            let name = list
+                .iter()
+                .find(|r| r.id == clicked)
+                .map(|r| r.name.clone())
+                .unwrap_or_default();
+            self.rename_dialog = Some((clicked, name));
+            ui.close();
+        }
         ui.separator();
         if ui
             .button(RichText::new(format!("Delete{suffix}…")).color(theme::danger()))
@@ -425,6 +437,137 @@ impl ResultsTab {
         {
             self.bulk_delete = Some(targets);
             ui.close();
+        }
+    }
+
+    /// The rename dialog (list context menu → Rename…).
+    fn rename_modal(&mut self, ui: &Ui, backend: &mut Backend) {
+        let Some((id, mut buf)) = self.rename_dialog.clone() else {
+            return;
+        };
+        let mut done = false;
+        let mut save = false;
+        let modal = egui::Modal::new(egui::Id::new("tournament_rename")).show(ui.ctx(), |ui| {
+            ui.set_width(320.0);
+            ui.label(
+                RichText::new("Rename tournament")
+                    .font(theme::semibold(16.0))
+                    .color(theme::text()),
+            );
+            ui.add_space(10.0);
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut buf)
+                    .desired_width(f32::INFINITY)
+                    .margin(egui::Margin::symmetric(8, 6)),
+            );
+            if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                save = true;
+            }
+            ui.add_space(12.0);
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if widgets::tinted_button(ui, "Save", theme::accent(), !buf.trim().is_empty())
+                    .clicked()
+                {
+                    save = true;
+                }
+                ui.add_space(4.0);
+                if ui
+                    .button(RichText::new("Cancel").color(theme::text()))
+                    .clicked()
+                {
+                    done = true;
+                }
+            });
+        });
+        if save {
+            self.apply_rename(backend, id, &buf);
+            done = true;
+        } else {
+            // Keep the (possibly edited) buffer for the next frame.
+            self.rename_dialog = Some((id, buf));
+        }
+        if done || modal.should_close() {
+            self.rename_dialog = None;
+        }
+    }
+
+    /// Apply a rename and refresh every cached view of the name.
+    fn apply_rename(&mut self, backend: &mut Backend, id: TournamentId, name: &str) {
+        let unchanged = self
+            .list
+            .as_ref()
+            .is_some_and(|l| l.iter().any(|r| r.id == id && r.name == name.trim()));
+        if name.trim().is_empty() || unchanged {
+            return;
+        }
+        match backend.rename_tournament(id, name) {
+            Ok(()) => {
+                self.error = None;
+                self.live_cache = None;
+                self.refresh(backend);
+            }
+            Err(e) => self.error = Some(format!("Rename failed: {e}")),
+        }
+    }
+
+    /// The tournament name as an inline-editable title: clicking the name (or
+    /// the pencil beside it) swaps it for a text field; Enter or the painted
+    /// checkmark saves, Escape or the × cancels.
+    fn editable_title(
+        &mut self,
+        ui: &mut Ui,
+        backend: &mut Backend,
+        id: TournamentId,
+        name: &str,
+        size: f32,
+    ) {
+        if self.title_edit.is_some() {
+            let mut confirmed = false;
+            let mut cancelled = false;
+            if let Some(buf) = &mut self.title_edit {
+                let resp = ui.add(
+                    egui::TextEdit::singleline(buf)
+                        .desired_width(240.0)
+                        .margin(egui::Margin::symmetric(8, 4)),
+                );
+                if self.title_edit_focus {
+                    resp.request_focus();
+                    self.title_edit_focus = false;
+                }
+                confirmed = widgets::confirm_button(ui)
+                    .on_hover_text("Save name (Enter)")
+                    .clicked()
+                    || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                cancelled = widgets::cancel_button(ui)
+                    .on_hover_text("Cancel (Esc)")
+                    .clicked()
+                    || ui.input(|i| i.key_pressed(egui::Key::Escape));
+            }
+            if confirmed {
+                if let Some(new_name) = self.title_edit.take() {
+                    self.apply_rename(backend, id, &new_name);
+                }
+            } else if cancelled {
+                self.title_edit = None;
+            }
+        } else {
+            let resp = ui
+                .add(
+                    egui::Label::new(
+                        RichText::new(name)
+                            .color(theme::text())
+                            .font(theme::semibold(size)),
+                    )
+                    .sense(egui::Sense::click()),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text("Rename tournament");
+            ui.add_space(2.0);
+            let pencil = widgets::edit_button(ui).on_hover_text("Rename tournament");
+            if resp.clicked() || pencil.clicked() {
+                self.title_edit = Some(name.to_string());
+                self.title_edit_focus = true;
+            }
         }
     }
 
@@ -620,7 +763,7 @@ impl ResultsTab {
                     .fill(theme::bg_darkest())
                     .inner_margin(egui::Margin::symmetric(14, 10)),
             )
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 self.live_control_bar(ui, backend, id, &live);
             });
 
@@ -630,7 +773,7 @@ impl ResultsTab {
         if !live.errors.is_empty() {
             egui::Panel::bottom("results_live_errors")
                 .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(14, 8)))
-                .show_inside(ui, |ui| {
+                .show(ui, |ui| {
                     egui::Frame::new()
                         .fill(theme::tint(theme::danger(), 0.08))
                         .stroke(egui::Stroke::new(1.0, theme::tint(theme::danger(), 0.35)))
@@ -672,7 +815,9 @@ impl ResultsTab {
                                 egui::Id::new("errors_header"),
                                 egui::Sense::click(),
                             );
-                            if click.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+                            if click
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked()
                             {
                                 self.errors_expanded = !self.errors_expanded;
                             }
@@ -700,14 +845,9 @@ impl ResultsTab {
         if self.live_views.is_watching(id) {
             egui::CentralPanel::default()
                 .frame(egui::Frame::new().inner_margin(egui::Margin::same(10)))
-                .show_inside(ui, |ui| {
-                    self.live_views.show(
-                        ui,
-                        backend,
-                        id,
-                        &live.in_flight_games,
-                        live.concurrency,
-                    );
+                .show(ui, |ui| {
+                    self.live_views
+                        .show(ui, backend, id, &live.in_flight_games, live.concurrency);
                 });
             return;
         }
@@ -724,10 +864,9 @@ impl ResultsTab {
                     .stroke(egui::Stroke::new(1.0, theme::stroke()))
                     .inner_margin(egui::Margin::same(10)),
             )
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 if let Some(game_id) = live_side_panel(ui, &live)
-                    && let Some(game) =
-                        live.in_flight_games.iter().find(|g| g.game_id == game_id)
+                    && let Some(game) = live.in_flight_games.iter().find(|g| g.game_id == game_id)
                 {
                     self.live_views.watch_game(id, game, live.concurrency);
                 }
@@ -741,7 +880,7 @@ impl ResultsTab {
                 top: 10,
                 bottom: 4,
             }))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ScrollArea::vertical()
                     .id_salt("results_live_scroll")
                     .auto_shrink([false, false])
@@ -802,8 +941,7 @@ impl ResultsTab {
                     .map_or(1500.0, |(_, p)| *p)
             };
             let ranked = standings.ranked_by_points();
-            let rank_of =
-                |id: EngineId| ranked.iter().position(|x| x == &id).map_or(0, |p| p + 1);
+            let rank_of = |id: EngineId| ranked.iter().position(|x| x == &id).map_or(0, |p| p + 1);
 
             let mut rows: Vec<Row> = active
                 .participants
@@ -907,11 +1045,7 @@ impl ResultsTab {
             let (label, dot, color) = status_pill_parts(status);
             widgets::status_pill(ui, label, dot, color);
             ui.add_space(6.0);
-            ui.label(
-                RichText::new(&live.name)
-                    .color(theme::text())
-                    .font(theme::semibold(15.0)),
-            );
+            self.editable_title(ui, backend, id, &live.name, 15.0);
             ui.add_space(10.0);
 
             let go_enabled = matches!(status, TournamentStatus::Stopped | TournamentStatus::Idle);
@@ -947,7 +1081,11 @@ impl ResultsTab {
 
             // Parallel-games limit, adjustable while running or stopped:
             // in-flight games always finish, only the launch rate changes.
-            ui.label(RichText::new("Parallel").color(theme::text_weak()).size(13.0));
+            ui.label(
+                RichText::new("Parallel")
+                    .color(theme::text_weak())
+                    .size(13.0),
+            );
             let mut lanes = live.concurrency as u32;
             if ui
                 .add(DragValue::new(&mut lanes).range(1..=256).speed(0.1))
@@ -1028,7 +1166,6 @@ impl ResultsTab {
                     }
                 }
             }
-
         });
 
         ui.add_space(8.0);
@@ -1038,7 +1175,8 @@ impl ResultsTab {
             // The Standings|Live switcher and Auto-follow live here — in the
             // normal flow, always in the same place — because a right-pinned
             // layout paints over the wrapped row-1 content in narrow windows.
-            self.live_views.header_controls(ui, id, in_flight, concurrency);
+            self.live_views
+                .header_controls(ui, id, in_flight, concurrency);
             ui.add_space(12.0);
 
             // Export menu: CSV standings / crosstable / game PGN.
@@ -1145,7 +1283,9 @@ impl ResultsTab {
             .column(Column::exact(76.0)) // elo delta chip
             .column(Column::exact(60.0)) // points
             .column(Column::exact(52.0)) // games
-            .column(Column::exact(92.0)) // w-d-l
+            // Wide enough for four-digit counts ("1160-267-211") — long
+            // tournaments hit five digits of games.
+            .column(Column::exact(112.0)) // w-d-l
             .column(Column::exact(90.0)) // nps
             .column(Column::exact(84.0)) // avg depth
             .column(Column::exact(84.0)) // avg time/move
@@ -1175,16 +1315,12 @@ impl ResultsTab {
                 header.col(|ui| {
                     sortable_header(ui, "Avg nps", SortKey::Nps, &mut self.sort);
                 });
+                header.col(|ui| sortable_header(ui, "Avg depth", SortKey::Depth, &mut self.sort));
+                header
+                    .col(|ui| sortable_header(ui, "Time/move", SortKey::MoveTime, &mut self.sort));
                 header.col(|ui| {
-                    sortable_header(ui, "Avg depth", SortKey::Depth, &mut self.sort)
-                });
-                header.col(|ui| {
-                    sortable_header(ui, "Time/move", SortKey::MoveTime, &mut self.sort)
-                });
-                header.col(|ui| {
-                    ui.label(strong_header("Forfeits")).on_hover_text(
-                        "Losses on time and by crash / illegal move.",
-                    );
+                    ui.label(strong_header("Forfeits"))
+                        .on_hover_text("Losses on time and by crash / illegal move.");
                 });
             })
             .body(|mut body| {
@@ -1219,12 +1355,9 @@ impl ResultsTab {
                         });
                         tr.col(|ui| {
                             ui.label(
-                                RichText::new(format!(
-                                    "{}-{}-{}",
-                                    row.wins, row.draws, row.losses
-                                ))
-                                .color(theme::text())
-                                .monospace(),
+                                RichText::new(format!("{}-{}-{}", row.wins, row.draws, row.losses))
+                                    .color(theme::text())
+                                    .monospace(),
                             );
                         });
                         tr.col(|ui| {
@@ -1323,11 +1456,7 @@ impl ResultsTab {
                                 .size(12.5),
                         );
                         let share = (h2h.points() / f64::from(h2h.games())) as f32;
-                        h2h_record_cell(
-                            ui,
-                            share,
-                            &self.h2h_cell_text(live, seed, opp.id),
-                        );
+                        h2h_record_cell(ui, share, &self.h2h_cell_text(live, seed, opp.id));
                     }
                     ui.end_row();
                 }
@@ -1376,8 +1505,7 @@ impl ResultsTab {
                                     if h2h.games() == 0 {
                                         ui.label(RichText::new("·").color(theme::text_weak()));
                                     } else {
-                                        let share =
-                                            (h2h.points() / f64::from(h2h.games())) as f32;
+                                        let share = (h2h.points() / f64::from(h2h.games())) as f32;
                                         h2h_record_cell(
                                             ui,
                                             share,
@@ -1473,11 +1601,7 @@ impl ResultsTab {
                     })
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(&row.name)
-                                    .color(theme::text())
-                                    .font(theme::semibold(18.0)),
-                            );
+                            self.editable_title(ui, backend, row.id, &row.name, 18.0);
                             ui.add_space(8.0);
                             let (label, color) = status_parts(&row.status);
                             widgets::status_pill(ui, label, "●", color);
@@ -1785,8 +1909,16 @@ fn sortable_header(ui: &mut Ui, label: &str, key: SortKey, sort: &mut SortState)
     let active = sort.key == key;
     // Always lay out an arrow (transparent when inactive) so activating a
     // column never changes the header width and shifts the table.
-    let arrow = if active && sort.ascending { " ↑" } else { " ↓" };
-    let color = if active { theme::accent() } else { theme::text() };
+    let arrow = if active && sort.ascending {
+        " ↑"
+    } else {
+        " ↓"
+    };
+    let color = if active {
+        theme::accent()
+    } else {
+        theme::text()
+    };
     let fmt = |color| egui::TextFormat {
         font_id: theme::semibold(12.5),
         color,
@@ -1943,27 +2075,16 @@ fn live_side_panel(ui: &mut Ui, live: &LiveData) -> Option<colosseum_core::GameI
                         .inner_margin(egui::Margin::symmetric(6, 4))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
+                            // Tight rows: the default vertical spacing reads
+                            // as dead space between the two one-line names.
+                            ui.spacing_mut().item_spacing.y = 2.0;
                             ui.label(
                                 RichText::new(format!("Round {}", game.round))
                                     .color(theme::text_faint())
                                     .size(10.5),
                             );
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(format!("⬜ {white}"))
-                                        .color(theme::text())
-                                        .size(11.5),
-                                )
-                                .truncate(),
-                            );
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(format!("⬛ {black}"))
-                                        .color(theme::text_weak())
-                                        .size(11.5),
-                                )
-                                .truncate(),
-                            );
+                            widgets::side_engine_row(ui, true, &white, theme::text(), 11.5);
+                            widgets::side_engine_row(ui, false, &black, theme::text_weak(), 11.5);
                         });
                     let resp = ui
                         .interact(
@@ -2231,8 +2352,17 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
         .column(Column::remainder().at_least(110.0)) // forfeits (far right)
         .header(header_h, |mut header| {
             for label in [
-                "#", "Engine", "Elo", "Δ", "Pts", "Gms", "W-D-L", "Avg nps", "Avg depth",
-                "Time/move", "Forfeits",
+                "#",
+                "Engine",
+                "Elo",
+                "Δ",
+                "Pts",
+                "Gms",
+                "W-D-L",
+                "Avg nps",
+                "Avg depth",
+                "Time/move",
+                "Forfeits",
             ] {
                 header.col(|ui| {
                     ui.label(
@@ -2351,7 +2481,10 @@ fn settings_section(ui: &mut Ui, live: &LiveData) {
         TimeControl::Depth { depth } => format!("depth {depth}/move"),
     };
     let draw = c.adjudication.draw.map_or("off".to_string(), |d| {
-        format!("|cp| ≤ {} for {} moves (ply ≥ {})", d.score_cp, d.move_count, d.min_ply)
+        format!(
+            "|cp| ≤ {} for {} moves (ply ≥ {})",
+            d.score_cp, d.move_count, d.min_ply
+        )
     });
     let resign = c.adjudication.resign.map_or("off".to_string(), |r| {
         format!("|cp| ≥ {} for {} moves", r.score_cp, r.move_count)
@@ -2380,15 +2513,12 @@ fn settings_section(ui: &mut Ui, live: &LiveData) {
         }
         RatingWriteback::Estimate(id) => format!("follow: {}", name_of(*id)),
     };
-    let pgn = c
-        .pgn_output
-        .as_ref()
-        .map(|p| {
-            p.file_name()
-                .map_or_else(|| p.to_string_lossy().into_owned(), |f| {
-                    f.to_string_lossy().into_owned()
-                })
-        });
+    let pgn = c.pgn_output.as_ref().map(|p| {
+        p.file_name().map_or_else(
+            || p.to_string_lossy().into_owned(),
+            |f| f.to_string_lossy().into_owned(),
+        )
+    });
 
     ui.label(
         RichText::new("Settings")
@@ -2403,8 +2533,7 @@ fn settings_section(ui: &mut Ui, live: &LiveData) {
                 egui::Label::new(RichText::new(label).color(theme::text_faint()).size(11.0)),
             );
             ui.add(
-                egui::Label::new(RichText::new(value).color(theme::text_weak()).size(11.0))
-                    .wrap(),
+                egui::Label::new(RichText::new(value).color(theme::text_weak()).size(11.0)).wrap(),
             );
         });
     };

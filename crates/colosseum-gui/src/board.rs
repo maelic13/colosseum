@@ -67,8 +67,8 @@ pub fn draw(ui: &mut Ui, rect: Rect, board: &Board, last_move: Option<(Option<Sq
             let dark = (rank + file) % 2 == 0;
             painter.rect_filled(cell, 0.0, if dark { sq_dark } else { sq_light });
 
-            let highlighted = last_move
-                .is_some_and(|(from, to)| from == Some(square) || to == square);
+            let highlighted =
+                last_move.is_some_and(|(from, to)| from == Some(square) || to == square);
             if highlighted {
                 painter.rect_filled(cell, 0.0, theme::accent().gamma_multiply(0.35));
             }

@@ -51,13 +51,16 @@ fn live_info_sink<'a>(
     // Seed from the existing log so a sink created mid-search (ponderhit
     // continues the ponder's log) doesn't re-log an already-shown depth.
     let mut last_log_depth: u32 = live.lock().map_or(0, |lg| {
-        let log = if is_white { &lg.white_log } else { &lg.black_log };
+        let log = if is_white {
+            &lg.white_log
+        } else {
+            &lg.black_log
+        };
         log.last().map_or(0, |l| l.depth)
     });
     move |info| {
         let now = std::time::Instant::now();
-        let new_depth_line =
-            !info.pv.is_empty() && info.depth.is_some_and(|d| d > last_log_depth);
+        let new_depth_line = !info.pv.is_empty() && info.depth.is_some_and(|d| d > last_log_depth);
         let throttled =
             last_publish.is_some_and(|t| now.duration_since(t) < Duration::from_millis(100));
         if throttled && !new_depth_line {
@@ -495,8 +498,10 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         pos.play_unchecked(legal_move);
 
         if let Ok(mut lg) = live.lock() {
-            lg.san_moves.push(san_moves.last().cloned().unwrap_or_default());
-            lg.uci_moves.push(uci_moves.last().cloned().unwrap_or_default());
+            lg.san_moves
+                .push(san_moves.last().cloned().unwrap_or_default());
+            lg.uci_moves
+                .push(uci_moves.last().cloned().unwrap_or_default());
             lg.white_clock_ms = clock_ms(&spec.time_control, &clocks, Color::White);
             lg.black_clock_ms = clock_ms(&spec.time_control, &clocks, Color::Black);
             lg.white_to_move = pos.turn() == Color::White;
@@ -560,9 +565,12 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             let ponder_pos = build_uci_position(spec.start_fen.as_deref(), &ponder_moves);
             let (ponder_limits, _) =
                 move_limits(&spec.time_control, &clocks, mover, spec.timeout_tolerance);
-            if engine.start_ponder(&ponder_pos, &ponder_limits).await.is_ok() {
-                ponder_pred[color_idx(mover)] =
-                    Some((hint_uci, std::time::Instant::now()));
+            if engine
+                .start_ponder(&ponder_pos, &ponder_limits)
+                .await
+                .is_ok()
+            {
+                ponder_pred[color_idx(mover)] = Some((hint_uci, std::time::Instant::now()));
                 if let Ok(mut lg) = live.lock() {
                     // The ponder is a fresh search: its log starts clean.
                     if mover == Color::White {
@@ -680,8 +688,18 @@ fn incident_report(
     use std::fmt::Write as _;
     let mut s = String::with_capacity(8 * 1024);
     let _ = writeln!(s, "event:       {} (round {})", spec.event, spec.round);
-    let _ = writeln!(s, "white:       {}  [{}]", spec.white.name, spec.white.spawn.path.display());
-    let _ = writeln!(s, "black:       {}  [{}]", spec.black.name, spec.black.spawn.path.display());
+    let _ = writeln!(
+        s,
+        "white:       {}  [{}]",
+        spec.white.name,
+        spec.white.spawn.path.display()
+    );
+    let _ = writeln!(
+        s,
+        "black:       {}  [{}]",
+        spec.black.name,
+        spec.black.spawn.path.display()
+    );
     let _ = writeln!(s, "time control: {}", spec.time_control_label);
     let _ = writeln!(s, "termination: {:?}", outcome.termination);
     let _ = writeln!(s, "result:      {}", outcome.result.pgn());
@@ -702,7 +720,10 @@ fn incident_report(
     let _ = writeln!(s, "opening plies: {}", spec.opening_moves.len());
     let _ = writeln!(s, "moves ({}): {}", uci_moves.len(), uci_moves.join(" "));
     for (label, engine) in [("white", white), ("black", black)] {
-        let _ = writeln!(s, "\n── {label} UCI transcript (last lines; > sent, < received; info collapsed) ──");
+        let _ = writeln!(
+            s,
+            "\n── {label} UCI transcript (last lines; > sent, < received; info collapsed) ──"
+        );
         for line in engine.transcript() {
             let _ = writeln!(s, "{line}");
         }
@@ -863,9 +884,7 @@ fn initial_position(start_fen: Option<&str>) -> Chess {
 /// stderr, and returns the loss report.
 async fn handle_setup_failure(spec: &GameSpec, white: Prepared, black: Prepared) -> GameReport {
     // Consume each side: quit survivors, harvest forensics from the failure.
-    async fn consume(
-        prepared: Prepared,
-    ) -> (Option<UciError>, Option<(Vec<String>, Vec<String>)>) {
+    async fn consume(prepared: Prepared) -> (Option<UciError>, Option<(Vec<String>, Vec<String>)>) {
         match prepared {
             Prepared::Ready(engine) => {
                 let _ = engine.quit(Duration::from_millis(500)).await;
@@ -915,10 +934,7 @@ async fn handle_setup_failure(spec: &GameSpec, white: Prepared, black: Prepared)
         &spec.black
     };
     let text = setup_incident_report(spec, failed, side_spec, &err, forensics.as_ref());
-    let stub = format!(
-        "SetupCrash-{}-r{}",
-        side_spec.name, spec.round
-    );
+    let stub = format!("SetupCrash-{}-r{}", side_spec.name, spec.round);
     if let Some(file) = crate::incidents::write(&stub, &text) {
         let detail = report.error.take().unwrap_or_default();
         report.error = Some(format!("{detail} — see logs/incidents/{file}"));
@@ -940,11 +956,23 @@ fn setup_incident_report(
     let _ = writeln!(
         s,
         "failed side: {} — {}  [{}]",
-        if failed == Color::White { "white" } else { "black" },
+        if failed == Color::White {
+            "white"
+        } else {
+            "black"
+        },
         side_spec.name,
         side_spec.spawn.path.display()
     );
-    let _ = writeln!(s, "opponent:    {}", if failed == Color::White { &spec.black.name } else { &spec.white.name });
+    let _ = writeln!(
+        s,
+        "opponent:    {}",
+        if failed == Color::White {
+            &spec.black.name
+        } else {
+            &spec.white.name
+        }
+    );
     let _ = writeln!(s, "termination: EngineCrash (during setup)");
     let _ = writeln!(s, "detail:      {err}");
     let _ = writeln!(s, "handshake timeout: {:?}", spec.handshake_timeout);

@@ -140,7 +140,7 @@ impl EnginesTab {
                 top: 2,
                 ..Default::default()
             }))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 self.show_grid(ui, backend);
             });
 
@@ -153,8 +153,7 @@ impl EnginesTab {
         {
             let rect = grid_panel.response.rect;
             if ui.input(|i| {
-                i.pointer.any_click()
-                    && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))
+                i.pointer.any_click() && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))
             }) {
                 self.multi_selected.clear();
             }
@@ -171,7 +170,7 @@ impl EnginesTab {
                 top: 8,
                 ..Default::default()
             }))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 show_global_tablebases(ui, backend, &mut self.tb_expanded);
             });
 
@@ -183,7 +182,7 @@ impl EnginesTab {
                 top: 4,
                 ..Default::default()
             }))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 if self.edit.is_some() {
                     self.show_engine_panel(ui, backend);
                 } else {
@@ -769,9 +768,13 @@ impl EnginesTab {
             let folder_resp = ui
                 .add_enabled(
                     !busy,
-                    egui::Button::new(RichText::new("Scan Folder…").color(theme::text()).size(13.5))
-                        .fill(theme::bg_elevated())
-                        .stroke(egui::Stroke::new(1.0, theme::stroke())),
+                    egui::Button::new(
+                        RichText::new("Scan Folder…")
+                            .color(theme::text())
+                            .size(13.5),
+                    )
+                    .fill(theme::bg_elevated())
+                    .stroke(egui::Stroke::new(1.0, theme::stroke())),
                 )
                 .on_hover_text(
                     "Scan a folder for engine executables and add those that respond to UCI.",
@@ -801,7 +804,9 @@ impl EnginesTab {
             if let Some(err) = self.detect_error.clone() {
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .add(egui::Button::new(RichText::new("×").color(theme::text_weak())))
+                        .add(egui::Button::new(
+                            RichText::new("×").color(theme::text_weak()),
+                        ))
                         .clicked()
                     {
                         self.detect_error = None;
@@ -859,7 +864,9 @@ impl EnginesTab {
                         }
                         ui.add_space(2.0);
                         if ui
-                            .add(egui::Button::new(RichText::new("Cancel").color(theme::text_weak())))
+                            .add(egui::Button::new(
+                                RichText::new("Cancel").color(theme::text_weak()),
+                            ))
                             .clicked()
                         {
                             cancel_delete_all = true;
@@ -992,8 +999,11 @@ impl EnginesTab {
                                 .map(|e| e.path.clone())
                                 .collect();
                             let n = bulk.len();
-                            let suffix =
-                                if n > 1 { format!(" ({n})") } else { String::new() };
+                            let suffix = if n > 1 {
+                                format!(" ({n})")
+                            } else {
+                                String::new()
+                            };
                             let resp = self.engine_card(ui, engine, &logos_dir, card_w, card_h);
                             if resp.clicked() {
                                 clicked = Some((id, ui.input(|inp| inp.modifiers)));
@@ -1079,10 +1089,7 @@ impl EnginesTab {
                         }
                         self.select_anchor = Some(id);
                     } else if mods.shift {
-                        let anchor = self
-                            .select_anchor
-                            .or(self.selected_id)
-                            .unwrap_or(id);
+                        let anchor = self.select_anchor.or(self.selected_id).unwrap_or(id);
                         let a = visible_ids.iter().position(|v| *v == anchor);
                         let b = visible_ids.iter().position(|v| *v == id);
                         if let (Some(a), Some(b)) = (a, b) {
@@ -1210,7 +1217,13 @@ impl EnginesTab {
 
         let (logo_rect, _) = logo::slot(&mut child, 36.0, Sense::hover());
         let drawn = logo_file.as_ref().is_some_and(|f| {
-            logo::draw_fitted(&mut child, &mut self.logos, &logos_dir.join(f), logo_rect, 6)
+            logo::draw_fitted(
+                &mut child,
+                &mut self.logos,
+                &logos_dir.join(f),
+                logo_rect,
+                6,
+            )
         });
         if !drawn {
             widgets::draw_avatar_square_in(&child, logo_rect, &name, is_sel, 6);
@@ -1240,17 +1253,19 @@ impl EnginesTab {
             });
             if !subtitle.is_empty() {
                 ui.add(
-                    egui::Label::new(RichText::new(&subtitle).color(theme::text_weak()).size(11.5))
-                        .truncate(),
+                    egui::Label::new(
+                        RichText::new(&subtitle)
+                            .color(theme::text_weak())
+                            .size(11.5),
+                    )
+                    .truncate(),
                 );
             }
         });
 
         // Bottom stat columns: ELO (left) and VERSION (right-aligned).
-        let stats = egui::Rect::from_min_max(
-            egui::pos2(content.min.x, content.max.y - 27.0),
-            content.max,
-        );
+        let stats =
+            egui::Rect::from_min_max(egui::pos2(content.min.x, content.max.y - 27.0), content.max);
         let mut srow = ui.new_child(
             UiBuilder::new()
                 .max_rect(stats)
@@ -1277,7 +1292,11 @@ impl EnginesTab {
             Layout::top_down(egui::Align::Max),
             |ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
-                ui.label(RichText::new("VERSION").color(theme::text_faint()).size(11.0));
+                ui.label(
+                    RichText::new("VERSION")
+                        .color(theme::text_faint())
+                        .size(11.0),
+                );
                 let ver = Some(version.clone()).filter(|v| !v.is_empty());
                 ui.add(egui::Label::new(stat_value(ver)).truncate());
             },
@@ -1427,7 +1446,7 @@ impl EnginesTab {
                 bottom: 10,
                 ..Default::default()
             }))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if ui
                         .button(RichText::new("Clone").color(theme::text_weak()).size(13.0))
@@ -1448,7 +1467,7 @@ impl EnginesTab {
 
         egui::CentralPanel::default()
             .frame(egui::Frame::new())
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 // The whole detail column scrolls (header included), so small
                 // windows can still reach every field.
                 ScrollArea::vertical()
@@ -1474,10 +1493,12 @@ impl EnginesTab {
 
         // ── Deferred actions ──
         if pick_logo {
-            let mut dlg = crate::dialog::file_dialog().set_title("Choose engine logo").add_filter(
-                "Images",
-                &["png", "jpg", "jpeg", "webp", "bmp", "gif", "ico"],
-            );
+            let mut dlg = crate::dialog::file_dialog()
+                .set_title("Choose engine logo")
+                .add_filter(
+                    "Images",
+                    &["png", "jpg", "jpeg", "webp", "bmp", "gif", "ico"],
+                );
             if let Some(last) = &backend.config.last_engine_dir {
                 dlg = dlg.set_directory(last);
             }
@@ -1546,8 +1567,7 @@ impl EnginesTab {
         const REMOVE_ROW_H: f32 = 26.0;
 
         let avail = ui.available_width();
-        let (header_rect, _) =
-            ui.allocate_exact_size(egui::vec2(avail, HEADER_H), Sense::hover());
+        let (header_rect, _) = ui.allocate_exact_size(egui::vec2(avail, HEADER_H), Sense::hover());
         let id_width = (avail * 0.5).max(240.0).min((avail - 96.0).max(160.0));
 
         // ── Identity column (fixed position, fixed rows) ──
@@ -1559,83 +1579,79 @@ impl EnginesTab {
         );
         {
             let ui = &mut idui;
-                ui.set_width(id_width);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 7.0;
+            ui.set_width(id_width);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 7.0;
+                ui.label(
+                    RichText::new(&header_name)
+                        .font(theme::semibold(18.0))
+                        .color(theme::text()),
+                );
+                if !edit.version.trim().is_empty() {
+                    widgets::chip(ui, edit.version.trim(), theme::accent());
+                }
+                if !edit.dirty && edit.saved_at.is_some_and(|t| t.elapsed() < SAVED_FLASH) {
                     ui.label(
-                        RichText::new(&header_name)
-                            .font(theme::semibold(18.0))
-                            .color(theme::text()),
+                        RichText::new("saved")
+                            .color(theme::success())
+                            .size(11.5)
+                            .italics(),
                     );
-                    if !edit.version.trim().is_empty() {
-                        widgets::chip(ui, edit.version.trim(), theme::accent());
-                    }
-                    if !edit.dirty
-                        && edit
-                            .saved_at
-                            .is_some_and(|t| t.elapsed() < SAVED_FLASH)
+                }
+                if edit.redetect_pending {
+                    ui.label(
+                        RichText::new("⏳ detecting…")
+                            .color(theme::accent())
+                            .size(11.5),
+                    );
+                }
+            });
+            ui.add_space(6.0);
+
+            egui::Grid::new("identity_grid")
+                .num_columns(2)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    field_label(ui, "Name");
+                    if ui
+                        .add(text_field(&mut edit.name).hint_text("e.g. Stockfish"))
+                        .changed()
                     {
-                        ui.label(
-                            RichText::new("saved")
-                                .color(theme::success())
-                                .size(11.5)
-                                .italics(),
-                        );
+                        edit.mark_dirty();
                     }
-                    if edit.redetect_pending {
-                        ui.label(
-                            RichText::new("⏳ detecting…")
-                                .color(theme::accent())
-                                .size(11.5),
-                        );
+                    ui.end_row();
+
+                    field_label(ui, "Version");
+                    if ui
+                        .add(text_field(&mut edit.version).hint_text("e.g. 16.1"))
+                        .changed()
+                    {
+                        edit.mark_dirty();
                     }
+                    ui.end_row();
+
+                    field_label(ui, "Author");
+                    if ui
+                        .add(text_field(&mut edit.author).hint_text("from the engine's UCI id"))
+                        .changed()
+                    {
+                        edit.mark_dirty();
+                    }
+                    ui.end_row();
+
+                    field_label(ui, "Elo");
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut edit.elo_str)
+                                .desired_width(90.0)
+                                .hint_text("optional"),
+                        )
+                        .changed()
+                    {
+                        edit.mark_dirty();
+                    }
+                    ui.end_row();
                 });
-                ui.add_space(6.0);
-
-                egui::Grid::new("identity_grid")
-                    .num_columns(2)
-                    .spacing([12.0, 8.0])
-                    .show(ui, |ui| {
-                        field_label(ui, "Name");
-                        if ui
-                            .add(text_field(&mut edit.name).hint_text("e.g. Stockfish"))
-                            .changed()
-                        {
-                            edit.mark_dirty();
-                        }
-                        ui.end_row();
-
-                        field_label(ui, "Version");
-                        if ui
-                            .add(text_field(&mut edit.version).hint_text("e.g. 16.1"))
-                            .changed()
-                        {
-                            edit.mark_dirty();
-                        }
-                        ui.end_row();
-
-                        field_label(ui, "Author");
-                        if ui
-                            .add(text_field(&mut edit.author).hint_text("from the engine's UCI id"))
-                            .changed()
-                        {
-                            edit.mark_dirty();
-                        }
-                        ui.end_row();
-
-                        field_label(ui, "Elo");
-                        if ui
-                            .add(
-                                egui::TextEdit::singleline(&mut edit.elo_str)
-                                    .desired_width(90.0)
-                                    .hint_text("optional"),
-                            )
-                            .changed()
-                        {
-                            edit.mark_dirty();
-                        }
-                        ui.end_row();
-                    });
         }
 
         // ── Logo slot: a fixed region right of the identity column. The
@@ -1707,9 +1723,7 @@ impl EnginesTab {
             if ui
                 .put(
                     btn_rect,
-                    egui::Button::new(
-                        RichText::new("Remove").color(theme::text_weak()).size(11.0),
-                    ),
+                    egui::Button::new(RichText::new("Remove").color(theme::text_weak()).size(11.0)),
                 )
                 .clicked()
             {
@@ -1734,7 +1748,9 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                         // Switch the executable in place: same library entry
                         // (identity, options, rating, history) — new binary.
                         if ui
-                            .add(egui::Button::new(RichText::new("Change…").color(theme::text_weak())))
+                            .add(egui::Button::new(
+                                RichText::new("Change…").color(theme::text_weak()),
+                            ))
                             .on_hover_text(
                                 "Point this engine at a different executable. Identity, \
                                  options and rating are kept; re-detect afterwards if the \
@@ -1751,7 +1767,9 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                         if let Some(folder) = edit.path.parent() {
                             let folder = folder.to_path_buf();
                             if ui
-                                .add(egui::Button::new(RichText::new("Open folder").color(theme::text_weak())))
+                                .add(egui::Button::new(
+                                    RichText::new("Open folder").color(theme::text_weak()),
+                                ))
                                 .on_hover_text("Open the folder containing this engine.")
                                 .clicked()
                             {
@@ -1801,7 +1819,9 @@ fn launch_section(ui: &mut Ui, edit: &mut EngineEditBuf) {
                     field_label(ui, "Work dir");
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                         let browse_clicked = ui
-                            .add(egui::Button::new(RichText::new("Browse…").color(theme::text_weak())))
+                            .add(egui::Button::new(
+                                RichText::new("Browse…").color(theme::text_weak()),
+                            ))
                             .clicked();
                         if ui
                             .add(
@@ -1965,7 +1985,9 @@ fn uci_options_section(
             }
             if !edit.option_overrides.is_empty()
                 && ui
-                    .add(egui::Button::new(RichText::new("Reset all").color(theme::text_weak())))
+                    .add(egui::Button::new(
+                        RichText::new("Reset all").color(theme::text_weak()),
+                    ))
                     .on_hover_text("Remove all option overrides, reverting to engine defaults.")
                     .clicked()
             {
@@ -2036,9 +2058,7 @@ fn option_row_width(ui: &Ui, opt: &UciOption) -> f32 {
     };
     let label_w = text_w(opt.name(), 13.0);
     let value_w = match opt {
-        UciOption::Spin { min, max, .. } => {
-            56.0 + 10.0 + text_w(&format!("({min}–{max})"), 11.5)
-        }
+        UciOption::Spin { min, max, .. } => 56.0 + 10.0 + text_w(&format!("({min}–{max})"), 11.5),
         UciOption::Combo { .. } => 200.0,
         // Path-like fields need real room; bias toward fewer, wider columns.
         UciOption::Str { .. } => 300.0,
@@ -2072,7 +2092,9 @@ fn options_grid(
                 widgets::uci_option_row(ui, opt, &mut edit.option_overrides, changed);
                 if edit.option_overrides.contains_key(opt.name()) {
                     if ui
-                        .add(egui::Button::new(RichText::new("×").color(theme::text_faint())))
+                        .add(egui::Button::new(
+                            RichText::new("×").color(theme::text_faint()),
+                        ))
                         .on_hover_text("Reset to engine default.")
                         .clicked()
                     {
@@ -2128,17 +2150,14 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
                                 ("Nalimov", &backend.config.nalimov_path),
                                 ("Syzygy", &backend.config.syzygy_path),
                             ] {
-                                let set =
-                                    value.as_deref().is_some_and(|s| !s.trim().is_empty());
+                                let set = value.as_deref().is_some_and(|s| !s.trim().is_empty());
                                 let (mark, color) = if set {
                                     ("●", theme::success())
                                 } else {
                                     ("○", theme::text_faint())
                                 };
                                 ui.label(RichText::new(mark).color(color).size(10.0));
-                                ui.label(
-                                    RichText::new(label).color(theme::text_weak()).size(11.5),
-                                );
+                                ui.label(RichText::new(label).color(theme::text_weak()).size(11.5));
                                 ui.add_space(6.0);
                             }
                         });
@@ -2171,12 +2190,13 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
                     // controls in reverse visual order.
                     let cfg = &mut backend.config;
                     changed |= tablebase_row(ui, "Syzygy", &mut cfg.syzygy_path, |ui| {
-                        let mut ch = widgets::checkbox(ui, &mut cfg.syzygy_50_move_rule, "50-move rule")
-                            .on_hover_text(
-                                "Tablebase scores respect the 50-move rule (FIDE-correct). \
+                        let mut ch =
+                            widgets::checkbox(ui, &mut cfg.syzygy_50_move_rule, "50-move rule")
+                                .on_hover_text(
+                                    "Tablebase scores respect the 50-move rule (FIDE-correct). \
                                  Off counts \"cursed\" wins as wins.",
-                            )
-                            .changed();
+                                )
+                                .changed();
                         ui.add_space(8.0);
                         ch |= ui
                             .add(
@@ -2190,7 +2210,9 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
                             )
                             .changed();
                         ui.label(
-                            RichText::new("Probe limit").color(theme::text_faint()).size(11.5),
+                            RichText::new("Probe limit")
+                                .color(theme::text_faint())
+                                .size(11.5),
                         );
                         ch
                     });
@@ -2207,10 +2229,7 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
                             |ui| {
                                 for scheme in ["cp0", "cp1", "cp2", "cp3", "cp4"] {
                                     if ui
-                                        .selectable_label(
-                                            cfg.gaviota_compression == scheme,
-                                            scheme,
-                                        )
+                                        .selectable_label(cfg.gaviota_compression == scheme, scheme)
                                         .clicked()
                                     {
                                         cfg.gaviota_compression = scheme.to_string();
@@ -2221,7 +2240,9 @@ fn show_global_tablebases(ui: &mut Ui, backend: &mut Backend, expanded: &mut boo
                             },
                         );
                         ui.label(
-                            RichText::new("Compression").color(theme::text_faint()).size(11.5),
+                            RichText::new("Compression")
+                                .color(theme::text_faint())
+                                .size(11.5),
                         )
                         .on_hover_text(
                             "Compression scheme of the Gaviota files on disk (cp4 is the \
@@ -2253,7 +2274,9 @@ fn tablebase_row(
     let mut changed = false;
     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
         if ui
-            .add(egui::Button::new(RichText::new("Browse…").color(theme::text_weak())))
+            .add(egui::Button::new(
+                RichText::new("Browse…").color(theme::text_weak()),
+            ))
             .clicked()
             && let Some(dir) = crate::dialog::file_dialog()
                 .set_title(format!("Select {label} tablebase folder"))
@@ -2386,11 +2409,7 @@ fn duplicate_of(cfg: &EngineConfig, library: &[EngineConfig]) -> Option<String> 
         .map(|e| {
             let n = widgets::engine_base_name(e);
             let v = e.meta.version.trim();
-            if v.is_empty() {
-                n
-            } else {
-                format!("{n} {v}")
-            }
+            if v.is_empty() { n } else { format!("{n} {v}") }
         })
 }
 

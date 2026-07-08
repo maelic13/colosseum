@@ -125,7 +125,10 @@ mod tests {
     fn standings_csv_has_header_and_rows() {
         let csv = standings_csv(&[row(1, "Alpha", 1.5, 1, 1, 0)]);
         let lines: Vec<&str> = csv.lines().collect();
-        assert_eq!(lines[0], "Rank,Engine,Version,Elo,EloDelta,Points,Games,Wins,Draws,Losses,AvgNps");
+        assert_eq!(
+            lines[0],
+            "Rank,Engine,Version,Elo,EloDelta,Points,Games,Wins,Draws,Losses,AvgNps"
+        );
         assert_eq!(lines[1], "1,Alpha,,1500.0,+0.0,1.5,2,1,1,0,");
         assert!(csv.ends_with("\r\n"));
     }

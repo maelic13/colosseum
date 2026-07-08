@@ -1,11 +1,16 @@
+<p align="center">
+  <img src="docs/design/logo.svg" width="96" alt="Colosseum logo">
+</p>
+
 # Colosseum ♟ Chess Engine Testing Suite
 
-A cross-platform desktop application for running engine-vs-engine chess tournaments
-with a **live, sortable results table**.
+A cross-platform desktop application for running UCI engine-vs-engine chess
+tournaments — parallel games, a live board view, and maximum-likelihood Elo
+ratings.
 
-![Colosseum screenshot — tournament live view](docs/screenshot-placeholder.png)
+![Colosseum — Arena tab with live game view](docs/screenshot.png)
 
-> **v0.1.0 · GPL-3.0-or-later · Rust + egui**
+> **v1.0.0 · GPL-3.0-or-later · Rust + egui**
 
 ---
 
@@ -13,48 +18,45 @@ with a **live, sortable results table**.
 
 | | |
 |---|---|
-| **Engine library** | Add one engine or scan a whole folder; auto-detects UCI options (Threads, Hash, …); stores name, version, and Elo; editable launch args / working directory / env vars |
-| **Round-robin tournaments** | Configurable cycles, concurrency, time control (time-per-move from 10 ms up) |
-| **Live results table** | Sortable by Name / Elo / Elo Δ / Points / W-D-L; head-to-head matrix; avg NPS |
-| **Go / Stop / Force-Stop** | Stop drains in-flight games gracefully; Force-Stop aborts and discards them — tournament stays resumable |
-| **Opening books** | EPD or PGN files; sequential or random (deterministic seed); configurable plies; both engines play same opening from both sides |
-| **Adjudication** | Draw (eval threshold + consecutive plies), resign (eval threshold), max-move count — all individually toggleable |
-| **Elo policy** | Per-game (default), end-of-tournament, or never |
-| **Common engine options** | Threads, Hash (MB), SyzygyPath, Syzygy50MoveRule, Ponder (default off) — forwarded to every engine |
-| **PGN export** | Appended live per game to a user-chosen file; correct tags for non-standard start positions |
-| **Persistence & resume** | SQLite backend; every tournament is resumable after Stop or unexpected exit |
+| **Engine library** | Add one engine or scan a whole folder; auto-detects UCI options over the handshake; per-engine logo, launch args, working directory, env vars; robust option mapping for old/quirky engines |
+| **Tournament formats** | Round robin and gauntlet, configurable cycles and games per pair, parallel games |
+| **Time controls** | Time per move, sudden death, base + increment, fixed nodes, fixed depth |
+| **Pondering** | Full UCI ponder support — engines think on the opponent's time, and the live view shows it |
+| **Arena: standings** | Live sortable standings (Elo, Δ, points, W-D-L, avg nps/depth, time/move), head-to-head matrix, termination breakdown, settings summary |
+| **Arena: live view** | Full board with bundled piece set, move list with ECO opening names, material balance, per-engine panels (eval, depth, nodes, nps, clocks, Fritz-style search output) and an evaluation graph fed by both thinking *and* pondering engines |
+| **Ratings** | Ordo-style joint maximum-likelihood ratings with error bars, anchored to tournament-start values; library write-back per game — for all engines, none, or a chosen subset |
+| **Adjudication** | Draw (eval threshold over consecutive moves), resign, max-moves — plus all natural endings |
+| **Opening books** | EPD or PGN; sequential or seeded-random order; both engines play each opening from both sides |
+| **Endgame tablebases** | Syzygy / Nalimov / Gaviota paths configured once, forwarded to every engine — and switchable off per tournament |
+| **Transport** | Start / Stop (drain in-flight games) / Force-Stop (abort & requeue); every tournament resumes after a stop or crash |
+| **Export** | Per-game live PGN output, standings/crosstable CSV |
+| **Persistence** | SQLite backend; presets for tournament setups; incident reports for engine crashes/timeouts |
 | **Portable mode** | Pass `--portable` to keep all data next to the executable |
 
 ---
 
 ## Download
 
-Pre-built binaries for every release are on the
-[GitHub Releases](https://github.com/releases) page:
+Pre-built packages for every release are on the
+[GitHub Releases](https://github.com/maelic13/colosseum/releases) page:
 
 | Platform | Download |
 |---|---|
-| Windows x86-64 | `colosseum-vX.Y.Z-windows-x86_64.msi` (installer) or `.zip` (portable) |
-| Windows ARM64 | `colosseum-vX.Y.Z-windows-arm64.msi` (installer) or `.zip` (portable) |
-| Linux x86-64 | `colosseum-vX.Y.Z-linux-x86_64.tar.gz` |
-| macOS Apple Silicon | `colosseum-vX.Y.Z-macos-aarch64.dmg` or `.tar.gz` |
+| Windows x86-64 | `.msi` installer or portable `.zip` |
+| Windows ARM64 | `.msi` installer or portable `.zip` |
+| Linux x86-64 | `.deb` (Debian/Ubuntu), `.rpm` (Fedora/openSUSE), or `.tar.gz` |
+| macOS Apple Silicon | `.dmg` or `.tar.gz` |
 
-> **macOS note:** v0.1 is unsigned. On first launch Gatekeeper may block it.
-> Open **System Settings → Privacy & Security → Open Anyway**, or run:
+Intel Macs are not supported.
+
+> **macOS note:** builds are unsigned. On first launch Gatekeeper may block
+> the app. Open **System Settings → Privacy & Security → Open Anyway**, or run:
 > ```bash
 > xattr -d com.apple.quarantine /Applications/Colosseum.app
 > ```
 > See [`docs/macos-signing.md`](docs/macos-signing.md) for the signing roadmap.
 
-> **Linux Flatpak:** a Flatpak manifest is included in `flatpak/` for building
-> locally or submitting to Flathub. See the build instructions in that file.
-
 ---
-
-## Bundled assets
-
-- Chess pieces: [cburnett](https://github.com/lichess-org/lila/tree/master/public/piece/cburnett) by Colin M.L. Burnett, CC BY-SA 3.0 (`crates/colosseum-gui/assets/pieces/cburnett/`)
-- Opening names: [lichess chess-openings](https://github.com/lichess-org/chess-openings), CC0 (`crates/colosseum-gui/assets/openings/`)
 
 ## Build & Run
 
@@ -81,20 +83,12 @@ sudo dnf install gtk3-devel libxcb-devel libxkbcommon-devel openssl-devel
 sudo pacman -S gtk3 libxcb libxkbcommon openssl
 ```
 
-### Clone and run (debug build)
+### Clone and run
 
 ```bash
-git clone https://github.com/chess_tournament
-cd chess_tournament
-cargo run --bin colosseum
-```
-
-### Optimized release build
-
-```bash
-cargo build --release --bin colosseum
-# Binary is at:  target/release/colosseum        (Linux / macOS)
-#                target\release\colosseum.exe     (Windows)
+git clone https://github.com/maelic13/colosseum.git
+cd colosseum
+cargo run --release --bin colosseum
 ```
 
 ### One-step build scripts
@@ -119,12 +113,9 @@ distributing it to other Macs requires codesigning/notarization.
 cargo test --workspace
 ```
 
-The integration tests in `colosseum-engine` run real Stockfish games.
-They look for Stockfish at `D:\chess\engines\stockfish.exe` (Windows) and skip
-gracefully when the engine is absent — so CI on other machines still passes.
-
-To run those tests on your machine, either place a Stockfish binary at the path
-above, or set the `COLOSSEUM_TEST_ENGINE` environment variable:
+The integration tests in `colosseum-engine` run real engine games. They look
+for Stockfish at a developer-machine path and skip gracefully when the engine
+is absent — CI on other machines still passes. To run them locally, set:
 
 ```bash
 COLOSSEUM_TEST_ENGINE=/usr/games/stockfish cargo test --workspace
@@ -136,7 +127,7 @@ COLOSSEUM_TEST_ENGINE=/usr/games/stockfish cargo test --workspace
 
 By default Colosseum stores its data in the OS-standard directories:
 
-| Platform | Config (engines.json, config.toml) | Data (tournaments.db, PGN) |
+| Platform | Config (engines.json, config.toml) | Data (tournaments.db, logs) |
 |---|---|---|
 | Windows | `%APPDATA%\Colosseum\` | `%LOCALAPPDATA%\Colosseum\` |
 | Linux | `~/.config/colosseum/` | `~/.local/share/colosseum/` |
@@ -151,18 +142,18 @@ Pass `--portable` to keep everything next to the executable instead.
 ```
 colosseum/
 ├─ crates/
-│  ├─ colosseum-core/     Pure domain: types, Elo, pairings, adjudication
-│  ├─ colosseum-uci/      UCI protocol & async process management (tokio)
-│  ├─ colosseum-engine/   Orchestration: runner, scheduler, store, openings
+│  ├─ colosseum-core/     Pure domain: config, pairings, standings, ML ratings, adjudication
+│  ├─ colosseum-uci/      UCI protocol & async engine process management (tokio)
+│  ├─ colosseum-engine/   Orchestration: scheduler, game runner, SQLite store, openings
 │  └─ colosseum-gui/      eframe/egui GUI — the shipped binary
-├─ flatpak/               Flatpak manifest + desktop/AppStream metadata
-├─ docs/                  macOS signing guide
-└─ .github/workflows/     release (tag-triggered cross-platform packaging)
+├─ packaging/             Linux desktop entry + icon (.deb / .rpm assets)
+├─ docs/                  Design guidelines, macOS signing guide
+└─ .github/workflows/     release.yml (tag-triggered cross-platform packaging)
 ```
 
-The GUI never blocks on engine I/O: a tokio runtime drives all engine processes;
-results are pushed over channels and drained each egui frame (~30 Hz cap so fast
-games don't starve the UI).
+The GUI never blocks on engine I/O: a tokio runtime drives all engine
+processes; live state is published behind shared snapshots the UI reads each
+frame.
 
 ---
 
@@ -170,16 +161,27 @@ games don't starve the UI).
 
 ```bash
 # Tag a release — the release.yml workflow fires automatically
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
-This builds binaries on all four platform/arch combinations, runs smoke tests,
-and publishes a GitHub Release with auto-generated release notes.
+This builds Windows (x64 + ARM64), Linux, and macOS binaries, runs smoke
+tests, and publishes a GitHub Release with the MSI/ZIP/DEB/RPM/DMG/tar.gz
+artifacts and auto-generated notes.
 
-See `CHANGELOG.md` for the full version history.
+See [`CHANGELOG.md`](CHANGELOG.md) for the full version history.
 
 ---
+
+## Credits & bundled assets
+
+- Chess pieces: [cburnett set](https://github.com/lichess-org/lila/tree/master/public/piece/cburnett)
+  by Colin M.L. Burnett — CC BY-SA 3.0 (`crates/colosseum-gui/assets/pieces/cburnett/`)
+- Opening names: [lichess chess-openings](https://github.com/lichess-org/chess-openings)
+  — CC0 (`crates/colosseum-gui/assets/openings/`)
+- Fonts: [Inter](https://rsms.me/inter/) and
+  [JetBrains Mono](https://www.jetbrains.com/lp/mono/) — SIL Open Font
+  License 1.1 (`crates/colosseum-gui/assets/fonts/`, license texts included)
 
 ## License
 

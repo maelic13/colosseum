@@ -81,10 +81,7 @@ const PRIOR_WEIGHT: u32 = 6;
 /// K-free: the same set of games always yields the same ratings, regardless
 /// of play order.
 #[must_use]
-pub fn ml_ratings(
-    standings: &Standings,
-    priors: &[(EngineId, f64)],
-) -> HashMap<EngineId, f64> {
+pub fn ml_ratings(standings: &Standings, priors: &[(EngineId, f64)]) -> HashMap<EngineId, f64> {
     let mut ratings: HashMap<EngineId, f64> = priors.iter().copied().collect();
     let played: Vec<EngineId> = priors
         .iter()
@@ -367,7 +364,10 @@ mod tests {
         small.record(game(b, a, GameResult::WhiteWin));
         let r = ml_ratings(&small, &[(a, 1500.0), (b, 1500.0)]);
         let small_diff = r[&a] - r[&b];
-        assert!(small_diff > 90.0 && small_diff < 190.0, "small={small_diff}");
+        assert!(
+            small_diff > 90.0 && small_diff < 190.0,
+            "small={small_diff}"
+        );
         assert!(((r[&a] + r[&b]) / 2.0 - 1500.0).abs() < 0.5);
 
         // 75% over 400 games: the prior washes out; the pure logistic gap

@@ -10,8 +10,8 @@ authors.workspace = true
 [dependencies]
 anyhow = "1.0.102"
 toml = "1.1.2"
-colosseum-core = { version = "0.1.0", path = "../colosseum-core" }
-colosseum-uci = { version = "0.1.0", path = "../colosseum-uci" }
+colosseum-core = { path = "../colosseum-core" }
+colosseum-uci = { path = "../colosseum-uci" }
 crossbeam-channel = "0.5.15"
 directories = "6.0.0"
 rusqlite = { version = "0.40.1", features = ["bundled"] }

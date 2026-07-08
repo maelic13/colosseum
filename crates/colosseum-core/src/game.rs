@@ -22,7 +22,6 @@ impl GameResult {
             Self::Draw => "1/2-1/2",
         }
     }
-
 }
 
 /// Why a game ended. Natural endings plus adjudication and error terminations.

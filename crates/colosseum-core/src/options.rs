@@ -169,14 +169,14 @@ mod tests {
         // 33-engine library but are NOT thread counts. Several are numeric
         // Spins that would have been silently corrupted to "1".
         for name in [
-            "CPU Usage",              // Rybka: a 1–100 % throttle (Spin)
+            "CPU Usage",               // Rybka: a 1–100 % throttle (Spin)
             "Score Offset millipawns", // Rybka 4.1: "sCOREoffset" (Spin)
             "ThreadIdlingThreshold",   // SMP idling knob (Spin)
             "Busy Threads",            // HIARCS: boolean toggle
             "CPuct",                   // Lc0 search param
             "CPuctBase",
             "CPuctFactor",
-            "Always Score Main Move",  // has "core" via "Score"
+            "Always Score Main Move", // has "core" via "Score"
             "DrawScore",
             "ScoreType",
             "Resolve Score Drops",

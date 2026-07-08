@@ -208,10 +208,7 @@ mod tests {
             ("Stockfish".to_string(), Some("16".to_string()))
         );
         // Noise with no version leaves just the name.
-        assert_eq!(
-            split_name_version("Fire x64"),
-            ("Fire".to_string(), None)
-        );
+        assert_eq!(split_name_version("Fire x64"), ("Fire".to_string(), None));
     }
 
     #[test]

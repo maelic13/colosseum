@@ -31,13 +31,21 @@ fn slug(name: &str) -> String {
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect();
     let s = s.trim_matches('_').to_string();
-    if s.is_empty() { "tournament".to_string() } else { s }
+    if s.is_empty() {
+        "tournament".to_string()
+    } else {
+        s
+    }
 }
 
 /// Export the standings table as CSV. Returns a status note unless cancelled.
 pub fn export_standings_csv(tournament_name: &str, rows: &[ExportRow]) -> Option<String> {
     let csv = standings_csv(rows);
-    save_text(&format!("{}_standings.csv", slug(tournament_name)), "csv", &csv)
+    save_text(
+        &format!("{}_standings.csv", slug(tournament_name)),
+        "csv",
+        &csv,
+    )
 }
 
 /// Export the head-to-head crosstable as CSV. Returns a status note unless cancelled.
@@ -47,7 +55,11 @@ pub fn export_crosstable_csv(
     standings: &Standings,
 ) -> Option<String> {
     let csv = crosstable_csv(order, standings);
-    save_text(&format!("{}_crosstable.csv", slug(tournament_name)), "csv", &csv)
+    save_text(
+        &format!("{}_crosstable.csv", slug(tournament_name)),
+        "csv",
+        &csv,
+    )
 }
 
 /// Export the concatenated game PGN. Returns a status note unless cancelled.

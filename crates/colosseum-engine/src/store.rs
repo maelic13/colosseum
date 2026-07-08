@@ -202,6 +202,15 @@ impl Store {
         Ok(())
     }
 
+    /// Rename a tournament.
+    pub fn rename_tournament(&self, id: TournamentId, name: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE tournaments SET name = ?2 WHERE id = ?1",
+            params![id.to_string(), name],
+        )?;
+        Ok(())
+    }
+
     /// Update a tournament's status; sets `finished_at` when finishing.
     pub fn set_tournament_status(&self, id: TournamentId, status: &str) -> Result<()> {
         if status == STATUS_FINISHED {
@@ -730,13 +739,7 @@ mod tests {
         assert_eq!(reset, 2); // the running + discarded ones
         let listed = store.list_games(tid).unwrap();
         assert!(listed.iter().filter(|g| g.status == GAME_FINISHED).count() == 1);
-        assert!(
-            listed
-                .iter()
-                .filter(|g| g.status == GAME_PENDING)
-                .count()
-                == 499
-        );
+        assert!(listed.iter().filter(|g| g.status == GAME_PENDING).count() == 499);
     }
 
     #[test]

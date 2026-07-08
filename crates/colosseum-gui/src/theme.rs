@@ -213,25 +213,63 @@ pub fn is_dark() -> bool {
 
 // Accessors mirroring the palette fields, so call sites read as
 // `theme::accent()` — see [`Palette`] for what each color means.
-pub fn bg_darkest() -> Color32 { palette().bg_darkest }
-pub fn bg_panel() -> Color32 { palette().bg_panel }
-pub fn bg_elevated() -> Color32 { palette().bg_elevated }
-pub fn bg_hover() -> Color32 { palette().bg_hover }
-pub fn stroke() -> Color32 { palette().stroke }
-pub fn border_interactive() -> Color32 { palette().border_interactive }
-pub fn text() -> Color32 { palette().text }
-pub fn text_weak() -> Color32 { palette().text_weak }
-pub fn text_faint() -> Color32 { palette().text_faint }
-pub fn accent() -> Color32 { palette().accent }
-pub fn accent_bright() -> Color32 { palette().accent_bright }
-pub fn success() -> Color32 { palette().success }
-pub fn warn() -> Color32 { palette().warn }
-pub fn danger() -> Color32 { palette().danger }
-pub fn graph_white() -> Color32 { palette().graph_white }
-pub fn graph_black() -> Color32 { palette().graph_black }
-pub fn medal_gold() -> Color32 { palette().accent }
-pub fn medal_silver() -> Color32 { palette().medal_silver }
-pub fn medal_bronze() -> Color32 { palette().medal_bronze }
+pub fn bg_darkest() -> Color32 {
+    palette().bg_darkest
+}
+pub fn bg_panel() -> Color32 {
+    palette().bg_panel
+}
+pub fn bg_elevated() -> Color32 {
+    palette().bg_elevated
+}
+pub fn bg_hover() -> Color32 {
+    palette().bg_hover
+}
+pub fn stroke() -> Color32 {
+    palette().stroke
+}
+pub fn border_interactive() -> Color32 {
+    palette().border_interactive
+}
+pub fn text() -> Color32 {
+    palette().text
+}
+pub fn text_weak() -> Color32 {
+    palette().text_weak
+}
+pub fn text_faint() -> Color32 {
+    palette().text_faint
+}
+pub fn accent() -> Color32 {
+    palette().accent
+}
+pub fn accent_bright() -> Color32 {
+    palette().accent_bright
+}
+pub fn success() -> Color32 {
+    palette().success
+}
+pub fn warn() -> Color32 {
+    palette().warn
+}
+pub fn danger() -> Color32 {
+    palette().danger
+}
+pub fn graph_white() -> Color32 {
+    palette().graph_white
+}
+pub fn graph_black() -> Color32 {
+    palette().graph_black
+}
+pub fn medal_gold() -> Color32 {
+    palette().accent
+}
+pub fn medal_silver() -> Color32 {
+    palette().medal_silver
+}
+pub fn medal_bronze() -> Color32 {
+    palette().medal_bronze
+}
 
 /// Muted identity hues for engine monogram avatars. An engine is assigned one by
 /// hashing its name, so it keeps the same color across sessions — giving the list
