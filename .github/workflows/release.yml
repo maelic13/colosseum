@@ -1,6 +1,8 @@
 name: Release
+# Title runs by the tag ("v1.0.0", "v1.0.0-rc.2") instead of the commit message.
+run-name: ${{ github.ref_name }}
 
-# Triggered by version tags — e.g. git tag v0.1.0 && git push --tags
+# Triggered by version tags — e.g. git tag v1.0.0 && git push --tags
 on:
   push:
     tags: ['v[0-9]*.*.*']
