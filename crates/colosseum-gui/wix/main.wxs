@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  WiX v4/v5 installer source for Colosseum.
+  WiX installer source for Colosseum (v4 schema; builds with WiX v5+).
 
-  Built in CI with the WiX .NET tool (`dotnet tool install --global wix`):
+  Built in CI with the WiX .NET tool ("dotnet tool install -g wix").
+  NOTE: XML comments must not contain a double hyphen; a literal
+  "dash dash global" here used to make the whole file unparseable (WIX0104).
 
     wix build crates/colosseum-gui/wix/main.wxs ^
       -arch x64 ^                  (or: -arch arm64)
-      -d Version=0.1.0 ^
+      -d Version=1.0.0 ^
       -d BinDir=<dir containing colosseum.exe> ^
       -d ProjectRoot=<repository root> ^
       -ext WixToolset.UI.wixext ^
