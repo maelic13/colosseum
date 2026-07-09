@@ -100,7 +100,10 @@ pub fn draw(ui: &mut Ui, rect: Rect, board: &Board, last_move: Option<(Option<Sq
             );
         }
         for rank in 0..8u32 {
-            let dark = rank % 2 == 0; // h-file square color parity
+            // h-file square color parity: dark when (rank + file 7) is even,
+            // i.e. odd ranks. The inverted parity used to paint every digit
+            // in its own square's color — invisible.
+            let dark = (rank + 7) % 2 == 0;
             let color = if dark { sq_light } else { sq_dark };
             painter.text(
                 pos2(

@@ -49,7 +49,10 @@ const GRAPH_MAX_H: f32 = 160.0;
 const CARD_PAD: f32 = 12.0;
 const DIVIDER_H: f32 = 9.0;
 const PANEL_MIN: f32 = 150.0;
-const PANEL_MAX: f32 = 320.0;
+/// Generous: on tall windows the surplus height goes to the engine panels
+/// (more search-log lines) rather than stranding empty margins around the
+/// height-capped eval graph.
+const PANEL_MAX: f32 = 560.0;
 const GRAPH_MIN: f32 = 60.0;
 /// Below this board size the body scrolls instead of shrinking further.
 const MIN_BOARD: f32 = 320.0;
@@ -352,7 +355,12 @@ impl LiveViews {
                     board::draw(ui, board_rect, replay.pos.board(), replay.last_move);
                 }
                 if let Some((result, termination)) = snap.finished {
-                    result_banner(ui, board_rect, result, termination);
+                    let winner = match result {
+                        GameResult::WhiteWin => Some(snap.white_name.as_str()),
+                        GameResult::BlackWin => Some(snap.black_name.as_str()),
+                        GameResult::Draw => None,
+                    };
+                    result_banner(ui, board_rect, result, termination, winner);
                 }
                 ui.allocate_ui_with_layout(vec2(right_w, board_side), column, |ui| {
                     ui.set_max_width(right_w);
@@ -861,12 +869,27 @@ fn material_row(ui: &mut Ui, board: &shakmaty::Board) {
 
 // ── Board extras ────────────────────────────────────────────────────────────
 
-fn result_banner(ui: &Ui, board_rect: Rect, result: GameResult, termination: Termination) {
-    let text = format!(
-        "{} · {}",
-        result_label(result),
-        termination_label(termination)
-    );
+fn result_banner(
+    ui: &Ui,
+    board_rect: Rect,
+    result: GameResult,
+    termination: Termination,
+    winner: Option<&str>,
+) {
+    // Lead with who won — the score alone makes the reader cross-reference
+    // which engine had which colour.
+    let text = match winner {
+        Some(name) => format!(
+            "{name} wins · {} · {}",
+            result_label(result),
+            termination_label(termination)
+        ),
+        None => format!(
+            "{} · {}",
+            result_label(result),
+            termination_label(termination)
+        ),
+    };
     let painter = ui.painter();
     let galley = painter.layout_no_wrap(text, theme::semibold(15.0), theme::text());
     let pad = vec2(14.0, 8.0);

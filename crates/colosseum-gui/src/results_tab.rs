@@ -1500,7 +1500,16 @@ impl ResultsTab {
             // remaining height leaves a huge dead gap under the matrix.
             .auto_shrink([false, true])
             .show(ui, |ui| {
-                egui::Grid::new("results_h2h_matrix")
+                // Hover cross-highlight: a wash behind the hovered row and
+                // column makes a big matrix traceable. The wash is painted
+                // into a slot reserved *before* the grid (so it sits behind
+                // the cells) from label rects recorded while drawing —
+                // paint-only, nothing moves or resizes on hover.
+                let wash_slot = ui.painter().add(egui::Shape::Noop);
+                let mut col_labels: Vec<egui::Rect> = Vec::new();
+                let mut row_labels: Vec<egui::Rect> = Vec::new();
+
+                let grid = egui::Grid::new("results_h2h_matrix")
                     .striped(true)
                     .spacing([10.0, 4.0])
                     .show(ui, |ui| {
@@ -1508,12 +1517,24 @@ impl ResultsTab {
                         for col in &order {
                             // Same "name version" identity as the main table,
                             // so the four Rybkas / two Basilisks are distinct.
-                            engine_name_label_full(ui, &col.name, &col.version);
+                            let r = ui
+                                .scope(|ui| {
+                                    engine_name_label_full(ui, &col.name, &col.version);
+                                })
+                                .response
+                                .rect;
+                            col_labels.push(r);
                         }
                         ui.end_row();
 
                         for row in &order {
-                            engine_name_label_full(ui, &row.name, &row.version);
+                            let r = ui
+                                .scope(|ui| {
+                                    engine_name_label_full(ui, &row.name, &row.version);
+                                })
+                                .response
+                                .rect;
+                            row_labels.push(r);
                             for col in &order {
                                 if row.id == col.id {
                                     ui.label(RichText::new("—").color(theme::text_weak()));
@@ -1534,6 +1555,41 @@ impl ResultsTab {
                             ui.end_row();
                         }
                     });
+
+                let matrix = grid.response.rect;
+                if let Some(pos) = ui.ctx().pointer_hover_pos()
+                    && matrix.contains(pos)
+                {
+                    let wash = theme::tint(theme::accent(), 0.07);
+                    let mut shapes: Vec<egui::Shape> = Vec::new();
+                    if let Some(r) = row_labels
+                        .iter()
+                        .find(|r| pos.y >= r.top() - 2.0 && pos.y <= r.bottom() + 2.0)
+                    {
+                        shapes.push(egui::Shape::rect_filled(
+                            egui::Rect::from_min_max(
+                                egui::pos2(matrix.left(), r.top() - 2.0),
+                                egui::pos2(matrix.right(), r.bottom() + 2.0),
+                            ),
+                            2.0,
+                            wash,
+                        ));
+                    }
+                    if let Some(c) = col_labels
+                        .iter()
+                        .find(|c| pos.x >= c.left() - 5.0 && pos.x <= c.right() + 5.0)
+                    {
+                        shapes.push(egui::Shape::rect_filled(
+                            egui::Rect::from_min_max(
+                                egui::pos2(c.left() - 5.0, matrix.top()),
+                                egui::pos2(c.right() + 5.0, matrix.bottom()),
+                            ),
+                            2.0,
+                            wash,
+                        ));
+                    }
+                    ui.painter().set(wash_slot, egui::Shape::Vec(shapes));
+                }
             });
     }
 
@@ -2182,6 +2238,10 @@ fn termination_breakdown(ui: &mut Ui, counts: &HashMap<Termination, usize>) {
         ),
     ];
 
+    // Bars are scaled to the largest single count, so the distribution is
+    // readable at a glance (146 adjudicated resigns vs 4 fifty-move draws).
+    let max_count = counts.values().copied().max().unwrap_or(0).max(1);
+
     for (group_label, terms) in groups {
         let relevant: Vec<(Termination, usize)> = terms
             .iter()
@@ -2196,22 +2256,46 @@ fn termination_breakdown(ui: &mut Ui, counts: &HashMap<Termination, usize>) {
                 .size(11.0)
                 .italics(),
         );
+        let bar_color = if *group_label == "Errors" {
+            theme::tint(theme::warn(), 0.16)
+        } else {
+            theme::tint(theme::accent(), 0.12)
+        };
         for (term, count) in relevant {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(termination_label(term))
-                        .color(theme::text_weak())
-                        .size(12.0),
-                );
-                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+            // A proportional wash behind the row (painted into a slot
+            // reserved beforehand, so it sits under the text) turns the
+            // list into a small bar chart without costing any space.
+            let bar_slot = ui.painter().add(egui::Shape::Noop);
+            let row = ui
+                .horizontal(|ui| {
                     ui.label(
-                        RichText::new(count.to_string())
-                            .color(theme::text())
-                            .size(12.0)
-                            .monospace(),
+                        RichText::new(termination_label(term))
+                            .color(theme::text_weak())
+                            .size(12.0),
                     );
-                });
-            });
+                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(count.to_string())
+                                .color(theme::text())
+                                .size(12.0)
+                                .monospace(),
+                        );
+                    });
+                })
+                .response
+                .rect;
+            let frac = count as f32 / max_count as f32;
+            ui.painter().set(
+                bar_slot,
+                egui::Shape::rect_filled(
+                    egui::Rect::from_min_size(
+                        row.min,
+                        egui::vec2(row.width() * frac, row.height()),
+                    ),
+                    2.0,
+                    bar_color,
+                ),
+            );
         }
         ui.add_space(3.0);
     }
