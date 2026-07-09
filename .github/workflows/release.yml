@@ -1,14 +1,17 @@
 name: Release
-# Title runs by the tag ("v1.0.0", "v1.0.0-rc.2") instead of the commit message.
+# Title runs by the release tag ("v1.0.0") instead of the commit message.
 run-name: ${{ github.ref_name }}
 
-# Triggered by version tags — e.g. git tag v1.0.0 && git push --tags
+# Triggered by publishing a GitHub Release (create the release + tag with a
+# hand-written description on github.com; this workflow then builds the
+# platform assets and attaches them to that release). Publishing from a
+# draft fires the same event — the assets appear a few minutes later.
 on:
-  push:
-    tags: ['v[0-9]*.*.*']
+  release:
+    types: [published]
 
 permissions:
-  contents: write   # needed to create GitHub Releases
+  contents: write   # needed to upload assets to the release
 
 env:
   CARGO_TERM_COLOR: always
@@ -295,10 +298,10 @@ jobs:
           path: ${{ env.ARTIFACT_DMG }}
 
   # ────────────────────────────────────────────────────────────────────────────
-  # Collect all platform artifacts and publish a GitHub Release
+  # Collect all platform artifacts and attach them to the triggering release
   # ────────────────────────────────────────────────────────────────────────────
   publish:
-    name: Publish GitHub Release
+    name: Attach assets to the release
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -314,11 +317,10 @@ jobs:
       - name: List release artifacts
         run: ls -lh release-artifacts/
 
-      - name: Create GitHub Release
+      # The release (tag, title, description, pre-release flag) is authored by
+      # hand on github.com; this only uploads the files to it. No body/notes
+      # options here, so the hand-written description is never touched.
+      - name: Upload assets to the release
         uses: softprops/action-gh-release@v2
         with:
           files: release-artifacts/*
-          generate_release_notes: true
-          draft: false
-          # Mark pre-releases automatically (v0.1.0-rc.1, v0.1.0-beta, etc.)
-          prerelease: ${{ contains(github.ref_name, '-') }}
