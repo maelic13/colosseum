@@ -202,9 +202,12 @@ impl ResultsTab {
             return;
         };
         self.auto_loaded = Some(id);
-        if row.status != STATUS_FINISHED
-            && let Err(e) = backend.try_resume(row)
-        {
+        // Finished tournaments load too: the loaded (live) view is the one
+        // with the full standings, head-to-head, terminations and
+        // Information rail — no reason a finished tournament should show a
+        // stripped-down layer. Loading replays the DB only; no engines spawn
+        // and there is nothing left to play.
+        if let Err(e) = backend.try_resume(row) {
             self.error = Some(format!("Could not load: {e}"));
         }
     }
@@ -336,10 +339,10 @@ impl ResultsTab {
                             self.multi_selected.clear();
                             self.selected = Some(row.id);
                             self.pending_delete = None;
-                            // Unfinished tournaments load immediately — same
-                            // state as pressing Resume (stopped, ready).
-                            if row.status != STATUS_FINISHED
-                                && backend.active(row.id).is_none()
+                            // Load immediately (finished tournaments too) —
+                            // the loaded view carries the full standings,
+                            // head-to-head and Information rail.
+                            if backend.active(row.id).is_none()
                                 && let Err(e) = backend.try_resume(row.clone())
                             {
                                 self.error = Some(format!("Could not load: {e}"));

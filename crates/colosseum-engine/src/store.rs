@@ -215,11 +215,13 @@ impl Store {
         Ok(())
     }
 
-    /// Update a tournament's status; sets `finished_at` when finishing.
+    /// Update a tournament's status; sets `finished_at` when finishing (kept
+    /// at the *first* finish time if the status is ever re-applied).
     pub fn set_tournament_status(&self, id: TournamentId, status: &str) -> Result<()> {
         if status == STATUS_FINISHED {
             self.conn.execute(
-                "UPDATE tournaments SET status = ?2, finished_at = ?3 WHERE id = ?1",
+                "UPDATE tournaments SET status = ?2,
+                        finished_at = COALESCE(finished_at, ?3) WHERE id = ?1",
                 params![id.to_string(), status, now_iso8601()],
             )?;
         } else {

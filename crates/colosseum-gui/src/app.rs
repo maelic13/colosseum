@@ -365,7 +365,7 @@ impl ColosseumApp {
                 ui.label(
                     RichText::new(
                         "UCI chess-engine tournaments: round robin & gauntlet, \
-                         parallel games, live boards, ML ratings.",
+                         parallel games, live boards, maximum-likelihood ratings.",
                     )
                     .color(theme::text_weak())
                     .size(12.0),

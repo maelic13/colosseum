@@ -78,6 +78,10 @@ pub struct LiveGameState {
     pub uci_moves: Vec<String>,
     /// Plies pre-played from the opening book (no engine eval for these).
     pub opening_plies: u32,
+    /// Each side's library Elo captured when the game launched (stable for
+    /// the whole game — later write-backs from parallel games don't move it).
+    pub white_elo: Option<i32>,
+    pub black_elo: Option<i32>,
     /// Remaining clock per side (`None` for non-clock time controls).
     pub white_clock_ms: Option<u64>,
     pub black_clock_ms: Option<u64>,
@@ -125,6 +129,8 @@ impl LiveGameState {
             san_moves: Vec::new(),
             uci_moves: Vec::new(),
             opening_plies: 0,
+            white_elo: None,
+            black_elo: None,
             white_clock_ms: None,
             black_clock_ms: None,
             white_to_move: true,

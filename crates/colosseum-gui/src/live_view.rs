@@ -135,6 +135,9 @@ struct Snap {
     black_name: String,
     white_id: EngineId,
     black_id: EngineId,
+    /// Library Elo captured at game launch (stable for the whole game).
+    white_elo: Option<i32>,
+    black_elo: Option<i32>,
     start_fen: Option<String>,
     san: Vec<String>,
     uci: Vec<String>,
@@ -160,6 +163,8 @@ fn snapshot(live: &LiveGameHandle) -> Option<Snap> {
         black_name: lg.black_name.clone(),
         white_id: lg.white,
         black_id: lg.black,
+        white_elo: lg.white_elo,
+        black_elo: lg.black_elo,
         start_fen: lg.start_fen.clone(),
         san: lg.san_moves.clone(),
         uci: lg.uci_moves.clone(),
@@ -923,7 +928,7 @@ fn engine_column(
                     &PanelData {
                         engine: snap.black_id,
                         name: &snap.black_name,
-                        elo: engine_elo(backend, snap.black_id),
+                        elo: snap.black_elo,
                         is_white: false,
                         search: &snap.black_search,
                         log: &snap.black_log,
@@ -948,7 +953,7 @@ fn engine_column(
                     &PanelData {
                         engine: snap.white_id,
                         name: &snap.white_name,
-                        elo: engine_elo(backend, snap.white_id),
+                        elo: snap.white_elo,
                         is_white: true,
                         search: &snap.white_search,
                         log: &snap.white_log,
@@ -962,15 +967,6 @@ fn engine_column(
                 );
             });
         });
-}
-
-/// The engine's current library Elo (kept live by the ratings write-back).
-fn engine_elo(backend: &Backend, id: EngineId) -> Option<i32> {
-    backend
-        .engines
-        .iter()
-        .find(|e| e.id == id)
-        .and_then(|e| e.meta.elo)
 }
 
 /// Allocate exactly `w`×`h` for one engine panel and build it in a clipped
@@ -1120,39 +1116,52 @@ fn engine_panel(
                         ui.horizontal(|ui| {
                             let (dot, _) = ui.allocate_exact_size(vec2(9.0, 9.0), Sense::hover());
                             ui.painter().circle_filled(dot.center(), 4.5, series);
-                            // Elo sits right-aligned in the name row (same
-                            // pattern as the engine-library rows); the name
-                            // truncates against a reserved slot so a long
-                            // name never pushes the rating out.
-                            let elo_text = data.elo.map(|e| e.to_string());
-                            let elo_w = elo_text.as_ref().map_or(0.0, |t| {
+                            // The name is the star: it renders first and the
+                            // Elo chip beside it is the first thing to go
+                            // when space runs out — never the other way
+                            // around.
+                            let name_w = ui
+                                .painter()
+                                .layout_no_wrap(
+                                    data.name.to_owned(),
+                                    theme::semibold(15.0),
+                                    Color32::WHITE,
+                                )
+                                .size()
+                                .x;
+                            let chip = data.elo.map(|e| e.to_string());
+                            let chip_w = chip.as_ref().map_or(0.0, |t| {
                                 ui.painter()
                                     .layout_no_wrap(
                                         t.clone(),
-                                        egui::FontId::proportional(12.0),
+                                        egui::FontId::proportional(11.0),
                                         Color32::WHITE,
                                     )
                                     .size()
                                     .x
-                                    + 8.0
+                                    + 14.0 // chip frame padding + border
+                                    + ui.spacing().item_spacing.x
                             });
-                            let name_w = (ui.available_width() - elo_w).max(40.0);
-                            ui.allocate_ui_with_layout(
-                                vec2(name_w, 18.0),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(data.name)
-                                                .color(theme::text())
-                                                .font(theme::semibold(15.0)),
-                                        )
-                                        .truncate(),
-                                    );
-                                },
-                            );
-                            if let Some(text) = elo_text {
-                                ui.label(RichText::new(text).color(theme::text_faint()).size(12.0));
+                            if let Some(text) =
+                                chip.filter(|_| name_w + chip_w <= ui.available_width())
+                            {
+                                // Everything fits: full name with the chip
+                                // right beside it.
+                                ui.label(
+                                    RichText::new(data.name)
+                                        .color(theme::text())
+                                        .font(theme::semibold(15.0)),
+                                );
+                                widgets::chip(ui, &text, theme::text_weak());
+                            } else {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(data.name)
+                                            .color(theme::text())
+                                            .font(theme::semibold(15.0)),
+                                    )
+                                    .truncate(),
+                                );
                             }
                         });
                         ui.horizontal(|ui| {

@@ -1479,7 +1479,10 @@ impl TournamentTab {
         // normal one, stacked on narrow panels. Columns are grouped so
         // their heights roughly match.
         let w = ui.available_width();
-        if w >= 1150.0 {
+        // 3-column threshold: every column must comfortably hold the widest
+        // card content (the Openings file row) — at the old 1150 threshold a
+        // borderline window chose three columns whose third clipped.
+        if w >= 1500.0 {
             ui.columns(3, |cols| {
                 Self::section_tournament(&mut cols[0], f, engines);
                 Self::section_engine_options(&mut cols[0], f);

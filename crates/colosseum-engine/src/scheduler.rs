@@ -416,7 +416,9 @@ async fn drive(mut driver: Driver) {
     let mut launched: HashMap<GameId, ScheduledGame> = HashMap::new();
     let mut launch_seq = 0u64;
     let mut running = false;
-    let mut finished = false;
+    // Resumed-and-already-complete tournaments start (and stay) finished —
+    // Go must not flip them back to Running.
+    let mut finished = total > 0 && finished_count == total && pending.is_empty();
     // The tournament play clock: accumulates while games are in flight and
     // freezes the moment they stop (Force-Stop, or the last game of a Stop
     // draining). Live elapsed = `elapsed_active + running_since.elapsed()`.
@@ -458,6 +460,32 @@ async fn drive(mut driver: Driver) {
                 scheduled.start_fen.clone(),
                 driver.config.time_control,
             );
+            // Capture each side's *library* Elo as of this launch: for
+            // engines the write-back updates that is the latest recompute
+            // (mirrored to the library after every game), for the rest the
+            // tournament-start seed (their library never moves). Stored on
+            // the game so parallel finishes can't change it mid-display.
+            {
+                let seed_of =
+                    |eid: EngineId| seeds.iter().find(|(sid, _)| *sid == eid).map(|(_, s)| *s);
+                let elo_at_launch = |eid: EngineId| -> Option<i32> {
+                    let value = if driver.config.rating_writeback.applies_to(eid) {
+                        driver
+                            .snapshot
+                            .lock()
+                            .ok()
+                            .and_then(|s| s.elo.get(&eid).map(|e| e.current))
+                            .or_else(|| seed_of(eid))
+                    } else {
+                        seed_of(eid)
+                    };
+                    value.map(|v| v.round() as i32)
+                };
+                if let Ok(mut lg) = live.lock() {
+                    lg.white_elo = elo_at_launch(scheduled.pairing.white);
+                    lg.black_elo = elo_at_launch(scheduled.pairing.black);
+                }
+            }
             launch_seq += 1;
             in_flight.insert(
                 scheduled.game_id,
@@ -819,11 +847,20 @@ pub fn resume_tournament(
         }
     }
 
-    // Mark the tournament as stopped; it becomes running again when Go is pressed.
-    store.set_tournament_status(id, store::STATUS_STOPPED)?;
+    // Mark the tournament as stopped (running again when Go is pressed) —
+    // unless every game is already played: loading a finished tournament for
+    // viewing must keep it Finished, in the DB and on screen.
+    let all_done = total_games > 0 && finished_count == total_games;
+    let status = if all_done {
+        store.set_tournament_status(id, store::STATUS_FINISHED)?;
+        TournamentStatus::Finished
+    } else {
+        store.set_tournament_status(id, store::STATUS_STOPPED)?;
+        TournamentStatus::Stopped
+    };
 
     let snapshot = Arc::new(Mutex::new(TournamentSnapshot {
-        status: TournamentStatus::Stopped,
+        status,
         standings: standings.clone(),
         elo: elo_entries(&standings, &seeds, &config.rating_writeback),
         games_finished: finished_count,
