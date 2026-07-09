@@ -662,25 +662,53 @@ fn moves_column(ui: &mut Ui, snap: &Snap, replay: Option<&Replay>, height: f32) 
             ui.set_min_size(vec2(MOVES_W - 20.0, height - 20.0));
             ui.set_max_height(height - 20.0);
 
-            // Matchup header: the players are the headline.
+            // Matchup header: the players are the headline. Each line is the
+            // name with its launch-time Elo chip beside it (same style as the
+            // engine cards); the chip goes first when the column is too
+            // narrow for both, the name never does.
+            let player_line = |ui: &mut Ui, name: &str, elo: Option<i32>| {
+                let avail = ui.available_width();
+                let name_w = ui
+                    .painter()
+                    .layout_no_wrap(name.to_owned(), theme::semibold(15.0), Color32::WHITE)
+                    .size()
+                    .x;
+                let chip = elo.map(|e| e.to_string());
+                let chip_w = chip.as_ref().map_or(0.0, |t| {
+                    ui.painter()
+                        .layout_no_wrap(t.clone(), egui::FontId::proportional(11.0), Color32::WHITE)
+                        .size()
+                        .x
+                        + 14.0
+                        + ui.spacing().item_spacing.x
+                });
+                if let Some(text) = chip.filter(|_| name_w + chip_w <= avail) {
+                    ui.horizontal(|ui| {
+                        // Centre the name + chip pair by hand — a horizontal
+                        // row is left-aligned even inside vertical_centered.
+                        ui.add_space(((avail - name_w - chip_w) / 2.0).max(0.0));
+                        ui.label(
+                            RichText::new(name)
+                                .color(theme::text())
+                                .font(theme::semibold(15.0)),
+                        );
+                        widgets::chip(ui, &text, theme::text_weak());
+                    });
+                } else {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(name)
+                                .color(theme::text())
+                                .font(theme::semibold(15.0)),
+                        )
+                        .truncate(),
+                    );
+                }
+            };
             ui.vertical_centered(|ui| {
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(&snap.white_name)
-                            .color(theme::text())
-                            .font(theme::semibold(15.0)),
-                    )
-                    .truncate(),
-                );
+                player_line(ui, &snap.white_name, snap.white_elo);
                 ui.label(RichText::new("vs").color(theme::text_faint()).size(10.0));
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(&snap.black_name)
-                            .color(theme::text())
-                            .font(theme::semibold(15.0)),
-                    )
-                    .truncate(),
-                );
+                player_line(ui, &snap.black_name, snap.black_elo);
                 ui.add_space(2.0);
                 ui.label(
                     RichText::new(format!("Round {}", snap.round))
