@@ -159,15 +159,12 @@ frame.
 
 ## Releasing
 
-```bash
-# Tag a release — the release.yml workflow fires automatically
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-This builds Windows (x64 + ARM64), Linux, and macOS binaries, runs smoke
-tests, and publishes a GitHub Release with the MSI/ZIP/DEB/RPM/DMG/tar.gz
-artifacts and auto-generated notes.
+Create a release by hand on GitHub (**Releases → Draft a new release**):
+pick or create the `vX.Y.Z` tag, write the title and description, and
+publish. Publishing triggers the `release.yml` workflow, which builds
+Windows (x64 + ARM64), Linux, and macOS binaries, runs smoke tests, and
+attaches the MSI/ZIP/DEB/RPM/DMG/tar.gz artifacts to that release a few
+minutes later. The hand-written description is left untouched.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full version history.
 
