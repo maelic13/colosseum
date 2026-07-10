@@ -129,11 +129,16 @@ impl EnginesTab {
 
         let avail = ui.available_size();
 
-        // ── Left: engine grid (fixed ~50% so the split tracks window size
-        // rather than persisting an absolute width that breaks on resize) ──
+        // ── Left: engine grid (user-resizable; the range is recomputed from
+        // the window each frame, so a persisted width can never crowd out the
+        // engine panel after the window shrinks). The split is persisted on
+        // [`AppConfig`] as a fraction of the tab width, so it lands in the
+        // same place across sessions and window sizes. ──
+        let grid_max = (avail.x - 420.0).max(320.0);
         let grid_panel = egui::Panel::left("engines_grid_panel")
-            .resizable(false)
-            .exact_size((avail.x * 0.5).max(320.0))
+            .resizable(true)
+            .default_size((avail.x * backend.config.engines_split).max(320.0))
+            .size_range(320.0..=grid_max)
             .frame(egui::Frame::new().inner_margin(egui::Margin {
                 left: 2, // room for focus rings at the panel edge
                 right: 12,
@@ -143,6 +148,18 @@ impl EnginesTab {
             .show(ui, |ui| {
                 self.show_grid(ui, backend);
             });
+
+        // Persist the split once the drag is released (any_down gates the
+        // write so we don't hit the disk every frame mid-drag). Also fires
+        // after a window resize squeezes the panel — the remembered split is
+        // whatever is actually on screen.
+        let split = (grid_panel.response.rect.width() / avail.x).clamp(0.0, 1.0);
+        if (split - backend.config.engines_split).abs() > 0.002
+            && !ui.input(|i| i.pointer.any_down())
+        {
+            backend.config.engines_split = split;
+            backend.save_config();
+        }
 
         // A click outside the grid drops the bulk selection (the edited
         // engine stays). Skipped while a popup/modal is open so context-menu
@@ -157,6 +174,24 @@ impl EnginesTab {
             }) {
                 self.multi_selected.clear();
             }
+        }
+
+        // Delete asks to remove the ctrl-click selection, same as the context
+        // menu's Delete (N)…. Guarded so it never fires while typing or while
+        // any popup/modal is open.
+        if !self.multi_selected.is_empty()
+            && self.pending_delete.is_empty()
+            && !egui::Popup::is_any_open(ui.ctx())
+            && ui.ctx().memory(|m| m.focused().is_none())
+            && ui.input(|i| i.key_pressed(egui::Key::Delete))
+        {
+            // Library order, so the confirmation lists them top to bottom.
+            self.pending_delete = backend
+                .engines
+                .iter()
+                .map(|e| e.id)
+                .filter(|id| self.multi_selected.contains(id))
+                .collect();
         }
 
         // ── Bottom-right: global tablebase paths (collapsible, collapsed by
@@ -401,7 +436,9 @@ impl EnginesTab {
         }
 
         for id in new_ids {
-            if self.selected_id.is_none() {
+            // A single "Add Engine" selects the newcomer so it can be edited
+            // right away; a folder scan only fills an empty selection.
+            if single || self.selected_id.is_none() {
                 self.select_engine(id, backend);
             }
         }

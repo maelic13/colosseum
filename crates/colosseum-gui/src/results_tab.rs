@@ -72,8 +72,6 @@ pub struct ResultsTab {
     sort: SortState,
     /// Whether the engine-errors bar is expanded (collapsed summary otherwise).
     errors_expanded: bool,
-    /// Whether the tournaments list panel is collapsed to a slim strip.
-    list_collapsed: bool,
     /// The heavy per-tournament state (standings, rows, errors), rebuilt only
     /// when a game finishes — cloning `Standings` every frame at 30 Hz was
     /// the live view's biggest per-frame cost.
@@ -122,8 +120,19 @@ impl ResultsTab {
         self.auto_load_selected(backend);
 
         // Right: tournament list — collapsible to a slim strip for more room.
+        // Open/closed is remembered *per lens*: by default the list shows on
+        // Standings (browsing context matters) and hides on Live (the board
+        // wants the room); toggling it only affects the active lens.
+        let live_lens = self
+            .selected
+            .is_some_and(|id| backend.active(id).is_some() && self.live_views.is_watching(id));
+        let list_open = if live_lens {
+            backend.config.arena_list_open_live
+        } else {
+            backend.config.arena_list_open_standings
+        };
         let mut list_rect: Option<egui::Rect> = None;
-        if self.list_collapsed {
+        if !list_open {
             egui::Panel::right("results_list_collapsed")
                 .exact_size(24.0)
                 .resizable(false)
@@ -131,7 +140,12 @@ impl ResultsTab {
                 .show(ui, |ui| {
                     let count = self.list.as_ref().map_or(0, Vec::len);
                     if widgets::expand_strip(ui, "‹", &format!("Tournaments ({count})")) {
-                        self.list_collapsed = false;
+                        if live_lens {
+                            backend.config.arena_list_open_live = true;
+                        } else {
+                            backend.config.arena_list_open_standings = true;
+                        }
+                        backend.save_config();
                     }
                 });
         } else {
@@ -146,7 +160,7 @@ impl ResultsTab {
                     bottom: 8,
                 }))
                 .show(ui, |ui| {
-                    self.list_panel(ui, backend);
+                    self.list_panel(ui, backend, live_lens);
                 });
             list_rect = Some(panel.response.rect);
         }
@@ -163,6 +177,29 @@ impl ResultsTab {
             })
         {
             self.multi_selected.clear();
+        }
+
+        // Delete asks to remove the ctrl-click selection, same as the context
+        // menu's Delete (N)…. Guarded so it never fires while typing or while
+        // any popup/modal is open.
+        if !self.multi_selected.is_empty()
+            && self.bulk_delete.is_none()
+            && self.rename_dialog.is_none()
+            && !egui::Popup::is_any_open(ui.ctx())
+            && ui.ctx().memory(|m| m.focused().is_none())
+            && ui.input(|i| i.key_pressed(egui::Key::Delete))
+        {
+            // List order, so the bulk delete runs top to bottom.
+            let targets: Vec<TournamentId> = self
+                .list
+                .iter()
+                .flatten()
+                .map(|r| r.id)
+                .filter(|id| self.multi_selected.contains(id))
+                .collect();
+            if !targets.is_empty() {
+                self.bulk_delete = Some(targets);
+            }
         }
 
         self.bulk_delete_modal(ui, backend);
@@ -230,7 +267,7 @@ impl ResultsTab {
 
     // ── Tournament list (right panel) ───────────────────────────────────────
 
-    fn list_panel(&mut self, ui: &mut Ui, backend: &mut Backend) {
+    fn list_panel(&mut self, ui: &mut Ui, backend: &mut Backend, live_lens: bool) {
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new("Tournaments")
@@ -245,10 +282,15 @@ impl ResultsTab {
             );
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 if widgets::collapse_button(ui, "›")
-                    .on_hover_text("Hide the tournaments list.")
+                    .on_hover_text("Hide the tournaments list (remembered for this lens).")
                     .clicked()
                 {
-                    self.list_collapsed = true;
+                    if live_lens {
+                        backend.config.arena_list_open_live = false;
+                    } else {
+                        backend.config.arena_list_open_standings = false;
+                    }
+                    backend.save_config();
                 }
             });
         });
@@ -728,9 +770,13 @@ impl ResultsTab {
                 };
                 ui.spacing_mut().item_spacing.y = 1.0;
                 ui.label(
-                    RichText::new(format!("{finished} / {total} games"))
-                        .color(theme::text_weak())
-                        .size(11.5),
+                    RichText::new(format!(
+                        "{} / {} games",
+                        widgets::thousands(finished as u64),
+                        widgets::thousands(total as u64)
+                    ))
+                    .color(theme::text_weak())
+                    .size(11.5),
                 );
                 ui.label(
                     RichText::new(format_timestamp(&row.created_at))
@@ -888,7 +934,7 @@ impl ResultsTab {
                     .id_salt("results_live_scroll")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        self.results_table(ui, &live);
+                        self.results_table(ui, backend, &live);
                         ui.add_space(18.0);
                         self.head_to_head_section(ui, &live);
                         ui.add_space(8.0);
@@ -943,14 +989,31 @@ impl ResultsTab {
                     .find(|(pid, _)| *pid == eid)
                     .map_or(1500.0, |(_, p)| *p)
             };
-            let ranked = standings.ranked_by_points();
-            let rank_of = |id: EngineId| ranked.iter().position(|x| x == &id).map_or(0, |p| p + 1);
+            let participant_ids: Vec<EngineId> = active.participants.iter().map(|p| p.id).collect();
+            // A single-seed gauntlet ranks the *opponents* by their score
+            // share against the seed (the seed itself sits in a summary card
+            // above the table, not in the ranking).
+            let gauntlet_seed: Option<EngineId> = match active.config.format {
+                Format::Gauntlet { seeds, .. } if seeds.max(1) == 1 => {
+                    active.participants.first().map(|p| p.id)
+                }
+                _ => None,
+            };
+            let ranks = match gauntlet_seed {
+                Some(seed) => gauntlet_ranks(&standings, &participant_ids, seed),
+                None => competition_ranks(&standings, &participant_ids),
+            };
 
             let mut rows: Vec<Row> = active
                 .participants
                 .iter()
                 .map(|p| {
                     let st = standings.standing(p.id);
+                    let (rank, rank_label, sb) =
+                        ranks
+                            .get(&p.id)
+                            .cloned()
+                            .unwrap_or((0, String::from("—"), 0.0));
                     let entry = elo_model.get(&p.id).copied().unwrap_or_default();
                     // The driver's entries already reflect the writeback mode
                     // (anchored engines sit exactly at their start rating).
@@ -970,7 +1033,15 @@ impl ResultsTab {
                         };
                     Row {
                         id: p.id,
-                        rank: rank_of(p.id),
+                        rank,
+                        rank_label,
+                        sb,
+                        score_pct: if st.games() > 0 {
+                            st.points() / f64::from(st.games()) * 100.0
+                        } else {
+                            0.0
+                        },
+                        perf: None, // filled below, once every engine's Elo is known
                         name: p.name.clone(),
                         version: p.version.clone(),
                         elo,
@@ -989,7 +1060,33 @@ impl ResultsTab {
                     }
                 })
                 .collect();
-            rows.sort_by_key(|r| r.rank);
+            // Performance rating: solved against the *displayed* opponent
+            // Elos, so it works (and stays meaningful) under every rating
+            // write-back mode — including "never update".
+            let elo_of: HashMap<EngineId, f64> = rows.iter().map(|r| (r.id, r.elo)).collect();
+            let perfs: Vec<Option<f64>> = rows
+                .iter()
+                .map(|row| {
+                    let results: Vec<(f64, f64, u32)> = rows
+                        .iter()
+                        .filter(|opp| opp.id != row.id)
+                        .filter_map(|opp| {
+                            let h2h = standings.head_to_head(row.id, opp.id);
+                            (h2h.games() > 0).then(|| (elo_of[&opp.id], h2h.points(), h2h.games()))
+                        })
+                        .collect();
+                    colosseum_core::performance_rating(&results)
+                })
+                .collect();
+            for (row, perf) in rows.iter_mut().zip(perfs) {
+                row.perf = perf;
+            }
+
+            rows.sort_by(|a, b| {
+                a.rank
+                    .cmp(&b.rank)
+                    .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            });
 
             self.live_cache = Some((
                 id,
@@ -1119,9 +1216,13 @@ impl ResultsTab {
 
             // Progress: caption + slim bar.
             ui.label(
-                RichText::new(format!("{} / {} games", live.finished, live.total))
-                    .color(theme::text_weak())
-                    .size(13.0),
+                RichText::new(format!(
+                    "{} / {} games",
+                    widgets::thousands(live.finished as u64),
+                    widgets::thousands(live.total as u64)
+                ))
+                .color(theme::text_weak())
+                .size(13.0),
             );
             let frac = if live.total == 0 {
                 0.0
@@ -1170,8 +1271,9 @@ impl ResultsTab {
                                 .size(12.0),
                         )
                         .on_hover_text(format!(
-                            "{remaining} games left, {} in parallel, {} per game \
+                            "{} games left, {} in parallel, {} per game \
                              ({}).",
+                            widgets::thousands(remaining as u64),
                             live.concurrency,
                             format_duration(avg),
                             if live.games_timed > 0 {
@@ -1269,7 +1371,7 @@ impl ResultsTab {
         });
     }
 
-    fn results_table(&mut self, ui: &mut Ui, live: &LiveData) {
+    fn results_table(&mut self, ui: &mut Ui, backend: &mut Backend, live: &LiveData) {
         if live.rows.is_empty() {
             ui.add_space(20.0);
             ui.label(
@@ -1280,130 +1382,180 @@ impl ResultsTab {
             return;
         }
 
-        let mut rows: Vec<Row> = live.rows.as_ref().clone();
+        // A single-seed gauntlet keeps the seed in the table, but pinned on
+        // top, unranked ("G" badge), tinted, and separated from the ranked
+        // opponents by a bold rule. Opponents rank by score share against it,
+        // shown in the Score column that replaces SB (SB adds nothing when
+        // every game is against one engine).
+        let seed_id: Option<EngineId> = match live.gauntlet_seeds.as_slice() {
+            [seed] => Some(*seed),
+            _ => None,
+        };
+        let gauntlet = seed_id.is_some();
+
+        let mut rows: Vec<Row> = live
+            .rows
+            .iter()
+            .filter(|r| Some(r.id) != seed_id)
+            .cloned()
+            .collect();
         sort_rows(&mut rows, self.sort);
+        if let Some(seed) = seed_id.and_then(|id| live.rows.iter().find(|r| r.id == id)) {
+            rows.insert(0, seed.clone());
+        }
+
+        let order = column_order(&backend.config.arena_columns);
 
         let header_h = 30.0;
         let row_h = 30.0;
 
-        TableBuilder::new(ui)
+        // (column, header-cell response) pairs for the drag-reorder pass.
+        let mut header_cells: Vec<(Col, egui::Response)> = Vec::new();
+        let mut filler_cell: Option<egui::Response> = None;
+
+        let mut builder = TableBuilder::new(ui)
             // The page scrolls as a whole; a nested table scroll area would
             // add a second scrollbar inside the standings.
             .vscroll(false)
             .striped(true)
-            .cell_layout(Layout::left_to_right(egui::Align::Center))
-            // Fixed widths (not Column::auto): auto re-measures cell content every
-            // frame, so live-updating numbers make the columns visibly jump.
-            .column(Column::exact(40.0)) // rank
-            .column(Column::initial(210.0).at_least(130.0).clip(true)) // engine (name + version)
-            .column(Column::exact(60.0)) // elo
-            .column(Column::exact(76.0)) // elo delta chip
-            .column(Column::exact(60.0)) // points
-            .column(Column::exact(52.0)) // games
-            // Wide enough for four-digit counts ("1160-267-211") — long
-            // tournaments hit five digits of games.
-            .column(Column::exact(112.0)) // w-d-l
-            .column(Column::exact(90.0)) // nps
-            .column(Column::exact(84.0)) // avg depth
-            .column(Column::exact(84.0)) // avg time/move
-            .column(Column::remainder().at_least(110.0)) // forfeits (far right)
+            .cell_layout(Layout::left_to_right(egui::Align::Center));
+        // Fixed widths (not Column::auto): auto re-measures cell content every
+        // frame, so live-updating numbers make the columns visibly jump. A
+        // headerless filler column absorbs the leftover width so the last
+        // real column (and the seed-row tint) ends where its data does.
+        for col in &order {
+            builder = builder.column(if *col == Col::Engine {
+                Column::initial(210.0).at_least(130.0).clip(true)
+            } else {
+                Column::exact(col.width())
+            });
+        }
+        builder = builder.column(Column::remainder());
+        builder
             .header(header_h, |mut header| {
-                header.col(|ui| {
-                    ui.label(strong_header("#"));
-                });
-                header.col(|ui| {
-                    sortable_header(ui, "Engine", SortKey::Name, &mut self.sort);
-                });
-                header.col(|ui| {
-                    sortable_header(ui, "Elo", SortKey::Elo, &mut self.sort);
-                });
-                header.col(|ui| {
-                    sortable_header(ui, "Δ", SortKey::EloDelta, &mut self.sort);
-                });
-                header.col(|ui| {
-                    sortable_header(ui, "Pts", SortKey::Points, &mut self.sort);
-                });
-                header.col(|ui| {
-                    sortable_header(ui, "Gms", SortKey::Games, &mut self.sort);
-                });
-                header.col(|ui| {
-                    ui.label(strong_header("W-D-L"));
-                });
-                header.col(|ui| {
-                    sortable_header(ui, "Avg nps", SortKey::Nps, &mut self.sort);
-                });
-                header.col(|ui| sortable_header(ui, "Avg depth", SortKey::Depth, &mut self.sort));
-                header
-                    .col(|ui| sortable_header(ui, "Time/move", SortKey::MoveTime, &mut self.sort));
-                header.col(|ui| {
-                    ui.label(strong_header("Forfeits"))
-                        .on_hover_text("Losses on time and by crash / illegal move.");
-                });
+                for col in &order {
+                    let (_, resp) = header.col(|ui| {
+                        // Each header doubles as a drag handle for reordering;
+                        // sort clicks still work (drag needs actual movement).
+                        ui.dnd_drag_source(
+                            egui::Id::new(("arena_col_drag", col.id())),
+                            *col,
+                            |ui| {
+                                self.column_header(ui, *col, gauntlet);
+                            },
+                        );
+                    });
+                    header_cells.push((*col, resp));
+                }
+                let (_, filler_resp) = header.col(|_| {});
+                filler_cell = Some(filler_resp);
             })
             .body(|mut body| {
                 for row in &rows {
+                    let is_seed = Some(row.id) == seed_id;
                     body.row(row_h, |mut tr| {
-                        tr.col(|ui| {
-                            widgets::rank_badge(ui, row.rank);
-                        });
-                        tr.col(|ui| {
-                            engine_name_label(ui, &row.name, &row.version);
-                        });
-                        tr.col(|ui| {
-                            elo_cell(ui, row.elo, row.elo_error);
-                        });
-                        tr.col(|ui| {
-                            widgets::elo_delta_chip(ui, row.elo_delta);
-                        });
-                        tr.col(|ui| {
-                            ui.label(
-                                RichText::new(format!("{:.1}", row.points))
-                                    .color(theme::accent())
-                                    .monospace()
-                                    .strong(),
-                            );
-                        });
-                        tr.col(|ui| {
-                            ui.label(
-                                RichText::new(row.games.to_string())
-                                    .color(theme::text_weak())
-                                    .monospace(),
-                            );
-                        });
-                        tr.col(|ui| {
-                            ui.label(
-                                RichText::new(format!("{}-{}-{}", row.wins, row.draws, row.losses))
-                                    .color(theme::text())
-                                    .monospace(),
-                            );
-                        });
-                        tr.col(|ui| {
-                            ui.label(
-                                RichText::new(format_nps(row.nps))
-                                    .color(theme::text_weak())
-                                    .monospace(),
-                            );
-                        });
-                        tr.col(|ui| {
-                            ui.label(
-                                RichText::new(format_depth(row.depth))
-                                    .color(theme::text_weak())
-                                    .monospace(),
-                            );
-                        });
-                        tr.col(|ui| {
-                            ui.label(
-                                RichText::new(format_move_time(row.move_ms))
-                                    .color(theme::text_weak())
-                                    .monospace(),
-                            );
-                        });
-                        tr.col(|ui| {
-                            forfeit_cell(ui, row.time_losses, row.crash_losses);
-                        });
+                        for col in &order {
+                            tr.col(|ui| {
+                                if is_seed {
+                                    seed_row_decor(ui);
+                                }
+                                column_cell(ui, *col, row, gauntlet, is_seed);
+                            });
+                        }
+                        tr.col(|_| {}); // filler
                     });
                 }
             });
+
+        // Drag & drop pass: dropping a header on another moves it in front of
+        // that column; while dragging, the target edge shows an accent line.
+        let mut new_order: Option<Vec<Col>> = None;
+        for (col, resp) in &header_cells {
+            if let Some(src) = resp.dnd_release_payload::<Col>() {
+                if *src != *col {
+                    let mut o = order.clone();
+                    o.retain(|c| c != &*src);
+                    let at = o.iter().position(|c| c == col).unwrap_or(o.len());
+                    o.insert(at, *src);
+                    new_order = Some(o);
+                }
+            } else if resp.dnd_hover_payload::<Col>().is_some_and(|p| *p != *col) {
+                ui.painter().vline(
+                    resp.rect.left() - 2.0,
+                    resp.rect.y_range(),
+                    egui::Stroke::new(2.0, theme::accent()),
+                );
+            }
+        }
+        // Dropping on the trailing filler moves the column to the end.
+        if let Some(filler) = &filler_cell {
+            if let Some(src) = filler.dnd_release_payload::<Col>() {
+                let mut o = order.clone();
+                o.retain(|c| c != &*src);
+                o.push(*src);
+                new_order = Some(o);
+            } else if filler.dnd_hover_payload::<Col>().is_some() {
+                ui.painter().vline(
+                    filler.rect.left() - 2.0,
+                    filler.rect.y_range(),
+                    egui::Stroke::new(2.0, theme::accent()),
+                );
+            }
+        }
+        if let Some(o) = new_order {
+            backend.config.arena_columns = o.iter().map(|c| c.id().to_string()).collect();
+            backend.save_config();
+        }
+    }
+
+    /// One standings header cell (shared by every column arrangement).
+    fn column_header(&mut self, ui: &mut Ui, col: Col, gauntlet: bool) {
+        match col {
+            Col::Rank => {
+                ui.label(strong_header("#"));
+            }
+            Col::Engine => sortable_header(ui, "Engine", SortKey::Name, &mut self.sort),
+            Col::Elo => sortable_header(ui, "Elo", SortKey::Elo, &mut self.sort),
+            Col::Delta => sortable_header(ui, "Δ", SortKey::EloDelta, &mut self.sort),
+            Col::Pts => sortable_header(ui, "Pts", SortKey::Points, &mut self.sort),
+            Col::Tiebreak => {
+                if gauntlet {
+                    sortable_header(ui, "Score", SortKey::Score, &mut self.sort);
+                    ui.response().on_hover_text(
+                        "Share of the points scored against the gauntlet \
+                         engine. Opponents are ranked by it; equal share AND \
+                         equal points share the place (shown as a range).",
+                    );
+                } else {
+                    sortable_header(ui, "SB", SortKey::Sb, &mut self.sort);
+                    ui.response().on_hover_text(
+                        "Sonneborn–Berger tiebreak: every win adds the opponent's \
+                         total points, every draw half of them. Equal points AND \
+                         equal SB share the place (shown as a range).",
+                    );
+                }
+            }
+            Col::Perf => {
+                sortable_header(ui, "Perf", SortKey::Perf, &mut self.sort);
+                ui.response().on_hover_text(
+                    "Tournament performance rating: the rating at which the \
+                     expected score against these opponents (at their shown \
+                     Elo) equals the achieved score. Computed for every \
+                     engine, whether or not its rating is being updated.",
+                );
+            }
+            Col::Gms => sortable_header(ui, "Gms", SortKey::Games, &mut self.sort),
+            Col::Wdl => {
+                ui.label(strong_header("W-D-L"));
+            }
+            Col::Nps => sortable_header(ui, "Avg nps", SortKey::Nps, &mut self.sort),
+            Col::Depth => sortable_header(ui, "Avg depth", SortKey::Depth, &mut self.sort),
+            Col::MoveTime => sortable_header(ui, "Time/move", SortKey::MoveTime, &mut self.sort),
+            Col::Forfeits => {
+                ui.label(strong_header("Forfeits"))
+                    .on_hover_text("Losses on time and by crash / illegal move.");
+            }
+        }
     }
 
     // ── Head-to-head ────────────────────────────────────────────────────────
@@ -1435,30 +1587,47 @@ impl ResultsTab {
         let Some(seed_row) = live.rows.iter().find(|r| r.id == seed) else {
             return;
         };
-        // Seed header: name + total score.
-        ui.horizontal(|ui| {
-            engine_name_label_full(ui, &seed_row.name, &seed_row.version);
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new(format!("{:.1} / {}", seed_row.points, seed_row.games))
-                    .color(theme::accent())
-                    .font(theme::semibold(13.0)),
-            );
-            ui.label(
-                RichText::new("vs each opponent:")
-                    .color(theme::text_faint())
-                    .size(12.0),
-            );
-        });
+        ui.label(
+            RichText::new("The gauntlet engine's record against each opponent.")
+                .color(theme::text_weak())
+                .size(11.5),
+        );
         ui.add_space(6.0);
 
         let mut opponents: Vec<&Row> = live.rows.iter().filter(|r| r.id != seed).collect();
         opponents.sort_by_key(|r| r.rank);
 
-        egui::Grid::new("gauntlet_h2h")
+        // The seed leads the table, in the same tinted style as its standings
+        // row. The tint is reserved before the grid so it paints underneath.
+        let tint_slot = ui.painter().add(egui::Shape::Noop);
+        let mut seed_band: Option<egui::Rangef> = None;
+
+        let grid = egui::Grid::new("gauntlet_h2h")
             .striped(true)
             .spacing([14.0, 6.0])
             .show(ui, |ui| {
+                let r = engine_name_label_full(ui, &seed_row.name, &seed_row.version);
+                seed_band = Some(r.rect.y_range().expand(3.0));
+                ui.label(
+                    RichText::new(format!(
+                        "{} / {}",
+                        widgets::thousands_f1(seed_row.points),
+                        widgets::thousands(u64::from(seed_row.games))
+                    ))
+                    .color(theme::accent())
+                    .font(theme::semibold(12.5)),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "{}-{}-{}",
+                        seed_row.wins, seed_row.draws, seed_row.losses
+                    ))
+                    .color(theme::text())
+                    .monospace()
+                    .size(12.5),
+                );
+                ui.end_row();
+
                 for opp in opponents {
                     let h2h = live.standings.head_to_head(seed, opp.id);
                     engine_name_label_full(ui, &opp.name, &opp.version);
@@ -1478,6 +1647,17 @@ impl ResultsTab {
                     ui.end_row();
                 }
             });
+
+        if let Some(band) = seed_band {
+            ui.painter().set(
+                tint_slot,
+                egui::Shape::rect_filled(
+                    egui::Rect::from_x_y_ranges(grid.response.rect.x_range(), band),
+                    0.0,
+                    theme::tint(theme::accent(), 0.10),
+                ),
+            );
+        }
     }
 
     fn h2h_matrix(&self, ui: &mut Ui, live: &LiveData) {
@@ -1500,7 +1680,13 @@ impl ResultsTab {
             // remaining height leaves a huge dead gap under the matrix.
             .auto_shrink([false, true])
             .show(ui, |ui| {
-                egui::Grid::new("results_h2h_matrix")
+                // Tight label extents per column / row; widened into gap-free
+                // bands (midpoint to midpoint) after the grid, so the hover
+                // highlight covers full cell heights and widths.
+                let mut col_bands: Vec<egui::Rangef> = Vec::with_capacity(order.len());
+                let mut row_bands: Vec<egui::Rangef> = Vec::with_capacity(order.len());
+
+                let grid = egui::Grid::new("results_h2h_matrix")
                     .striped(true)
                     .spacing([10.0, 4.0])
                     .show(ui, |ui| {
@@ -1508,12 +1694,14 @@ impl ResultsTab {
                         for col in &order {
                             // Same "name version" identity as the main table,
                             // so the four Rybkas / two Basilisks are distinct.
-                            engine_name_label_full(ui, &col.name, &col.version);
+                            let r = engine_name_label_full(ui, &col.name, &col.version);
+                            col_bands.push(r.rect.x_range());
                         }
                         ui.end_row();
 
                         for row in &order {
-                            engine_name_label_full(ui, &row.name, &row.version);
+                            let r = engine_name_label_full(ui, &row.name, &row.version);
+                            row_bands.push(r.rect.y_range());
                             for col in &order {
                                 if row.id == col.id {
                                     ui.label(RichText::new("—").color(theme::text_weak()));
@@ -1534,6 +1722,38 @@ impl ResultsTab {
                             ui.end_row();
                         }
                     });
+
+                // Cross-highlight the hovered row and column with a subtle
+                // theme-aware overlay: white over the dark theme, black over
+                // the light one, so it reads on striped and tinted cells
+                // alike. Painted over the cells — the alpha is low enough to
+                // leave the text crisp.
+                let grid_rect = grid.response.rect;
+                let row_bands = widen_to_bands(&row_bands, 2.0);
+                let col_bands = widen_to_bands(&col_bands, 5.0);
+                if let Some(pos) = ui.ctx().pointer_latest_pos()
+                    && grid_rect.contains(pos)
+                {
+                    let overlay = if ui.visuals().dark_mode {
+                        Color32::from_white_alpha(14)
+                    } else {
+                        Color32::from_black_alpha(16)
+                    };
+                    if let Some(band) = row_bands.iter().find(|b| b.contains(pos.y)) {
+                        ui.painter().rect_filled(
+                            egui::Rect::from_x_y_ranges(grid_rect.x_range(), *band),
+                            egui::CornerRadius::same(3),
+                            overlay,
+                        );
+                    }
+                    if let Some(band) = col_bands.iter().find(|b| b.contains(pos.x)) {
+                        ui.painter().rect_filled(
+                            egui::Rect::from_x_y_ranges(*band, grid_rect.y_range()),
+                            egui::CornerRadius::same(3),
+                            overlay,
+                        );
+                    }
+                }
             });
     }
 
@@ -1773,7 +1993,17 @@ impl ResultsTab {
 #[derive(Clone)]
 struct Row {
     id: EngineId,
+    /// The group's best place (competition ranking; medals key off this).
     rank: usize,
+    /// Displayed place, a range for shared places ("2-3").
+    rank_label: String,
+    /// Sonneborn–Berger tiebreak score.
+    sb: f64,
+    /// Score share in percent (points / games × 100; 0 before any games).
+    score_pct: f64,
+    /// Tournament performance rating vs the displayed opponent Elos
+    /// (independent of the rating write-back mode; None before any games).
+    perf: Option<f64>,
     name: String,
     version: String,
     elo: f64,
@@ -1874,6 +2104,11 @@ enum SortKey {
     Elo,
     EloDelta,
     Points,
+    Sb,
+    /// Score share in percent (the gauntlet table's tiebreak column).
+    Score,
+    /// Tournament performance rating.
+    Perf,
     Games,
     Nps,
     Depth,
@@ -1908,6 +2143,16 @@ fn sort_rows(rows: &mut [Row], sort: SortState) {
                 .partial_cmp(&b.elo_delta.unwrap_or(0.0))
                 .unwrap_or(Ordering::Equal),
             SortKey::Points => a.points.partial_cmp(&b.points).unwrap_or(Ordering::Equal),
+            SortKey::Sb => a.sb.partial_cmp(&b.sb).unwrap_or(Ordering::Equal),
+            SortKey::Score => a
+                .score_pct
+                .partial_cmp(&b.score_pct)
+                .unwrap_or(Ordering::Equal),
+            SortKey::Perf => a
+                .perf
+                .unwrap_or(f64::NEG_INFINITY)
+                .partial_cmp(&b.perf.unwrap_or(f64::NEG_INFINITY))
+                .unwrap_or(Ordering::Equal),
             SortKey::Games => a.games.cmp(&b.games),
             SortKey::Nps => a.nps.unwrap_or(0).cmp(&b.nps.unwrap_or(0)),
             SortKey::Depth => a
@@ -2004,22 +2249,348 @@ fn engine_name_label(ui: &mut Ui, name: &str, version: &str) {
 
 /// "Name version" at its natural width (grids/headers — truncation there
 /// collapses the label to a few characters).
-fn engine_name_label_full(ui: &mut Ui, name: &str, version: &str) {
-    ui.add(egui::Label::new(engine_name_job(name, version)));
+fn engine_name_label_full(ui: &mut Ui, name: &str, version: &str) -> egui::Response {
+    ui.add(egui::Label::new(engine_name_job(name, version)))
 }
 
-/// The Elo cell: the rating, with the ML estimate's ±95% interval on hover.
-fn elo_cell(ui: &mut Ui, elo: f64, error: Option<f64>) {
+/// Competition ranking with Sonneborn–Berger as the tiebreak: engines are
+/// ordered by points, then SB; engines equal on *both* share a place shown
+/// as a range, and the next distinct group resumes at its ordinal position —
+/// 1, 2-3, 2-3, 4. Returns `(best place, display label, SB)` per engine.
+fn competition_ranks(
+    standings: &Standings,
+    ids: &[EngineId],
+) -> HashMap<EngineId, (usize, String, f64)> {
+    use std::cmp::Ordering;
+    let mut rows: Vec<(EngineId, f64, f64)> = ids
+        .iter()
+        .map(|&id| {
+            (
+                id,
+                standings.standing(id).points(),
+                standings.sonneborn_berger(id),
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(Ordering::Equal)
+            .then(b.2.partial_cmp(&a.2).unwrap_or(Ordering::Equal))
+            .then_with(|| a.0.0.cmp(&b.0.0))
+    });
+
+    let mut out = HashMap::new();
+    let mut start = 0;
+    while start < rows.len() {
+        let mut end = start;
+        while end + 1 < rows.len()
+            && (rows[end + 1].1 - rows[start].1).abs() < 1e-9
+            && (rows[end + 1].2 - rows[start].2).abs() < 1e-9
+        {
+            end += 1;
+        }
+        let label = if start == end {
+            (start + 1).to_string()
+        } else {
+            format!("{}-{}", start + 1, end + 1)
+        };
+        for row in &rows[start..=end] {
+            out.insert(row.0, (start + 1, label.clone(), row.2));
+        }
+        start = end + 1;
+    }
+    out
+}
+
+/// The standings columns. Their order is user-arrangeable by dragging the
+/// headers; ids are persisted in `AppConfig::arena_columns`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Col {
+    Rank,
+    Engine,
+    Elo,
+    Delta,
+    Pts,
+    /// SB in a round robin, Score (%) in a gauntlet.
+    Tiebreak,
+    Perf,
+    Gms,
+    Wdl,
+    Nps,
+    Depth,
+    MoveTime,
+    Forfeits,
+}
+
+impl Col {
+    /// Default order — also the canonical list of every column.
+    const ALL: [Col; 13] = [
+        Col::Rank,
+        Col::Engine,
+        Col::Elo,
+        Col::Delta,
+        Col::Pts,
+        Col::Tiebreak,
+        Col::Perf,
+        Col::Gms,
+        Col::Wdl,
+        Col::Nps,
+        Col::Depth,
+        Col::MoveTime,
+        Col::Forfeits,
+    ];
+
+    /// Stable id used in the persisted column order.
+    fn id(self) -> &'static str {
+        match self {
+            Col::Rank => "rank",
+            Col::Engine => "engine",
+            Col::Elo => "elo",
+            Col::Delta => "delta",
+            Col::Pts => "pts",
+            Col::Tiebreak => "tiebreak",
+            Col::Perf => "perf",
+            Col::Gms => "gms",
+            Col::Wdl => "wdl",
+            Col::Nps => "nps",
+            Col::Depth => "depth",
+            Col::MoveTime => "time",
+            Col::Forfeits => "forfeits",
+        }
+    }
+
+    fn from_id(id: &str) -> Option<Col> {
+        Col::ALL.into_iter().find(|c| c.id() == id)
+    }
+
+    /// Fixed column width (minimum width for the Engine / last column).
+    fn width(self) -> f32 {
+        match self {
+            Col::Rank => 48.0,    // wide enough for "10-11" pills
+            Col::Engine => 130.0, // minimum; the column starts at 210
+            Col::Elo => 60.0,
+            Col::Delta => 76.0,
+            Col::Pts => 72.0,      // "21,000.0" in huge tournaments
+            Col::Tiebreak => 88.0, // "56,043.75"
+            Col::Perf => 64.0,
+            Col::Gms => 52.0,
+            Col::Wdl => 112.0, // five digits of games: "1160-267-211"
+            Col::Nps => 90.0,
+            Col::Depth => 84.0,
+            Col::MoveTime => 84.0,
+            Col::Forfeits => 110.0,
+        }
+    }
+}
+
+/// The persisted column order, made whole again: unknown ids dropped,
+/// duplicates removed, missing columns appended in default order.
+fn column_order(stored: &[String]) -> Vec<Col> {
+    let mut out: Vec<Col> = Vec::with_capacity(Col::ALL.len());
+    for id in stored {
+        if let Some(c) = Col::from_id(id)
+            && !out.contains(&c)
+        {
+            out.push(c);
+        }
+    }
+    for c in Col::ALL {
+        if !out.contains(&c) {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// One standings body cell.
+fn column_cell(ui: &mut Ui, col: Col, row: &Row, gauntlet: bool, is_seed: bool) {
+    match col {
+        Col::Rank => {
+            if is_seed {
+                widgets::seed_badge(ui);
+            } else {
+                widgets::rank_badge(ui, &row.rank_label, row.rank);
+            }
+        }
+        Col::Engine => engine_name_label(ui, &row.name, &row.version),
+        Col::Elo => elo_cell(ui, row.elo, row.elo_error, row.elo_delta.is_some()),
+        Col::Delta => widgets::elo_delta_chip(ui, row.elo_delta),
+        Col::Pts => {
+            ui.label(
+                RichText::new(widgets::thousands_f1(row.points))
+                    .color(theme::accent())
+                    .monospace()
+                    .strong(),
+            );
+        }
+        Col::Tiebreak => {
+            if gauntlet {
+                ui.label(
+                    RichText::new(format!("{:.1}%", row.score_pct))
+                        .color(theme::text())
+                        .monospace(),
+                );
+            } else {
+                ui.label(
+                    RichText::new(widgets::thousands_f2(row.sb))
+                        .color(theme::text_weak())
+                        .monospace(),
+                );
+            }
+        }
+        Col::Perf => {
+            ui.label(
+                RichText::new(row.perf.map_or_else(|| "—".into(), |p| format!("{p:.0}")))
+                    .color(theme::text())
+                    .monospace(),
+            );
+        }
+        Col::Gms => {
+            ui.label(
+                RichText::new(widgets::thousands(u64::from(row.games)))
+                    .color(theme::text_weak())
+                    .monospace(),
+            );
+        }
+        Col::Wdl => {
+            ui.label(
+                RichText::new(format!("{}-{}-{}", row.wins, row.draws, row.losses))
+                    .color(theme::text())
+                    .monospace(),
+            );
+        }
+        Col::Nps => {
+            ui.label(
+                RichText::new(format_nps(row.nps))
+                    .color(theme::text_weak())
+                    .monospace(),
+            );
+        }
+        Col::Depth => {
+            ui.label(
+                RichText::new(format_depth(row.depth))
+                    .color(theme::text_weak())
+                    .monospace(),
+            );
+        }
+        Col::MoveTime => {
+            ui.label(
+                RichText::new(format_move_time(row.move_ms))
+                    .color(theme::text_weak())
+                    .monospace(),
+            );
+        }
+        Col::Forfeits => forfeit_cell(ui, row.time_losses, row.crash_losses),
+    }
+}
+
+/// Widen tight per-item extents along one axis into contiguous bands: each
+/// band reaches the midpoint of the gap to its neighbour (edges get `pad`),
+/// so highlighting a band covers the full cell, not just the label's extent.
+fn widen_to_bands(tight: &[egui::Rangef], pad: f32) -> Vec<egui::Rangef> {
+    (0..tight.len())
+        .map(|i| {
+            let lo = if i == 0 {
+                tight[i].min - pad
+            } else {
+                (tight[i - 1].max + tight[i].min) / 2.0
+            };
+            let hi = if i + 1 == tight.len() {
+                tight[i].max + pad
+            } else {
+                (tight[i].max + tight[i + 1].min) / 2.0
+            };
+            egui::Rangef::new(lo, hi)
+        })
+        .collect()
+}
+
+/// Backdrop for the pinned gauntlet-seed row: a soft accent tint setting the
+/// unranked seed apart from the ranked opponents. Called first in every data
+/// cell of the row, so the paint lands behind the content and the per-cell
+/// strips join into one continuous band (the trailing filler column is left
+/// unpainted — the band ends with the real columns).
+fn seed_row_decor(ui: &Ui) {
+    let r = ui.max_rect().expand2(egui::vec2(4.0, 2.0));
+    ui.painter()
+        .rect_filled(r, 0.0, theme::tint(theme::accent(), 0.10));
+}
+
+/// Competition ranking for a single-seed gauntlet: the opponents (everyone
+/// but `seed`) are ordered by score share against the seed, then points;
+/// equal on both shares the place, like [`competition_ranks`]. The seed is
+/// absent from the result (it is shown in a summary card, not ranked).
+fn gauntlet_ranks(
+    standings: &Standings,
+    ids: &[EngineId],
+    seed: EngineId,
+) -> HashMap<EngineId, (usize, String, f64)> {
+    use std::cmp::Ordering;
+    // (id, score share, points, SB — carried through for the Row field).
+    let mut rows: Vec<(EngineId, f64, f64, f64)> = ids
+        .iter()
+        .filter(|&&id| id != seed)
+        .map(|&id| {
+            let st = standings.standing(id);
+            let share = if st.games() > 0 {
+                st.points() / f64::from(st.games())
+            } else {
+                0.0
+            };
+            (id, share, st.points(), standings.sonneborn_berger(id))
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(Ordering::Equal)
+            .then(b.2.partial_cmp(&a.2).unwrap_or(Ordering::Equal))
+            .then_with(|| a.0.0.cmp(&b.0.0))
+    });
+
+    let mut out = HashMap::new();
+    let mut start = 0;
+    while start < rows.len() {
+        let mut end = start;
+        while end + 1 < rows.len()
+            && (rows[end + 1].1 - rows[start].1).abs() < 1e-9
+            && (rows[end + 1].2 - rows[start].2).abs() < 1e-9
+        {
+            end += 1;
+        }
+        let label = if start == end {
+            (start + 1).to_string()
+        } else {
+            format!("{}-{}", start + 1, end + 1)
+        };
+        for row in &rows[start..=end] {
+            out.insert(row.0, (start + 1, label.clone(), row.3));
+        }
+        start = end + 1;
+    }
+    out
+}
+
+/// The Elo cell. For engines this tournament updates, hovering shows the ML
+/// estimate's ±95% interval; for anchored engines the shown rating is fixed,
+/// so the interval would be misleading — the hover says where to look instead.
+fn elo_cell(ui: &mut Ui, elo: f64, error: Option<f64>, updated: bool) {
     let resp = ui.label(
         RichText::new(format!("{elo:.0}"))
             .color(theme::text())
             .monospace(),
     );
-    if let Some(err) = error {
-        resp.on_hover_text(format!(
-            "{:.0} ± {:.0} (95% confidence, maximum-likelihood estimate)",
-            elo, err
-        ));
+    if updated {
+        if let Some(err) = error {
+            resp.on_hover_text(format!(
+                "{elo:.0} ± {err:.0} (95% confidence, maximum-likelihood estimate)"
+            ));
+        }
+    } else {
+        resp.on_hover_text(
+            "Library rating — this tournament does not update it. \
+             The Perf column shows the strength suggested by this \
+             tournament's games alone.",
+        );
     }
 }
 
@@ -2267,6 +2838,8 @@ fn termination_label(t: Termination) -> &'static str {
 /// One read-only results row: standings joined with rating + identity.
 struct ResultRow {
     rank: usize,
+    rank_label: String,
+    sb: f64,
     name: String,
     version: String,
     elo: f64,
@@ -2287,8 +2860,8 @@ struct ResultRow {
 
 fn build_rows(res: &TournamentResults) -> Vec<ResultRow> {
     let standings: &Standings = &res.standings;
-    let ranked = standings.ranked_by_points();
-    let rank_of = |id| ranked.iter().position(|x| x == &id).map_or(0, |p| p + 1);
+    let ids: Vec<EngineId> = res.participants.iter().map(|p| p.id).collect();
+    let ranks = competition_ranks(standings, &ids);
     let seed_of = |id: EngineId| {
         res.seeds
             .iter()
@@ -2313,8 +2886,15 @@ fn build_rows(res: &TournamentResults) -> Vec<ResultRow> {
                     res.rating_writeback.applies_to(p.id).then_some(e.delta),
                 )
             };
+            let (rank, rank_label, sb) =
+                ranks
+                    .get(&p.id)
+                    .cloned()
+                    .unwrap_or((0, String::from("—"), 0.0));
             ResultRow {
-                rank: rank_of(p.id),
+                rank,
+                rank_label,
+                sb,
                 name: p.name.clone(),
                 version: p.version.clone(),
                 elo,
@@ -2333,7 +2913,11 @@ fn build_rows(res: &TournamentResults) -> Vec<ResultRow> {
             }
         })
         .collect();
-    rows.sort_by_key(|r| r.rank);
+    rows.sort_by(|a, b| {
+        a.rank
+            .cmp(&b.rank)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
     rows
 }
 
@@ -2405,11 +2989,12 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
         .vscroll(false)
         .striped(true)
         .cell_layout(Layout::left_to_right(egui::Align::Center))
-        .column(Column::exact(40.0)) // rank
+        .column(Column::exact(48.0)) // rank (wide enough for "10-11" pills)
         .column(Column::initial(210.0).at_least(130.0).clip(true)) // engine
         .column(Column::exact(60.0)) // elo
         .column(Column::exact(76.0)) // elo delta
-        .column(Column::exact(60.0)) // points
+        .column(Column::exact(72.0)) // points ("21,000.0" in huge tournaments)
+        .column(Column::exact(88.0)) // Sonneborn–Berger tiebreak ("56,043.75")
         .column(Column::exact(52.0)) // games
         .column(Column::exact(92.0)) // w-d-l
         .column(Column::exact(90.0)) // nps
@@ -2423,6 +3008,7 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
                 "Elo",
                 "Δ",
                 "Pts",
+                "SB",
                 "Gms",
                 "W-D-L",
                 "Avg nps",
@@ -2442,17 +3028,17 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
         .body(|mut body| {
             for row in &rows {
                 body.row(row_h, |mut tr| {
-                    tr.col(|ui| widgets::rank_badge(ui, row.rank));
+                    tr.col(|ui| widgets::rank_badge(ui, &row.rank_label, row.rank));
                     tr.col(|ui| {
                         engine_name_label(ui, &row.name, &row.version);
                     });
                     tr.col(|ui| {
-                        elo_cell(ui, row.elo, row.elo_error);
+                        elo_cell(ui, row.elo, row.elo_error, row.elo_delta.is_some());
                     });
                     tr.col(|ui| widgets::elo_delta_chip(ui, row.elo_delta));
                     tr.col(|ui| {
                         ui.label(
-                            RichText::new(format!("{:.1}", row.points))
+                            RichText::new(widgets::thousands_f1(row.points))
                                 .color(theme::accent())
                                 .monospace()
                                 .strong(),
@@ -2460,7 +3046,14 @@ fn standings_table(ui: &mut Ui, res: &TournamentResults) {
                     });
                     tr.col(|ui| {
                         ui.label(
-                            RichText::new(row.games.to_string())
+                            RichText::new(widgets::thousands_f2(row.sb))
+                                .color(theme::text_weak())
+                                .monospace(),
+                        );
+                    });
+                    tr.col(|ui| {
+                        ui.label(
+                            RichText::new(widgets::thousands(u64::from(row.games)))
                                 .color(theme::text_weak())
                                 .monospace(),
                         );
@@ -2769,6 +3362,10 @@ mod tests {
         Row {
             id,
             rank: 0,
+            rank_label: String::from("0"),
+            sb: 0.0,
+            score_pct: 0.0,
+            perf: None,
             name: "E".to_string(),
             version: String::new(),
             elo,

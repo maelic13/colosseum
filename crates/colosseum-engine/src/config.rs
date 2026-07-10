@@ -156,8 +156,24 @@ pub struct AppConfig {
     pub theme: String,
     /// Engines-tab card sort order: `"name"`, `"elo"`, or `"author"`.
     pub engines_sort: String,
+    /// Engines-tab split position: the engine grid's width as a fraction of
+    /// the tab width. Stored as a fraction (not pixels) so the split lands in
+    /// the same place across window sizes and monitors.
+    pub engines_split: f32,
     /// Tournament-setup engine list sort order (same values as `engines_sort`).
     pub tournament_engines_sort: String,
+    /// Tournament-setup engine list width in logical pixels.
+    pub tournament_engines_width: f32,
+    /// Arena standings column order (column ids); empty = default order.
+    /// Unknown ids are dropped and missing ones appended, so the list
+    /// survives app versions adding or removing columns.
+    pub arena_columns: Vec<String>,
+    /// Whether the Arena tournaments list is open while the Standings lens is
+    /// active. Remembered separately per lens.
+    pub arena_list_open_standings: bool,
+    /// Whether the Arena tournaments list is open while the Live lens is
+    /// active (hidden by default — the live board wants the room).
+    pub arena_list_open_live: bool,
 }
 
 impl Default for AppConfig {
@@ -179,7 +195,12 @@ impl Default for AppConfig {
             gaviota_compression: "cp4".to_string(),
             theme: "system".to_string(),
             engines_sort: "name".to_string(),
+            engines_split: 0.5,
             tournament_engines_sort: "name".to_string(),
+            tournament_engines_width: 280.0,
+            arena_columns: Vec::new(),
+            arena_list_open_standings: true,
+            arena_list_open_live: false,
         }
     }
 }

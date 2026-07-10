@@ -136,39 +136,69 @@ pub fn section_card<R>(
     r
 }
 
-/// Medal badge for ranks 1–3; plain dim number for rank ≥ 4.
-pub fn rank_badge(ui: &mut Ui, rank: usize) {
-    let medal = match rank {
+/// Medal badge for places 1–3 (`tier` = the group's best place); plain dim
+/// text otherwise. `label` may be a shared-place range like `2-3`, so the
+/// badge is a pill that grows with the text. A small margin is baked into
+/// the allocation so the outline never clips at a table column's left edge.
+pub fn rank_badge(ui: &mut Ui, label: &str, tier: usize) {
+    const LEAD: f32 = 4.0;
+    let medal = match tier {
         1 => Some(theme::medal_gold()),
         2 => Some(theme::medal_silver()),
         3 => Some(theme::medal_bronze()),
         _ => None,
     };
-    match medal {
-        Some(c) => {
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-            ui.painter().circle(
-                rect.center(),
-                9.0,
-                theme::tint(c, 0.2),
-                egui::Stroke::new(1.0, theme::tint(c, 0.5)),
-            );
-            ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                rank.to_string(),
-                egui::FontId::proportional(11.0),
-                c,
-            );
-        }
-        None => {
-            ui.label(
-                RichText::new(rank.to_string())
-                    .color(theme::text_faint())
-                    .monospace(),
-            );
-        }
+    let font = egui::FontId::proportional(11.0);
+    let text_w = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font.clone(), Color32::WHITE)
+        .size()
+        .x;
+    // Non-medal ranks share the pill's slot geometry (just without the pill)
+    // so every number lines up under the 1/2/3 medals.
+    let w = (text_w + 10.0).max(18.0);
+    let (alloc, _) = ui.allocate_exact_size(egui::vec2(LEAD + w, 18.0), egui::Sense::hover());
+    let pill = egui::Rect::from_min_size(alloc.min + egui::vec2(LEAD, 0.0), egui::vec2(w, 18.0));
+    if let Some(c) = medal {
+        ui.painter().rect(
+            pill,
+            egui::CornerRadius::same(9),
+            theme::tint(c, 0.2),
+            egui::Stroke::new(1.0, theme::tint(c, 0.5)),
+            egui::StrokeKind::Inside,
+        );
     }
+    ui.painter().text(
+        pill.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        font,
+        medal.unwrap_or_else(theme::text_faint),
+    );
+}
+
+/// Accent "G" pill marking the gauntlet engine's pinned, unranked row —
+/// same geometry as [`rank_badge`] so the column stays aligned.
+pub fn seed_badge(ui: &mut Ui) {
+    const LEAD: f32 = 4.0;
+    let c = theme::accent();
+    let (alloc, resp) = ui.allocate_exact_size(egui::vec2(LEAD + 18.0, 18.0), egui::Sense::hover());
+    let pill = egui::Rect::from_min_size(alloc.min + egui::vec2(LEAD, 0.0), egui::vec2(18.0, 18.0));
+    ui.painter().rect(
+        pill,
+        egui::CornerRadius::same(9),
+        theme::tint(c, 0.2),
+        egui::Stroke::new(1.0, theme::tint(c, 0.5)),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        pill.center(),
+        egui::Align2::CENTER_CENTER,
+        "G",
+        egui::FontId::proportional(11.0),
+        c,
+    );
+    resp.on_hover_text("The gauntlet engine — plays every game, not ranked.");
 }
 
 // ── Engine identity helpers (shared by the Engines tab and tournament setup) ──
@@ -269,6 +299,34 @@ pub fn draw_avatar_square_in(
         egui::FontId::proportional(rect.height().min(rect.width()) * 0.46),
         c,
     );
+}
+
+/// `1234567` → `"1,234,567"`. Use for every user-facing count that can reach
+/// four digits or more — unbroken digit runs are hard to read.
+pub fn thousands(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// `25065.75` → `"25,065.75"` — [`thousands`] for non-negative fractional
+/// scores shown with two decimals (Sonneborn–Berger).
+pub fn thousands_f2(x: f64) -> String {
+    let cents = (x.max(0.0) * 100.0).round() as u64;
+    format!("{}.{:02}", thousands(cents / 100), cents % 100)
+}
+
+/// `10507.5` → `"10,507.5"` — [`thousands`] for non-negative fractional
+/// scores shown with one decimal (game points).
+pub fn thousands_f1(x: f64) -> String {
+    let tenths = (x.max(0.0) * 10.0).round() as u64;
+    format!("{}.{}", thousands(tenths / 10), tenths % 10)
 }
 
 /// A checkbox drawn as a small rounded *square* (radius 3). The global widget
@@ -798,10 +856,15 @@ pub fn uci_option_row(
     overrides: &mut BTreeMap<String, UciOptionValue>,
     dirty: &mut bool,
 ) {
-    ui.label(
-        RichText::new(opt.name())
-            .color(theme::text_weak())
-            .size(13.0),
+    // For Check options the name is part of the control: clicking it toggles,
+    // like a checkbox label.
+    let name_resp = ui.add(
+        egui::Label::new(
+            RichText::new(opt.name())
+                .color(theme::text_weak())
+                .size(13.0),
+        )
+        .sense(egui::Sense::click()),
     );
 
     match opt {
@@ -809,7 +872,12 @@ pub fn uci_option_row(
             let mut val = matches!(overrides.get(name), Some(UciOptionValue::Check(true)))
                 || (overrides.get(name).is_none() && *default);
 
-            if checkbox(ui, &mut val, "").changed() {
+            let mut changed = checkbox(ui, &mut val, "").changed();
+            if name_resp.clicked() {
+                val = !val;
+                changed = true;
+            }
+            if changed {
                 overrides.insert(name.clone(), UciOptionValue::Check(val));
                 *dirty = true;
             }
@@ -930,5 +998,26 @@ pub fn uci_option_row(
                 *dirty = true;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{thousands, thousands_f1, thousands_f2};
+
+    #[test]
+    fn thousands_groups_digits() {
+        assert_eq!(thousands(0), "0");
+        assert_eq!(thousands(999), "999");
+        assert_eq!(thousands(1000), "1,000");
+        assert_eq!(thousands(2_632_036), "2,632,036");
+    }
+
+    #[test]
+    fn thousands_fractional_keeps_decimals() {
+        assert_eq!(thousands_f1(762.5), "762.5");
+        assert_eq!(thousands_f1(21_000.0), "21,000.0");
+        assert_eq!(thousands_f2(25_065.75), "25,065.75");
+        assert_eq!(thousands_f2(8.0), "8.00");
     }
 }

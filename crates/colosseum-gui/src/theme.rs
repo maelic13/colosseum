@@ -309,6 +309,23 @@ pub fn apply(ctx: &egui::Context, choice: ThemeChoice) {
         // content, so they never cover cards or option rows.
         spacing.scroll = egui::style::ScrollStyle::solid();
         spacing.scroll.bar_width = 8.0;
+        // Draw the handle with the foreground (text) colors instead of the
+        // widget background fill — the fill is near-white in the light theme,
+        // which made scrollbars invisible on light panels. Full text color is
+        // far too loud, though, and solid bars ignore the opacity knobs; so
+        // run in floating mode with the whole bar width allocated (the bar
+        // still reserves its own lane, covering nothing) and soften the
+        // handle to the usual translucent grey of native scrollbars.
+        spacing.scroll.foreground_color = true;
+        spacing.scroll.floating = true;
+        spacing.scroll.floating_width = 8.0;
+        spacing.scroll.floating_allocated_width = 8.0;
+        spacing.scroll.dormant_handle_opacity = 0.30;
+        spacing.scroll.active_handle_opacity = 0.45;
+        spacing.scroll.interact_handle_opacity = 0.65;
+        spacing.scroll.dormant_background_opacity = 0.0;
+        spacing.scroll.active_background_opacity = 0.0;
+        spacing.scroll.interact_background_opacity = 0.0;
 
         // A clear, readable type scale.
         style.text_styles = [

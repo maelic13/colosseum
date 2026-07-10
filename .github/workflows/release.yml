@@ -365,11 +365,112 @@ jobs:
           path: ${{ env.ARTIFACT_DMG }}
 
   # ────────────────────────────────────────────────────────────────────────────
+  # Arch Linux package (.pkg.tar.zst, installable with `pacman -U`) — built in
+  # an Arch container because makepkg only exists there. Covers Arch and its
+  # derivatives (CachyOS, EndeavourOS, Manjaro, …).
+  # ────────────────────────────────────────────────────────────────────────────
+  build-arch:
+    name: Build (x86_64 Arch package)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      # base-devel has makepkg; add rustup + the same GUI build deps the Ubuntu
+      # leg installs (gtk3 for the rfd file dialogs, xkbcommon for winit).
+      # rust-cache queries rustup when fingerprinting the installed toolchain.
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed git rustup gtk3 libxkbcommon openssl
+          rustup set profile minimal
+          rustup default stable
+
+      - uses: actions/checkout@v7
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-arch-x86_64
+
+      - name: Build release binary
+        run: cargo build --release --bin colosseum
+
+      - name: Smoke test
+        run: |
+          bin="target/release/colosseum"
+          test -f "$bin"   || { echo "ERROR: binary missing at $bin"; exit 1; }
+          size=$(wc -c < "$bin")
+          echo "Binary size: ${size} bytes"
+          test "$size" -gt 2097152 || { echo "ERROR: binary too small (${size} B)"; exit 1; }
+
+      # Package the prebuilt binary with a generated PKGBUILD. makepkg refuses
+      # to run as root (the container's default user), so the build dir is
+      # handed to an unprivileged user first.
+      - name: Package .pkg.tar.zst
+        run: |
+          tag='${{ github.ref_name }}'
+          # pkgver may not contain hyphens (v1.0.2-rc.1 -> 1.0.2_rc.1).
+          pkgver="$(echo "${tag#v}" | tr '-' '_')"
+
+          mkdir -p pkgbuild
+          cp target/release/colosseum        pkgbuild/colosseum
+          cp packaging/colosseum.desktop     pkgbuild/colosseum.desktop
+          cp packaging/colosseum.png         pkgbuild/colosseum.png
+          cp LICENSE                         pkgbuild/LICENSE
+
+          cat > pkgbuild/PKGBUILD <<EOF
+          pkgname=colosseum
+          pkgver=${pkgver}
+          pkgrel=1
+          pkgdesc="UCI chess engine tournament GUI"
+          arch=('x86_64')
+          url="https://github.com/maelic13/colosseum"
+          license=('GPL-3.0-or-later')
+          depends=('gtk3' 'libxkbcommon')
+          # Arch builds a companion -debug package by default; a release
+          # binary carries no debug symbols, so it would only be an empty
+          # second package that confuses the asset glob below.
+          options=('!debug')
+          source=('colosseum' 'colosseum.desktop' 'colosseum.png' 'LICENSE')
+          sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+          package() {
+            install -Dm755 "\$srcdir/colosseum"         "\$pkgdir/usr/bin/colosseum"
+            install -Dm644 "\$srcdir/colosseum.desktop" "\$pkgdir/usr/share/applications/colosseum.desktop"
+            install -Dm644 "\$srcdir/colosseum.png"     "\$pkgdir/usr/share/icons/hicolor/256x256/apps/colosseum.png"
+            install -Dm644 "\$srcdir/LICENSE"           "\$pkgdir/usr/share/licenses/colosseum/LICENSE"
+          }
+          EOF
+
+          useradd -m builder
+          chown -R builder pkgbuild
+          su builder -c 'cd pkgbuild && makepkg --nodeps'
+
+          # Exact name, not a glob: makepkg names packages
+          # <pkgname>-<pkgver>-<pkgrel>-<arch>.pkg.tar.zst, and a glob would
+          # silently pick up any companion package makepkg decides to build.
+          built="pkgbuild/colosseum-${pkgver}-1-x86_64.pkg.tar.zst"
+          test -f "$built" || {
+            echo "ERROR: expected $built; makepkg produced:"
+            ls -1 pkgbuild/*.pkg.tar.zst || true
+            exit 1
+          }
+          dest="colosseum-${tag}-linux-x86_64.pkg.tar.zst"
+          mv "$built" "$dest"
+          test -f "$dest" || { echo "ERROR: Arch package not produced"; exit 1; }
+          echo "ARTIFACT_PKG=$dest" >> "$GITHUB_ENV"
+
+      - name: Upload Arch package
+        if: env.ARTIFACT_PKG != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: pkg-linux-arch-x86_64
+          path: ${{ env.ARTIFACT_PKG }}
+
+  # ────────────────────────────────────────────────────────────────────────────
   # Collect all platform artifacts and attach them to the triggering release
   # ────────────────────────────────────────────────────────────────────────────
   publish:
     name: Attach assets to the release
-    needs: build
+    needs: [build, build-arch]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

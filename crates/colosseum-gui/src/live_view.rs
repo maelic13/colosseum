@@ -798,9 +798,9 @@ fn moves_grid(ui: &mut Ui, san: &[String]) {
     }
 }
 
-/// Lichess-style material imbalance: the leading side shows the material it
-/// is up — as the opponent's captured pieces, drawn with the real board piece
-/// set — plus the point difference.
+/// Material imbalance: each side shows the pieces it has that the other does
+/// not, drawn with the real board piece set in that side's own colour —
+/// white on the left, black on the right, point difference in the middle.
 fn material_row(ui: &mut Ui, board: &shakmaty::Board) {
     const ROLES: [(Role, i32); 5] = [
         (Role::Queen, 9),
@@ -810,7 +810,6 @@ fn material_row(ui: &mut Ui, board: &shakmaty::Board) {
         (Role::Pawn, 1),
     ];
     const PIECE: f32 = 22.0;
-    // (owner is up, shown as the opponent's piece image).
     let mut white_up: Vec<Role> = Vec::new();
     let mut black_up: Vec<Role> = Vec::new();
     let mut points = 0i32;
@@ -839,32 +838,43 @@ fn material_row(ui: &mut Ui, board: &shakmaty::Board) {
         return;
     }
 
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        let pieces = (white_up.len() + black_up.len()) as f32;
-        // Centre the run (pieces overlap slightly, like lichess).
-        let run_w = pieces * (PIECE - 6.0) + 6.0 + 34.0;
-        ui.add_space(((ui.available_width() - run_w) / 2.0).max(0.0));
-        let draw = |ui: &mut Ui, roles: &[Role], color: ChessColor| {
-            for &role in roles {
-                let (rect, _) = ui.allocate_exact_size(vec2(PIECE - 6.0, PIECE), Sense::hover());
-                let rect = Rect::from_min_size(rect.min, vec2(PIECE, PIECE));
-                egui::Image::new(board::piece_source(color, role)).paint_at(ui, rect);
-            }
-        };
-        // White is up: show black's captured pieces, and vice versa.
-        draw(ui, &white_up, ChessColor::Black);
-        draw(ui, &black_up, ChessColor::White);
-        ui.add_space(8.0);
-        if points != 0 {
-            ui.label(
-                RichText::new(format!("{points:+}"))
-                    .color(theme::text())
-                    .size(15.0)
-                    .monospace(),
-            );
+    // White's extra pieces on the left, black's on the right (each side's own
+    // colour), point difference in the middle. Pieces overlap slightly, like
+    // lichess.
+    const PAD: f32 = 4.0;
+    let step = PIECE - 6.0;
+    let dark_mode = ui.visuals().dark_mode;
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), PIECE), Sense::hover());
+    let draw_piece = |role: Role, color: ChessColor, min: egui::Pos2| {
+        let r = Rect::from_min_size(min, vec2(PIECE, PIECE));
+        // The black piece images are near-invisible on the dark theme's
+        // background — substitute a dark-grey silhouette (the white sprite,
+        // multiply-tinted) which still reads as the dark side.
+        if color == ChessColor::Black && dark_mode {
+            egui::Image::new(board::piece_source(ChessColor::White, role))
+                .tint(Color32::from_gray(115))
+                .paint_at(ui, r);
+        } else {
+            egui::Image::new(board::piece_source(color, role)).paint_at(ui, r);
         }
-    });
+    };
+    for (i, &role) in white_up.iter().enumerate() {
+        let x = rect.left() + PAD + i as f32 * step;
+        draw_piece(role, ChessColor::White, egui::pos2(x, rect.top()));
+    }
+    for (i, &role) in black_up.iter().enumerate() {
+        let x = rect.right() - PAD - PIECE - (black_up.len() - 1 - i) as f32 * step;
+        draw_piece(role, ChessColor::Black, egui::pos2(x, rect.top()));
+    }
+    if points != 0 {
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            format!("{points:+}"),
+            egui::FontId::monospace(15.0),
+            theme::text(),
+        );
+    }
 }
 
 // ── Board extras ────────────────────────────────────────────────────────────
