@@ -16,6 +16,10 @@ cargo-dist; the primary dev machine is Windows.
 
 Commands: `cargo check --workspace --tests`, `cargo clippy --workspace`,
 `cargo test --workspace`, run with `cargo run -p colosseum-gui`.
+Docs split: `README.md` and `CHANGELOG.md` are **user-facing** (keep them
+simple, no build/internals detail); `docs/DEVELOPMENT.md` holds the
+maintainer material (build prerequisites, tests, workspace layout, release
+process).
 App data lives in `%APPDATA%\colosseum\` (`config/engines.json`,
 `data/colosseum.db`, `data/logs/` incl. per-game incident reports);
 `--portable` keeps everything next to the exe. The user's real engine

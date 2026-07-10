@@ -664,7 +664,7 @@ checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 
 [[package]]
 name = "colosseum-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -673,7 +673,7 @@ dependencies = [
 
 [[package]]
 name = "colosseum-engine"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "colosseum-core",
@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "colosseum-gui"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "colosseum-core",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "colosseum-uci"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "colosseum-core",
  "tempfile",

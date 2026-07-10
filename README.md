@@ -2,195 +2,109 @@
   <img src="docs/design/logo.svg" width="88" alt="Colosseum logo">
 </p>
 
-<h1 align="center">Colosseum Chess Engine Testing Suite</h1>
+<h1 align="center">Colosseum</h1>
 
-A cross-platform desktop application for running UCI engine-vs-engine chess
-tournaments — parallel games, a live board view, and maximum-likelihood Elo
-ratings.
+<p align="center">
+  Run chess engines against each other — and watch them play.
+</p>
 
 ![Colosseum — Arena tab with live game view](docs/screenshot.png)
 
-> **v1.0.1 · GPL-3.0-or-later · Rust + egui**
+> **v1.0.2 · Windows · Linux · macOS · Free and open source (GPL-3.0)**
 
 ---
 
-## Features
+## What it does
 
-| | |
-|---|---|
-| **Engine library** | Add one engine or scan a whole folder; auto-detects UCI options over the handshake; per-engine logo, launch args, working directory, env vars; robust option mapping for old/quirky engines |
-| **Tournament formats** | Round robin and gauntlet, configurable cycles and games per pair, parallel games |
-| **Time controls** | Time per move, sudden death, base + increment, fixed nodes, fixed depth |
-| **Pondering** | Full UCI ponder support — engines think on the opponent's time, and the live view shows it |
-| **Arena: standings** | Live sortable standings (Elo, Δ, points, W-D-L, avg nps/depth, time/move), head-to-head matrix, termination breakdown, settings summary |
-| **Arena: live view** | Full board with bundled piece set, move list with ECO opening names, material balance, per-engine panels (eval, depth, nodes, nps, clocks, Fritz-style search output) and an evaluation graph fed by both thinking *and* pondering engines |
-| **Ratings** | Ordo-style joint maximum-likelihood ratings with error bars, anchored to tournament-start values; library write-back per game — for all engines, none, or a chosen subset |
-| **Adjudication** | Draw (eval threshold over consecutive moves), resign, max-moves — plus all natural endings |
-| **Opening books** | EPD or PGN; sequential or seeded-random order; both engines play each opening from both sides |
-| **Endgame tablebases** | Syzygy / Nalimov / Gaviota paths configured once, forwarded to every engine — and switchable off per tournament |
-| **Transport** | Start / Stop (drain in-flight games) / Force-Stop (abort & requeue); every tournament resumes after a stop or crash |
-| **Export** | Per-game live PGN output, standings/crosstable CSV |
-| **Persistence** | SQLite backend; presets for tournament setups; incident reports for engine crashes/timeouts |
-| **Portable mode** | Pass `--portable` to keep all data next to the executable |
+- **Play engines against each other** — round robin or gauntlet, many games at once.
+- **Watch live** — full board, move list with opening names, evaluation graph, clocks, and each engine's search output.
+- **Get real ratings** — Elo computed from all results at once (with error bars), not a running K-factor tally.
+- **Any UCI engine** — add one executable or scan a whole folder; options are detected automatically.
+- **Set it up your way** — time controls from bullet to fixed depth, opening books, adjudication rules, endgame tablebases, pondering.
+- **Nothing gets lost** — every game is saved as it finishes; stop any time and resume later.
+- **Take the results with you** — live PGN output and CSV export of standings and crosstables.
 
 ---
 
-## Download
+## Download & install
 
-Pre-built packages for every release are on the
-[GitHub Releases](https://github.com/maelic13/colosseum/releases) page:
+Get the file for your system from the
+[latest release](https://github.com/maelic13/colosseum/releases/latest).
+Release downloads are the only supported way to install Colosseum.
 
-| Platform | Download |
-|---|---|
-| Windows x86-64 | `.msi` installer or portable `.zip` |
-| Windows ARM64 | `.msi` installer or portable `.zip` |
-| Linux x86-64 | `.deb` (Debian/Ubuntu), `.rpm` (Fedora/openSUSE), or `.tar.gz` |
-| macOS Apple Silicon | `.dmg` or `.tar.gz` |
+### Windows
 
+| Your PC | File | How to install |
+|---|---|---|
+| Intel or AMD | `…-windows-x86_64.msi` | Double-click, then follow the installer |
+| Arm (Snapdragon) | `…-windows-arm64.msi` | Double-click, then follow the installer |
+| No install wanted | `…-windows-….zip` | Unzip and run `colosseum.exe` |
+
+### Linux (64-bit)
+
+| Your distribution | File | How to install |
+|---|---|---|
+| Ubuntu, Debian, Mint, Pop!_OS | `….deb` | `sudo apt install ./colosseum-….deb` |
+| Fedora, RHEL, openSUSE | `….rpm` | `sudo dnf install ./colosseum-….rpm` |
+| Arch, CachyOS, EndeavourOS, Manjaro | `….pkg.tar.zst` | `sudo pacman -U ./colosseum-….pkg.tar.zst` |
+| Anything else | `….tar.gz` | Extract and run `./colosseum` |
+
+### macOS (Apple Silicon)
+
+Download `…-macos-aarch64.dmg`, open it, and drag Colosseum to Applications.
 Intel Macs are not supported.
 
-> **macOS note:** builds are unsigned. On first launch Gatekeeper may block
-> the app. Open **System Settings → Privacy & Security → Open Anyway**, or run:
-> ```bash
-> xattr -d com.apple.quarantine /Applications/Colosseum.app
-> ```
-> See [`docs/macos-signing.md`](docs/macos-signing.md) for the signing roadmap.
+The app is not signed yet, so macOS blocks it on first launch. Open
+**System Settings → Privacy & Security** and click **Open Anyway**.
 
 ---
 
-## Build & Run
+## Getting started
 
-### Prerequisites
+1. **Engines tab** — click *Add Engine* and pick an engine executable
+   (or *Scan Folder* to add many at once). Set a starting Elo if you know it.
+2. **Tournament tab** — tick the engines you want, choose a format and time
+   control, then hit *Start Tournament*.
+3. **Arena tab** — watch the standings fill in, or switch to *Live* to follow
+   a game move by move.
 
-| Requirement | Notes |
-|---|---|
-| **Rust 1.88+** | `rustup update stable` |
-| **C linker** | Windows: MSVC build tools; Linux: `gcc`; macOS: Xcode CLT |
-| **Linux GUI libs** | `libgtk-3-dev libxcb-*-dev libxkbcommon-dev` (see below) |
+Tips:
 
-#### Install Linux GUI dependencies
-
-```bash
-# Debian / Ubuntu
-sudo apt-get install -y \
-  libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
-  libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
-
-# Fedora / RHEL
-sudo dnf install gtk3-devel libxcb-devel libxkbcommon-devel openssl-devel
-
-# Arch
-sudo pacman -S gtk3 libxcb libxkbcommon openssl
-```
-
-### Clone and run
-
-```bash
-git clone https://github.com/maelic13/colosseum.git
-cd colosseum
-cargo run --release --bin colosseum
-```
-
-### One-step build scripts
-
-Each script builds the optimized binary and puts the distributable artifact
-in `dist/`:
-
-```bash
-./build_macos.sh      # dist/Colosseum.app (double-clickable, no Terminal window)
-./build_linux.sh      # dist/colosseum
-.\build_windows.ps1   # dist\colosseum.exe
-```
-
-macOS note: a bare executable opened from Finder always spawns a Terminal
-window, so the macOS script wraps the binary in a minimal app bundle with a
-Dock icon. The bundle is ad-hoc signed: fine on the machine that built it;
-distributing it to other Macs requires codesigning/notarization.
-
-### Run tests
-
-```bash
-cargo test --workspace
-```
-
-The integration tests in `colosseum-engine` run real engine games. They look
-for Stockfish at a developer-machine path and skip gracefully when the engine
-is absent — CI on other machines still passes. To run them locally, set:
-
-```bash
-COLOSSEUM_TEST_ENGINE=/usr/games/stockfish cargo test --workspace
-```
+- Keep **Parallel games** at or below your CPU core count — engines that share
+  cores lose on time.
+- **Update ratings** decides whose library Elo the tournament changes. Testing
+  one new engine? Set it to *Chosen engines* and pick only that one.
+- Stopped a tournament? Select it in the Arena list and press *Start* to
+  continue where it left off.
 
 ---
 
-## Data locations
+## Where your files are
 
-By default Colosseum stores its data in the OS-standard directories:
+| | Windows | Linux | macOS |
+|---|---|---|---|
+| Settings & engines | `%APPDATA%\Colosseum\` | `~/.config/colosseum/` | `~/Library/Application Support/Colosseum/` |
+| Games & logs | `%APPDATA%\Colosseum\` | `~/.local/share/colosseum/` | `~/Library/Application Support/Colosseum/` |
 
-| Platform | Config (engines.json, config.toml) | Data (tournaments.db, logs) |
-|---|---|---|
-| Windows | `%APPDATA%\Colosseum\` | `%LOCALAPPDATA%\Colosseum\` |
-| Linux | `~/.config/colosseum/` | `~/.local/share/colosseum/` |
-| macOS | `~/Library/Application Support/Colosseum/` | same |
-
-Pass `--portable` to keep everything next to the executable instead.
+Start Colosseum with `--portable` to keep everything next to the program instead.
 
 ---
 
-## Architecture
+## Help & more
 
-```
-colosseum/
-├─ crates/
-│  ├─ colosseum-core/     Pure domain: config, pairings, standings, ML ratings, adjudication
-│  ├─ colosseum-uci/      UCI protocol & async engine process management (tokio)
-│  ├─ colosseum-engine/   Orchestration: scheduler, game runner, SQLite store, openings
-│  └─ colosseum-gui/      eframe/egui GUI — the shipped binary
-├─ packaging/             Linux desktop entry + icon (.deb / .rpm assets)
-├─ docs/                  Design guidelines, macOS signing guide
-└─ .github/workflows/     release.yml (tag-triggered cross-platform packaging)
-```
-
-The GUI never blocks on engine I/O: a tokio runtime drives all engine
-processes; live state is published behind shared snapshots the UI reads each
-frame.
+- Something broken or missing? [Open an issue](https://github.com/maelic13/colosseum/issues).
+- What changed in each version: [CHANGELOG.md](CHANGELOG.md)
+- Building from source: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 
 ---
 
-## Releasing
+## Credits & license
 
-Create a release by hand on GitHub (**Releases → Draft a new release**):
-pick or create the `vX.Y.Z` tag, write the title and description, and
-publish. Publishing triggers the `release.yml` workflow, which builds
-Windows (x64 + ARM64), Linux, and macOS binaries, runs smoke tests, and
-attaches the MSI/ZIP/DEB/RPM/DMG/tar.gz artifacts to that release a few
-minutes later. The hand-written description is left untouched.
+Chess pieces by Colin M.L. Burnett ([cburnett](https://github.com/lichess-org/lila/tree/master/public/piece/cburnett),
+CC BY-SA 3.0) · opening names from [lichess chess-openings](https://github.com/lichess-org/chess-openings)
+(CC0) · fonts [Inter](https://rsms.me/inter/) and [JetBrains Mono](https://www.jetbrains.com/lp/mono/)
+(SIL OFL 1.1).
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the full version history.
-
----
-
-## Credits & bundled assets
-
-- Chess pieces: [cburnett set](https://github.com/lichess-org/lila/tree/master/public/piece/cburnett)
-  by Colin M.L. Burnett — CC BY-SA 3.0 (`crates/colosseum-gui/assets/pieces/cburnett/`)
-- Opening names: [lichess chess-openings](https://github.com/lichess-org/chess-openings)
-  — CC0 (`crates/colosseum-gui/assets/openings/`)
-- Fonts: [Inter](https://rsms.me/inter/) and
-  [JetBrains Mono](https://www.jetbrains.com/lp/mono/) — SIL Open Font
-  License 1.1 (`crates/colosseum-gui/assets/fonts/`, license texts included)
-
-## License
-
-Colosseum is free software licensed under the
-**GNU General Public License v3.0 or later**.  
-See [`LICENSE`](LICENSE) for the full text.
-
-```
-Copyright (C) 2026  Miloslav Macůrek
-
-This program is free software: you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation, either version 3 of the License, or (at your option) any later
-version.
-```
+Colosseum is free software under the **GNU General Public License v3.0 or
+later** — see [LICENSE](LICENSE).
+Copyright © 2026 Miloslav Macůrek.

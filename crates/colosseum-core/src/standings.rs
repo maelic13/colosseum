@@ -249,6 +249,23 @@ impl Standings {
             .unwrap_or_default()
     }
 
+    /// Sonneborn–Berger tiebreak score: every win contributes the opponent's
+    /// total points, every draw half of them — the standard round-robin
+    /// tiebreaker, rewarding scores against strong opposition.
+    #[must_use]
+    pub fn sonneborn_berger(&self, engine: EngineId) -> f64 {
+        self.per_engine
+            .keys()
+            .filter(|&&opponent| opponent != engine)
+            .map(|&opponent| {
+                let record = self.head_to_head(engine, opponent);
+                let opponent_points = self.standing(opponent).points();
+                f64::from(record.wins) * opponent_points
+                    + 0.5 * f64::from(record.draws) * opponent_points
+            })
+            .sum()
+    }
+
     /// `engine`'s individual game results against `opponent`, in played order.
     #[must_use]
     pub fn pair_results(&self, engine: EngineId, opponent: EngineId) -> &[PairGameResult] {
@@ -335,6 +352,26 @@ mod tests {
         assert_eq!((ab.wins, ab.draws, ab.losses), (1, 1, 1));
         assert_eq!((ba.wins, ba.draws, ba.losses), (1, 1, 1));
         assert_eq!(ab.games(), 3);
+    }
+
+    #[test]
+    fn sonneborn_berger_weights_wins_and_draws_by_opponent_points() {
+        let a = EngineId::new();
+        let b = EngineId::new();
+        let c = EngineId::new();
+        let mut s = Standings::with_engines(&[a, b, c]);
+
+        s.record(outcome(a, b, GameResult::WhiteWin)); // a beats b
+        s.record(outcome(a, c, GameResult::Draw)); // a draws c
+        s.record(outcome(b, c, GameResult::WhiteWin)); // b beats c
+
+        // Points: a = 1.5, b = 1.0, c = 0.5.
+        // SB(a) = 1 win vs b (1.0) + half a draw vs c (0.25) = 1.25.
+        assert!((s.sonneborn_berger(a) - 1.25).abs() < 1e-9);
+        // SB(b) = loss to a (0) + win vs c (0.5) = 0.5.
+        assert!((s.sonneborn_berger(b) - 0.5).abs() < 1e-9);
+        // SB(c) = draw vs a (0.75) + loss to b (0) = 0.75.
+        assert!((s.sonneborn_berger(c) - 0.75).abs() < 1e-9);
     }
 
     #[test]

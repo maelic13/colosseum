@@ -6,6 +6,61 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.2] — 2026-07-30
+
+A quality-of-life release: a new performance rating and tiebreak in the
+standings, a much clearer gauntlet view, an Arch Linux package, and a long
+list of readability fixes.
+
+### Added
+- **Arch Linux package** — releases now ship a `.pkg.tar.zst` alongside the
+  `.deb` and `.rpm`, installable with `sudo pacman -U` on Arch and its
+  derivatives (CachyOS, EndeavourOS, Manjaro, …)
+- **Perf column** — the rating an engine's results in this tournament
+  correspond to, shown for every engine even when its library Elo is not
+  being updated
+- **SB column** — the Sonneborn–Berger tiebreak, sortable and explained on
+  hover. Engines tied on points *and* SB now share a place, shown as a
+  range: 1, 2-3, 2-3, 4
+- **Rearrangeable standings columns** — drag any column header to move it;
+  the order is remembered
+- **Head-to-head cross-highlight** — hovering a cell highlights its whole
+  row and column, so a matchup is easy to trace across a wide crosstable
+- **Delete key** removes the selected engines or tournaments, with the same
+  confirmation as the right-click menu
+- Adding a single engine now selects it, ready for editing
+
+### Changed
+- **Gauntlet standings** — the gauntlet engine sits pinned at the top of the
+  table, marked **G** and unranked; its opponents are ranked by the share of
+  points they scored against it (Score column), which replaces the SB
+  tiebreak that carries no meaning in a gauntlet
+- **Large numbers are grouped** — "2,632,036 openings loaded",
+  "5,551 / 15,000 games", and the Pts / SB / Gms columns are readable at a
+  glance
+- **Material imbalance** in the live view now shows each side's own extra
+  pieces — white on the left, black on the right, point difference in the
+  middle — and black pieces stay clearly visible in the dark theme
+- **Whole option lines are clickable**: clicking a label toggles its
+  checkbox (engine options, opening-book limit, UCI check options)
+- **Threads and Parallel games are capped** to the machine's CPU core count,
+  and never drop below 1
+- The Arena tournaments list remembers separately whether it is open on the
+  Standings and Live views (open on Standings, hidden on Live by default)
+- Panel widths in the Engines and Tournament tabs are remembered
+- Engine pickers are sorted by name
+- Hovering an Elo the tournament does not update now explains that, instead
+  of showing a confidence interval that cannot move
+
+### Fixed
+- Scrollbars were invisible in the light theme
+- Shredder 13 never received the Syzygy 50-move-rule setting (its option
+  name contains spaces, which the option forwarding missed)
+- Medals in the standings were clipped on the left, and ranks below third
+  did not line up under them
+
+---
+
 ## [1.0.1] — 2026-07-10
 
 A packaging and release-tooling patch; no functional changes to the app.
@@ -189,5 +244,8 @@ UCI pondering, and Linux packages.
 
 ---
 
-[Unreleased]: https://github.com/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/releases/tag/v0.1.0
+[Unreleased]: https://github.com/maelic13/colosseum/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/maelic13/colosseum/releases/tag/v1.0.2
+[1.0.1]: https://github.com/maelic13/colosseum/releases/tag/v1.0.1
+[1.0.0]: https://github.com/maelic13/colosseum/releases/tag/v1.0.0
+[0.1.0]: https://github.com/maelic13/colosseum/releases/tag/v0.1.0

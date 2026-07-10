@@ -879,9 +879,10 @@ impl TournamentTab {
                 self.setup_action_bar(ui, backend);
             });
 
-        // Engine selection (left).
-        egui::Panel::left("tournament_engine_select")
-            .default_size(280.0)
+        // Engine selection (left). The width is persisted, like the Engines
+        // tab's grid split.
+        let list_panel = egui::Panel::left("tournament_engine_select")
+            .default_size(backend.config.tournament_engines_width.clamp(200.0, 440.0))
             .size_range(200.0..=440.0)
             .resizable(true)
             .frame(egui::Frame::new().inner_margin(egui::Margin {
@@ -891,6 +892,15 @@ impl TournamentTab {
             .show(ui, |ui| {
                 self.engine_selection(ui, backend);
             });
+        // Persist once the drag is released (any_down gates the write so we
+        // don't hit the disk every frame mid-drag).
+        let width = list_panel.response.rect.width();
+        if (width - backend.config.tournament_engines_width).abs() > 0.5
+            && !ui.input(|i| i.pointer.any_down())
+        {
+            backend.config.tournament_engines_width = width;
+            backend.save_config();
+        }
 
         // Settings (centre, scrollable). Left margin keeps the section cards
         // clear of the engine panel's separator line.
@@ -982,9 +992,12 @@ impl TournamentTab {
                         .map(|d| format!(" · ~{}", format_duration(d)))
                         .unwrap_or_default();
                     ui.label(
-                        RichText::new(format!("{count} engines · {games} games{duration}"))
-                            .color(theme::text_weak())
-                            .size(13.0),
+                        RichText::new(format!(
+                            "{count} engines · {} games{duration}",
+                            widgets::thousands(games as u64)
+                        ))
+                        .color(theme::text_weak())
+                        .size(13.0),
                     );
                 } else {
                     ui.label(
@@ -1572,10 +1585,16 @@ impl TournamentTab {
                                 engine_display_name,
                             );
                         widgets::select(ui, "gauntlet_engine", &current, 200.0, |ui| {
-                            for id in f.selected.clone() {
-                                let Some(engine) = engines.iter().find(|e| e.id == id) else {
-                                    continue;
-                                };
+                            // Sorted by display name, like every other engine
+                            // list (selection order is arbitrary click order).
+                            let mut listed: Vec<&EngineConfig> = f
+                                .selected
+                                .iter()
+                                .filter_map(|id| engines.iter().find(|e| e.id == *id))
+                                .collect();
+                            listed.sort_by_key(|e| engine_display_name(e).to_lowercase());
+                            for engine in listed {
+                                let id = engine.id;
                                 if ui
                                     .selectable_label(
                                         f.selected.first() == Some(&id),
@@ -1630,9 +1649,14 @@ impl TournamentTab {
                     ui.end_row();
 
                     field_label(ui, "Parallel games");
+                    // More lanes than logical cores only starves the engines —
+                    // clamp the input to the machine (and anything ≤ 0 to 1).
+                    let cores =
+                        std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+                    f.concurrency = f.concurrency.clamp(1, cores);
                     let mut c = f.concurrency as u32;
                     if ui
-                        .add(DragValue::new(&mut c).range(1..=256).speed(0.1))
+                        .add(DragValue::new(&mut c).range(1..=cores as u32).speed(0.1))
                         .changed()
                     {
                         f.concurrency = c as usize;
@@ -1671,9 +1695,13 @@ impl TournamentTab {
                     );
                     dot(ui);
                     ui.label(
-                        RichText::new(format!("{games} game{}", if games == 1 { "" } else { "s" }))
-                            .color(theme::text())
-                            .font(theme::semibold(12.5)),
+                        RichText::new(format!(
+                            "{} game{}",
+                            widgets::thousands(games as u64),
+                            if games == 1 { "" } else { "s" }
+                        ))
+                        .color(theme::text())
+                        .font(theme::semibold(12.5)),
                     );
                     if let Some(total) = f.estimated_duration_secs() {
                         let lanes = f.concurrency.max(1);
@@ -1684,9 +1712,10 @@ impl TournamentTab {
                                 .size(12.5),
                         )
                         .on_hover_text(format!(
-                            "Estimated total length: {games} games, {lanes} in parallel. \
+                            "Estimated total length: {} games, {lanes} in parallel. \
                              Assumes ~{EST_MOVES_PER_SIDE:.0} moves per side per game, \
                              plus a small scheduling overhead.",
+                            widgets::thousands(games as u64),
                         ));
                     }
                 });
@@ -1803,15 +1832,22 @@ impl TournamentTab {
                     .spacing([8.0, 6.0])
                     .show(ui, |ui| {
                         widgets::checkbox(ui, &mut f.threads_on, "");
-                        field_label(ui, "Threads");
+                        toggle_field_label(ui, &mut f.threads_on, "Threads");
+                        // Per-engine threads beyond the machine's logical cores
+                        // only starve the games — clamp the input (≤ 0 → 1).
+                        let cores =
+                            std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+                        f.threads = f.threads.clamp(1, cores as u32);
                         ui.add_enabled(
                             f.threads_on,
-                            DragValue::new(&mut f.threads).range(1..=1024).speed(0.1),
+                            DragValue::new(&mut f.threads)
+                                .range(1..=cores as u32)
+                                .speed(0.1),
                         );
                         ui.end_row();
 
                         widgets::checkbox(ui, &mut f.hash_on, "");
-                        field_label(ui, "Hash (MB)");
+                        toggle_field_label(ui, &mut f.hash_on, "Hash (MB)");
                         ui.add_enabled(
                             f.hash_on,
                             DragValue::new(&mut f.hash_mb)
@@ -1821,20 +1857,21 @@ impl TournamentTab {
                         ui.end_row();
 
                         widgets::checkbox(ui, &mut f.ponder, "");
-                        field_label(ui, "Ponder").on_hover_text(
+                        toggle_field_label(ui, &mut f.ponder, "Ponder").on_hover_text(
                             "Let engines think on the opponent's time. \
                              Off keeps fast games fair.",
                         );
                         ui.end_row();
 
                         widgets::checkbox(ui, &mut f.tablebases, "");
-                        field_label(ui, "Use endgame tablebases").on_hover_text(
-                            "Forward the globally configured tablebase paths \
+                        toggle_field_label(ui, &mut f.tablebases, "Use endgame tablebases")
+                            .on_hover_text(
+                                "Forward the globally configured tablebase paths \
                              (Engines tab) to the engines. Off runs this \
                              tournament without tablebases — no tablebase \
                              option reaches any engine, and the global paths \
                              stay untouched.",
-                        );
+                            );
                         ui.end_row();
                     });
 
@@ -2196,9 +2233,11 @@ impl TournamentTab {
                             ui.end_row();
                         }
 
-                        field_label(ui, "Limit count");
+                        let mut changed =
+                            toggle_field_label(ui, &mut f.openings_count_on, "Limit count")
+                                .clicked();
                         ui.horizontal(|ui| {
-                            let mut changed =
+                            changed |=
                                 widgets::checkbox(ui, &mut f.openings_count_on, "").changed();
                             changed |= ui
                                 .add_enabled(
@@ -2218,9 +2257,12 @@ impl TournamentTab {
                 match &f.openings_preview {
                     Some(Ok((count, sample))) => {
                         ui.label(
-                            RichText::new(format!("{count} openings loaded"))
-                                .color(theme::success())
-                                .size(12.0),
+                            RichText::new(format!(
+                                "{} openings loaded",
+                                widgets::thousands(*count as u64)
+                            ))
+                            .color(theme::success())
+                            .size(12.0),
                         );
                         if let Some(label) = sample {
                             ui.label(
@@ -2281,6 +2323,19 @@ impl TournamentTab {
 
 fn field_label(ui: &mut Ui, text: &str) -> egui::Response {
     ui.label(RichText::new(text).color(theme::text_weak()).size(13.0))
+}
+
+/// A field label paired with a checkbox elsewhere on the row: clicking the
+/// text toggles `on` too, so the whole line reads as one control.
+fn toggle_field_label(ui: &mut Ui, on: &mut bool, text: &str) -> egui::Response {
+    let resp = ui.add(
+        egui::Label::new(RichText::new(text).color(theme::text_weak()).size(13.0))
+            .sense(egui::Sense::click()),
+    );
+    if resp.clicked() {
+        *on = !*on;
+    }
+    resp
 }
 
 /// The one-line explanation under the time-control fields.
@@ -2531,14 +2586,17 @@ fn apply_global_tablebases(engines: &mut [EngineConfig], config: &AppConfig) {
                     return Some((opt.name().to_string(), UciOptionValue::Spin(value)));
                 }
                 // Syzygy policy options, applied with the Syzygy path.
+                // Compare space-insensitively: Stockfish spells it
+                // "Syzygy50MoveRule", Shredder 13 "Syzygy 50 Moves Rule".
+                let squashed: String = n.chars().filter(|c| !c.is_whitespace()).collect();
                 if n.contains("syzygy") && path_set(&config.syzygy_path) {
-                    if n.contains("50move") {
+                    if squashed.contains("50move") {
                         return Some((
                             opt.name().to_string(),
                             UciOptionValue::Check(config.syzygy_50_move_rule),
                         ));
                     }
-                    if n.contains("probelimit") {
+                    if squashed.contains("probelimit") {
                         let value = match opt {
                             UciOption::Spin { min, max, .. } => {
                                 i64::from(config.syzygy_probe_limit).clamp(*min, *max)
