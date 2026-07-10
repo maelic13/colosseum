@@ -56,7 +56,7 @@ jobs:
             arch: aarch64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -124,7 +124,7 @@ jobs:
       # version on both x64 and Arm runners.
       - name: Install .NET SDK (Windows)
         if: runner.os == 'Windows'
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
 
@@ -207,24 +207,38 @@ jobs:
           tar -C staging -czf "${name}.tar.gz" "${name}"
           echo "ARTIFACT_TGZ=${name}.tar.gz" >> "$GITHUB_ENV"
 
-      # ── macOS: .app bundle + DMG via hdiutil ───────────────────────────────
-      # NOTE (signing): v0.1 ships unsigned / ad-hoc.
-      # For Gatekeeper-free distribution, sign with:
-      #   codesign --deep --force --sign "Developer ID Application: ..."
-      #             Colosseum.app
-      # Then notarize:
+      # ── macOS: .app bundle (icon + Info.plist + ad-hoc signature) ──────────
+      # A double-clickable, Finder-friendly bundle: it carries the app icon and
+      # launches without a Terminal window (unlike the bare binary in the tarball).
+      #
+      # NOTE (signing): v1.0 ships unsigned / ad-hoc — users still get the
+      # Gatekeeper "unidentified developer" prompt (right-click → Open once).
+      # For a prompt-free install, sign + notarize with a Developer ID:
+      #   codesign --deep --force --sign "Developer ID Application: ..." Colosseum.app
       #   xcrun notarytool submit colosseum.dmg --apple-id ... --wait
       # See docs/macos-signing.md for the full process.
-      - name: Package DMG (macOS)
+      - name: Assemble .app bundle (macOS)
         if: runner.os == 'macOS'
         run: |
           tag='${{ github.ref_name }}'
           ver="${tag#v}"
           app="dmg-staging/Colosseum.app"
 
-          # Build the .app bundle structure
-          mkdir -p "${app}/Contents/MacOS"
+          mkdir -p "${app}/Contents/MacOS" "${app}/Contents/Resources"
           cp "target/${{ matrix.target }}/release/colosseum" "${app}/Contents/MacOS/colosseum"
+
+          # Generate colosseum.icns from the shipped 256px .ico (sips + iconutil,
+          # both preinstalled on macOS runners) — same recipe as build_macos.sh.
+          ico="crates/colosseum-gui/assets/colosseum.ico"
+          iconset="$(mktemp -d)/colosseum.iconset"
+          master="$(mktemp -t colosseum-icon).png"
+          mkdir -p "$iconset"
+          sips -s format png "$ico" --out "$master" >/dev/null
+          for size in 16 32 128 256; do
+            sips -z "$size" "$size"                 "$master" --out "$iconset/icon_${size}x${size}.png"    >/dev/null
+            sips -z "$((size*2))" "$((size*2))"     "$master" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+          done
+          iconutil -c icns "$iconset" -o "${app}/Contents/Resources/colosseum.icns"
 
           cat > "${app}/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
@@ -233,6 +247,7 @@ jobs:
           <plist version="1.0">
           <dict>
             <key>CFBundleExecutable</key>    <string>colosseum</string>
+            <key>CFBundleIconFile</key>      <string>colosseum</string>
             <key>CFBundleIdentifier</key>    <string>com.colosseum.Colosseum</string>
             <key>CFBundleName</key>          <string>Colosseum</string>
             <key>CFBundleDisplayName</key>   <string>Colosseum</string>
@@ -240,59 +255,111 @@ jobs:
             <key>CFBundleShortVersionString</key><string>${ver}</string>
             <key>CFBundlePackageType</key>   <string>APPL</string>
             <key>CFBundleSignature</key>     <string>????</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
             <key>NSHighResolutionCapable</key><true/>
             <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
           </dict>
           </plist>
           PLIST
 
+          # Ad-hoc sign the whole bundle (Apple Silicon refuses unsigned bundles).
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app" || true
+
+      # ── macOS: DMG with drag-to-Applications layout ─────────────────────────
+      # `create-dmg` builds a Finder window that shows the app icon next to an
+      # /Applications shortcut so users can drag to install — the standard macOS
+      # experience. If it fails (its AppleScript layout step is occasionally
+      # flaky in CI), fall back to a plain hdiutil DMG that still contains the
+      # /Applications symlink, so we always ship a functional installer.
+      - name: Package DMG (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          tag='${{ github.ref_name }}'
           dmg="colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}.dmg"
-          hdiutil create \
-            -volname "Colosseum ${tag}" \
-            -srcfolder "dmg-staging/" \
-            -ov -format UDZO \
-            "$dmg"
+          icns="dmg-staging/Colosseum.app/Contents/Resources/colosseum.icns"
+
+          # The macOS runner image ships an untrusted third-party tap (aws/tap)
+          # that makes every `brew` command print a noisy "tap trust is required"
+          # warning. We don't use it, so drop it to keep the log clean.
+          brew untap aws/tap >/dev/null 2>&1 || true
+          brew install create-dmg
+
+          # Retina-aware background: fold the 1x and 2x PNGs (icon slots match
+          # the --icon/--app-drop-link coordinates below) into a multi-res TIFF.
+          # Regenerate the PNGs with crates/colosseum-gui/assets/dmg/dmg_bg.swift.
+          bgdir="crates/colosseum-gui/assets/dmg"
+          tiffutil -cathidpicheck \
+            "$bgdir/dmg-background.png" "$bgdir/dmg-background@2x.png" \
+            -out dmg-background.tiff
+
+          create-dmg \
+            --volname "Colosseum ${tag}" \
+            --volicon "$icns" \
+            --background dmg-background.tiff \
+            --window-pos 200 120 \
+            --window-size 640 400 \
+            --icon-size 128 \
+            --icon "Colosseum.app" 160 200 \
+            --hide-extension "Colosseum.app" \
+            --app-drop-link 480 200 \
+            --no-internet-enable \
+            "$dmg" \
+            "dmg-staging/Colosseum.app" \
+          || echo "create-dmg reported an error — will verify output below."
+
+          if [ ! -f "$dmg" ]; then
+            echo "create-dmg produced no DMG; falling back to hdiutil."
+            ln -s /Applications "dmg-staging/Applications"
+            hdiutil create \
+              -volname "Colosseum ${tag}" \
+              -srcfolder "dmg-staging/" \
+              -ov -format UDZO \
+              "$dmg"
+          fi
+
+          test -f "$dmg" || { echo "ERROR: DMG not produced"; exit 1; }
           echo "ARTIFACT_DMG=${dmg}" >> "$GITHUB_ENV"
 
       # ── Upload artifacts (separate steps so missing ones are skipped) ───────
       - name: Upload ZIP
         if: env.ARTIFACT_ZIP != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: zip-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_ZIP }}
 
       - name: Upload MSI
         if: env.ARTIFACT_MSI != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: msi-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_MSI }}
 
       - name: Upload TGZ
         if: env.ARTIFACT_TGZ != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tgz-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_TGZ }}
 
       - name: Upload DEB
         if: env.ARTIFACT_DEB != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deb-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_DEB }}
 
       - name: Upload RPM
         if: env.ARTIFACT_RPM != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rpm-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_RPM }}
 
       - name: Upload DMG
         if: env.ARTIFACT_DMG != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dmg-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_DMG }}
@@ -305,10 +372,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: '*'
           merge-multiple: true
@@ -321,6 +388,6 @@ jobs:
       # hand on github.com; this only uploads the files to it. No body/notes
       # options here, so the hand-written description is never touched.
       - name: Upload assets to the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: release-artifacts/*

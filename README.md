@@ -10,7 +10,7 @@ ratings.
 
 ![Colosseum — Arena tab with live game view](docs/screenshot.png)
 
-> **v1.0.0 · GPL-3.0-or-later · Rust + egui**
+> **v1.0.1 · GPL-3.0-or-later · Rust + egui**
 
 ---
 

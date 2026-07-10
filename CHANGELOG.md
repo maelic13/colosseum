@@ -6,7 +6,27 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [1.0.0] — 2026-07-08
+## [1.0.1] — 2026-07-10
+
+A packaging and release-tooling patch; no functional changes to the app.
+
+### Fixed
+- macOS `.dmg` is now a proper installer: the disk image opens to a branded
+  Finder window (light background with the gold-ring motif) with the
+  Colosseum app icon and a drag-to-`/Applications` shortcut, carries a
+  custom volume icon, and the bundled `Colosseum.app` shows its app icon.
+  Previously the CI-built DMG contained a bare, icon-less `.app` and no
+  Applications shortcut.
+- The app now reports its version as 1.0.1, so a fresh install no longer
+  claims an update is available
+
+### Changed
+- CI: GitHub Actions dependencies bumped to their latest majors (Node 24
+  runtime), Homebrew tap-trust warning silenced
+
+---
+
+## [1.0.0] — 2026-07-09
 
 The first stable release. Since 0.1.0 the app has been redesigned around the
 **Arena** tab (live standings + live game view), gained real ratings math,
