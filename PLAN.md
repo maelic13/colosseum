@@ -2,13 +2,15 @@
 
 `colosseum-cli` is a headless, cross-platform harness for **developing** chess
 engines: SPRT gates, SPSA tuning, gauntlets, speed measurement, and the
-provenance/calibration machinery that makes those numbers trustworthy.
+run-record/calibration machinery that makes those numbers trustworthy. Its only
+contract with an engine is a UCI executable: no repository manifest, custom
+build command or non-standard benchmark command is required.
 
 The desktop app answers *"who is stronger?"*. The CLI answers *"is this commit
 stronger than that commit, and can I believe the answer?"* — a different
 question with much harsher requirements: reproducibility, explicit CPU
-placement, byte-level provenance, and a calibration path that proves the
-harness itself is not lying.
+placement, byte-level identification of inputs, and an optional calibration
+path that can exercise the complete harness on the machine where it runs.
 
 **Audience of this file:** the maintainer. It carries the specifications,
 success criteria, the evidence behind each requirement, and the forward plan.
@@ -20,12 +22,12 @@ phase numbers or internal naming.
 
 ## S1. Current state
 
-**Nothing is built yet. This document is step 0.**
+**The CLI is not built yet. This document is step 0 for that work.**
 
 What exists is the reason the plan is short: `colosseum-core`,
 `colosseum-uci` and `colosseum-engine` are already headless (no `egui`
 dependency anywhere in them), already cross-platform, already released for
-Windows/Linux/macOS including arm64, and already carry ~136 tests. The CLI is a
+Windows/Linux/macOS including arm64, and already carry 149 tests. The CLI is a
 new workspace member consuming them — not a refactor.
 
 First consumers: **Rarog** (`D:/code/rarog`, Rust) and **Basilisk**
@@ -93,37 +95,43 @@ Every rule here was paid for. They are requirements on the tools, not advice.
 
 1. **SPRT is the only verdict.** Holdout MSE, bench nodes, EBF, NPS and depth
    are diagnostics. A −4.9% holdout improvement once lost 17 Elo.
-2. **A node count is a fingerprint, not a metric.** Identical ⇒
-   behaviour-preserving. Magnitude comparisons across parameter changes are
-   meaningless (±1 threshold changes swing it several %).
+2. **Binary identity is observable; source identity is not.** Colosseum hashes
+   executable bytes and records the UCI identity and effective options. Custom
+   node-count fingerprints may be useful inside an engine project, but they
+   are not UCI and are not a Colosseum requirement.
 3. **`[-3,+3]` is not an equivalence test.** Non-inferiority is `[-3,0]`;
    equivalence is a fixed-N calibration with a CI containment rule.
 4. **A null is not proof of no effect.** Report the resolution limit alongside
    any null. A 3,000-game-per-arm paired difference resolves ±13.8 Elo; calling
    that "no effect" when hunting a ~16 Elo effect is wrong.
-5. **Explicit CPU placement is mandatory for every clock match.** Unpinned Zen 3
+5. **Explicit CPU placement must be available for every clock match.** Unpinned Zen 3
    showed a hidden per-run offset of ~±10 nElo. `fastchess` before 1.7.0 failed
    to apply Windows affinity at all; 1.8.0 guesses SMT siblings from logical CPU
    order and pins **one core per game**, which starves `Threads>1` (a 4-thread
-   comparison read −100 purely from starvation).
-6. **Compiler equality.** A toolchain change between building A and B folds the
-   compiler delta into the measured Elo, and **no null pair can see it** — a null
-   runs one binary against itself, so both sides always share a compiler. Three
-   unrelated Rarog gates clustered at −8.68/−8.22/−7.37 across the boundary.
-   Hard-fail, never warn.
-7. **Provenance travels with the result.** Binary SHA-256, fingerprint, compiler
-   version, dirty-tree flag, harness version, book hash, seed, affinity list.
-8. **The measuring instrument must be validated before it is trusted.** Two NPS
+   comparison read −100 purely from starvation). Colosseum exposes automatic,
+   disabled and explicit-CPU modes; if placement is requested but cannot be
+   applied, it fails rather than silently degrading.
+6. **Build comparability belongs to the test author.** Compiler, flags, source
+   state, PGO data and auxiliary engine files are not exposed by UCI and cannot
+   be verified reliably from an arbitrary executable. Colosseum neither builds
+   engines nor rejects a comparison based on claimed build provenance.
+7. **Observable run identity travels with the result.** Binary path and
+   SHA-256, UCI identity, arguments, working directory, effective UCI options,
+   harness version, book path/hash when used, seed, conditions and resolved
+   affinity are written automatically. Unverifiable compiler/source metadata is
+   not part of the contract.
+8. **Calibration is available, not a prerequisite.** Two NPS
    estimators each read −0.2…−0.4% on a *self pair* (the same binary in both
    arms) and had already produced two confident false rejections. Bench NPS is
    left-skewed, so any estimator weighting the arms unequally against the slow
    tail manufactures bias. Validate on a self pair; compare arm-level **median**
-   and **best-of**; pool ≥2 builds per arm (two PGO builds of identical source
-   differ ~0.36%).
+   and **best-of**. Calibration is evidence about one machine and configuration,
+   never a guarantee and never a condition for running another command.
 9. **Unified conditions.** Tune and gate share TC, book *and* adjudication.
    A tuner optimising under different game-termination rules than the gate
    measures is optimising the wrong objective.
-10. **Two-sided resignation.** `-resign movecount=3 score=600 twosided=true`.
+10. **Default to two-sided resignation.** `-resign movecount=3 score=600
+    twosided=true`.
     Fishtest uses `score=600` with no `twosided` (verified in
     `official-stockfish/fishtest`, `worker/games.py`); we match the threshold
     and go one step stricter, because one-sided resignation adjudicates on the
@@ -132,13 +140,11 @@ Every rule here was paid for. They are requirements on the tools, not advice.
     more readily than its sibling. That asymmetry lands directly in the
     gradient. Draw rule `movenumber=40 movecount=8 score=10` (stricter than
     fishtest's `34/8/20` on both axes).
-11. **SPSA facts, from a calibrated convergence model:** iterations dominate and
-    **5,000 is the floor** (at 1,000–2,500 a run barely beats its seed);
-    **dimension is ~free** (p=6 and p=26 converge alike — merging groups is
-    cheaper *and* more correct where knobs interact); there is a **noise floor**
-    independent of the starting point, so re-tuning knobs already inside it
-    scatters them; **curvature below ~0.5 Elo per full step is unfittable** at
-    32 games/iteration; games-per-iteration is ~neutral at fixed game budget.
+11. **SPSA defaults are policy, not universal laws.** The default horizon is
+    5,000 iterations and the default mini-match is 32 games because they are
+    proven useful for the first consumers, but both are externally configurable.
+    Colosseum does not enforce engine-specific claims about minimum horizon,
+    dimensionality, curvature or noise floors.
 12. **Derive schedule constants from the horizon, and assert them at the point
     they are written.** Hand-picking the gain leaves it stale whenever the
     horizon changes. Fishtest's end-state form (`c_end`, `r_end` → back-solve
@@ -152,12 +158,12 @@ Every rule here was paid for. They are requirements on the tools, not advice.
     decisive, cutting draws ~56% → ~35–45% so gates resolve in far fewer games.
     A balanced book for CCRL-comparable gauntlets. **Book exhaustion inflates
     error bars** — one run recycled 23% of its pairs and reported optimistic
-    error. For SPSA, opening reuse across iterations is harmless and arguably
-    beneficial (common random numbers reduce gradient variance).
-14. **Speed → Elo is ≈ 2 Elo per 1% NPS at 3+0.03** (measured on a
-    bench-identical gate that isolated execution speed). The older 0.7 figure
-    was an LTC estimate and must not be transferred to STC, nor this one to LTC
-    unmeasured.
+    error. Books are optional: without one, games start from the normal initial
+    position. SPRT/SPSA warn about the resulting lack of opening diversity but
+    continue. Colosseum ships no book and never assumes a filesystem path.
+14. **Speed is reported as speed.** Colosseum reports NPS differences and their
+    uncertainty; it does not convert them to Elo using an engine- or
+    time-control-specific rule.
 15. **Pentanomial pairs and normalized Elo are the reporting basis.** Paired
     openings are correlated; the pentanomial model is why the error bars are
     honest, and `model=normalized` is what the existing ledgers are denominated
@@ -171,7 +177,7 @@ Every rule here was paid for. They are requirements on the tools, not advice.
 colosseum-core      pure math + domain      ← pentanomial stats, nElo, SPSA schedule
 colosseum-uci       UCI protocol/process    ← unchanged
 colosseum-engine    driver/scheduler/store  ← + CPU affinity, book slicing
-colosseum-cli       NEW: bin + commands     ← descriptors, manifests, NPS, SPSA driver
+colosseum-cli       NEW: bin + commands     ← run configs/records, NPS, SPSA driver
 colosseum-gui       desktop app             ← unchanged; may consume new stats
 ```
 
@@ -179,44 +185,33 @@ colosseum-gui       desktop app             ← unchanged; may consume new stats
 so they are trivially testable); anything that spawns or places a process goes
 in `engine`; anything that is a *workflow* goes in `cli`.
 
-### The engine descriptor
+### Engine invocation and configuration
 
-The single mechanism that makes one tool serve two engines. A per-engine TOML,
-living **in the engine's repo**, never in Colosseum:
+The required input is an executable path. Each side may additionally declare a
+display name, arguments, working directory, allocated cores and arbitrary UCI
+option values. Colosseum obtains engine identity and the supported option
+schema from the normal UCI handshake.
 
-```toml
-# rarog/.colosseum/engine.toml
-name    = "Rarog"
-version_cmd = ["uci"]            # or read from the binary's id string
+Every ordinary workflow is fully controllable with CLI arguments. A
+human-authored TOML run configuration is optional for repeatability; command
+line values override it:
 
-[build]
-command = ["cargo", "xtask", "build", "--arch", "pext", "--pgo"]
-artifact_glob = "target/dist/rarog-*-pext-pgo{exe}"
-
-[fingerprint]                     # the "is this behaviour-identical?" check
-command = ["bench", "13"]         # sent on stdin, or argv if stdin_command=false
-pattern = "Nodes searched\\s*:\\s*(\\d+)"
-
-[speed]
-pattern = "Nodes/second\\s*:\\s*(\\d+)"
-
-[tunables]                        # for SPSA
-source  = "spsa/params.json"      # engine exports its own knob table
-
-[conditions]                      # defaults for this engine's gates
-tc = "3+0.03"
-book = "books/UHO_Lichess_4852_v1.epd"
+```text
+built-in defaults < TOML run configuration < CLI arguments
 ```
 
-Everything engine-specific is here. Colosseum never learns what `cargo xtask`
-or `bench 13` mean. **Success criterion: adding Basilisk requires writing one
-TOML and zero lines of Rust.**
+SPSA is the exception only for its parameter vector: a tune TOML supplies the
+selected numeric UCI option names and schedule inputs because a large vector is
+not usable as command-line syntax. Global SPSA controls remain CLI options.
+Colosseum writes the fully resolved configuration as machine-readable JSON in
+the run directory.
 
 ### Explicitly out of scope
 
-Anything that belongs to one engine: parameter *baking* into source, build
-flavour logic (PGO/PEXT/AVX2), Texel tuning, datagen, NNUE. The CLI may *call*
-an engine's build command; it must never contain build knowledge.
+Anything that belongs to one engine: building, artifact discovery, custom
+bench/fingerprint commands, compiler/source-tree inspection, parameter
+*baking* into source, build flavour logic (PGO/PEXT/AVX2), Texel tuning,
+datagen and NNUE management. The CLI consumes finished UCI executables.
 
 ---
 
@@ -224,6 +219,30 @@ an engine's build command; it must never contain build knowledge.
 
 Every criterion below must be checkable by a test or a single command. "It
 looks right" is not a criterion.
+
+### 5.0 CLI invocation and configuration — `colosseum-cli`
+
+**Requirements**
+
+- Bare UCI executable paths are sufficient. Per side, accept an optional display
+  name, arguments, working directory, arbitrary UCI option values and allocated
+  core count.
+- `engine inspect` prints the UCI identity and advertised option schema;
+  `engine check` exercises handshake, readiness, a bounded search, stop and
+  clean shutdown.
+- All ordinary workflow controls are CLI arguments. `--config <run.toml>` is an
+  optional convenience, with CLI values taking precedence.
+- SPSA requires a human-authored tune TOML only for its parameter vector.
+- Every run writes its fully resolved configuration as JSON. JSON is generated
+  output, not a required user-authored manifest.
+
+**Success criteria**
+
+- Two arbitrary UCI executables can be inspected and compliance-checked using
+  paths and CLI arguments only.
+- The same run launched from TOML plus overrides resolves to byte-identical JSON.
+- Adding a new conforming engine requires no engine-repository file and no Rust
+  code.
 
 ### 5.1 Pentanomial statistics and normalized Elo — `colosseum-core`
 
@@ -270,14 +289,17 @@ the most platform-divergent.
   logical CPU numbering** — that is the 1.8.0 defect.
 - One logical CPU **per physical core**, leaving a configurable headroom
   (default 2 cores free).
-- Pin per *game slot*, and a slot must receive **`Threads` cores, not one** —
-  the starvation bug. At `Threads=1` this reduces to one core per game.
-- Report the resolved placement in the run manifest, and fail loudly if pinning
-  is requested and unavailable (never silently continue unpinned).
+- Pin per *game slot*, and a slot must receive the explicitly configured
+  `cores-per-engine`, not one — the starvation bug. This resource allocation is
+  separate from whichever UCI option controls the engine's worker count.
+- Modes: `auto`, `off`, or an explicit CPU list; configurable headroom defaults
+  to 2 cores in automatic mode.
+- Report the resolved placement in the run record, and fail loudly if pinning
+  is requested and unavailable. An explicitly unpinned run is allowed and
+  recorded.
 - macOS caveat: there is no supported hard CPU-affinity API. Either use affinity
-  *hints* and mark the run as `affinity=advisory` in the manifest, or refuse
-  clock-TC gates on macOS by default. **Decide by measurement in Phase 2, not
-  now** — and whichever way it goes, the manifest must say which.
+  *hints* and mark the run as `affinity=advisory`, or report hard affinity as
+  unavailable and allow `off`. Clock matches are not prohibited.
 
 **Success criteria**
 
@@ -287,47 +309,53 @@ the most platform-divergent.
 - An integration test spawns N busy child processes under a pinning request and
   samples actual CPU residency, asserting each lands on its assigned core.
   Skipped with a clear message where the OS cannot enforce it.
-- **The real gate is the null calibration (5.3), run per platform.**
 
 ### 5.3 Null calibration — `colosseum-cli calibrate`
 
-**Why:** it is the only test that can catch a harness that mis-measures.
+**Why:** it is an optional end-to-end symmetry test on the actual machine. It
+does not prove correctness and is not required before other commands.
 
 **Requirements**
 
 - Byte-identical binary on both sides — **refuse** if the SHA-256 differs.
-- Fixed game count (default 30,000), no early stopping.
-- PASS iff the **full 95% nElo CI lies inside ±5**. Report inconclusive if the
-  interval is wider than the tolerance rather than declaring PASS.
+- Fixed game count (default 30,000), confidence (default 95%) and tolerance
+  (default ±5 nElo), all externally configurable; no early stopping.
+- PASS iff the full configured nElo CI lies inside the configured tolerance.
+  Report inconclusive if the interval is wider than the tolerance rather than
+  declaring PASS.
 - Any timeout, crash, disconnect or illegal move invalidates the run.
-- Must be re-run after **any** harness change, and per platform.
 
 **Success criteria**
 
-- Passes on Windows, Linux and macOS before that platform is declared supported.
-- A deliberately-broken build (affinity disabled) is shown to *fail* it on at
-  least one machine — a calibration that cannot fail proves nothing.
+- Different binary hashes are rejected; configurable fixed-N/CI/tolerance
+  values round-trip through persistence and resume.
+- PASS, FAIL, inconclusive and invalid outcomes each have deterministic tests.
 
-### 5.4 SPRT gate — `colosseum-cli sprt`
+### 5.4 Fixed match and SPRT gate — `colosseum-cli match|sprt`
 
 **Requirements**
 
-- Modes: `gainer` `[0,3]`, `simplify` `[-3,0]`, `fixed` (N games, no stopping),
-  `calibrate` (5.3).
-- Two engines by path, per-side UCI options and per-side `Threads` (so one
-  binary can be A/B-tested on a knob without a rebuild).
-- Defaults from doctrine: `tc=3+0.03`, hash 64 MB, `Threads=1`, UHO book,
-  `-repeat`/both colours per opening, adjudication per doctrine 10.
-- **Hard-fail** on compiler mismatch between the two manifests (doctrine 6).
-- Live report block on an interval; full log to disk; PGN out; run manifest.
+- `match` is fixed-N with no sequential stopping. `sprt` accepts explicit
+  `elo0`/`elo1`/`alpha`/`beta` and model; `gainer` `[0,3]` and `simplify`
+  `[-3,0]` are configurable convenience defaults. `calibrate` remains its own
+  command (5.3).
+- Two engines by path, with per-side arguments, working directory, arbitrary
+  UCI options and allocated cores. The same binary may be tested with different
+  options, or against itself.
+- Configurable defaults: `tc=3+0.03`, hash 64 MB when a compatible option is
+  advertised, worker count 1 when a compatible option is advertised,
+  both colours per pair, and adjudication per doctrine 10.
+- A book is optional. Without one, every game begins at the normal starting
+  position; SPRT/SPSA print a lack-of-opening-diversity warning but continue.
+- Live report block on an interval; full log to disk; PGN out; run record.
 - Resume a stopped gate from the store without double-counting.
 
 **Success criteria**
 
 - Replaying a stored Rarog gate's game outcomes reaches the **same verdict at
   the same game number** as `fastchess` did (±1 report interval).
-- Compiler mismatch, SHA-identical-with-identical-options, and missing-manifest
-  cases each produce the specified error/warning — asserted by tests.
+- A path-only invocation needs no configuration file; identical binaries and
+  identical options are allowed for self-play.
 - Killing the process mid-run and resuming produces the same final statistics as
   an uninterrupted run over the same seed.
 
@@ -338,27 +366,27 @@ the most platform-divergent.
 - **End-state parameterization** (doctrine 12): each knob declares `c_end` and
   the run declares `r_end` and horizon `N`; `c`, `a` and `A = 0.1·N` are
   back-solved. `alpha=0.601`, `gamma=0.102`.
+- The tune TOML selects numeric UCI options and supplies each initial value,
+  tuning bounds and `c_end`. The engine needs no tune manifest or source file.
+- Defaults are `N=5,000` iterations and 32 games/iteration; both are
+  configurable and neither is enforced as a minimum.
 - Decay per **iteration**, never per game.
-- Persistent driver: no per-iteration process relaunch, book loaded once.
+- Persistent driver: no per-iteration harness relaunch; a supplied book is
+  loaded once.
 - Multi-session: state saved every K iterations; log **appends** on resume;
   stops itself at the horizon; prints iteration/percent/ETA; the horizon is
   frozen at first launch and the tool must say so out loud.
 - Emits the tail-mean vector for baking. **No per-knob filter** — SPSA estimates
   a *joint* optimum, and reverting a subset yields a point the tuner never
   evaluated. The tail mean already is the filter.
-- **Config audit**, refusing to launch on the two hard-error classes:
-  1. knob declared but in no group *(info)*
-  2. group entry not declared by the engine *(error)*
-  3. seed disagrees with the engine default *(warn — may be deliberate)*
-  4. knob in more than one group *(info)*
-  5. **pinned or near-discrete knob inside a tune (ERROR)** — a `min==max` knob
-     is identical in both arms of every mini-match, so it is never *measured*,
-     yet its value shapes every other knob's fit
-  6. **perturbation rounds to zero before the horizon (ERROR)** — the engine
-     receives `round(value)`, so once `c_end · c_t < 0.5` both arms see the same
-     integer: the knob stops being measured but keeps being *updated*, i.e. it
-     random-walks and drags the fit
-  7. seed on a rail *(warn — one-sided gradient)*
+- **Config audit**, checked against the live UCI option schema:
+  1. selected option absent or not numeric `spin` *(error)*
+  2. duplicate parameter name *(error)*
+  3. initial/tuning bounds outside the advertised UCI range *(error)*
+  4. `min >= max`, so the knob cannot be measured *(error)*
+  5. perturbation rounds to zero before the horizon *(error)*
+  6. initial value disagrees with the engine default *(warn — may be deliberate)*
+  7. initial value sits on a rail *(warn — one-sided gradient)*
 
 **Success criteria**
 
@@ -368,7 +396,7 @@ the most platform-divergent.
 - **Written-artifact assertion:** the persisted schedule is read back and
   verified (`A == 0.1N`, `A > 0`, `a` matches) before any game is played. A test
   mutates the file and asserts the launch refuses.
-- Audit classes 5 and 6 each have a fixture that must be rejected.
+- Every hard audit class has a fixture that must be rejected.
 - **Recovery test:** kill at iteration K, resume, and the schedule continues
   (does not restart at full gain); the log retains the pre-kill iterations.
 - **Convergence smoke test:** against a synthetic noisy quadratic objective with
@@ -379,16 +407,23 @@ the most platform-divergent.
 
 **Requirements**
 
-- Strict alternation of arms; arm-level **median** and **best-of**; bootstrap CI
-  on the median.
-- Pool ≥2 builds per arm and report per-build medians so non-overlap is visible.
-- **Refuse to report a verdict until a self-pair run has been recorded** for the
-  same machine and configuration, and warn if it read outside ±0.5%.
+- Drive an optional user-supplied EPD position suite through standard UCI
+  bounded searches; use the normal starting position when it is omitted and
+  warn about the weaker workload. Consume `info nodes`/`time`/`nps` when
+  provided and report clearly when the engine does not expose enough
+  information.
+- Strict alternation of arms; warm-up; arm-level **median** and **best-of**;
+  bootstrap CI on the median.
+- Accept one or more executables per arm and show per-executable medians, without
+  requiring multiple builds.
+- A self-pair is recommended but optional; warn when a recorded matching
+  self-pair lies outside a configurable tolerance (default ±0.5%).
 - Detect and report machine noise (per-round SD).
 
 **Success criteria**
 
-- A self pair reads within ±0.5% and the tool says so.
+- A self-pair result is reported without being required as a prerequisite for
+  comparing other executables.
 - A synthetic left-skewed sample injected into the estimator reproduces the
   known bias in a naive ABBA estimator and *not* in the shipped one — the test
   that would have caught the original defect.
@@ -401,15 +436,17 @@ with error bars, one anchor, standings/crosstable CSV.
 **Success criterion:** on a stored tournament, CLI ratings match the GUI's for
 the same data to ≤0.01 Elo.
 
-### 5.8 Provenance and guards — `colosseum-cli`
+### 5.8 Automatic run record — `colosseum-cli`
 
-Manifest per run: both engines' path/SHA-256/fingerprint/compiler/dirty flag,
-harness version and git SHA, book path+hash, seed, resolved affinity, TC, hash,
-threads, adjudication, full command line, UTC start.
+Generated JSON per run: both engines' canonical path/SHA-256, UCI identity,
+arguments, working directory and effective options; harness version; optional
+book path+hash; seed; resolved affinity; TC; adjudication; full command line;
+UTC start/end and outcome. No engine-supplied manifest or unverifiable build
+metadata is accepted or required.
 
-**Success criteria:** a manifest is written for every run including aborted
-ones; a test asserts every field is populated or explicitly `null` with a
-reason; the compiler guard hard-fails on mismatch.
+**Success criteria:** a run record is written for every run including aborted
+ones; a test asserts every observable field is populated and every
+not-applicable optional field is explicitly `null` with a reason.
 
 ### 5.9 Book tools — `colosseum-cli book`
 
@@ -418,6 +455,15 @@ reason; the compiler guard hard-fails on mismatch.
 
 **Success criteria:** slicing is deterministic given a seed and reproducible
 across platforms (same hash); `verify` rejects a known-bad EPD fixture.
+
+### 5.10 Statistics/replay — `colosseum-cli stats`
+
+Read a Colosseum run, PGN or supported fastchess/cutechess result log and report
+the same pentanomial/nElo/SPRT block used live. This makes the parity machinery
+useful outside the test suite.
+
+**Success criterion:** replaying every 5.1 golden fixture through the command
+produces the same result as the library API.
 
 ---
 
@@ -446,9 +492,10 @@ meant to catch it.** These are requirements, not aspirations.
 6. **Determinism tests:** same seed + same stubs ⇒ same pairings, same opening
    order, same final statistics, on every platform.
 7. **Resume/kill tests** for both SPRT and SPSA.
-8. **The calibration gate (5.3) is part of acceptance**, not part of testing —
-   CI cannot run 30,000 games, so it is a documented manual gate per platform,
-   recorded in GUIDE.
+8. **Calibration (5.3) is optional end-to-end evidence**, not a CI or user
+   prerequisite. PASS/FAIL/inconclusive/invalid classification is tested
+   deterministically; maintainers may run real calibrations after material
+   clock, scheduling or affinity changes.
 9. **CI matrix: Windows, Linux, macOS × debug and release.** Debug is not
    optional: a debug build searches ~an order of magnitude slower and a CI
    runner is slower again, which is exactly how a flat-timeout test passes
@@ -468,9 +515,10 @@ executable suffix and path separators; process spawn/kill semantics; symlink and
 permission handling for engine binaries; high-resolution timing; file locking on
 the SQLite store; line endings in PGN/EPD parsing.
 
-**Rule: no platform is "supported" until it has passed a null calibration and
-the full test suite there.** Platform status is tracked in GUIDE, per platform,
-with the date and the CI of the calibration run.
+**Rule:** platform support requires the full test suite and documented
+capability/fallback behaviour there. Calibration results apply only to the
+machine and configuration on which they were measured; they do not determine
+whether the operating system is supported.
 
 ---
 
@@ -484,50 +532,57 @@ Spec 5.1. First because every later phase reports through it and because it is
 what makes results comparable with the existing ledgers. Pure functions, no I/O,
 fully testable offline. **Exit:** golden-file parity against ≥6 stored runs.
 
-### Phase 2 — CPU topology, affinity, and the calibration command
-Specs 5.2 + 5.3. The highest-risk component, done early so its unknowns
-(especially macOS) surface before anything depends on them. **Exit:** topology
-fixtures pass on all three OSes; a null calibration passes on Windows; the macOS
-affinity decision is recorded in this file.
+### Phase 2 — CLI skeleton, direct UCI invocation and run records
+Specs 5.0 + 5.8. New workspace member, argument parsing, optional TOML input,
+direct executable/arguments/working-directory/options controls, `engine
+inspect/check`, and generated JSON run records. Decide the foundational
+fastchess/cutechess interface gaps here: restart/recovery, per-engine time
+margin, debug logging, opening repetition and machine-readable output.
+**Exit:** two arbitrary UCI executables pass path-only inspect/check workflows;
+TOML plus CLI overrides resolves identically; run-record schema and aborted-run
+tests pass.
 
-### Phase 3 — `colosseum-cli` skeleton and the engine descriptor
-New workspace member, argument parsing, descriptor loading, manifests (5.8),
-`fingerprint` and `build` passthrough. **Exit:** `colosseum-cli fingerprint`
-reproduces Rarog's `bench 13` node total from a descriptor, on all three OSes.
+### Phase 3 — CPU topology and affinity
+Spec 5.2. Implement `auto`/`off`/explicit-list placement, allocated cores per
+engine and platform capability reporting. **Exit:** topology fixtures pass on
+all three OSes; enforced-residency integration tests pass where supported; the
+macOS advisory/unavailable behaviour is documented.
 
-### Phase 4 — SPRT gate
-Spec 5.4, including the compiler-equality guard and resume. **Exit:** verdict
-replay parity against a stored Rarog gate; guard tests pass.
+### Phase 4 — Fixed match, SPRT and optional calibration
+Specs 5.3 + 5.4, including resume. **Exit:** verdict replay parity against a
+stored Rarog gate; path-only and no-book runs pass; calibration outcome tests
+pass.
 
 ### Phase 5 — SPSA
 Spec 5.5: schedule in `core`, driver in `cli`, audit, multi-session, written-
-artifact assertion. **Exit:** schedule property tests, both hard audit classes
-rejected, recovery test, synthetic convergence smoke test.
+artifact assertion. **Exit:** schedule property tests, every hard audit class
+rejected by a fixture, recovery test, synthetic convergence smoke test.
 
-### Phase 6 — Speed/NPS and book tools
-Specs 5.6 + 5.9. **Exit:** the skew-bias regression test passes; self-pair
-enforcement demonstrated.
+### Phase 6 — Speed/NPS, book tools and statistics replay
+Specs 5.6 + 5.9 + 5.10. **Exit:** the skew-bias regression test passes; optional
+self-pair warnings work; book slicing is reproducible; golden fixtures replay
+through the CLI.
 
 ### Phase 7 — Gauntlet CLI surface
 Spec 5.7. Thin. **Exit:** ratings match the GUI to ≤0.01 Elo on stored data.
 
-### Phase 8 — Parity check vs fastchess and cutechess, and the feature-gap decision
-**This is development work, not analysis to do now.** Two parts:
+### Phase 8 — Parity check vs fastchess and cutechess, and remaining gaps
+Two parts:
 
-- **(a) Parity run — the entry gate for trusting this harness.** Same two
-  binaries, same book, same seed, same TC, same adjudication, run through
+- **(a) Parity run — the entry gate for trusting this harness.** Prepare one
+  deterministic opening sequence first, then use it sequentially with the same
+  two binaries, TC and adjudication through
   `colosseum-cli`, `fastchess` and `cutechess-cli`. Compare final Elo/nElo/LOS,
   the pentanomial vector, draw rate, and time-loss counts. **Agreement within
   the combined error bars is the gate**; disagreement is a defect in one of the
   three and must be root-caused before either is trusted. This is the mitigation
   for the loss of runner independence (S2), so it is not optional and it is
   repeated after any change to game-running code.
-- **(b) Feature-gap decision.** Enumerate what `fastchess`/`cutechess` do that
-  Colosseum does not, and decide per feature: adopt, decline with a reason, or
-  defer. Known candidates to evaluate at that time: SPRT-during-tournament
-  reporting cadence, `-recover` semantics, per-engine time margins, Chess960,
-  ponder handling under test conditions, tournament formats we lack, output
-  formats other tools consume. **Do not pre-judge these here.** Feature and
+- **(b) Remaining feature-gap decision.** Revisit what `fastchess`/`cutechess`
+  do that Colosseum does not after the foundational decisions in Phase 2, and
+  decide per remaining feature: adopt, decline with a reason, or defer. Known
+  candidates: Chess960, ponder handling under test conditions and additional
+  tournament formats. Feature and
   stability parity would make the tool useful beyond Rarog and Basilisk, which
   is welcome but explicitly **not the primary goal** — the primary goal is that
   our two engines can develop on one trustworthy harness on any OS.
@@ -539,14 +594,16 @@ The deliverable is a tool any engine developer can pick up.
   desktop app so harness churn cannot destabilise a 1.0 GUI product.
 - Windows/Linux/macOS × x64/arm64 through the existing pipeline; smoke-test the
   exact published artifacts (`--version`, `--help`, one stub-engine match).
-- User documentation: quickstart, the engine-descriptor reference, one worked
-  example per command, and a short **"how to trust a result"** page carrying the
-  parts of S3 a user needs (calibration, provenance, self-pair validation).
+- User documentation: quickstart, direct-engine and optional run-TOML reference,
+  SPSA tune-TOML reference, one worked example per command, and a short **"how
+  to trust a result"** page carrying the parts of S3 a user needs (optional
+  calibration, run records, self-pair validation).
   User-facing docs must not carry phase numbers or internal naming.
-- Reference descriptors for Rarog and Basilisk as worked examples.
+- Path-only and optional TOML worked examples using ordinary UCI executables.
 - **Acceptance:** Rarog and Basilisk each run one real gate end-to-end through
-  the released artifact, on at least two different operating systems, with a
-  passing null calibration on each — and the result agrees with Phase 8(a).
+  the released artifact, on at least two different operating systems, and the
+  result agrees with Phase 8(a). A calibration example is documented but not
+  required.
 
 ---
 
@@ -555,9 +612,9 @@ The deliverable is a tool any engine developer can pick up.
 | Risk | Mitigation |
 |---|---|
 | **Loss of runner independence** (S2) | Phase 8(a) parity gate; keep `fastchess` installed as a second opinion; re-run parity after any game-running change |
-| macOS cannot enforce affinity | Decide in Phase 2; mark runs `affinity=advisory` or refuse clock gates there; the manifest always states which |
+| macOS cannot enforce affinity | Mark runs `affinity=advisory` or `off`; fail only when hard affinity was explicitly requested |
 | Harness churn destabilises the released GUI | Separate bin crate, separate release asset, shared core covered by the existing test suite |
-| Scope creep into engine-specific work | S4 "explicitly out of scope"; the descriptor is the only extension point |
+| Scope creep into engine-specific work | S4 "explicitly out of scope"; consume finished UCI executables and keep run configuration generic |
 | Silent statistical divergence from the old ledgers | Golden-file parity tests (S6.2) are permanent, not one-off |
 | A derived constant is wrong and invisible | Assert written artifacts at the point of writing (doctrine 12) |
 
@@ -572,5 +629,5 @@ The deliverable is a tool any engine developer can pick up.
 | `D:/code/rarog/tools/` | the PowerShell harness being replaced; the source of most doctrine in S3 |
 | `D:/code/rarog/tools/results/` | stored real runs — the golden-file fixtures for S5.1 |
 | `D:/code/rarog/PLAN.md` | the evidence behind every doctrine item, with dates and Elo figures |
-| `D:/code/basilisk` | second consumer; proves the descriptor abstraction |
+| `D:/code/basilisk` | second consumer; proves the bare-UCI abstraction |
 | `official-stockfish/fishtest` `worker/games.py` | reference adjudication settings |
