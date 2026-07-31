@@ -20,6 +20,7 @@ clap = { version = "4.5.51", features = ["derive"] }
 colosseum-application = { path = "../colosseum-application" }
 colosseum-engine = { path = "../colosseum-engine" }
 colosseum-uci = { path = "../colosseum-uci" }
+thiserror = "2.0.18"
 
 [dev-dependencies]
 serde_json = "1.0.150"

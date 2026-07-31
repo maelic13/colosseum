@@ -776,6 +776,7 @@ dependencies = [
  "colosseum-engine",
  "colosseum-uci",
  "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

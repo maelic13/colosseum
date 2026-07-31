@@ -18,8 +18,8 @@ numbers, internal naming or method argumentation.
 | What is missing | The Phase 2 boundary migration and independent CLI composition root; CPU affinity, match/SPRT workflows, SPSA, durable runs, run records and trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 2.2 — independent CLI composition root** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 2.4 — layered configuration resolution** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -179,8 +179,13 @@ model as well.
   [`tools/release/`](tools/release/),
   [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
   [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
-- ☐ **2.3** — **Model: Terra High.** Direct engine controls: executable, optional label, arguments, cwd,
-  environment, arbitrary UCI options and allocated cores
+- ☑ **2.3 — DONE** — **Model: Terra High.** Add reusable direct engine controls:
+  required executable plus optional display label, ordered process arguments,
+  cwd, environment, arbitrary UCI values/buttons and logical-core allocation.
+  Path-only input resolves to the minimal application launch spec; duplicate
+  names, malformed values and ambiguous/unsafe core lists are rejected — evidence:
+  [`crates/colosseum-cli/src/engine_args.rs`](crates/colosseum-cli/src/engine_args.rs),
+  [`docs/cli/engine-controls.md`](docs/cli/engine-controls.md)
 - ☐ **2.4** — **Model: Sol High.** Resolution order is built-in defaults < committed run TOML (with its
   `extend` chain) < CLI; write the fully resolved JSON/config hash. Run
   files use one parent, maximum depth 16, canonical cycle detection,

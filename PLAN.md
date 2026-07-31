@@ -1306,6 +1306,15 @@ separate. Required push/PR CI exposes `workflow_call`, runs Windows/Linux/macOS
 debug and release suites, and builds the CLI artifact independently. The legacy
 GUI publication workflow remains until Phase 9.4 replaces publication lanes.
 
+**Implemented direct engine controls (2.3):** CLI driving adapters resolve a
+bare executable or the optional `--label`, repeated `--engine-arg`, `--cwd`,
+repeated `--env NAME=VALUE`, repeated `--option NAME=VALUE`, repeated
+`--button NAME` and `--cores LIST` controls into the minimal application launch
+spec. Names and arguments are preserved exactly; duplicate names and malformed,
+descending, repeated or excessive CPU ranges are errors. Command-specific
+composition in later steps reuses this parser rather than introducing an engine
+descriptor.
+
 **Exit:** two arbitrary UCI executables pass path-only workflows; run-file
 inheritance/clearing/path origins resolve identically to equivalent all-CLI or
 flattened input; seed golden vectors reproduce across platforms; durable and
