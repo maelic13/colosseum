@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+# Explicit local interoperability coverage only. Required CI never enables it.
+real-engine-smoke = []
+
 [dependencies]
 colosseum-core = { path = "../colosseum-core" }
 thiserror = "2.0.18"
@@ -15,3 +19,8 @@ tracing = "0.1.44"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[[test]]
+name = "uci_smoke"
+path = "tests/stockfish.rs"
+required-features = ["real-engine-smoke"]

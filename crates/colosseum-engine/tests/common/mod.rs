@@ -1,19 +1,10 @@
-//! Shared test support: locate a real engine and copy it to a temp dir so the
-//! original is never touched. Tests skip gracefully when no engine is available.
+//! Support for explicitly opt-in real-engine smoke tests.
+//!
+//! This module is compiled only by the `real-engine-smoke` test targets. Those
+//! targets require `COLOSSEUM_SMOKE_ENGINE`; required tests never discover a
+//! local engine or read this environment variable.
 
 use std::path::{Path, PathBuf};
-
-/// Locate a UCI engine: `COLOSSEUM_TEST_ENGINE` env, else the known dev path.
-pub fn locate_engine() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("COLOSSEUM_TEST_ENGINE") {
-        let path = PathBuf::from(path);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-    let default = PathBuf::from(r"D:\chess\engines\stockfish.exe");
-    default.exists().then_some(default)
-}
 
 /// Copy the engine into a fresh temp dir; returns the guard (keep alive) and path.
 pub fn copy_to_temp(src: &Path) -> (tempfile::TempDir, PathBuf) {
@@ -23,8 +14,18 @@ pub fn copy_to_temp(src: &Path) -> (tempfile::TempDir, PathBuf) {
     (dir, dest)
 }
 
-/// Convenience: a temp engine copy, or `None` to skip the test.
-pub fn engine_or_skip() -> Option<(tempfile::TempDir, PathBuf)> {
-    let src = locate_engine()?;
-    Some(copy_to_temp(&src))
+/// Read the explicit smoke-engine path and make an isolated temporary copy.
+///
+/// A smoke test requested without a usable engine is a configuration error,
+/// not a pass-by-skip: callers intentionally opted into this test tier.
+pub fn smoke_engine() -> (tempfile::TempDir, PathBuf) {
+    let source = std::env::var("COLOSSEUM_SMOKE_ENGINE")
+        .expect("real-engine smoke test requires COLOSSEUM_SMOKE_ENGINE to name a UCI executable");
+    let source = PathBuf::from(source);
+    assert!(
+        source.is_file(),
+        "COLOSSEUM_SMOKE_ENGINE must name an existing executable file: {}",
+        source.display()
+    );
+    copy_to_temp(&source)
 }

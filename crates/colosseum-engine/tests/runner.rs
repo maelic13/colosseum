@@ -1,5 +1,7 @@
-//! Integration test for the single-game runner using a real engine. Strong vs.
-//! deliberately weakened Stockfish, with adjudication, so the game ends quickly.
+//! Explicitly opt-in real-engine smoke coverage for the single-game runner.
+//!
+//! Cargo compiles this target only with `real-engine-smoke`; it requires
+//! `COLOSSEUM_SMOKE_ENGINE` and is never part of required CI or release evidence.
 
 mod common;
 
@@ -42,10 +44,7 @@ fn spec(
 
 #[tokio::test]
 async fn stockfish_self_play_one_game() {
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping stockfish_self_play_one_game: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
 
     let white = spec(
         EngineId::new(),
@@ -123,10 +122,7 @@ async fn stockfish_self_play_one_game() {
 /// surface the opening in the PGN movetext.
 #[tokio::test]
 async fn game_pre_plays_opening_moves() {
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping game_pre_plays_opening_moves: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
 
     let white = spec(EngineId::new(), "SF-W", &exe, vec![("Threads", "1")]);
     let black = spec(EngineId::new(), "SF-B", &exe, vec![("Threads", "1")]);
@@ -175,10 +171,7 @@ async fn game_pre_plays_opening_moves() {
 /// no error.
 #[tokio::test]
 async fn game_starts_from_fen() {
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping game_starts_from_fen: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
 
     // Position after 1.e4 e5 2.Nf3 (Black to move).
     let fen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2";

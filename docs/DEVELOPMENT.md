@@ -70,16 +70,35 @@ to other Macs requires codesigning and notarization — see
 ```bash
 cargo check --workspace --tests
 cargo clippy --workspace
-cargo test --workspace
+cargo test --workspace --all-targets
 ```
 
-The integration tests in `colosseum-engine` play real engine games. They look
-for Stockfish at a developer-machine path and skip gracefully when it is
-absent, so CI elsewhere still passes. To run them locally:
+Those commands are the required hermetic suite: they use only inputs owned by
+the repository. They do not discover an installed engine, read an engine-path
+environment variable, or establish a platform or release claim.
+
+Real-engine interoperability coverage is a separate, explicit local smoke
+tier. It receives a local UCI executable through `COLOSSEUM_SMOKE_ENGINE`,
+copies that executable to a temporary directory, and fails if the variable is
+absent or invalid rather than passing by skip. `uci_smoke` expects `Threads`
+and `Hash`; `runner_smoke` and `scheduler_smoke` additionally exercise
+Stockfish-style strength options. Run the targets appropriate to the selected
+engine, for example:
 
 ```bash
-COLOSSEUM_TEST_ENGINE=/usr/games/stockfish cargo test --workspace
+COLOSSEUM_SMOKE_ENGINE=/path/to/engine \
+  cargo test -p colosseum-uci --features real-engine-smoke --test uci_smoke -- --nocapture
+
+COLOSSEUM_SMOKE_ENGINE=/path/to/engine \
+  cargo test -p colosseum-engine --features real-engine-smoke --test runner_smoke -- --nocapture
+
+COLOSSEUM_SMOKE_ENGINE=/path/to/engine \
+  cargo test -p colosseum-engine --features real-engine-smoke --test scheduler_smoke -- --nocapture
 ```
+
+On PowerShell, set `$env:COLOSSEUM_SMOKE_ENGINE` before running the same Cargo
+commands. These opt-in checks are useful local interoperability evidence only;
+they never count as required CI, supported-platform, or release evidence.
 
 GUI and live-view changes need a real run as well: launch the app, play a short
 tournament (two engines, 100 ms/move), and delete the test tournament

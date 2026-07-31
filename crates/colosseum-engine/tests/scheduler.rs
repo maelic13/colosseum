@@ -1,6 +1,7 @@
-//! Integration tests for the tournament scheduler, driven by real engines (copied to
-//! a temp dir). Cover a full round-robin, Stop→drain→resume, Force-Stop→discard, and
-//! the engine-failure path (a bogus executable). Skips when no engine is available.
+//! Explicitly opt-in real-engine smoke coverage for the tournament scheduler.
+//!
+//! Cargo compiles this target only with `real-engine-smoke`; it requires
+//! `COLOSSEUM_SMOKE_ENGINE` and is never part of required CI or release evidence.
 
 mod common;
 
@@ -66,10 +67,7 @@ fn temp_db() -> (tempfile::TempDir, Store, std::path::PathBuf) {
 
 #[tokio::test]
 async fn full_round_robin_completes() {
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping full_round_robin_completes: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
     let (_dir, store, db_path) = temp_db();
 
     let engines = vec![
@@ -127,10 +125,7 @@ async fn full_round_robin_completes() {
 
 #[tokio::test]
 async fn stop_drains_then_resume_completes() {
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping stop_drains_then_resume_completes: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
     let (_dir, store, _db_path) = temp_db();
 
     let engines = vec![
@@ -182,10 +177,7 @@ async fn stop_drains_then_resume_completes() {
 
 #[tokio::test]
 async fn force_stop_discards_in_flight() {
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping force_stop_discards_in_flight: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
     let (_dir, store, db_path) = temp_db();
 
     let engines = vec![
@@ -245,10 +237,7 @@ async fn force_stop_discards_in_flight() {
 
 #[tokio::test]
 async fn failed_engine_loses_with_error() {
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping failed_engine_loses_with_error: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
     let (_dir, store, _db_path) = temp_db();
 
     let good = engine_cfg("Good", &exe, &[("Hash", "16")]);
@@ -301,10 +290,7 @@ async fn failed_engine_loses_with_error() {
 /// `resume_tournament`, and verifies the full schedule completes.
 #[tokio::test]
 async fn resume_across_restart() {
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping resume_across_restart: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
 
     // ── Phase 1: start tournament, let at least 1 game finish, then stop ──
     let (_dir, store1, db_path) = temp_db();
@@ -469,10 +455,7 @@ fn openings_assigned_per_encounter_and_persisted() {
 async fn tournament_with_openings_runs_to_completion() {
     use colosseum_core::{OpeningBook, StartPosition};
 
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping tournament_with_openings_runs_to_completion: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
     let (_dir, store, db_path) = temp_db();
 
     let book_path = _dir.path().join("book.epd");

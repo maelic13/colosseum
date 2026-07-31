@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  required-tests:
+    name: Required hermetic tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # eframe/egui needs GTK + XCB headers on Linux.
+      - name: Install Linux GUI dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check workspace tests
+        run: cargo check --workspace --tests
+
+      - name: Lint workspace
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Run required hermetic tests
+        run: cargo test --workspace --all-targets

@@ -142,9 +142,13 @@ model as well.
   comparisons — evidence:
   [`tests/fixtures/statistics/`](tests/fixtures/statistics/),
   [`scripts/Generate-StatisticsFixture.ps1`](scripts/Generate-StatisticsFixture.ps1)
-- ☐ **1.8** — **Model: Terra High.** Make the required CI suite hermetic: no required test reads outside
-  the repository; real-engine smoke tests are explicit opt-in,
-  environment-only and never count as release/platform evidence
+- ☑ **1.8 — DONE** — **Model: Terra High. Hermetic CI suite:** add repository-only required CI and
+  regression assertions; isolate runner, scheduler and UCI real-engine checks
+  behind the `real-engine-smoke` feature and `COLOSSEUM_SMOKE_ENGINE`, with no
+  implicit machine path, skip, platform, or release evidence — evidence:
+  [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
+  [`crates/colosseum-engine/tests/hermetic_ci.rs`](crates/colosseum-engine/tests/hermetic_ci.rs),
+  [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
 - ☐ **1.9** — **EXIT · Model: Sol High.** Analytic fixtures and every compatible oracle-matrix cell
   pass; no unsupported field is compared or silently guessed
 
@@ -419,9 +423,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 1.8 — hermetic CI suite. Model: GPT-5.6 Terra — High.** Ensure required
-tests read only repository-owned inputs; real-engine smoke tests are explicit
-opt-in, environment-only, and cannot count as release or platform evidence.
+**Phase 1.9 — fixture validation exit. Model: GPT-5.6 Sol — High.** Prove
+analytic fixtures and each compatible oracle-matrix cell pass, without
+comparing unsupported fields or silently guessing values.
 
 ```
 git diff --check
