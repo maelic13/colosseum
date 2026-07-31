@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. CLI: **not started** |
-| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0.1's inventory, 0.2's current-state analysis and 0.3's target Clean Architecture are complete |
-| What is missing | Binding architecture ADRs, independent release/naming decisions, pentanomial/nElo, CPU affinity, the CLI itself, SPSA, durable runs, run records, trustworthy NPS |
+| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0.1's inventory, 0.2's current-state analysis, 0.3's target Clean Architecture and 0.4's binding ADRs are complete |
+| What is missing | Independent release/naming decisions, pentanomial/nElo, CPU affinity, the CLI itself, SPSA, durable runs, run records, trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 0.4 — record the binding architecture ADRs** |
+| Next step | **Phase 0.5 — design independent CLI/GUI releases and shared-layer CI** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -68,10 +68,11 @@ model as well.
   Architecture: domain, application use cases/ports, adapters, drivers,
   composition roots, error/cancellation flow and current-to-target migration —
   evidence: [`docs/architecture/target-architecture.md`](docs/architecture/target-architecture.md)
-- ☐ **0.4** — **Model: Sol High.** Record ADRs for package boundaries, runtime `EngineLaunchSpec`,
+- ☑ **0.4 — DONE** — **Model: Sol High.** Record ADRs for package boundaries, runtime `EngineLaunchSpec`,
   injected persistence/artifact/affinity/identity/master-seed ports,
   GUI-library mapping and the smallest refactor that enforces inward
-  dependencies
+  dependencies — evidence:
+  [`docs/architecture/adr/README.md`](docs/architecture/adr/README.md)
 - ☐ **0.5** — **Model: Sol High.** Design independent CLI/GUI versions, tags, artifacts, release notes
   and shared-layer regression CI. Prefer one repo; split only with a
   documented concrete advantage
@@ -363,15 +364,14 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 0.4 — record the binding architecture ADRs. Model: GPT-5.6 Sol — High.**
-Use the completed
-[`target architecture`](docs/architecture/target-architecture.md) to record the
-package boundary, runtime `EngineLaunchSpec`, injected port set, GUI-library
-mapping and incremental boundary refactor, including rejected alternatives.
+**Phase 0.5 — design independent CLI/GUI releases and shared-layer CI. Model:
+GPT-5.6 Sol — High.** Define independent versions, tags, artifacts and release
+notes; specify regression and published-artifact checks for shared changes.
+Prefer one repository and split only if a documented concrete advantage
+outweighs cross-repository coordination.
 
-The later Phase 0 steps decide independent release/versioning and naming. Only
-after the Phase 0 exit may implementation move to **Phase 1 — pentanomial
-statistics**.
+Phase 0.6 then resolves naming before the Phase 0 exit review. Only after that
+exit may implementation move to **Phase 1 — pentanomial statistics**.
 
 ```
 git diff --check

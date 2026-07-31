@@ -8,8 +8,9 @@ migration plan required by PLAN §S4. The factual baseline remains
 The design is intentionally incremental. Colosseum gains an application
 boundary and independent CLI composition root without replacing the working UCI
 parser, process lifecycle, chess-game runner, opening parser, SQLite history or
-GUI. Step 0.4 records the consequential choices below as ADRs; step 0.5 owns the
-independent version, CI and release design.
+GUI. The consequential choices below are accepted in the
+[`adr/`](adr/README.md) decision records. Step 0.5 owns the independent version,
+CI and release design.
 
 ## Architectural decision
 
@@ -141,9 +142,10 @@ input. Books and suites are optional run inputs, not engine descriptors.
 
 ## Port contracts
 
-Ports are declared by `colosseum-application`. Their Rust async/object-safety
-mechanism is an implementation detail to settle in the package-boundary ADR;
-their semantic contracts are not.
+Ports are declared by `colosseum-application`.
+[ADR-0003](adr/0003-application-ports-and-commit-boundary.md) fixes their Rust
+async/object-safety and injection mechanism; their semantic contracts are
+summarized here.
 
 | Port | Contract | Initial adapter |
 |---|---|---|
@@ -480,7 +482,7 @@ assigns every consequential cross-layer type identified by the current-state
 audit. CS-01 through CS-10 have inward-facing resolutions; CS-11 and CS-12 are
 routed to their test and release-design steps.
 
-Step 0.4 must now turn the package boundary, launch specification, port set,
-GUI mapping and incremental-refactor choices into reviewed ADRs. Step 0.5 then
-defines independent release/versioning and shared-layer CI; this document does
-not pre-empt those decisions.
+Step 0.4 records the package boundary, launch specification, port/commit set,
+GUI mapping and incremental-refactor choices in accepted ADRs. Step 0.5 now
+defines independent release/versioning and shared-layer CI; this document and
+the architecture ADRs do not pre-empt those decisions.
