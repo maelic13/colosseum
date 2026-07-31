@@ -34,8 +34,10 @@ One numbered `GUIDE.md` item is the normal unit of work.
    checks from `CLAUDE.md`.
 4. Demonstrate the exit criterion. A compiling change is not automatically
    complete.
-5. Mark the step `[x]` in `GUIDE.md` with the required outcome tag and record
-   corresponding status/evidence in `PLAN.md` in the same change.
+5. Mark the step `☑` in `GUIDE.md` with the required outcome label and record
+   corresponding status/evidence in `PLAN.md` in the same change. Use `☐` for
+   todo and `◐` only while genuinely in progress; do not use GitHub `[ ]` task
+   syntax because the Codex renderer does not display it reliably.
 6. Commit the completed step before starting another numbered step.
 
 Use a short imperative commit subject that names the outcome, preferably with
@@ -81,4 +83,3 @@ consistency validation; they do not require rerunning unchanged Rust tests.
 - `docs/DEVELOPMENT.md`: implemented build/test/release facts; update it when
   the workspace or release process actually changes, not merely when planned.
 - `CHANGELOG.md`: released user-visible changes only.
-
