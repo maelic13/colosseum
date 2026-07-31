@@ -1612,6 +1612,75 @@ mod tests {
     }
 
     #[test]
+    fn pentanomial_llr_is_zero_for_an_empty_kernel_sample() {
+        for model in [EloModel::Logistic, EloModel::Normalized] {
+            for (elo0, elo1) in [(-5.0, 5.0), (0.0, 10.0), (-12.0, 3.0)] {
+                assert_eq!(
+                    pentanomial_llr([0; 5], model, elo0, elo1),
+                    Ok(0.0),
+                    "{model:?}, {elo0}, {elo1}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pentanomial_llr_increases_with_score_at_fixed_pair_count() {
+        // Each adjacent vector moves one pair from the zero-score bin to the
+        // two-score bin. N and the remaining distribution stay fixed, while
+        // the tested engine's mean score rises by 1/N at each step.
+        let score_ladder = [
+            [8, 4, 16, 4, 8],
+            [7, 4, 16, 4, 9],
+            [6, 4, 16, 4, 10],
+            [5, 4, 16, 4, 11],
+            [4, 4, 16, 4, 12],
+        ];
+
+        for model in [EloModel::Logistic, EloModel::Normalized] {
+            let mut previous = f64::NEG_INFINITY;
+            for counts in score_ladder {
+                let llr = pentanomial_llr(counts, model, -5.0, 5.0).unwrap();
+                assert!(
+                    llr > previous,
+                    "LLR must increase with the score for {model:?}: {llr} <= {previous}"
+                );
+                previous = llr;
+            }
+        }
+    }
+
+    #[test]
+    fn pentanomial_llr_is_antisymmetric_when_arms_are_swapped() {
+        let counts = [3, 7, 11, 5, 4];
+        let swapped_counts = [counts[4], counts[3], counts[2], counts[1], counts[0]];
+
+        for model in [EloModel::Logistic, EloModel::Normalized] {
+            for (elo0, elo1) in [(-5.0, 5.0), (0.0, 8.0), (-12.0, 3.0)] {
+                let original = pentanomial_llr(counts, model, elo0, elo1).unwrap();
+                let swapped = pentanomial_llr(swapped_counts, model, -elo1, -elo0).unwrap();
+                assert!(
+                    approx(swapped, -original, 1e-9),
+                    "{model:?}, ({elo0}, {elo1}): {swapped} != {}",
+                    -original
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pentanomial_sprt_bounds_exactly_follow_error_rates() {
+        let sample = pentanomial_sample([4, 7, 12, 9, 8]);
+        for (alpha, beta) in [(0.05, 0.05), (0.01, 0.1), (0.1, 0.2)] {
+            for model in [EloModel::Logistic, EloModel::Normalized] {
+                let result = pentanomial_sprt(&sample, model, -5.0, 5.0, alpha, beta).unwrap();
+                assert_eq!(result.lower, (beta / (1.0 - alpha)).ln());
+                assert_eq!(result.upper, ((1.0 - beta) / alpha).ln());
+            }
+        }
+    }
+
+    #[test]
     fn pentanomial_bins_cover_every_two_game_score() {
         use PairGameResult::{Draw, Loss, Win};
 
