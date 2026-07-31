@@ -1,0 +1,154 @@
+[Event "Fastchess Tournament"]
+[Site "?"]
+[Date "2026.07.31"]
+[Round "1"]
+[White "Rarog"]
+[Black "Stockfish"]
+[Result "0-1"]
+[EngineWhiteName "Rarog 2.3.1"]
+[EngineWhiteAuthor "Miloslav Macurek"]
+[EngineBlackName "Stockfish dev-20260711-9a8dd81d"]
+[EngineBlackAuthor "the Stockfish developers (see AUTHORS file)"]
+[GameDuration "00:00:00"]
+[GameStartTime "2026-07-31T22:43:27 +0200"]
+[GameEndTime "2026-07-31T22:43:29 +0200"]
+[PlyCount "13"]
+[Termination "time forfeit"]
+[TimeControl "0.05+0.001"]
+[ECO "A00"]
+[Opening "Van Geet Opening"]
+
+1. Nc3 {+1.65/1 0.009s} d5 {+0.01/6 0.003s} 2. e3 {+2.58/1 0.009s}
+e5 {+0.33/7 0.000s} 3. Qh5 {+4.02/1 0.009s} Nc6 {+0.84/7 0.001s}
+4. Bd3 {+0.87/1 0.010s} Nf6 {+1.40/6 0.000s} 5. Qg5 {+0.45/1 0.009s}
+Be7 {+2.77/6 0.002s} 6. Qxg7 {+4.08/1 0.010s} Rg8 {+3.24/6 0.000s}
+7. Qh6 {-1.23/1 0.010s, White loses on time (9ms overrun)} 0-1
+
+[Event "Fastchess Tournament"]
+[Site "?"]
+[Date "2026.07.31"]
+[Round "1"]
+[White "Stockfish"]
+[Black "Rarog"]
+[Result "1-0"]
+[EngineWhiteName "Stockfish dev-20260711-9a8dd81d"]
+[EngineWhiteAuthor "the Stockfish developers (see AUTHORS file)"]
+[EngineBlackName "Rarog 2.3.1"]
+[EngineBlackAuthor "Miloslav Macurek"]
+[GameDuration "00:00:00"]
+[GameStartTime "2026-07-31T22:43:29 +0200"]
+[GameEndTime "2026-07-31T22:43:29 +0200"]
+[PlyCount "12"]
+[Termination "time forfeit"]
+[TimeControl "0.05+0.001"]
+[ECO "B00"]
+[Opening "Nimzowitsch Defense"]
+
+1. e4 {+0.33/4 0.003s} Nc6 {+0.16/1 0.010s} 2. d4 {+0.48/6 0.001s}
+e6 {+2.13/1 0.013s} 3. Nf3 {+0.72/6 0.002s} Qf6 {+2.61/1 0.011s}
+4. Nc3 {+1.51/7 0.000s} h6 {+0.67/1 0.010s} 5. a3 {+1.72/9 0.004s}
+d6 {+0.79/1 0.010s} 6. d5 {+1.80/6 0.000s}
+exd5 {-0.46/1 0.009s, Black loses on time (7ms overrun)} 1-0
+
+[Event "Fastchess Tournament"]
+[Site "?"]
+[Date "2026.07.31"]
+[Round "2"]
+[White "Rarog"]
+[Black "Stockfish"]
+[Result "0-1"]
+[EngineWhiteName "Rarog 2.3.1"]
+[EngineWhiteAuthor "Miloslav Macurek"]
+[EngineBlackName "Stockfish dev-20260711-9a8dd81d"]
+[EngineBlackAuthor "the Stockfish developers (see AUTHORS file)"]
+[GameDuration "00:00:00"]
+[GameStartTime "2026-07-31T22:43:29 +0200"]
+[GameEndTime "2026-07-31T22:43:29 +0200"]
+[PlyCount "9"]
+[Termination "time forfeit"]
+[TimeControl "0.05+0.001"]
+[ECO "A00"]
+[Opening "Van Geet Opening"]
+
+1. Nc3 {+1.65/1 0.011s} d5 {+0.03/5 0.003s} 2. e3 {+2.58/1 0.012s}
+e5 {+0.46/9 0.001s} 3. Qh5 {+4.02/1 0.011s} Nc6 {+1.12/7 0.001s}
+4. Bd3 {+0.87/1 0.011s} Nf6 {+1.96/8 0.001s}
+5. Qg5 {+0.45/1 0.013s, White loses on time (3ms overrun)} 0-1
+
+[Event "Fastchess Tournament"]
+[Site "?"]
+[Date "2026.07.31"]
+[Round "2"]
+[White "Stockfish"]
+[Black "Rarog"]
+[Result "1-0"]
+[EngineWhiteName "Stockfish dev-20260711-9a8dd81d"]
+[EngineWhiteAuthor "the Stockfish developers (see AUTHORS file)"]
+[EngineBlackName "Rarog 2.3.1"]
+[EngineBlackAuthor "Miloslav Macurek"]
+[GameDuration "00:00:00"]
+[GameStartTime "2026-07-31T22:43:29 +0200"]
+[GameEndTime "2026-07-31T22:43:29 +0200"]
+[PlyCount "12"]
+[Termination "time forfeit"]
+[TimeControl "0.05+0.001"]
+[ECO "B00"]
+[Opening "Nimzowitsch Defense"]
+
+1. e4 {+0.31/7 0.003s} Nc6 {+0.16/1 0.011s} 2. d4 {+0.39/5 0.000s}
+e6 {+2.13/1 0.010s} 3. Nc3 {+0.46/5 0.000s} Qf6 {+0.61/1 0.009s}
+4. Nf3 {+1.86/7 0.001s} h6 {+0.67/1 0.009s} 5. d5 {+1.78/9 0.003s}
+Ne5 {-0.18/1 0.011s} 6. Nxe5 {+1.79/9 0.002s}
+Qxe5 {-0.18/1 0.010s, Black loses on time (4ms overrun)} 1-0
+
+[Event "Fastchess Tournament"]
+[Site "?"]
+[Date "2026.07.31"]
+[Round "3"]
+[White "Rarog"]
+[Black "Stockfish"]
+[Result "0-1"]
+[EngineWhiteName "Rarog 2.3.1"]
+[EngineWhiteAuthor "Miloslav Macurek"]
+[EngineBlackName "Stockfish dev-20260711-9a8dd81d"]
+[EngineBlackAuthor "the Stockfish developers (see AUTHORS file)"]
+[GameDuration "00:00:00"]
+[GameStartTime "2026-07-31T22:43:29 +0200"]
+[GameEndTime "2026-07-31T22:43:29 +0200"]
+[PlyCount "11"]
+[Termination "time forfeit"]
+[TimeControl "0.05+0.001"]
+[ECO "A00"]
+[Opening "Van Geet Opening"]
+
+1. Nc3 {+1.65/1 0.009s} d5 {+0.03/5 0.003s} 2. e3 {+2.58/1 0.010s}
+e5 {+0.38/7 0.001s} 3. Qh5 {+4.02/1 0.011s} Nc6 {+0.93/7 0.000s}
+4. Bd3 {+0.87/1 0.010s} Nf6 {+1.45/7 0.002s} 5. Qg5 {+0.45/1 0.010s}
+a6 {+2.28/11 0.004s} 6. h3 {+0.60/1 0.009s, White loses on time (3ms overrun)}
+0-1
+
+[Event "Fastchess Tournament"]
+[Site "?"]
+[Date "2026.07.31"]
+[Round "3"]
+[White "Stockfish"]
+[Black "Rarog"]
+[Result "1-0"]
+[EngineWhiteName "Stockfish dev-20260711-9a8dd81d"]
+[EngineWhiteAuthor "the Stockfish developers (see AUTHORS file)"]
+[EngineBlackName "Rarog 2.3.1"]
+[EngineBlackAuthor "Miloslav Macurek"]
+[GameDuration "00:00:00"]
+[GameStartTime "2026-07-31T22:43:29 +0200"]
+[GameEndTime "2026-07-31T22:43:30 +0200"]
+[PlyCount "12"]
+[Termination "time forfeit"]
+[TimeControl "0.05+0.001"]
+[ECO "B00"]
+[Opening "Nimzowitsch Defense"]
+
+1. e4 {+0.31/9 0.003s} Nc6 {+0.16/1 0.009s} 2. d4 {+0.41/6 0.000s}
+e6 {+2.13/1 0.009s} 3. Nf3 {+0.67/9 0.002s} Qf6 {+2.61/1 0.010s}
+4. Nc3 {+2.13/7 0.000s} h6 {+0.67/1 0.010s} 5. Nb5 {+1.74/8 0.004s}
+Kd8 {+1.03/1 0.010s} 6. Be2 {+2.15/7 0.001s}
+a6 {+2.03/1 0.010s, Black loses on time (2ms overrun)} 1-0

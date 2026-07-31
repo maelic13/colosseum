@@ -1088,6 +1088,8 @@ the measurement meant to catch it.
    implements the same model: analytic fixtures are authoritative for every
    formula; fastchess covers compatible pentanomial/normalized outputs; both
    external tools cover their shared logistic/trinomial surface and scheduling.
+   The vendored corpus is `tests/fixtures/statistics/`; its per-field oracle
+   matrix is binding, so unsupported fields are excluded rather than guessed.
    A documented generator extends the corpus from any engine pair. A
    disagreement is recorded and root-caused, never averaged away.
 3. **⛔ The required test suite is hermetic.** CI rejects any required test that

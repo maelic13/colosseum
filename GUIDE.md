@@ -15,10 +15,10 @@ numbers, internal naming or method argumentation.
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent CLI: **not started** |
 | What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform and released for Windows/Linux/macOS incl. arm64. The workspace suite passes. `core/stats.rs` has the five-bin paired sample, pentanomial estimates and diagnostics, selectable normalized/logistic SPRT, explicit-assumption fixed-N difference planning and descriptive achieved resolution. Phase 0's Clean Architecture and independent-release contract is complete |
-| What is missing | Oracle fixtures; CPU affinity, the CLI itself, SPSA, durable runs, run records and trustworthy NPS |
+| What is missing | Hermetic fixture execution; CPU affinity, the CLI itself, SPSA, durable runs, run records and trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 1.7 — external fixture corpus** |
+| Next step | **Phase 1.8 — hermetic CI suite** |
 | Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
@@ -134,10 +134,14 @@ model as well.
   negates the LLR, and Wald bounds exactly equal `log(β/(1−α))` and
   `log((1−β)/α)` — evidence:
   [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
-- ☐ **1.7** — **Model: Terra High. Fixture corpus:** a documented generator that plays any two UCI
-  engines through `fastchess` and `cutechess-cli`; commit engine/tool
-  identity, versions, hashes/licence provenance, exact commands and logs.
-  Define a per-field oracle matrix plus analytic hand-derived fixtures
+- ☑ **1.7 — DONE** — **Model: Terra High. Fixture corpus:** add a documented
+  generator for arbitrary UCI pairs through `fastchess` and `cutechess-cli`,
+  with committed runner/engine identity, version, SHA-256, licence/source
+  provenance, commands, console logs and PGNs. Add hand-derived pentanomial
+  fixtures and a binding field-by-field oracle matrix that excludes unsupported
+  comparisons — evidence:
+  [`tests/fixtures/statistics/`](tests/fixtures/statistics/),
+  [`scripts/Generate-StatisticsFixture.ps1`](scripts/Generate-StatisticsFixture.ps1)
 - ☐ **1.8** — **Model: Terra High.** Make the required CI suite hermetic: no required test reads outside
   the repository; real-engine smoke tests are explicit opt-in,
   environment-only and never count as release/platform evidence
@@ -415,10 +419,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 1.7 — external fixture corpus. Model: GPT-5.6 Terra — High.** Define
-a documented generator that plays arbitrary UCI pairs through `fastchess` and
-`cutechess-cli`; commit tool/engine identity, versions, hashes/licence
-provenance, commands, logs, an oracle matrix and analytic fixtures.
+**Phase 1.8 — hermetic CI suite. Model: GPT-5.6 Terra — High.** Ensure required
+tests read only repository-owned inputs; real-engine smoke tests are explicit
+opt-in, environment-only, and cannot count as release or platform evidence.
 
 ```
 git diff --check

@@ -1,0 +1,67 @@
+schema_version = 1
+description = "Hand-derived regression inputs for PLAN.md §5.1; values use pair-average scores [0, 0.25, 0.5, 0.75, 1]."
+
+[[statistics]]
+id = "symmetric-nine-pair"
+counts = [1, 2, 3, 2, 1]
+pairs = 9
+unpaired_games = 1
+z = 1.959963984540054
+score = 0.5
+variance = 0.08333333333333333
+standard_error = 0.09622504486493763
+logistic_elo = 0.0
+logistic_margin = 137.857437832269
+normalized_elo = 0.0
+normalized_margin = 160.504102230314
+los = 0.5
+draw_ratio = 0.3333333333333333
+pairs_ratio = 1.0
+win_loss_to_double_draw_ratio = 2.0
+
+[[sprt]]
+id = "both-models-1150-pairs"
+counts = [100, 200, 400, 300, 150]
+elo0 = 0.0
+elo1 = 5.0
+alpha = 0.05
+beta = 0.05
+lower = -2.9444389791664403
+upper = 2.9444389791664403
+logistic_llr = 4.02364937272566
+normalized_llr = 3.31154720975704
+
+[[fixed_n]]
+id = "symmetric-assumed-distribution"
+probabilities = [0.1, 0.2, 0.4, 0.2, 0.1]
+variance = 0.075
+tails = "two-sided"
+target_effect = 5.0
+significance = 0.05
+power = 0.8
+normalized_required_pairs = 18949
+logistic_required_pairs = 11371
+
+[[error]]
+id = "zero-pairs"
+counts = [0, 0, 0, 0, 0]
+operation = "pentanomial_statistics"
+error = "InsufficientPairs"
+
+[[error]]
+id = "one-pair"
+counts = [0, 0, 1, 0, 0]
+operation = "pentanomial_statistics"
+error = "InsufficientPairs"
+
+[[error]]
+id = "all-draws"
+counts = [0, 0, 2, 0, 0]
+operation = "pentanomial_statistics"
+error = "ZeroVariance"
+
+[[error]]
+id = "clean-sweep"
+counts = [0, 0, 0, 0, 2]
+operation = "pentanomial_statistics"
+error = "InvalidScore"
