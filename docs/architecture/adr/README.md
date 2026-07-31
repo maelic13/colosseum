@@ -20,3 +20,5 @@ Phase 0.5's detailed release and CI design is in
 [`release-architecture.md`](../release-architecture.md).
 Phase 0.6's collision research and rejected public-name proposal are in
 [`naming-decision.md`](../naming-decision.md).
+The Phase 0.7 cross-document and module-ownership review is in
+[`phase-0-review.md`](../phase-0-review.md).

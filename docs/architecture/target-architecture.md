@@ -15,8 +15,10 @@ model is specified in
 
 ## Architectural decision
 
-Add one inner library, `colosseum-application`, between the domain and driven
-adapters. Keep the other package names and give them narrower ownership:
+Add one inner application library between the domain and driven adapters and
+give every package narrower ownership. The table uses current/working package
+identifiers; Phase 0.8 may rename them mechanically, but cannot change these
+roles or dependency edges without a new architecture ADR:
 
 | Package | Target layer and responsibility |
 |---|---|
@@ -24,8 +26,8 @@ adapters. Keep the other package names and give them narrower ownership:
 | `colosseum-application` | UI-independent use cases, input/output models, run invariants and ports; no process, filesystem, database, OS, GUI or async-runtime implementation |
 | `colosseum-uci` | UCI protocol and process adapter implementing application engine-session ports |
 | `colosseum-engine` | Headless infrastructure adapters: game execution, opening/position input, PGN and forensic artifacts, SQLite/run-directory repositories, topology and affinity |
-| `ucirig` | UCI Rig CLI driving adapter and composition root; added in Phase 2 |
-| `colosseum-gui` | GUI driving adapter, GUI-only library/configuration/read models and independent composition root |
+| CLI product package (`<name>-cli`) | CLI driving adapter and composition root; added in Phase 2 after the Phase 0.8 rename |
+| GUI product package (currently `colosseum-gui`) | GUI driving adapter, GUI-only library/configuration/read models and independent composition root; final package spelling follows the Phase 0.8 migration matrix |
 
 This is the smallest package change that creates a stable inward-facing seam.
 Splitting every adapter into its own crate would add coordination without
@@ -42,8 +44,8 @@ flowchart BT
     APP["colosseum-application<br/>use cases and ports"]
     UCI["colosseum-uci<br/>UCI/process adapter"]
     ENGINE["colosseum-engine<br/>runner and infrastructure adapters"]
-    CLI["ucirig<br/>UCI Rig adapter + composition root"]
-    GUI["colosseum-gui<br/>GUI adapter + composition root"]
+    CLI["&lt;name&gt;-cli product package<br/>CLI adapter + composition root"]
+    GUI["GUI product package<br/>GUI adapter + composition root"]
 
     APP --> CORE
     UCI --> APP
@@ -71,7 +73,7 @@ The logical layers are stricter than package visibility alone:
 - Adapters translate application models to UCI, SQLite, files, platform APIs
   and presentation models. Concrete adapter errors do not cross inward.
 - Drivers own runtimes, processes, threads, channels and shutdown mechanics.
-- Only `ucirig` and `colosseum-gui` assemble concrete implementations.
+- Only the CLI and GUI product packages assemble concrete implementations.
   Neither composition root calls or reads the other.
 
 `colosseum-engine` may depend on `colosseum-uci` because its retained game
@@ -179,7 +181,7 @@ executable.
 
 ### CLI root
 
-`ucirig::main` parses CLI/run files, selects or creates the run directory
+The `<name>-cli` binary's `main` parses CLI/run files, selects or creates the run directory
 and constructs the runtime. It then assembles UCI sessions, the game executor,
 bounded execution pool, run repository, artifact sink, opening source, CPU
 placement, clocks, identity, seed, progress and cancellation adapters. The root
@@ -200,7 +202,7 @@ successful application result; it is not tournament/domain policy.
 
 The GUI may retain its existing shared history database and stored JSON/TOML
 formats. Adapter mappers preserve those formats while the inner model changes.
-The GUI does not import or call `ucirig`.
+The GUI does not import or call the CLI product package.
 
 ### Test roots
 
@@ -308,7 +310,7 @@ fixtures; it does not authorize a rewrite.
 | Current module | Target owner | Migration |
 |---|---|---|
 | `adjudication` | `colosseum-core` domain | Keep pure rules and tests |
-| `branding` | `colosseum-gui` presentation/platform policy; CLI owns its own identity after naming decision | Remove product/path constants from core |
+| `branding` | GUI presentation/platform policy; each composition root owns its product identity after Phase 0.8 | Remove product/path constants from core |
 | `engine` | GUI library model plus `colosseum-application::EngineLaunchSpec` | Split `EngineMeta`/saved data from minimal runtime launch data; inject identity |
 | `event` | `colosseum-application::ProgressEvent` plus GUI mapper | Replace GUI-named inner event with presentation-neutral progress |
 | `export` | `colosseum-engine` output adapter | Move CSV formatting out of domain; continue consuming domain standings |
@@ -455,23 +457,21 @@ At every slice:
 
 ## Enforceable architecture checks
 
-The release/CI workflow belongs to step 0.5, but the target supplies its
-dependency assertions:
+The release/CI workflow belongs to step 0.5, but the target supplies executable
+assertions and assigns each one to an implementation step. Phase 0.8 replaces
+the package-name tokens in commands; the assertions themselves do not depend on
+the chosen brand.
 
-- `cargo tree -p colosseum-core` contains no application, adapter, runtime, GUI,
-  filesystem/database or OS-topology package;
-- `cargo tree -p colosseum-application` contains neither `colosseum-uci` nor
-  `colosseum-engine`, Tokio, crossbeam, rusqlite, eframe/egui or OS drivers;
-- `cargo tree -p ucirig` contains no `colosseum-gui`, eframe, egui or GUI
-  configuration feature;
-- a compile-time boundary test proves application use cases can be composed
-  entirely from fake ports;
-- CLI integration tests run with an isolated temporary directory and fail if
-  they read GUI app directories or a path outside the repository/test root;
-- GUI compatibility tests prove saved engines, presets and SQLite history map
-  through the new boundary without format changes;
-- a failure-injection test proves no official result/progress event precedes
-  its durable commit.
+| Invariant | Executable assertion | Implementation owner |
+|---|---|---|
+| Domain points inward | `cargo tree` plus manifest/source policy check: the core package contains no application, adapter, runtime, GUI, filesystem/database or OS-topology dependency | 2.1 repository architecture check |
+| Application points inward | `cargo tree` plus manifest/source policy check: application contains neither UCI/engine adapters, Tokio, crossbeam, rusqlite, eframe/egui nor OS drivers | 2.1 repository architecture check |
+| Use cases are framework-independent | Compile and run every application use-case family with deterministic fake ports only | 2.1 application test root; extended with each feature |
+| CLI is headless and separate | `cargo tree -p <name>-cli` rejects the GUI package, eframe, egui and GUI configuration features; a source-edge check rejects either root importing the other | 2.2 architecture check |
+| CLI reads no GUI state | CLI integration tests use an isolated temporary root and sentinel GUI app directories; any GUI-path or outside-root access fails | 2.4 configuration integration suite, required again by 2.10 |
+| GUI storage remains compatible | Golden saved-engine, preset, config and SQLite fixtures map through the new boundary without format changes | 2.1 GUI adapter compatibility suite |
+| Durable state is authoritative | Fault injection proves no official statistic or progress event precedes repository commit and every required write failure invalidates | 2.1 fake repository ordering test; full recovery suite in 2.8 |
+| Published CLI is self-contained | Unpack the final artifact on a headless host and run `--version`, `--help`, `self-test` and a deterministic JSON workflow inside an isolated directory | 2.7 published-style test; exact artifacts in 9.4 |
 
 ## Step 0.3 completion evidence
 
@@ -485,6 +485,7 @@ routed to their test and release-design steps.
 
 Step 0.4 records the package boundary, launch specification, port/commit set,
 GUI mapping and incremental-refactor choices in accepted ADRs. Step 0.5 records
-one-repository independent product releases and shared-layer CI. Step 0.6 names
-the CLI product UCI Rig and its package/command `ucirig` without reopening those
-boundaries. Phase 0.7 performs the integrated exit review.
+one-repository independent product releases and shared-layer CI. Step 0.6
+records the collision research and rejected split-brand proposal. Phase 0.7
+performs the integrated review; Phase 0.8 binds and applies the shared name
+without reopening these responsibility boundaries.

@@ -16,7 +16,7 @@ supportable distinction in speech.
 The CLI must remain independently identifiable and co-installable without
 renaming working GUI storage, installer and application identities.
 
-## Decision
+## Rejected decision
 
 This decision is rejected and must not be implemented. Phase 0.8 will replace
 it with a shared GUI/CLI product name using `<name>` and `<name>-cli`.
@@ -38,14 +38,15 @@ The research evidence, preliminary trademark limitations and pre-release
 revalidation rule are in
 [`naming-decision.md`](../naming-decision.md).
 
-## Consequences
+## Proposed consequences (not applied)
 
 - Users can install and invoke Colosseum GUI and UCI Rig independently.
 - CLI documentation and support have a short, searchable command that states
   the supported protocol.
 - Public product naming differs from the repository and shared crate prefix;
   documentation must distinguish those intentionally.
-- Phase 2 creates `crates/ucirig`; dependency tests use `cargo tree -p ucirig`.
+- The proposal would have created `crates/ucirig` and used
+  `cargo tree -p ucirig` for dependency tests.
 - Phase 9 must repeat availability and preliminary trademark searches before
   first release. The current screen is evidence, not legal clearance or name
   reservation.

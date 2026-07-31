@@ -22,6 +22,10 @@ Add one workspace library, `colosseum-application`, as the owner of
 presentation-independent use cases, input/output models, run invariants and
 driven-port traits.
 
+These package names are current/working identifiers. Phase 0.8 may rename them
+as part of the shared product migration without changing the accepted package
+roles or dependency edges.
+
 The target package ownership is:
 
 | Package | Ownership |
@@ -30,8 +34,8 @@ The target package ownership is:
 | `colosseum-application` | Use cases, application models, ports and failure/commit policy |
 | `colosseum-uci` | UCI parsing/process adapter implementing application engine-session ports |
 | `colosseum-engine` | Headless runner, execution, persistence, artifact, input, topology and affinity adapters |
-| `ucirig` | UCI Rig command adapter and CLI composition root |
-| `colosseum-gui` | Desktop adapter, GUI-owned persistence models and GUI composition root |
+| CLI product package (`<name>-cli`) | Command adapter and CLI composition root |
+| GUI product package (currently `colosseum-gui`) | Desktop adapter, GUI-owned persistence models and GUI composition root |
 
 Allowed workspace dependency edges are:
 
@@ -100,7 +104,7 @@ real engine executable.
 Rejected. It would either keep concrete Tokio/SQLite/UCI dependencies in use
 cases or require an internal layering convention that Cargo cannot enforce.
 
-### Put shared workflows in `ucirig`
+### Put shared workflows in the CLI product package
 
 Rejected. The GUI would depend on the CLI or duplicate experiment policy, so
 the command adapter would incorrectly own application behavior.

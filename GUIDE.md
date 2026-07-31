@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent CLI: **not started** |
-| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0.1–0.6 have inventoried, audited and designed the architecture and independent product releases/CI; Phase 0.6 also documents why Colosseum is too crowded to extend to the CLI |
-| What is missing | Integrated architecture review, a shared distinctive GUI/CLI name and migration contract, pentanomial/nElo, CPU affinity, the CLI itself, SPSA, durable runs, run records, trustworthy NPS |
+| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0.1–0.7 have inventoried, audited, designed and reviewed the Clean Architecture target and independent product releases/CI as one contract; Phase 0.6 also documents why Colosseum is too crowded to extend to the CLI |
+| What is missing | A shared distinctive GUI/CLI name and applied migration contract, pentanomial/nElo, CPU affinity, the CLI itself, SPSA, durable runs, run records, trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 0.7 — integrated architecture review** |
+| Next step | **Phase 0.8 — select and apply the shared product name; Phase 0 exit** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -84,10 +84,11 @@ model as well.
   rejected by the maintainer before implementation and is retained as evidence:
   [`docs/architecture/naming-decision.md`](docs/architecture/naming-decision.md)
   and [ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md)
-- ☐ **0.7** — **Model: Sol High.** Review the current/target architecture, ADRs and release design as one
+- ☑ **0.7 — DONE** — **Model: Sol High.** Review the current/target architecture, ADRs and release design as one
   contract; demonstrate that every module has a target owner, dependency and
   release diagrams agree, and every independence invariant has an executable
-  test owner; correct inconsistencies and record review evidence
+  test owner; correct inconsistencies and record review evidence — evidence:
+  [`docs/architecture/phase-0-review.md`](docs/architecture/phase-0-review.md)
 - ☐ **0.8** — **EXIT · Model: Sol High.** Select a distinctive shared product name **with the maintainer** and
   bind `<name>` for the GUI/product and command plus `<name>-cli` for the CLI
   product, package and command. Repeat web, same-domain, GitHub,
@@ -125,8 +126,10 @@ model as well.
 
 - ☐ **2.1** — **Model: Sol High.** Implement the Phase-0 boundary migration: generic runtime participant
   type, application use cases/ports and GUI adapter for library/config data
-- ☐ **2.2** — **Model: Terra High.** Add independently versioned CLI package and composition root;
-  `--version`/`--help`; no GUI/windowing dependency
+- ☐ **2.2** — **Model: Terra High.** Add the independently versioned CLI package and composition root;
+  `--version`/`--help`; no GUI/windowing dependency. Establish the separate
+  GUI/CLI version and changelog lanes plus required push/PR shared-workspace CI
+  baseline from the Phase 0.5 release design; publication workflows remain 9.4
 - ☐ **2.3** — **Model: Terra High.** Direct engine controls: executable, optional label, arguments, cwd,
   environment, arbitrary UCI options and allocated cores
 - ☐ **2.4** — **Model: Sol High.** Resolution order is built-in defaults < committed run TOML (with its
@@ -147,7 +150,7 @@ model as well.
 - ☐ **2.7** — **Model: Sol High.** `self-test` launches the exact executable's hidden deterministic UCI
   stub mode and tests protocol, process containment/reaping, bounded
   stdout/stderr draining, persistence failures and one short match
-- ☐ **2.8** — **Model: Sol High.** Run directories: unique default under `./colosseum-runs`; explicit
+- ☐ **2.8** — **Model: Sol High.** Run directories: unique default under `./<name>-runs`; explicit
   `--dir` to resume; archive-on-restart; append-only logs; checksummed
   two-generation atomic checkpoints; config mismatch refusal
 - ☐ **2.9** — **Model: Terra High.** Common read-only `status <run-dir>` plus run records containing
@@ -326,7 +329,7 @@ model as well.
   `stats_version` exists), discoverability, offline availability,
   contribution friction, and whether the command reference can be generated
   from the argument parser so it cannot drift. Record the decision
-- ☐ **9.2** — **Model: Terra High.** README as the project front door — what the Colosseum GUI and UCI Rig
+- ☐ **9.2** — **Model: Terra High.** README as the project front door — what the renamed GUI and CLI
   are, install, links
 - ☐ **9.3** — **Model: Terra High.** User documentation: quickstart, command reference, run-file and
   tune-file reference, a worked example per command, "how to trust a result"
@@ -335,7 +338,8 @@ model as well.
   separate processes and direct users to applicable licences; make no
   blanket legal conclusion
 - ☐ **9.4** — **Model: Sol High.** Ship per Phase 0.5's release model; all supported platforms;
-  repeat and record the dated UCI Rig web/GitHub/crates.io/TMview screen;
+  repeat and record the Phase 0.8 name's dated
+  web/GitHub/crates.io/package-channel/preliminary-trademark screen;
   smoke-test the exact published artifacts (`--version`, `--help`,
   `self-test`, one deterministic JSON workflow, dependency inspection)
 - ☐ **9.5** — **Model: Sol High. Coverage acceptance** (PLAN §5.14) — archive replaced generic
@@ -375,18 +379,19 @@ Not steps — they are never "done".
 - Compare old/new resolved inputs, schedule, durable artifacts and statistics.
 - Archive the old generic implementation only after parity; retain declarative
   configs and thin project-policy/CI invocation.
-- Record an exception as either a UCI Rig mechanism gap or intentional
+- Record an exception as either a CLI mechanism gap or intentional
   engine-specific policy.
 
 ## What to do now
 
-**Phase 0.7 — integrated architecture review. Model: GPT-5.6 Sol — High.**
-Review the current/target architecture, ADRs and release design as one contract;
-confirm every module has a target owner, dependency/release diagrams agree, and
-every independence test has an executable owner. Record concrete review
-evidence and close inconsistencies. Phase 0.8 then selects the shared name with
-the maintainer and completes the Phase-0 exit; only after 0.8 may implementation
-move to **Phase 1 — pentanomial statistics**.
+**Phase 0.8 — select and apply the shared product name; Phase 0 exit. Model:
+GPT-5.6 Sol — High.** Choose the distinctive name with the maintainer, keeping
+the `<name>` GUI/product and `<name>-cli` CLI convention. Re-run the required
+availability/supportability checks, record the accepted and rejected candidates
+in a replacement ADR, then apply and verify the complete repository/package/
+binary/release/installer/path/documentation migration matrix. Re-run the Phase
+0.7 consistency checks. Only then may implementation move to **Phase 1 —
+pentanomial statistics**.
 
 ```
 git diff --check
@@ -419,5 +424,5 @@ repository workflow.
 | Feature exists in an external runner but not here | Phase 8.2 decides, with "does a general engine developer need it?" as the tie-breaker |
 | Tempted to add engine-specific logic | It belongs in the engine's own tooling, not here |
 | Engine project still needs scheduling/statistics/tuning/recovery code | Generic mechanism gap: add or explicitly decline it |
-| Engine project keeps a run file or thin CI command | Expected project policy, not a UCI Rig gap |
+| Engine project keeps a run file or thin CI command | Expected project policy, not a CLI gap |
 | Diagnostic heuristic looks stable | Report the observation; do not call it convergence or causation |

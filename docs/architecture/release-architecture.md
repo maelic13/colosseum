@@ -11,6 +11,12 @@ and verifies the final publication workflows. Until those steps land,
 [`docs/DEVELOPMENT.md`](../DEVELOPMENT.md) remains the authority for the current
 GUI-only release process.
 
+Public-name tokens in this target design are intentionally provisional until
+Phase 0.8: `<name>` is the shared product stem and GUI executable; `<name>-cli`
+is the CLI product, package and executable. The Phase 0.8 migration matrix
+decides the GUI Cargo package and internal shared-crate spellings rather than
+letting release architecture rename them implicitly.
+
 ## Current baseline and decision
 
 The baseline has one workspace version, one GUI binary, one GUI changelog and
@@ -24,10 +30,10 @@ The target keeps one repository and creates two product lanes:
 
 | Concern | GUI lane | CLI lane |
 |---|---|---|
-| Cargo product package | `colosseum-gui` | `ucirig` |
+| Cargo product package | GUI product package (Phase 0.8 mapping) | `<name>-cli` |
 | Version authority | explicit package `version` | explicit package `version` |
 | Tag | `gui-v<semver>` | `cli-v<semver>` |
-| GitHub Release title | `Colosseum GUI <semver>` | `UCI Rig <semver>` |
+| GitHub Release title | `<name> <semver>` | `<name>-cli <semver>` |
 | Release notes | GUI changelog section | CLI changelog section |
 | Workflow | `.github/workflows/release-gui.yml` | `.github/workflows/release-cli.yml` |
 | Artifacts | desktop archives/installers | headless binary archives |
@@ -42,10 +48,10 @@ trigger one another.
 
 ### Product packages
 
-`colosseum-gui` and `ucirig` own independent SemVer values in their
+The GUI product package and `<name>-cli` own independent SemVer values in their
 package manifests. The root workspace no longer supplies a product version.
 The GUI retains `1.0.2` when the manifests are decoupled; the CLI selects its
-initial version when its public name/package is added.
+initial version when its package is added.
 
 `env!("CARGO_PKG_VERSION")` remains valid in each binary and reports that
 binary package's version. CLI run records use the CLI package version plus a
@@ -62,9 +68,9 @@ Cargo versions as required by Cargo, but those versions:
 
 Product packages and currently internal shared packages declare their intended
 registry publishing policy explicitly rather than accidentally becoming
-publishable. Phase 0.6 selected the available-at-audit package name `ucirig`;
-Phase 9 rechecks it before release. V1 binary distribution does not require a
-registry publication.
+publishable. Phase 0.8 checks and selects the package names; Phase 9 rechecks
+them before release. V1 binary distribution does not require a registry
+publication.
 
 ### Version validation
 
@@ -157,8 +163,9 @@ Artifact basenames contain product, full version, OS and architecture. They do
 not use raw tag strings, so tag-prefix punctuation cannot create invalid paths.
 Every release includes a `SHA256SUMS` file covering every uploaded asset.
 
-Phase 0.6 fixes the public binary/artifact basename as `ucirig`. The internal
-product lane and `cli-v` tag namespace remain `cli` as decided in ADR-0006.
+Phase 0.8 fixes public binary/artifact basenames from the shared `<name>` stem.
+The internal product lanes and `gui-v`/`cli-v` tag namespaces remain stable as
+decided in ADR-0006, independent of branding.
 
 ### GUI artifacts
 
@@ -172,7 +179,7 @@ The stable GUI lane preserves the existing supported package set:
 | Arch Linux x64 | native Arch container | `.pkg.tar.zst` |
 | macOS ARM64 | `aarch64-apple-darwin` | tar.gz, DMG containing `.app` |
 
-Names follow `colosseum-gui-<version>-<os>-<arch>.<format>`. GUI archives and
+Names follow `<name>-<version>-<os>-<arch>.<format>`. GUI archives and
 installers contain only GUI runtime/assets, licence and applicable user
 documentation. Existing desktop IDs, WiX upgrade identity and macOS bundle
 identity remain GUI-owned and are never reused for CLI installation.
@@ -190,12 +197,12 @@ release target:
 
 | Platform | Target | Required asset |
 |---|---|---|
-| Windows x64 | `x86_64-pc-windows-msvc` | ZIP containing `ucirig.exe` |
-| Windows ARM64 | `aarch64-pc-windows-msvc` | ZIP containing `ucirig.exe` |
-| Linux x64 | `x86_64-unknown-linux-gnu` | tar.gz containing `ucirig` |
-| macOS ARM64 | `aarch64-apple-darwin` | tar.gz containing `ucirig` |
+| Windows x64 | `x86_64-pc-windows-msvc` | ZIP containing `<name>-cli.exe` |
+| Windows ARM64 | `aarch64-pc-windows-msvc` | ZIP containing `<name>-cli.exe` |
+| Linux x64 | `x86_64-unknown-linux-gnu` | tar.gz containing `<name>-cli` |
+| macOS ARM64 | `aarch64-apple-darwin` | tar.gz containing `<name>-cli` |
 
-Names follow `ucirig-<version>-<os>-<arch>.<format>`. The archive contains
+Names follow `<name>-cli-<version>-<os>-<arch>.<format>`. The archive contains
 the binary, licence and version-matched CLI documentation needed for offline
 use. It contains no GUI executable, icons, desktop entry, installer metadata,
 engine, book, language runtime or writable installation data. Linux package
@@ -329,8 +336,8 @@ before attachment.
 | Current surface | Target action | Delivery step |
 |---|---|---|
 | Root `[workspace.package].version = 1.0.2` inherited by all crates | Give GUI/CLI explicit product versions; give internal crates explicit non-product versions; remove root product authority | 2.2 |
-| `colosseum-gui` binary `colosseum` | Preserve GUI package/binary and GUI-specific version lookup | 2.2/9.4 |
-| No CLI package/binary | Add independently versioned `ucirig` package/composition root and binary | 2.2 |
+| Current `colosseum-gui` package/binary `colosseum` | Apply the Phase 0.8 GUI package/binary mapping and retain GUI-specific version lookup | 0.8, then 2.2/9.4 |
+| No CLI package/binary | Add independently versioned `<name>-cli` package/composition root and binary | 2.2 |
 | `.github/workflows/release.yml` on published unscoped release | Replace with required `ci.yml`, `release-gui.yml` and `release-cli.yml`; tag push validates before publication | 2.2 baseline, 9.4 publication |
 | Global `contents: write` | Limit write permission to final publish jobs | 9.4 |
 | Raw `github.ref_name` parsed repeatedly in shell | Use one tested internal Rust release-metadata command | 2.2/9.4 |
@@ -339,7 +346,7 @@ before attachment.
 | `build_windows.ps1`, `build_linux.sh`, `build_macos.sh` build only `--bin colosseum` | Keep explicit GUI scripts and add separate CLI scripts/targets; obtain versions through metadata, never `grep` root manifest | 2.2/9.4 |
 | GUI Cargo DEB/RPM metadata, `wix/main.wxs`, `build.rs`, `packaging/` desktop/icon and DMG assets | Remain GUI-owned and consume GUI package version; CLI packaging imports none of them | 9.4 |
 | Arch PKGBUILD generated inside workflow | Remain GUI-owned; use validated GUI version/filename helper | 9.4 |
-| `CHANGELOG.md` contains GUI history | Preserve it as `CHANGELOG-GUI.md`, add CLI stream and root index | 9.4 |
+| `CHANGELOG.md` contains GUI history | Preserve it as `CHANGELOG-GUI.md`, add CLI stream and root index | 2.2 lane foundation; 9.4 release content |
 | README and GUI updater use repository-wide latest release | Use product-specific links/tag filtering with legacy GUI fallback | 9.4 |
 | `docs/DEVELOPMENT.md` describes GUI-only release | Update only when the new scripts/workflows actually exist | 2.2/9.4 |
 | No push/PR CI; required engine tests may skip | Add matrix CI; Phase 1.8/2.7 make lifecycle tests hermetic and non-skipping | 1.8/2.7/9.4 |
@@ -364,6 +371,6 @@ This design assigns every current version/build/release/documentation surface,
 defines independent product versions/tags/notes/artifacts, specifies required
 shared-layer debug/release CI on all supported operating systems, and makes the
 published CLI artifact's headless behavior testable. ADR-0006 records why the
-repository remains unified. Phase 0.6 resolves the public CLI product as UCI
-Rig / `ucirig` without reopening the product-lane or release-independence
-decisions. Phase 0.7 reviews the combined contract.
+repository remains unified. Phase 0.7 reviews the combined contract; Phase 0.8
+supplies and applies the shared public-name mapping without reopening the
+product-lane or release-independence decisions.
