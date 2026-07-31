@@ -98,8 +98,11 @@ model as well.
 
 ### Phase 1 — Pentanomial statistics and nElo (`colosseum-core`)
 
-- ☐ **1.1** — **Model: Terra High.** Pair-level scoring into the pentanomial vector; incomplete pairs are
-  excluded from pentanomial SPRT and labelled unpaired elsewhere
+- ☑ **1.1 — DONE** — **Model: Terra High.** Pair-level scoring maps every
+  complete colour-reversed pair to the `[0, 0.5, 1, 1.5, 2]` pentanomial
+  vector; incomplete games are explicitly counted as unpaired and cannot enter
+  a pentanomial SPRT input — evidence:
+  [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
 - ☐ **1.2** — **Model: Sol High.** Pentanomial variance, normalized Elo, logistic Elo ± error, LOS, draw
   ratio, pairs ratio, WL/DD ratio
 - ☐ **1.3** — **Model: Sol High.** SPRT over **both** the pentanomial/normalized and logistic models,

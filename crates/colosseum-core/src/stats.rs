@@ -3,6 +3,95 @@
 //! (SPRT). All pure functions over win/draw/loss counts so they are easy to
 //! unit-test and reuse from both the live view and the History tab.
 
+use crate::standings::PairGameResult;
+
+/// One of the five possible scores for a two-game, colour-reversed opening
+/// pair, from the tested engine's perspective.
+///
+/// The discriminant is the index in a pentanomial vector ordered as
+/// `[0, 0.5, 1, 1.5, 2]` points. The central bin combines draw/draw and a
+/// win/loss split because both score one point from the pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(usize)]
+pub enum PentanomialBin {
+    Zero = 0,
+    Half = 1,
+    One = 2,
+    OneAndHalf = 3,
+    Two = 4,
+}
+
+impl PentanomialBin {
+    /// Map the two game results from one opening pair to its pentanomial bin.
+    #[must_use]
+    pub fn from_pair(first: PairGameResult, second: PairGameResult) -> Self {
+        let score = first.points_twice() + second.points_twice();
+        match score {
+            0 => Self::Zero,
+            1 => Self::Half,
+            2 => Self::One,
+            3 => Self::OneAndHalf,
+            4 => Self::Two,
+            _ => unreachable!("two chess game results score from 0 to 4 half-points"),
+        }
+    }
+
+    /// Index in the `[0, 0.5, 1, 1.5, 2]` pentanomial vector.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// Counts of complete colour-reversed pairs, ordered by pair score
+/// `[0, 0.5, 1, 1.5, 2]`.
+///
+/// An incomplete colour pair is deliberately kept out of `counts`: it is
+/// recorded in `unpaired_games` for an explicitly labelled non-pentanomial
+/// fallback, and must never be supplied to pentanomial SPRT calculations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PentanomialVector {
+    counts: [u32; 5],
+    unpaired_games: u32,
+}
+
+impl PentanomialVector {
+    /// Record one complete opening pair.
+    ///
+    /// The caller establishes that both results use the same opening with
+    /// colours reversed; this value intentionally carries no scheduler or
+    /// persistence identity.
+    pub fn record_pair(&mut self, first: PairGameResult, second: PairGameResult) {
+        let bin = PentanomialBin::from_pair(first, second);
+        self.counts[bin.index()] += 1;
+    }
+
+    /// Record one completed game whose colour-reversed companion is absent.
+    ///
+    /// This does not change the pentanomial vector or its pair count.
+    pub fn record_unpaired_game(&mut self) {
+        self.unpaired_games += 1;
+    }
+
+    /// The five bin counts in score order `[0, 0.5, 1, 1.5, 2]`.
+    #[must_use]
+    pub const fn counts(&self) -> [u32; 5] {
+        self.counts
+    }
+
+    /// Number of complete pairs represented by this vector.
+    #[must_use]
+    pub const fn pairs(&self) -> u32 {
+        self.counts[0] + self.counts[1] + self.counts[2] + self.counts[3] + self.counts[4]
+    }
+
+    /// Completed games excluded because their colour-reversed companion is absent.
+    #[must_use]
+    pub const fn unpaired_games(&self) -> u32 {
+        self.unpaired_games
+    }
+}
+
 /// Standard normal cumulative distribution function Φ(x), via an `erf`
 /// approximation (Abramowitz & Stegun 7.1.26, ~1e-7 accuracy).
 #[must_use]
@@ -242,5 +331,50 @@ mod tests {
         let r = sprt(100, 200, 700, 0.0, 5.0, 0.05, 0.05);
         assert_eq!(r.decision, SprtDecision::AcceptH0);
         assert!(r.llr <= r.lower);
+    }
+
+    #[test]
+    fn pentanomial_bins_cover_every_two_game_score() {
+        use PairGameResult::{Draw, Loss, Win};
+
+        let cases = [
+            ((Loss, Loss), PentanomialBin::Zero),
+            ((Loss, Draw), PentanomialBin::Half),
+            ((Draw, Loss), PentanomialBin::Half),
+            ((Loss, Win), PentanomialBin::One),
+            ((Draw, Draw), PentanomialBin::One),
+            ((Win, Loss), PentanomialBin::One),
+            ((Draw, Win), PentanomialBin::OneAndHalf),
+            ((Win, Draw), PentanomialBin::OneAndHalf),
+            ((Win, Win), PentanomialBin::Two),
+        ];
+
+        for ((first, second), expected) in cases {
+            assert_eq!(PentanomialBin::from_pair(first, second), expected);
+        }
+    }
+
+    #[test]
+    fn pentanomial_vector_keeps_incomplete_pairs_out_of_the_bins() {
+        use PairGameResult::{Draw, Loss, Win};
+
+        let mut vector = PentanomialVector::default();
+        vector.record_pair(Loss, Loss);
+        vector.record_pair(Loss, Draw);
+        vector.record_pair(Draw, Loss);
+        vector.record_pair(Loss, Win);
+        vector.record_pair(Draw, Draw);
+        vector.record_pair(Win, Loss);
+        vector.record_pair(Draw, Win);
+        vector.record_pair(Win, Draw);
+        vector.record_pair(Win, Win);
+
+        // This game is visibly retained for an unpaired fallback but cannot
+        // affect any future pentanomial SPRT input.
+        vector.record_unpaired_game();
+
+        assert_eq!(vector.counts(), [1, 2, 3, 2, 1]);
+        assert_eq!(vector.pairs(), 9);
+        assert_eq!(vector.unpaired_games(), 1);
     }
 }
