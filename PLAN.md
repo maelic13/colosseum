@@ -1,10 +1,11 @@
 # Colosseum CLI — engine-development harness plan
 
 `colosseum-cli` is a headless, cross-platform harness for **developing** chess
-engines: SPRT gates, SPSA tuning, fixed matches, gauntlets, speed measurement,
-and the run-record machinery that makes those numbers trustworthy. Its only
-contract with an engine is a UCI executable: no repository manifest, custom
-build command or non-standard benchmark command is required.
+engines on one machine: SPRT gates, SPSA tuning, fixed matches, tournaments,
+speed measurement, position suites, and the run-record machinery that makes
+those numbers trustworthy. Its only contract with an engine is a UCI
+executable: no repository manifest, custom build command or non-standard
+benchmark command is required.
 
 The desktop app answers *"who is stronger?"*. The CLI answers *"is this build
 stronger than that build, and can I believe the answer?"* — a different
@@ -16,6 +17,11 @@ the same thing next month.
 validate it, not its specification. Where a policy could reasonably differ
 between projects, the tool ships a default with a stated reason and lets the
 user change it — see S3.
+
+**It is deliberately local.** Distributed workers, source checkout, compilation
+and result coordination belong to systems such as testing farms. Colosseum owns
+the generic mechanics of a trustworthy experiment on one host; the engine
+project owns its source, build, correctness and experiment policy.
 
 **Document audiences.** This file and [`GUIDE.md`](GUIDE.md) are the
 maintainer-facing pair: specifications, success criteria, evidence, forward
@@ -32,11 +38,18 @@ argumentation.
 
 **The CLI is not built yet. This document is step 0 for that work.**
 
-What exists is the reason the plan is short: `colosseum-core`, `colosseum-uci`
-and `colosseum-engine` are already headless (no `egui` dependency anywhere in
-them), already cross-platform, already released for Windows/Linux/macOS
-including arm64, and already carry 149 tests. The CLI is a new workspace member
-consuming them — not a refactor.
+What exists is the reason the plan can reuse rather than rewrite:
+`colosseum-core`, `colosseum-uci` and `colosseum-engine` are already headless
+(no `egui` dependency anywhere in them), already cross-platform, already
+released for Windows/Linux/macOS including arm64, and already carry 149 tests.
+
+They are not yet the final CLI architecture. The shared model still contains
+GUI engine-library metadata and rating-writeback policy, while
+`colosseum-engine` exposes GUI application directories and configuration.
+Phase 0 therefore begins with a current-state dependency audit and a bounded
+Clean Architecture refactor. The game runner, UCI implementation and statistics
+are reused; ownership and dependency direction are corrected before new
+workflows are built.
 
 Validation engines: **Rarog** (Rust) and **Basilisk** (C++), chosen because they
 are available, actively developed, and differ in language and build system.
@@ -112,7 +125,13 @@ list is deliberately short, and additions need a stated failure mode.
 - **A6. The statistical model in force is printed in every result block and
   stored in every run record.** `elo0=0 elo1=3` means materially different
   things under normalized and logistic models; the number alone is ambiguous.
-- **A7. Every null result is reported with its resolution limit** (S3-C2).
+- **A7. Statistical conclusions never claim more than their design supports.**
+  Fixed-N results report their interval and achieved resolution; equivalence
+  requires interval containment. SPRT results report their hypotheses, error
+  rates, LLR, bounds and terminal sample. A capped SPRT is inconclusive.
+- **A8. Every sequential run has a finite pair cap**, supplied explicitly or by
+  a documented default. Reaching it is an inconclusive result, never an
+  implicit H0.
 
 ### Tier B — Defaults. Shipped with a reason, changeable by anyone.
 
@@ -154,13 +173,12 @@ users who value throughput more; the user documentation names common
 alternatives, including the values used by well-known public testing
 frameworks.
 
-**Profiles.** `--profile <name>` applies a named bundle of Tier-B defaults, so a
-project can run its house style in one flag without that style being imposed on
-anyone else. Ships with at least `default` and `strict`; users can define their
-own in the config file. Resolution order:
+For a project house style, commit a run file beside the engine source. This is
+portable, reviewable and does not depend on hidden per-user state. Resolution
+order:
 
 ```text
-built-in defaults  <  profile  <  run file  <  command line
+built-in defaults  <  run file  <  command line
 ```
 
 ### Tier C — Recommended. Documentation only, zero code impact.
@@ -172,10 +190,11 @@ is what separates a number from a result.
   Static-evaluation losses, node counts, search depth and NPS all correlate
   imperfectly with strength; several have moved the wrong way while strength
   improved, and vice versa.
-- **C2. A null is not proof of no effect.** Report it as "no effect larger than
-  X", where X is the smallest effect the design could have detected. The tool
-  computes and prints that limit (A7) from the game count, the draw rate and the
-  pairing, so the user does not have to derive it.
+- **C2. A null is not proof of no effect.** Before a fixed-N test, minimum
+  detectable effect depends on significance, desired power and an assumed
+  outcome distribution. Afterwards, report the achieved interval. An SPRT H0
+  means only that the declared H0 boundary was reached under the declared model;
+  it is not a universal "no effect larger than X" statement.
 - **C3. `[-3,+3]` is not an equivalence test.** Non-inferiority is `[-3,0]`;
   equivalence is a fixed-N run with a containment rule on the interval.
 - **C4. Prefer pentanomial pairs and normalized Elo** — see S3-C4 below.
@@ -222,21 +241,81 @@ Both models are supported and the model in force is always printed (A6).
 
 ## S4. Architecture
 
+Phase 0 records the current and target architecture before implementation. The
+target follows the **Clean Architecture dependency rule**: source dependencies
+point inward; policy does not depend on frameworks, storage, operating systems,
+the CLI or the GUI.
+
+| Layer | Responsibility | Allowed dependencies |
+|---|---|---|
+| Domain/entities | Scores, pair outcomes, statistical models, schedules, run-state invariants | Standard library and pure math only |
+| Application/use cases | Match, SPRT, calibration, SPSA, NPS, tournament, suite, status; ports for engines, persistence, time, affinity and progress | Domain |
+| Interface adapters | CLI parsing/config resolution, GUI mapping, UCI adapter, SQLite/run-directory adapter, PGN/external-log adapters | Application + domain |
+| Frameworks/drivers | Tokio/processes, filesystem, `rusqlite`, OS topology/affinity, terminal and GUI frameworks | Adapters |
+
+The target package map is chosen in Phase 0 after the dependency audit. A
+separate application crate is the default design because both CLI and GUI may
+invoke use cases; keeping workflows in the CLI would make the command-line
+adapter the owner of application policy. Phase 0 may choose another package
+layout only if it enforces the same dependency direction.
+
 ```
-colosseum-core      pure math + domain      ← pentanomial stats, nElo, SPSA schedule
-colosseum-uci       UCI protocol/process    ← unchanged
-colosseum-engine    driver/scheduler/store  ← + CPU affinity, durable runs
-colosseum-cli       NEW: bin + commands     ← run config/records, NPS, SPSA driver
-colosseum-gui       desktop app             ← unchanged; may consume new stats
+colosseum-core          domain/entities          ← pure statistics and invariants
+colosseum-application   use cases + ports        ← new by default; no OS/UI/storage
+colosseum-uci           UCI driven adapter       ← engine sessions/process protocol
+colosseum-engine        infrastructure adapters  ← runner, store, topology, affinity
+colosseum-cli           command-line adapter     ← parse, compose, present
+colosseum-gui           desktop adapter          ← map GUI library entries to use cases
 ```
 
-**Placement rule:** pure functions go in `core` (so the GUI can reuse them and
-so they are trivially testable); anything that spawns or places a process goes
-in `engine`; anything that is a *workflow* goes in `cli`.
+**Binding architecture rules**
 
-**The CLI never depends on the GUI**, on the GUI's configuration, or on its
-application-data locations. It reads no engine library and writes no shared
-database by default; a run is self-contained in its run directory (S5.11).
+- A runtime `EngineLaunchSpec` contains only path, arguments, working directory,
+  environment, display label, effective UCI options and allocated CPUs. It has
+  no logo, library rating, arbitrary metadata or GUI persistence fields.
+- Saved GUI engine-library data (`EngineConfig`/`EngineMeta` today),
+  `EngineLibrary`, `AppConfig`, `AppDirs` and rating writeback remain in the GUI
+  adapter. They are mapped to runtime specifications at the boundary.
+- Application use cases receive ports such as `EngineSessionFactory`,
+  `RunRepository`, `ArtifactSink`, `CpuPlacement`, `Clock` and `ProgressSink`;
+  they do not open global paths or select concrete databases.
+- Framework types (`rusqlite::Connection`, Tokio handles, GUI types, OS handles)
+  do not cross into the domain.
+- Paths and artifact sinks are injected. No process-wide mutable/global output
+  directory is part of the application contract.
+- CLI and GUI are composition roots. Neither depends on the other.
+
+**Independence contract**
+
+- The CLI reads no GUI engine library, configuration or application-data path.
+- Every CLI run is self-contained in its selected run directory (S5.11).
+- `cargo tree -p <cli-package>` contains no GUI/windowing dependencies.
+- The published CLI starts and completes `self-test` on a headless host.
+- CLI and GUI have separate versions, tags, artifacts and release notes even if
+  they stay in one repository.
+- Changes to shared layers run both CLI and GUI test suites.
+
+### Required end state
+
+At completion, the repository contains reviewed current/target architecture and
+ADRs; inward-only shared layers; a still-working independently released GUI; and
+an independently versioned/packageable CLI with this public capability surface:
+
+| Need | CLI surface |
+|---|---|
+| UCI/protocol diagnosis | `engine inspect`, `engine check`, `self-test` |
+| Host diagnosis | `capabilities`, common `status` |
+| Strength experiments | `match`, pair-atomic capped `sprt`, optional `calibrate` |
+| Parameter tuning | `spsa`, `spsa plan`, `spsa status`, `sprt --apply` |
+| Performance | `nps` A/B and thread-scaling sweep |
+| Multi-engine comparison | `tournament` round-robin/gauntlet |
+| Experiment design/replay | `stats plan fixed|sprt`, `stats` |
+| Input preparation | `book slice|hash|stats|verify`, `suite` |
+
+The published CLI archive needs no GUI, separately installed language runtime,
+engine manifest, bundled book, external script or writable installation
+directory. The validation projects retain only declarative policy/CI glue plus
+engine-specific responsibilities from S5.14.
 
 ### Engine invocation and configuration
 
@@ -255,9 +334,10 @@ output, never a required user-authored manifest.
 
 Building engines, artifact discovery, custom bench/fingerprint commands,
 compiler/source-tree inspection, parameter baking into source, build-flavour
-logic, dataset generation and neural-net management. The CLI consumes finished
-UCI executables. Non-chess variants are out of scope; Chess960 is a Phase-8
-decision.
+logic, distributed execution, training-data extraction/filtering/labelling and
+neural-net management. The CLI consumes finished UCI executables. Correctness
+suites tied to a custom move generator or search command stay with the engine.
+Non-chess variants are out of scope; Chess960 is a Phase-8 decision.
 
 ---
 
@@ -274,12 +354,18 @@ right" is not a criterion.
   arguments, working directory, arbitrary UCI option values, allocated cores.
 - `engine inspect` prints UCI identity and the advertised option schema.
 - `engine check` runs a **compliance report** with per-requirement pass/fail:
-  handshake, `isready`, option round-trip, a bounded search returning a legal
-  `bestmove`, `stop` honoured promptly, clean shutdown, and behaviour on
-  `ucinewgame`. Exit code reflects the outcome.
-- `--profile`, run file and CLI arguments resolve per S3 Tier B.
+  handshake, `isready`, validation of a requested value against the advertised
+  option schema, option acceptance followed by `readyok`, a bounded search
+  returning a legal `bestmove`, `stop` honoured promptly, clean shutdown, and
+  behaviour on `ucinewgame`. UCI has no option read-back, so this is explicitly
+  not called a round trip. Exit code reflects the outcome.
+- Run file and CLI arguments resolve per S3 Tier B.
 - `--dry-run` prints the fully resolved configuration and the exact engine
   invocations without playing a game.
+- In machine-readable mode stdout contains one documented JSON value only;
+  progress and diagnostics go to stderr.
+- `self-test` launches an internal deterministic UCI stub mode from the same
+  executable and checks process, protocol, persistence and one short match.
 
 **Success criteria**
 
@@ -304,14 +390,17 @@ right" is not a criterion.
 - SPRT over both the pentanomial/normalized and logistic models, selectable,
   reporting LLR and both bounds with H0/H1/continue — and always naming the
   model in force (A6).
-- **Minimum detectable effect** for the design, so nulls can be reported per A7.
-- An unpaired fallback for odd counts and gauntlets, clearly labelled.
+- Fixed-N design and achieved-resolution calculations with explicit
+  significance, power and assumed pair distribution; never infer an MDE from
+  game count alone.
+- An unpaired fallback for imported data and tournaments, clearly labelled.
+  An incomplete colour pair is never admitted to a pentanomial SPRT.
 
 **Success criteria**
 
-- **Golden-file parity** against vendored fixtures (S6.2) reproduces every
-  reported statistic to ≤1e-6 on continuous values and exactly on integer
-  vectors, for both external oracles.
+- **Golden-file parity** follows the oracle matrix in S6.2. Each field is
+  compared only with an implementation that exposes the same model; no external
+  runner is treated as an oracle for statistics it does not implement.
 - **Analytic fixtures**: hand-computed pentanomial vectors with independently
   derived LLR/nElo/variance, so correctness does not rest on any third-party
   tool being right.
@@ -330,9 +419,15 @@ right" is not a criterion.
   `sysctl`. **Never infer SMT siblings from logical CPU numbering.**
 - Modes `auto` / `off` / explicit CPU list; configurable headroom (default 2
   physical cores free) in `auto`.
+- Detect and respect the CPUs available to the current process, including Linux
+  cpusets/cgroups and Windows processor groups; never allocate from the machine
+  total when the process is restricted.
 - Allocate the configured **cores-per-engine** to each game slot — not one core
   per game. This allocation is independent of whichever UCI option controls the
   engine's internal worker count.
+- On hybrid systems, keep both A/B slots on the same core class. Record NUMA
+  node and core class; avoid cross-node placement by default and make any
+  unavoidable asymmetry visible.
 - Fail when requested placement cannot be applied (A1); allow and record `off`.
 - macOS has no supported hard-affinity API: report the capability as advisory or
   unavailable, record which, and do not prohibit clock matches.
@@ -355,8 +450,12 @@ correctness and is never a prerequisite for another command.
 - Byte-identical binary on both sides — refuse if the SHA-256 differs.
 - Configurable fixed N (default 30,000), confidence (default 95%) and tolerance
   (default ±5 nElo); no early stopping.
-- PASS iff the full interval lies inside the tolerance; report *inconclusive* if
-  the interval is wider than the tolerance rather than declaring PASS.
+- Use the same time control, opening policy, adjudication, concurrency and CPU
+  placement intended for the real experiment. A calibration is evidence about
+  that machine and configuration, not a permanent certificate.
+- `PASS` iff the full confidence interval lies inside the tolerance.
+  `FAIL` iff the full interval lies above `+tolerance` or below `-tolerance`.
+  Every overlapping case is `INCONCLUSIVE`; no point estimate alone decides.
 - Any timeout, crash, disconnect or illegal move marks the run invalid.
 
 **Success criteria:** hash mismatch rejected; configurable values round-trip
@@ -370,6 +469,15 @@ deterministic tests.
 - `match` is fixed-N with no sequential stopping. `sprt` accepts explicit
   `elo0`/`elo1`/`alpha`/`beta` and model; `gainer` and `simplify` are named
   convenience bundles, not hard-coded semantics.
+- `sprt` has an explicit finite `max-pairs`. Reaching it without a boundary is
+  `INCONCLUSIVE`.
+- A colour-reversed opening pair is the atomic scheduling, persistence and
+  statistical unit. LLR and verdict are evaluated only after both games finish.
+  Pair IDs enter the official sample in deterministic schedule order, never
+  completion order, so concurrency cannot change the terminal sample.
+- After a boundary is reached, schedule no new pairs. Finish the mate of any
+  half-played pair. Store other already-finished work as post-terminal evidence
+  but exclude it from the official terminal sample.
 - Two engines by path, per-side arguments, working directory, UCI options and
   allocated cores. The same binary may be tested against itself or against
   itself with different options.
@@ -378,58 +486,93 @@ deterministic tests.
   scheduler jitter is not counted as a loss on time. Asymmetric controls are
   supported (odds matches, "same engine at double time").
 - **Adjudication:** draw, resign and max-moves each individually configurable and
-  each individually **disableable**; optional tablebase adjudication where
-  tablebase paths are supplied.
+  each individually **disableable**. Arbitrary engine tablebase UCI options may
+  be forwarded; harness-side tablebase adjudication is deferred to Phase 8
+  because it requires a new probing dependency and is not necessary for a
+  trustworthy SPRT.
 - **Time-loss accounting is first class**: losses on time, crashes, disconnects
   and illegal moves are counted per engine, printed in every report block, and
   stored in the run record. `--max-time-losses N` flags or aborts the run.
   A test whose engines forfeit is not a valid test, and the user must not have
   to go looking for that.
 - **Concurrency** is explicit: number of parallel games, its interaction with
-  cores-per-engine and headroom, and a startup estimate of total memory
-  (concurrency × 2 × hash). Refuse or warn — configurably — when the request
-  exceeds available cores or memory.
+  cores-per-engine and headroom. Refuse a CPU request that cannot be placed.
+  Report `concurrency × 2 × hash` only as a hash-memory lower bound; warn about
+  available memory, but refuse on memory only when the user supplies an
+  explicit trusted per-engine budget or hard cap.
 - **Book is optional.** Without one, every game starts from the initial position
   and the tool warns that opening diversity is absent. With one: order
   (sequential or seeded random), start index, ply depth, and **reuse detection**
   — the fraction of openings played more than once is reported, because reuse
   narrows error bars misleadingly.
-- **Engine crash policy** is explicit and configurable: abandon the game and
-  count it, discard it, or retry it once. The choice biases results and is
-  therefore recorded, never implicit.
+- **Failure policy separates cause.** An engine-attributable crash, timeout,
+  disconnect or illegal move is a forfeit and anomaly; statistical commands are
+  invalid once their configurable engine-fault threshold is exceeded (default
+  zero). An infrastructure/harness failure is never scored: pause or invalidate
+  the run. Retry is allowed only for a failure proved to occur before play or
+  independently of either arm. Statistical runs never silently discard a game.
+  Exploratory tournaments may opt into a recorded non-strict policy.
 - Live report block on a configurable interval; full log to disk; PGN out; run
   record; per-game engine output retained for failed games.
 - **Machine-readable results**: JSON to a file or stdout, and **exit codes that
-  distinguish H1 / H0 / still-running / invalid / error**, so the tool can be
-  scripted and wired into CI.
+  distinguish H1 / H0 / inconclusive / invalid / error**, so the tool can be
+  scripted and wired into CI. JSON stdout is never mixed with progress text.
 - Resume per S5.11.
 
 **Success criteria**
 
-- Replaying stored fixture outcomes reaches the same verdict at the same game
-  number as both external oracles (±1 report interval).
+- Replaying the same ordered fixture outcomes reaches the same verdict and
+  terminal pair as a compatible external oracle. Live runners are compared on
+  shared conditions and outcome distributions, not required to produce the
+  same clock-game sequence.
 - A path-only invocation needs no configuration file; identical binaries with
   identical options are allowed for self-play.
 - Every exit code is asserted by a test.
 - A forfeit-injecting stub engine triggers the time-loss counters and the
   `--max-time-losses` policy.
 - Killing mid-run and resuming yields the same final statistics as an
-  uninterrupted run at the same seed.
+  uninterrupted deterministic-stub run at the same seed; an incomplete pair is
+  resumed without entering the official sample early.
 
 ### 5.5 SPSA — `colosseum-cli spsa` + `colosseum-core` schedule
 
 **Requirements**
 
-- **End-state parameterization:** each knob declares `c_end`; the run declares
-  `r_end` and horizon `N`; `c`, `a` and `A = 0.1·N` are back-solved
-  (`alpha=0.601`, `gamma=0.102`). Deriving from the horizon is what stops a
-  hand-picked gain going stale when the horizon changes.
-- Decay per **iteration**, never per game.
+- **Exact Fishtest-compatible variant.** For iteration `k = 0..N-1`, each knob
+  `i` receives a seeded independent Rademacher perturbation
+  `Δ[k,i] ∈ {-1,+1}`. With `alpha=0.601`, `gamma=0.102` and `A=0.1·N`:
+
+  ```text
+  c[k,i] = c0[i] / (k + 1)^gamma
+  a[k,i] = a0[i] / (A + k + 1)^alpha
+  r[k,i] = a[k,i] / c[k,i]^2
+  ```
+
+  Each knob declares `c_end[i]`; the run declares `r_end` and `N`.
+  `a_end[i] = r_end × c_end[i]^2`, and `c0[i]`/`a0[i]` are back-solved so the
+  final iteration has exactly those end values. Decay is per iteration, never
+  per game.
+- Keep the internal centre vector in floating point. The two sent UCI vectors
+  are `round_half_away_from_zero(clamp(theta ± c×Δ))`; this tie rule is binding
+  and cross-platform tested. Both arms play the same opening pairs with colours
+  reversed. For the plus arm, `D = wins - losses` across the complete mini-match;
+  draws contribute zero. Update:
+
+  ```text
+  theta[k+1,i] = clamp(theta[k,i] + c[k,i] × r[k,i] × D × Δ[k,i])
+  ```
+
+  Rounding is applied when values are sent or emitted, not to the stored centre
+  after every update. The exact RNG algorithm, seed and draw order are part of
+  `stats_version` and persisted state.
 - The tune file selects numeric UCI options and supplies initial value, tuning
   bounds and `c_end` per knob, validated against the live UCI option schema.
 - Defaults `N=5,000` and 32 games/iteration; configurable, not enforced minima.
 - Persistent driver: no per-iteration relaunch; a supplied book is loaded once.
 - Multi-session per S5.11.
+- A mini-match is committed only when all of its scheduled colour pairs
+  complete. An engine-attributable fault invalidates the iteration and tune;
+  it is never converted into a gradient or selectively retried.
 - **Config audit**, against the live schema:
   1. option absent or not a numeric `spin` *(error)*
   2. duplicate parameter *(error)*
@@ -441,18 +584,23 @@ deterministic tests.
      still being updated, and random-walks for the rest of the run
   6. initial value disagrees with the engine default *(warn — may be deliberate)*
   7. initial value on a rail *(warn — one-sided gradient)*
-- **Closing the loop (S5.5a).** A tune must not end at "here is a vector".
-  On completion, and on demand mid-run, emit the tail-mean vector as
+- **Closing the loop.** A tune must not end at "here is a vector". On
+  completion, and on demand mid-run, emit the rounded mean of the final 10% of
+  completed centre vectors (window configurable and frozen in the run record) as
   (a) a ready-to-paste `setoption` list, (b) JSON, and (c) a run file fragment.
   `colosseum-cli sprt --apply <result.json>` then gates the tuned values against
-  the untuned binary **using UCI options only** — no source edit, no rebuild, no
-  engine-specific baking step. Users who prefer to bake values into their source
-  still can; they no longer have to.
+  the original vector **using the same executable and UCI options only** — no
+  source edit, rebuild or engine-specific baking step. The artifact contains
+  executable hash, original/tuned vectors, tune conditions, schema and schedule
+  versions. A changed executable hash is refused unless explicitly overridden,
+  and an override is prominent in the gate record.
 
 **Success criteria**
 
-- Schedule property tests: `c_t == c_end` and `a_t == a_end` exactly at `t = N`;
-  `r_end` invariant as `N` varies while `a` moves.
+- Schedule property tests: `c[N-1] == c_end`,
+  `a[N-1] == r_end × c_end²`, and `r[N-1] == r_end` within a stated floating
+  tolerance; arm swap negates the update; the same seed reproduces every
+  perturbation and vector.
 - Written-artifact assertion (A5): the persisted schedule is read back and
   verified before any game is played; a test mutates the file and asserts the
   launch refuses.
@@ -464,14 +612,55 @@ deterministic tests.
 - **Loop test:** a tune over a stub engine produces a result file that
   `sprt --apply` consumes without hand-editing.
 
+#### 5.5a SPSA sizing — `colosseum-cli spsa plan`
+
+Offline, no games. Validate the exact schedule and report total iterations,
+games and pairs; `c/a/r` trajectories; the first rounding-resolution hazard;
+checkpoint/storage count; and a wall-clock range from user-supplied timing or a
+short pilot sample. Show how cost and schedule change with the horizon.
+
+An optional synthetic-objective simulation may report convergence bands only
+when the user supplies that objective/noise model. It is labelled a model
+simulation, never a prediction that a chess tune will converge: real convergence
+also depends on unknown curvature, sensitivity, interactions and starting
+distance.
+
+**Success criteria:** schedule and cost arithmetic match hand-computed fixtures;
+the wall-clock estimator covers a controlled stub run; a synthetic simulation
+is reproducible by seed and clearly separated from factual schedule output.
+
+#### 5.5b SPSA diagnostics — `colosseum-cli spsa status`
+
+Read an atomic snapshot of a run directory without touching the running tune.
+Report iteration, percent, ETA, per-knob current value and trajectory, plus a
+thirds comparison of completed history normalised to the knob range.
+
+These are explicitly **heuristics, not causal or convergence claims**. Flag
+frequent contact with a bound, little net movement from the seed, recent
+trajectory stability, and perturbation below the engine's rounding resolution.
+Explain that each observation may result from the objective, noise, gain,
+clipping or an unsuitable range; never automatically advise continue/abandon.
+
+**Success criteria:** fixture diagnostics match hand calculations; a short run
+reports insufficient history rather than inventing a trend; status against a
+live atomically-updated run neither blocks nor mutates it.
+
 ### 5.6 Speed / NPS A/B — `colosseum-cli nps`
 
 **Requirements**
 
 - Drive an optional user-supplied position suite through standard bounded
   searches; use the initial position when omitted and warn that the workload is
-  weaker. Consume `info nodes`/`time`/`nps` and report clearly when the engine
-  does not expose enough information.
+  weaker.
+- The authoritative sample is harness monotonic wall time from sending
+  `go nodes` until `bestmove`, over a fixed-node workload. Reported `info nodes`
+  verifies comparable work; engine-reported `time`/`nps` is diagnostic only
+  because it is produced by the system under test.
+- Define and record state policy: `cold` restarts the engine per measured
+  repetition with startup excluded; `warm` keeps it alive and sends
+  `ucinewgame`/`isready`. Hash clearing is used only when the engine advertises a
+  suitable button and is never assumed. Position order, repetitions and warm-up
+  are seeded and stored.
 - Strict alternation, warm-up, arm-level **median** and **best-of**, bootstrap
   CI on the median.
 - Accept one or more executables per arm; show per-executable medians so
@@ -479,34 +668,48 @@ deterministic tests.
 - A self pair is recommended and optional; warn when a matching recorded self
   pair lies outside a configurable tolerance (default ±0.5%).
 - Report per-round SD as a machine-noise indicator.
-- **Scaling sweep:** measure across a list of worker counts (e.g. 1, 2, 4, 8,
-  16) and report speed and efficiency per count. Answers "does this engine
-  scale?" without a second tool, and the position set must be pinned and
-  recorded so a later sweep is comparable.
+- **Scaling sweep:** measure across a list of engine search-thread counts (for
+  example 1, 2, 4, 8, 16) using an explicitly selected or safely recognised UCI
+  spin option. Allocate the same number of physical cores; pin the identical
+  position sequence/search limits; declare fixed-total versus per-thread Hash;
+  and report wall-time speedup and parallel efficiency relative to one thread.
+  Store CPU class/NUMA placement and warn when symmetric placement is impossible.
 
 **Success criteria**
 
 - A self-pair result is reported without being a prerequisite.
 - A synthetic left-skewed sample reproduces the known bias in a naive
   alternating-pair estimator and *not* in the shipped one.
+- A fake engine that lies in `info nps` cannot change the authoritative result.
+- Cold/warm modes, scaling efficiency and fixed/per-thread Hash policies match
+  hand-computed fixtures.
 
-### 5.7 Gauntlet — `colosseum-cli gauntlet`
+### 5.7 Tournaments — `colosseum-cli tournament`
 
-Opponent ladder, joint ML ratings with error bars, optional anchor,
-standings/crosstable CSV, and **resume per S5.11** — gauntlets are the longest
-runs the tool performs.
+Expose both formats already supported by the shared core:
 
-**Success criteria:** ratings match the GUI to ≤0.01 Elo on stored data;
-kill/resume produces identical standings.
+- round-robin: every engine against every other engine
+- gauntlet: one or more seeds against an opponent ladder
+
+Both provide joint ML ratings with error bars, optional anchor,
+standings/crosstable CSV and resume per S5.11. A `gauntlet` alias may exist for
+convenience, but it resolves to the same tournament use case rather than a
+second implementation.
+
+**Success criteria:** schedules and ratings match the GUI on stored data
+(ratings ≤0.01 Elo); kill/resume with deterministic stubs produces identical
+standings for both formats.
 
 ### 5.8 Run record
 
 Generated JSON per run: both engines' canonical path, SHA-256, UCI identity,
 arguments, working directory and effective options; harness version and build;
 **`schema_version` and `stats_version`**; host summary (OS, CPU model, physical
-and logical core counts); optional book path and hash; seed; resolved affinity
-and capability mode; time control; adjudication settings; concurrency;
-full command line; UTC start/end; outcome, statistics and anomaly counts.
+and logical core counts, allowed CPU set, core class/NUMA where known); optional
+book path and hash; seed; resolved affinity and capability mode; time control;
+adjudication settings; concurrency; resolved configuration hash; full command
+line; UTC start/end; official terminal sample, outcome, statistics and anomaly
+counts.
 
 **Versioning policy.** `schema_version` changes when the record's shape changes;
 `stats_version` changes when any reported statistic changes definition. Both are
@@ -528,98 +731,52 @@ rejects a known-bad fixture.
 ### 5.10 Statistics replay — `colosseum-cli stats`
 
 Read a Colosseum run, a PGN, or a supported external result log and report the
-same block used live.
+same block used live. External formats and versions are explicitly listed; when
+pair/opening identity is absent, fall back to labelled unpaired statistics
+rather than guessing pairs.
 
-**The durable artifact is authoritative, not the console.** A console log can be
-buffered, truncated by a lost terminal, or simply not flushed for hours; none of
-that is evidence about the run. Every command that reports live must be
-reproducible from the run directory and the PGN afterwards, and `stats` is how.
-A stalled log must never be the only way to ask "is this run alive?" — that is
-what `status` (5.5c, generalised to every long command) answers.
+**Authority order:** the structured run store/checkpoint is authoritative; PGN
+is the portable game export; logs are forensic evidence; console output is
+observational only. Every live number must be reproducible from the structured
+run directory. PGN replay reproduces only information the PGN actually carries.
 
 **Search telemetry from a PGN.** Where move annotations are present, report per
-engine: mean and median reported depth, time per move, and implied nodes per
-second. At a fixed node limit this is the cleanest available comparison of how
-two engines spend the same budget, and it needs no instrumentation in either.
+engine the coverage fraction and mean/median depth, elapsed time and implied
+nodes per second. List the supported annotation syntaxes; preserve unknown
+annotations; exclude pre-played opening moves; and report `unavailable` when
+coverage is insufficient. Fixed-node telemetry is comparable only when node
+accounting has compatible semantics—normally the same engine lineage.
+
+**Experiment planning**
+
+- `stats plan fixed` accepts target effect/equivalence margin, significance,
+  desired power and an assumed pair distribution, then estimates required
+  pairs and states every assumption.
+- `stats plan sprt` accepts hypotheses/error rates plus an assumed true effect
+  and pair distribution, then simulates an expected-length distribution. It is
+  a planning model, not a stopping guarantee.
+- Post-run output reports achieved intervals/resolution; it never back-fits a
+  planning MDE and presents it as a fact.
 
 **Success criteria:** every golden fixture replays through the command with the
 same result as the library API; telemetry aggregates match hand-computed values
-on a fixture PGN; a PGN written without annotations produces a clear
-"unavailable" rather than zeros.
+on fixture PGNs in every supported syntax; missing pair/telemetry information
+produces a clear labelled fallback; planning calculations match analytic or
+seeded-simulation fixtures.
 
-### 5.5b SPSA sizing — `colosseum-cli spsa plan`
+### 5.11 Durable runs and status — one contract for every long command
 
-Offline, no games. Given a horizon, a knob count, a mini-match size, a measured
-or assumed per-iteration cost and a noise model, simulate the shipped schedule
-and report expected convergence, the wall-clock estimate, and how the answer
-changes with the horizon.
-
-**Why it earns its place:** the alternative to modelling a tune is folklore, and
-the unit of error is *machine-nights*. A run that would have needed 5,000
-iterations, launched at 1,500, produces a fitted-looking vector that is barely
-distinguishable from its seed — and nothing in the output says so. This is a few
-hundred lines of arithmetic that prevents that.
-
-**Success criteria:** given a synthetic objective whose optimum is known, the
-predicted RMSE band contains the observed RMSE of an actual `spsa` run over the
-same objective; the wall-clock estimate is within 10% of a measured short run.
-
-### 5.5c SPSA diagnostics — `colosseum-cli spsa status`
-
-Reads a run directory and reports, without touching the running tune: iteration
-and percent complete, ETA, per-knob current value and trajectory, and a
-**convergence check on the trajectory rather than on single iterations** —
-compare each knob's mean over the second and third thirds of the run, normalised
-to its range, because single-iteration values are far too noisy to eyeball and
-SPSA wanders even at low gain.
-
-Also flags, per knob: values pinned at a bound (the range was wrong, not the
-value converged), values that have returned to their seed and stayed there (the
-tuner has *rejected* that knob — a result, not a failure), and knobs whose
-perturbation has decayed below the engine's rounding resolution (no longer
-measured, still being updated).
-
-**Why it earns its place:** deciding whether to abandon a multi-night tune is a
-routine operation, and doing it by hand means parsing a multi-hundred-megabyte
-log correctly under time pressure. The tool has the state; it should answer the
-question.
-
-**Success criteria:** on a recorded fixture run, the thirds comparison, the rail
-detection and the dead-knob detection each match hand-computed values; running
-`status` against a live run directory neither blocks nor mutates it.
-
-### 5.12 Data generation — `colosseum-cli datagen`  ⚖ scope decision
-
-**Proposed in scope, to be confirmed.** Self-play or engine-vs-engine games at a
-fixed node or depth limit from a book, written as PGN, appending across runs, at
-full concurrency with the same placement and durability guarantees as any other
-long run.
-
-The argument for: this is exactly what the harness already does — schedule games,
-place them on cores, survive interruption, write PGN. Every engine project that
-trains anything needs it, and re-implementing it outside means a second
-scheduler with none of the durability or placement work.
-
-The line: **generating games is in scope; interpreting them is not.** Extraction
-into a training format, position filtering, deduplication and label construction
-are specific to a trainer and stay with whoever owns it. The tool's output is
-PGN.
-
-**Success criteria (if adopted):** a datagen run resumes per S5.11 and appends
-without duplicating games; a fixed node limit produces the documented node count
-per move; concurrency and placement behave as in `match`.
-
-### 5.11 Durable runs — one contract for every long command
-
-Applies uniformly to `match`, `sprt`, `spsa`, `calibrate` and `gauntlet`. It is
-Tier A because the failure mode is silent data loss or silent pooling of
-incomparable games.
+Applies uniformly to `match`, `sprt`, `spsa`, `calibrate`, `tournament` and
+long position suites. It is Tier A because the failure mode is silent data loss
+or silent pooling of incomparable work.
 
 - A run lives in a **run directory** with a predictable layout (state, log, PGN,
-  run record, resolved config). `--dir` selects it; a portable mode keeps
-  everything beside the executable.
-- **Resume is the default** when a run directory already exists. Starting over
-  requires an explicit flag, and that flag **archives rather than deletes**.
+  run record, resolved config). Without `--dir`, create a unique directory under
+  `./colosseum-runs/`; never write beside the installed executable.
+- Resume occurs only when the user explicitly selects an existing `--dir`.
+  Starting over in that directory requires an explicit flag, and that flag
+  **archives rather than deletes**. A generated default directory can never
+  accidentally resume an unrelated run.
 - **A resume refuses** if the stored configuration differs materially from the
   requested one — engine paths or hashes, time control, book or its hash,
   adjudication, bounds, model, schedule. Pooling games from different conditions
@@ -627,45 +784,78 @@ incomparable games.
 - **Logs append; they never truncate.**
 - The **stored** horizon and schedule win over command-line arguments on a
   resume, and the tool says so on screen rather than silently ignoring the flag.
-- State is written at least every K units and **atomically** (write to a
-  temporary file, then rename), so a hard kill costs at most K units and can
-  never leave a corrupt state file.
+- State is written at least every K units with a checksum and **two-generation
+  atomic checkpoints** (write, flush, rename, retain previous), so a hard kill
+  costs at most K units and a damaged current checkpoint can fall back to a
+  verified previous generation.
 - Interrupting is a supported operation, not an accident: a clean stop and a
   hard kill must both be recoverable.
+- `colosseum-cli status <run-directory>` reads an atomic snapshot without
+  mutation and reports command type/state, owning-process liveness where
+  detectable, last durable checkpoint, completed/running/pending/failed units,
+  current official statistics, anomalies and ETA. Command-specific status (for
+  example SPSA trajectories) extends this common view.
 
 **Success criteria:** one shared test suite runs against every long command —
 kill at a random point, resume, and reach statistics identical to an
 uninterrupted run; a mismatched-config resume is refused with a precise message;
 a truncation attempt on the log fails; a state file corrupted mid-write is
-detected and the previous state used.
+detected and the previous state used; status against a live run is non-blocking,
+read-only and consistent with the last committed checkpoint.
 
 ---
 
-### 5.13 Coverage target — what the CLI must replace
+### 5.12 Position suites — `colosseum-cli suite`
 
-The point of the tool is that an engine project keeps **no harness scripts of
-its own**. That is only auditable if the boundary is written down, so here is
-the mapping against a real, mature harness (~3,400 lines of PowerShell plus
-Python across two engines). Anything in the left column that is not claimed by a
-spec above is a gap in this plan, not a script the user should keep writing.
+Run standard UCI searches over EPD/FEN position sets at fixed time, nodes or
+depth. Support EPD `bm`/`am` expectations, per-position outcome and latency,
+aggregate pass rate, and comparison with a compatible previous suite run.
+Unknown EPD operations are preserved and ignored with a report; no custom
+engine `perft`, `bench` or diagnostic command is inferred.
+
+**Success criteria:** legal `bm`/`am`, multiple accepted moves, no-solution and
+malformed fixtures have deterministic outcomes; a baseline comparison refuses
+incompatible position-set/search hashes; long suites resume without duplicating
+positions.
+
+### 5.13 Data generation — deferred as a separate command
+
+Fixed-node/depth self-play written as PGN is already expressible as a normal
+match using the same scheduler, placement and durability. Document that recipe
+and do not create a second `datagen` workflow in v1.
+
+Revisit in Phase 8 only if concrete engine-independent requirements exceed
+`match`: corpus sharding, deterministic game IDs, deduplication, controlled
+randomisation or effectively unbounded horizons. Training-format extraction,
+position filtering, labelling and trainer-specific records remain out of scope.
+
+### 5.14 Coverage target — generic machinery the CLI replaces
+
+The target is not literally “no scripts”: an engine project may keep
+declarative run/tune files and thin CI invocations that select project policy.
+It must not have to reimplement generic scheduling, statistics, tuning,
+affinity, recovery or result analysis. This is audited against a mature harness
+(~3,400 lines of PowerShell plus Python across two engines). An unclaimed piece
+of **generic mechanism** is a gap; project-specific policy is not.
 
 | Existing tool | Replaced by |
 |---|---|
 | SPRT driver, null calibration | 5.3, 5.4 |
 | SPSA driver | 5.5 |
 | SPSA config audit | 5.5 audit classes |
-| SPSA sizing model | 5.5b |
-| "is my tune converging?" log analysis | 5.5c |
-| Gauntlet driver | 5.7 |
+| SPSA sizing model | 5.5a |
+| "is my tune converging?" log analysis | 5.5b |
+| Round-robin / gauntlet driver | 5.7 |
 | NPS A/B, multi-build pooling | 5.6 |
 | Thread-scaling sweep | 5.6 scaling sweep |
 | UCI probe / handshake helper | 5.0 `engine inspect` / `check` |
 | Result recomputation from PGN | 5.10 |
 | Per-engine depth/time from PGN | 5.10 telemetry |
-| Affinity, topology, concurrency, seeds, hashing | 5.2, 5.8 |
-| Console log filtering and tee | CLI logging + 5.10 |
+| Affinity, topology, concurrency, seeds, hashing | 5.2, 5.4, 5.8, 5.9 |
+| Console log filtering, tee and liveness checks | CLI logging + 5.10 + 5.11 status |
 | Book handling and slicing | 5.9 |
-| Self-play data generation | 5.12 (if adopted) |
+| Generic EPD best-move suites | 5.12 |
+| PGN self-play corpus generation | 5.4 recipe; no duplicate command |
 | Runner/tuner fetching and patching | evaporates — nothing to vendor or patch |
 
 **Residual, and deliberately so — these stay with the engine, forever.** They
@@ -673,15 +863,19 @@ depend on the engine's source, build system or internals, so no general harness
 can own them:
 
 - building engines, PGO/instruction-set flavours, artifact naming
+- choosing comparable compilers, flags and build conditions for A/B binaries
 - profiling (sampling profilers, platform trace tooling)
 - correctness suites tied to the engine's own move generator or search
 - engine-specific diagnostic counters and their readouts
-- evaluation tuning and training-data extraction, labelling and filtering
+- declarative Colosseum configs and thin CI/release-policy invocations
+- non-UCI evaluation tuning and training-data extraction, labelling/filtering
 - baking tuned values into source, if the project prefers that to UCI options
 
-**Success criterion (checked at Phase 9):** both validation engines can delete
-every script in the left column and keep only the residual list, with no
-workflow lost. Any exception is recorded here as a named gap with a decision.
+**Success criterion:** after each relevant phase, migrate and compare the
+corresponding real workflow. By Phase 9 both validation engines have archived
+every replaced generic implementation and retain only declarative/thin policy
+glue and the residual list, with no workflow lost. Any exception is recorded
+here as either a named generic gap or an intentional project-specific policy.
 
 ## S6. Testing requirements — binding
 
@@ -690,27 +884,26 @@ the measurement meant to catch it.
 
 1. **Every pure function is unit-tested**, including degenerate inputs. No
    statistical function returns `NaN`/`Inf` without a typed error.
-2. **Golden-file parity against vendored fixtures, from two independent
-   oracles.** Fixtures are produced by running real UCI engines — two versions
-   of the same engine is a convenient way to get a small, known Elo difference,
-   and any pair of engines will do — through **both `fastchess` and
-   `cutechess-cli`**, and the resulting logs are committed with the tool name,
-   tool version and the exact command line that produced them. Engine names are
-   anonymised in the fixtures so nothing implies a particular project.
-   A documented **generator** regenerates or extends the corpus from any engine
-   pair. Two oracles matter: agreement between independently written
-   implementations is much stronger evidence than agreement with one, and where
-   they disagree that disagreement is itself the finding.
+2. **Golden-file parity against vendored fixtures, with an oracle matrix.**
+   Fixtures come from public UCI engine versions run through `fastchess` and
+   `cutechess-cli`. Commit engine/tool names and versions, executable or source
+   hashes, licences/provenance, exact commands and raw logs. Do not anonymise
+   away reproducibility. Compare each field only where the external tool
+   implements the same model: analytic fixtures are authoritative for every
+   formula; fastchess covers compatible pentanomial/normalized outputs; both
+   external tools cover their shared logistic/trinomial surface and scheduling.
+   A documented generator extends the corpus from any engine pair. A
+   disagreement is recorded and root-caused, never averaged away.
 3. **⛔ No test may depend on a path outside the repository.** Enforced in CI.
    This is what makes the project independently buildable and testable by
    anyone who clones it.
 4. **Analytic fixtures** with hand-derived expected values, so correctness does
    not rest on any external tool being right.
 5. **Property-based tests** for statistics and the SPSA schedule.
-6. **Integration tests with a cross-platform stub engine.** A tiny UCI responder
-   built as a test binary, replacing the current Windows-only shell stubs, and
-   **shipped as a documented artifact** so users can smoke-test the harness with
-   no real engine and file reproducible bug reports.
+6. **Integration tests with a cross-platform stub engine.** The CLI exposes
+   `self-test` and internally spawns its own hidden deterministic UCI-stub mode.
+   This exercises the exact published artifact without shipping a second public
+   executable. Test-only fault modes replace current Windows-only shell stubs.
 7. **Fault injection:** crash at handshake / mid-search / on quit; timeout;
    illegal move; never answering `isready`; garbage on stdout. Each must produce
    a specific tested outcome and none may be silently absorbed into a result.
@@ -724,6 +917,12 @@ the measurement meant to catch it.
     combination is exactly how a flat-timeout test passes locally for months and
     fails on a runner.
 12. **No new `clippy` warnings**; the workspace lint wall stays at zero.
+13. **Architecture tests enforce S4:** dependency inspection rejects GUI
+    dependencies in the CLI and outward framework dependencies in inner crates;
+    application tests use in-memory/fake ports; no CLI integration test reads
+    GUI application directories.
+14. **Published-artifact smoke tests** run `--version`, `--help`, `self-test`
+    and one deterministic JSON-mode workflow from the packaged CLI, headlessly.
 
 ---
 
@@ -747,77 +946,119 @@ supported.
 
 ## S8. Implementation plan
 
-### Phase 0 — Project identity and release model
-Decisions that shape everything downstream, taken before any code.
+### Phase 0 — Current-state analysis and target architecture
 
-- **(a) Naming.** A separate "Coliseum" chess application already exists and
-  aims at a similar space, which creates real ambiguity in search, package
-  registries and user conversation. Evaluate: keep the product name and give the
-  CLI a distinct binary name; rename the CLI only; or rename the product.
-  Criteria: search-result collision, availability on the package registries the
-  release targets, trademark risk, whether the name survives being said aloud in
-  a bug report, and the cost of renaming a released 1.0 product (users, links,
-  packaging, existing installs). Record the decision and the rejected options.
-- **(b) Release model.** The GUI is a released 1.0 desktop product; the CLI will
-  churn. Evaluate one repository with two release tracks and independent version
-  numbers, versus splitting the CLI into its own repository consuming the core
-  crates (via a registry release or a git dependency). Criteria: whether a CLI
-  change can destabilise a GUI release, CI complexity, how the shared core is
-  versioned and tested, contributor friction, and how a bug fix in the core
-  reaches both. **Exit:** both decisions recorded here with reasoning, and the
-  release pipeline sketched for the chosen model.
+No CLI implementation begins until the boundary it will depend on is understood
+and recorded.
+
+- **(a) Current-state report.** Use `cargo metadata`, `cargo tree` and source
+  inspection to write `docs/architecture/current-state.md`: crate/module
+  dependency graph; ownership of domain, workflows, process I/O, persistence,
+  paths and global state; framework dependencies; public types crossing crate
+  boundaries; current GUI/CLI release coupling; and each violation of the S4
+  dependency rule. Explicitly cover `EngineMeta`, `EngineLibrary`,
+  `AppConfig`/`AppDirs`, `RatingWriteback`, incident output and the SQLite
+  scheduler.
+- **(b) Clean Architecture design.** Write
+  `docs/architecture/target-architecture.md` with layer/package diagram, use
+  cases, port contracts, runtime data types, composition roots, run-directory
+  ownership, error/cancellation flow and a migration map from every current
+  module. Record consequential choices as ADRs. Prefer the smallest refactor
+  that enforces inward dependencies; do not rewrite working UCI/game logic.
+- **(c) Independence and release design.** Define architecture tests and sketch
+  CI/release pipelines. Default to one repository with independently versioned
+  GUI and CLI packages, distinct tags/artifacts/release notes, and shared-layer
+  regression tests. Split repositories only if the written analysis establishes
+  a concrete advantage that outweighs cross-repository core coordination.
+- **(d) Naming.** Resolve the existing “Coliseum” search/package collision:
+  retain the product name with a distinct CLI binary, rename only the CLI, or
+  rename the product. Check package availability, search ambiguity, trademark
+  risk and spoken supportability; record rejected options.
+- **EXIT:** current and target documents plus ADRs are reviewed; every current
+  module has a target owner; dependency and release diagrams are internally
+  consistent; the independence contract in S4 is testable; naming and release
+  decisions are recorded. Only then may Phase 1/2 code start.
 
 ### Phase 1 — Pentanomial statistics and normalized Elo (`core`)
 Spec 5.1 plus the fixture corpus (S6.2–S6.4). First because everything reports
 through it and it needs no I/O or platform surface. **Exit:** analytic fixtures
-pass; golden-file parity against both oracles; no test reads outside the repo.
+pass; the per-field oracle matrix passes; no test reads outside the repo.
 
-### Phase 2 — CLI skeleton, direct UCI invocation, run records, durable runs
-Specs 5.0 + 5.8 + 5.11. Workspace member, argument parsing, profiles and
-resolution order, run file, `engine inspect`/`check` compliance report,
-`--dry-run`, run directory layout, run records with schema/stats versioning, and
-the durable-run contract with its shared test suite. **Exit:** two arbitrary UCI
-executables pass path-only workflows; run file plus overrides resolves
-identically to all-CLI; the durable-run suite passes against a stub command.
+### Phase 2 — Architecture migration, CLI skeleton and durable foundation
+Implement the Phase-0 migration needed by Specs 5.0 + 5.8 + 5.11: generic
+runtime participant type, application ports/use cases, GUI mapping adapter, CLI
+composition root and independently versioned CLI package. Add argument parsing,
+run file resolution, inspect/check, dry-run, JSON/stdout contract, `self-test`,
+run records, run directories, two-generation checkpoints and common status.
+
+**Exit:** two arbitrary UCI executables pass path-only workflows; run file plus
+overrides resolves identically to all-CLI; durable/status suites pass against
+the internal stub; architecture tests prove no GUI dependency or GUI-data access;
+GUI tests remain green; a headless CLI artifact is produced independently.
 
 ### Phase 3 — CPU topology and affinity
-Spec 5.2, including the `capabilities` command. **Exit:** topology fixtures pass
-on all three OSes; residency tests pass where enforceable; platform capability
-reporting documented.
+Spec 5.2, including the `capabilities` command. **Exit:** SMT, hybrid,
+restricted-cpuset, processor-group, no-SMT and dual-socket fixtures pass;
+residency tests pass where enforceable; platform capability reporting is
+documented.
 
-### Phase 4 — Fixed match, SPRT, calibration
-Specs 5.3 + 5.4. Time controls per side, adjudication including disable and
-tablebases, time-loss accounting and policy, concurrency and memory checks, book
-options with reuse detection, crash policy, JSON output and exit codes, resume.
-**Exit:** verdict parity against both oracles; forfeit and exit-code tests;
-path-only and no-book runs; calibration outcome tests.
+### Phase 4A — Fixed-match runner
+
+Implement the non-sequential part of 5.4: fixed matches, per-side controls,
+adjudication (without harness tablebase probing), strict failure classification,
+concurrency/resource reporting, optional books, outputs and durability.
+**Exit:** path-only/no-book and paired-book matches pass; fault injection never
+silently scores infrastructure failures; JSON/exit contracts and resume pass;
+the same deterministic schedule is replayable by pair ID.
+
+### Phase 4B — Pair-atomic SPRT and runner parity
+
+Add 5.1/5.4 SPRT orchestration: finite cap, deterministic pair commit order,
+official terminal sample and post-terminal handling. Replay identical outcome
+streams through compatible external statistics, then run controlled live parity
+against fastchess and Cute Chess on their shared feature surface.
+**Exit:** analytic/oracle verdict parity; concurrency cannot change the terminal
+pair; capped/invalid/H0/H1 exits pass; live disagreements are root-caused before
+SPSA builds on the runner.
+
+### Phase 4C — Optional calibration
+
+Implement 5.3 over the trusted runner. **Exit:** representative configuration
+round-trips; byte mismatch is rejected; PASS/FAIL/INCONCLUSIVE/INVALID fixtures
+and one real-machine smoke run behave as specified.
 
 ### Phase 5 — SPSA
-Spec 5.5 including 5.5a loop closure. **Exit:** schedule property tests; every
-hard audit class rejected; recovery; convergence smoke test; the tune result
-feeds `sprt --apply` unedited.
 
-### Phase 6 — Speed/NPS, book tools, statistics replay
-Specs 5.6 + 5.9 + 5.10. **Exit:** skew-bias regression test; reproducible book
-slicing; every golden fixture replays through the CLI.
+Implement the exact 5.5 algorithm, loop closure, plan and status. **Exit:**
+formula/RNG/rounding properties and every hard audit pass; recovery preserves
+the exact stream; synthetic convergence smoke test passes; plan arithmetic and
+diagnostics match fixtures; the tune result feeds `sprt --apply` unedited with
+the original executable hash.
 
-### Phase 7 — Gauntlet
-Spec 5.7. **Exit:** ratings match the GUI to ≤0.01 Elo; kill/resume identical.
+### Phase 6 — Speed, planning, replay, books and position suites
+
+Specs 5.6 + 5.9 + 5.10 + 5.12. **Exit:** wall-clock/fixed-node and skew-bias
+regressions pass; scaling sweep fixtures pass; book slicing is reproducible;
+every golden fixture replays; fixed/SPRT planning matches fixtures; EPD suite
+and baseline compatibility tests pass.
+
+### Phase 7 — Tournaments
+
+Spec 5.7. **Exit:** round-robin and gauntlet schedules/ratings match the GUI;
+kill/resume is identical with deterministic stubs.
 
 ### Phase 8 — Parity against external runners, and remaining gaps
 
-- **(a) Parity run — the entry gate for trusting this harness.** Prepare one
-  deterministic opening sequence, then play it with the same two binaries, time
-  control and adjudication through `colosseum-cli`, `fastchess` and
-  `cutechess-cli`. Compare Elo/nElo/LOS, the pentanomial vector, draw rate and
-  time-loss counts. Agreement within combined error bars is the gate;
-  disagreement is a defect in one of the three and must be root-caused. Repeat
-  after any change to game-running code.
+- **(a) Repeat the Phase-4 parity gate** against current supported external
+  versions and the exact release candidate. Compare only the oracle matrix's
+  shared fields and record every divergence.
 - **(b) Remaining feature gaps.** Revisit what the external runners do that this
   does not, and decide per feature: adopt, decline with a reason, or defer.
-  Candidates: Chess960, ponder under test conditions, additional tournament
-  formats, output formats other tools consume. **The tie-breaker is whether a
-  general engine developer needs it**, not whether the validation engines do.
+  Candidates: Chess960, ponder under test conditions, harness-side Syzygy
+  adjudication, additional tournament/output formats and whether datagen has
+  gained concrete generic requirements beyond `match`. **The tie-breaker is
+  whether a general engine developer needs it**, not whether the validation
+  engines do.
 
 ### Phase 9 — Documentation and release
 The deliverable is a tool any engine developer can pick up.
@@ -834,23 +1075,23 @@ The deliverable is a tool any engine developer can pick up.
   the CLI in depth: quickstart, command reference, run-file and tune-file
   reference, worked examples per command, a "how to trust a result" page drawn
   from S3 Tier C, and a compatibility page (what the tool needs from a UCI
-  engine, and what it does with non-conforming ones). Note that the licence
-  applies to the tool and not to engines it runs as separate processes.
-- **(c) Ship.** Per Phase 0(b)'s release model; all supported platforms;
+  engine, and what it does with non-conforming ones). Explain that engines are
+  launched as separate processes and tell users to consult the relevant licence
+  terms; do not make a blanket legal conclusion.
+- **(c) Ship.** Per Phase 0(c)'s release model; all supported platforms;
   smoke-test the exact published artifacts (`--version`, `--help`,
-  `engine check` against the shipped stub, one stub match).
-- **(d) Acceptance.** A **third-party engine pair the maintainers did not
+  `self-test`, one stub match, and architecture/dependency inspection).
+- **(d) Release-candidate usability exercise.** A **third-party engine pair the maintainers did not
   write** — any two public UCI engines — driven by someone following only the
   published documentation, completing a fixed match, an SPRT and a short SPSA.
   That is the test of "usable by anyone"; the validation engines cannot
-  demonstrate it because their authors know too much. Additionally the two
-  validation engines each run one real gate through the released artifact on at
-  least two operating systems, agreeing with 8(a).
-- **(e) Coverage acceptance.** Both validation engines delete every harness
-  script covered by S5.13 and retain only the residual list, with no workflow
-  lost. Any exception is recorded in S5.13 as a named gap with a decision —
-  because "as little tooling as possible" is only real if the scripts actually
-  go away.
+  demonstrate it because their authors know too much. Treat feedback as an RC
+  gate requiring triage, not as an unautomatable permanent release dependency.
+- **(e) Coverage acceptance.** Both validation engines archive every generic
+  implementation covered by S5.14 and retain only declarative/thin policy glue
+  and the residual list. Any exception is classified as a generic gap or
+  intentional project policy. Each engine also runs one real gate through the
+  released artifact on at least two operating systems, agreeing with 8(a).
 
 ---
 
@@ -858,12 +1099,15 @@ The deliverable is a tool any engine developer can pick up.
 
 | Risk | Mitigation |
 |---|---|
-| Loss of runner independence for users who adopt this for everything | Phase 8(a) parity against two external runners; recommend keeping a second runner for periodic cross-checks |
+| Loss of runner independence for users who adopt this for everything | Phase 4B/8 parity against two external runners; recommend periodic cross-checks |
 | macOS cannot enforce affinity | Advisory or unavailable, recorded per run; fail only when hard placement was explicitly requested |
-| CLI churn destabilises the released GUI | Phase 0(b) release model decision; shared core covered by the existing suite |
-| Name collision with an existing similar product | Phase 0(a) |
-| Scope creep into engine-specific work | S4 out-of-scope list; consume finished UCI executables only |
-| Our defaults read as mandates | S3 tiers; profiles; user docs name alternatives |
+| CLI churn destabilises the released GUI | Phase 0 architecture/release design; independent releases; shared-layer regression suite |
+| Clean Architecture becomes a rewrite | Current-to-target migration map; smallest boundary refactor; retain working runner/UCI logic |
+| Name collision with an existing similar product | Phase 0(d) |
+| Scope creep into engine-specific work | S4 boundary, S5.13 decision, S5.14 mechanism-vs-policy test |
+| “No scripts” absorbs project CI/policy | Declarative configs and thin invocations explicitly remain with the engine |
+| SPSA diagnostics are mistaken for proof | Label trajectory signals as heuristics; no automatic continue/abandon decision |
+| Our defaults read as mandates | S3 tiers; committed run files; user docs name alternatives |
 | Statistics change meaning silently over time | `stats_version` + changelog (5.8) |
 | A derived constant is wrong and invisible | A5: assert written artifacts before play |
 
@@ -887,5 +1131,8 @@ The deliverable is a tool any engine developer can pick up.
 |---|---|
 | `crates/colosseum-core/src/stats.rs` | existing SPRT/Elo/LOS — extend here for pentanomial |
 | `crates/colosseum-engine/src/{scheduler,runner,openings,store}.rs` | driver, game execution, books, persistence |
+| `crates/colosseum-engine/src/{config,paths,incidents}.rs` | current GUI/path/global-state seams to classify in Phase 0 |
+| `crates/colosseum-core/src/{engine,tournament}.rs` | current runtime/library model seam to classify in Phase 0 |
+| `docs/architecture/` | Phase-0 current/target architecture and ADRs |
 | `tests/fixtures/` | vendored golden fixtures + the generator that produces them |
 | `CLAUDE.md` | workspace conventions, including why engines are spawned per game |
