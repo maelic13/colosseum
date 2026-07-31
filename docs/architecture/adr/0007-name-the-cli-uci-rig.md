@@ -18,8 +18,9 @@ renaming working GUI storage, installer and application identities.
 
 ## Rejected decision
 
-This decision is rejected and must not be implemented. Phase 0.8 will replace
-it with a shared GUI/CLI product name using `<name>` and `<name>-cli`.
+This decision is rejected and must not be implemented. ADR-0008 instead uses
+Colosseum and `colosseum-cli` consistently through implementation, with an
+optional whole-product naming review deferred to Phase 9.0.
 
 Keep **Colosseum** as the desktop product name. Name the independent CLI product
 **UCI Rig**, with Cargo package, crate and executable `ucirig` and workspace path

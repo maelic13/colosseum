@@ -1,4 +1,4 @@
-# Colosseum GUI and CLI — development guide
+# Colosseum — development guide
 
 The short operational view: where the harness stands and what to do next.
 Rationale, specifications, success criteria and evidence live in
@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent CLI: **not started** |
-| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0.1–0.7 have inventoried, audited, designed and reviewed the Clean Architecture target and independent product releases/CI as one contract; Phase 0.6 also documents why Colosseum is too crowded to extend to the CLI |
-| What is missing | A shared distinctive GUI/CLI name and applied migration contract, pentanomial/nElo, CPU affinity, the CLI itself, SPSA, durable runs, run records, trustworthy NPS |
+| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0 is complete: it inventoried, audited, designed and reviewed the Clean Architecture target and independent product releases/CI as one contract, then bound coherent Colosseum / `colosseum-cli` implementation naming while deferring any optional whole-product rebrand to Phase 9.0 |
+| What is missing | Pentanomial/nElo, CPU affinity, the CLI itself, SPSA, durable runs, run records, trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 0.8 — select and apply the shared product name; Phase 0 exit** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Next step | **Phase 1.1 — pair-level pentanomial scoring** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -79,9 +79,9 @@ model as well.
   [`docs/architecture/release-architecture.md`](docs/architecture/release-architecture.md)
   and [ADR-0006](docs/architecture/adr/0006-one-repository-independent-product-releases.md)
 - ☑ **0.6 — DONE** — **Model: Terra High.** Research the existing “Coliseum” naming/search/package collision
-  and record the proposal plus rejected alternatives — outcome: extending
-  Colosseum to the CLI is unsuitable; the CLI-only **UCI Rig** proposal was
-  rejected by the maintainer before implementation and is retained as evidence:
+  and record the proposal plus rejected alternatives — outcome: material
+  Colosseum collision risks are documented; the CLI-only **UCI Rig** proposal
+  was rejected before implementation and is retained as evidence:
   [`docs/architecture/naming-decision.md`](docs/architecture/naming-decision.md)
   and [ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md)
 - ☑ **0.7 — DONE** — **Model: Sol High.** Review the current/target architecture, ADRs and release design as one
@@ -89,14 +89,12 @@ model as well.
   release diagrams agree, and every independence invariant has an executable
   test owner; correct inconsistencies and record review evidence — evidence:
   [`docs/architecture/phase-0-review.md`](docs/architecture/phase-0-review.md)
-- ☐ **0.8** — **EXIT · Model: Sol High.** Select a distinctive shared product name **with the maintainer** and
-  bind `<name>` for the GUI/product and command plus `<name>-cli` for the CLI
-  product, package and command. Repeat web, same-domain, GitHub,
-  crates.io/package-channel and preliminary trademark checks; test spelling and
-  spoken supportability; record rejected names. Define and apply a reviewed
-  migration matrix covering repository, Cargo packages/crates, binaries,
-  tags/artifacts/release lanes, installer/application IDs, config/data paths,
-  compatibility and documentation; re-run the Phase-0 consistency review
+- ☑ **0.8 — DONE / EXIT** — **Model: Sol High.** Bind **Colosseum** / `colosseum` /
+  `colosseum-gui` and **Colosseum CLI** / `colosseum-cli` as the coherent
+  implementation identity; preserve the Phase 0.6 collision research, reject
+  speculative rename indirection and defer an optional full keep-or-rename
+  decision to Phase 9.0 — evidence:
+  [ADR-0008](docs/architecture/adr/0008-use-colosseum-through-implementation.md)
 
 ### Phase 1 — Pentanomial statistics and nElo (`colosseum-core`)
 
@@ -126,7 +124,8 @@ model as well.
 
 - ☐ **2.1** — **Model: Sol High.** Implement the Phase-0 boundary migration: generic runtime participant
   type, application use cases/ports and GUI adapter for library/config data
-- ☐ **2.2** — **Model: Terra High.** Add the independently versioned CLI package and composition root;
+- ☐ **2.2** — **Model: Terra High.** Add independently versioned package and composition root
+  `colosseum-cli`;
   `--version`/`--help`; no GUI/windowing dependency. Establish the separate
   GUI/CLI version and changelog lanes plus required push/PR shared-workspace CI
   baseline from the Phase 0.5 release design; publication workflows remain 9.4
@@ -150,7 +149,7 @@ model as well.
 - ☐ **2.7** — **Model: Sol High.** `self-test` launches the exact executable's hidden deterministic UCI
   stub mode and tests protocol, process containment/reaping, bounded
   stdout/stderr draining, persistence failures and one short match
-- ☐ **2.8** — **Model: Sol High.** Run directories: unique default under `./<name>-runs`; explicit
+- ☐ **2.8** — **Model: Sol High.** Run directories: unique default under `./colosseum-runs`; explicit
   `--dir` to resume; archive-on-restart; append-only logs; checksummed
   two-generation atomic checkpoints; config mismatch refusal
 - ☐ **2.9** — **Model: Terra High.** Common read-only `status <run-dir>` plus run records containing
@@ -323,14 +322,22 @@ model as well.
 
 ### Phase 9 — Documentation and release
 
+- ☐ **9.0** — **Model: Sol High. Optional final naming review:** judge the
+  implemented product and either retain Colosseum with a recorded decision or
+  choose one replacement and perform the complete one-time migration before
+  documentation and release. Recheck dated web, same-domain, GitHub,
+  package-channel and preliminary trademark evidence. A rename covers the
+  repository, packages/crates, binaries, releases/artifacts, installer and app
+  IDs, config/data compatibility, updater URLs and docs; do not build neutral
+  aliases or a speculative branding framework merely to prepare for it
 - ☐ **9.1** — **Model: Sol High. Documentation placement analysis:** in-repo `docs/` published as a
   static site, GitHub wiki, or generated reference plus guides. Criteria:
   versioning with the binary (a wiki does not version, which matters once
   `stats_version` exists), discoverability, offline availability,
   contribution friction, and whether the command reference can be generated
   from the argument parser so it cannot drift. Record the decision
-- ☐ **9.2** — **Model: Terra High.** README as the project front door — what the renamed GUI and CLI
-  are, install, links
+- ☐ **9.2** — **Model: Terra High.** README as the project front door — what Colosseum GUI and
+  Colosseum CLI are (or their Phase 9.0 replacement), install, links
 - ☐ **9.3** — **Model: Terra High.** User documentation: quickstart, command reference, run-file and
   tune-file reference, a worked example per command, "how to trust a result"
   from PLAN §S3 Tier C, and a compatibility page (what the tool needs from a
@@ -338,8 +345,8 @@ model as well.
   separate processes and direct users to applicable licences; make no
   blanket legal conclusion
 - ☐ **9.4** — **Model: Sol High.** Ship per Phase 0.5's release model; all supported platforms;
-  repeat and record the Phase 0.8 name's dated
-  web/GitHub/crates.io/package-channel/preliminary-trademark screen;
+  use the Phase 9.0 identity and its dated
+  web/GitHub/package-channel/preliminary-trademark screen;
   smoke-test the exact published artifacts (`--version`, `--help`,
   `self-test`, one deterministic JSON workflow, dependency inspection)
 - ☐ **9.5** — **Model: Sol High. Coverage acceptance** (PLAN §5.14) — archive replaced generic
@@ -384,14 +391,11 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 0.8 — select and apply the shared product name; Phase 0 exit. Model:
-GPT-5.6 Sol — High.** Choose the distinctive name with the maintainer, keeping
-the `<name>` GUI/product and `<name>-cli` CLI convention. Re-run the required
-availability/supportability checks, record the accepted and rejected candidates
-in a replacement ADR, then apply and verify the complete repository/package/
-binary/release/installer/path/documentation migration matrix. Re-run the Phase
-0.7 consistency checks. Only then may implementation move to **Phase 1 —
-pentanomial statistics**.
+**Phase 1.1 — pair-level pentanomial scoring. Model: GPT-5.6 Terra — High.**
+Implement the five-bin paired-game result mapping in `colosseum-core`. Exclude
+incomplete pairs from pentanomial SPRT and label them unpaired in other output.
+Demonstrate the mapping and exclusion behavior with focused tests before
+marking and committing the step.
 
 ```
 git diff --check

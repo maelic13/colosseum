@@ -1,7 +1,7 @@
-# Colosseum GUI and CLI — engine-development harness plan
+# Colosseum — engine-development harness plan
 
-The planned CLI is a headless, cross-platform harness for **developing** chess
-engines on one machine: SPRT gates, SPSA tuning, fixed matches, tournaments,
+`colosseum-cli` is a planned headless, cross-platform harness for
+**developing** chess engines on one machine: SPRT gates, SPSA tuning, fixed matches, tournaments,
 speed measurement, position suites, and the run-record machinery that makes
 those numbers trustworthy. Its only contract with an engine is a UCI
 executable: no repository manifest, custom build command or non-standard
@@ -38,15 +38,16 @@ argumentation.
 
 **The CLI is not built yet. This document is step 0 for that work.**
 
-**Colosseum is the current released name, not the target public identity.**
-Phase 0.6 established that it is too crowded to extend to the CLI, but its
-CLI-only **UCI Rig** proposal was rejected by the maintainer before
-implementation. Phase 0.8 selects one distinctive shared product name together
-and binds the convention `<name>` for the GUI and `<name>-cli` for the CLI. The
-Phase 0.6 evidence is retained in the
-[naming research](docs/architecture/naming-decision.md) and rejected
-[ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md); neither name is
-an implementation instruction.
+**Colosseum is the implementation identity for the whole product.** The desktop
+product and executable are **Colosseum** / `colosseum`; its Cargo package is
+`colosseum-gui`. The independent CLI product, Cargo package and executable are
+**Colosseum CLI** / `colosseum-cli`. Shared packages keep their coherent
+`colosseum-*` names. Phase 0.6 established real search and supportability risks,
+and its CLI-only **UCI Rig** proposal was rejected. ADR-0008 accepts those risks
+for implementation and defers an optional whole-product reconsideration to
+Phase 9.0, when the implemented product can be judged as a whole. The
+[naming research](docs/architecture/naming-decision.md) remains evidence, not a
+requirement to rename.
 
 What exists is the reason the plan can reuse rather than rewrite:
 `colosseum-core`, `colosseum-uci` and `colosseum-engine` are already headless
@@ -308,14 +309,16 @@ colosseum-core          domain/entities          ← pure statistics and invaria
 colosseum-application   use cases + ports        ← new by default; no OS/UI/storage
 colosseum-uci           UCI driven adapter       ← engine sessions/process protocol
 colosseum-engine        infrastructure adapters  ← runner, store, topology, affinity
-CLI product package     command-line adapter     ← parse, compose, present
-GUI product package     desktop adapter          ← map GUI library entries to use cases
+colosseum-cli           command-line adapter     ← parse, compose, present
+colosseum-gui           desktop adapter          ← map GUI library entries to use cases
 ```
 
-The role and edge names above are binding; `colosseum-*` spellings are working
-identifiers for the current repository. Phase 0.8 may rename them mechanically
-according to its explicit migration matrix without changing responsibility or
-dependency direction.
+The roles, edges and `colosseum-*` spellings above are binding implementation
+names. Architecture must not add a generic brand-token service, neutral aliases
+or other indirection solely to ease a hypothetical one-time rename. Product
+display names, executable/application paths and packaging metadata still belong
+to the outer adapters and composition roots; that responsibility placement is
+what keeps a possible Phase 9.0 rename bounded.
 
 **Binding architecture rules**
 
@@ -339,8 +342,7 @@ dependency direction.
 
 - The CLI reads no GUI engine library, configuration or application-data path.
 - Every CLI run is self-contained in its selected run directory (S5.11).
-- `cargo tree -p <name>-cli` contains no GUI/windowing dependencies after the
-  Phase 0.8 package migration.
+- `cargo tree -p colosseum-cli` contains no GUI/windowing dependencies.
 - The published CLI starts and completes `self-test` on a headless host.
 - CLI and GUI have separate versions, tags, artifacts and release notes even if
   they stay in one repository.
@@ -426,7 +428,7 @@ right" is not a criterion.
   silently change what an old seed reproduces.
   The version-1 contract is exact: the displayed master seed is an unsigned
   64-bit integer; a stream seed is
-  `SHA-256("chess-harness-rng-v1\0" || master-seed-u64-LE || stream-name-UTF-8)`;
+  `SHA-256("colosseum-rng-v1\0" || master-seed-u64-LE || stream-name-UTF-8)`;
   those 32 bytes seed ChaCha12 at its initial stream position. Stream names are
   stable ASCII identifiers. Shuffle, bounded-integer, Rademacher and bootstrap
   sampling algorithms are specified rather than delegated to dependency helper
@@ -534,7 +536,7 @@ right" is not a criterion.
   residency; skipped with a clear message where the OS cannot enforce it.
 - `capabilities` command prints what this platform can and cannot do.
 
-### 5.3 Calibration — `<name>-cli calibrate`
+### 5.3 Calibration — `colosseum-cli calibrate`
 
 An optional end-to-end symmetry test on the actual machine. It does not prove
 correctness and is never a prerequisite for another command.
@@ -556,7 +558,7 @@ correctness and is never a prerequisite for another command.
 through persistence and resume; PASS/FAIL/inconclusive/invalid each have
 deterministic tests.
 
-### 5.4 Fixed match and SPRT — `<name>-cli match|sprt`
+### 5.4 Fixed match and SPRT — `colosseum-cli match|sprt`
 
 **Requirements**
 
@@ -685,7 +687,7 @@ report an unattributable divergence.
   for every completed clock-based run and are not mislabelled as engine or
   harness overhead.
 
-### 5.5 SPSA — `<name>-cli spsa` + core schedule
+### 5.5 SPSA — `colosseum-cli spsa` + core schedule
 
 **Requirements**
 
@@ -739,7 +741,7 @@ report an unattributable divergence.
   completion, and on demand mid-run, emit the rounded mean of the final 10% of
   completed centre vectors (window configurable and frozen in the run record) as
   (a) a ready-to-paste `setoption` list, (b) JSON, and (c) a run file fragment.
-  `<name>-cli sprt --apply <result.json>` then gates the tuned values against
+  `colosseum-cli sprt --apply <result.json>` then gates the tuned values against
   the original vector **using the same executable and UCI options only** — no
   source edit, rebuild or engine-specific baking step. The artifact contains
   executable hash, original/tuned vectors, tune conditions, schema and schedule
@@ -763,7 +765,7 @@ report an unattributable divergence.
 - **Loop test:** a tune over a stub engine produces a result file that
   `sprt --apply` consumes without hand-editing.
 
-#### 5.5a SPSA sizing — `<name>-cli spsa plan`
+#### 5.5a SPSA sizing — `colosseum-cli spsa plan`
 
 Offline, no games. Validate the exact schedule and report total iterations,
 games and pairs; `c/a/r` trajectories; the first rounding-resolution hazard;
@@ -780,7 +782,7 @@ distance.
 the wall-clock estimator covers a controlled stub run; a synthetic simulation
 is reproducible by seed and clearly separated from factual schedule output.
 
-#### 5.5b SPSA diagnostics — `<name>-cli spsa status`
+#### 5.5b SPSA diagnostics — `colosseum-cli spsa status`
 
 Read an atomic snapshot of a run directory without touching the running tune.
 Report iteration, percent, ETA, per-knob current value and trajectory, plus a
@@ -796,7 +798,7 @@ clipping or an unsuitable range; never automatically advise continue/abandon.
 reports insufficient history rather than inventing a trend; status against a
 live atomically-updated run neither blocks nor mutates it.
 
-### 5.6 Speed / NPS A/B — `<name>-cli nps`
+### 5.6 Speed / NPS A/B — `colosseum-cli nps`
 
 **Requirements**
 
@@ -835,7 +837,7 @@ live atomically-updated run neither blocks nor mutates it.
 - Cold/warm modes, scaling efficiency and fixed/per-thread Hash policies match
   hand-computed fixtures.
 
-### 5.7 Tournaments — `<name>-cli tournament`
+### 5.7 Tournaments — `colosseum-cli tournament`
 
 Expose both formats already supported by the shared core:
 
@@ -874,7 +876,7 @@ a test asserts every observable field is populated and every not-applicable
 optional field is explicitly null with a reason; a schema-version bump fails a
 test that pins the current schema unless the changelog is updated.
 
-### 5.9 Book tools — `<name>-cli book`
+### 5.9 Book tools — `colosseum-cli book`
 
 `slice` (deterministic given a seed), `hash`, `stats` (count, ply depth, eval
 band where present), `verify` (every position legal and parseable).
@@ -882,7 +884,7 @@ band where present), `verify` (every position legal and parseable).
 **Success criteria:** slicing is byte-reproducible across platforms; `verify`
 rejects a known-bad fixture.
 
-### 5.10 Statistics replay — `<name>-cli stats`
+### 5.10 Statistics replay — `colosseum-cli stats`
 
 Read a CLI run, a PGN, or a supported external result log and report the
 same block used live. External formats and versions are explicitly listed; when
@@ -926,7 +928,7 @@ or silent pooling of incomparable work.
 
 - A run lives in a **run directory** with a predictable layout (state, log, PGN,
   run record, resolved config). Without `--dir`, create a unique directory under
-  `./<name>-runs/`; never write beside the installed executable.
+  `./colosseum-runs/`; never write beside the installed executable.
 - Resume occurs only when the user explicitly selects an existing `--dir`.
   Starting over in that directory requires an explicit flag, and that flag
   **archives rather than deletes**. A generated default directory can never
@@ -944,7 +946,7 @@ or silent pooling of incomparable work.
   verified previous generation.
 - Interrupting is a supported operation, not an accident: a clean stop and a
   hard kill must both be recoverable.
-- `<name>-cli status <run-directory>` reads an atomic snapshot without
+- `colosseum-cli status <run-directory>` reads an atomic snapshot without
   mutation and reports command type/state, owning-process liveness where
   detectable, last durable checkpoint, completed/running/pending/failed units,
   current official statistics, anomalies and ETA. Command-specific status (for
@@ -959,7 +961,7 @@ read-only and consistent with the last committed checkpoint.
 
 ---
 
-### 5.12 Position suites — `<name>-cli suite`
+### 5.12 Position suites — `colosseum-cli suite`
 
 Run standard UCI searches over EPD/FEN position sets at fixed time, nodes or
 depth. Support EPD `bm`/`am` expectations, per-position outcome and latency,
@@ -1140,14 +1142,14 @@ Every identifier is covered below; ranges are inclusive.
 | 6 | 6.4–6.5, 6.7–6.8 | 6.1–6.3, 6.6, 6.9 |
 | 7 | 7.1 | 7.2–7.3 |
 | 8 | — | 8.1–8.3 |
-| 9 | 9.2–9.3, 9.6 | 9.1, 9.4–9.5, 9.7 |
+| 9 | 9.2–9.3, 9.6 | 9.0–9.1, 9.4–9.5, 9.7 |
 
 ### Phase 0 — Current-state analysis and target architecture
 
 No CLI implementation begins until the boundary it will depend on is understood
 and recorded.
 
-**Progress:** Steps 0.1 through 0.7 are complete. The
+**Progress:** Steps 0.1 through 0.8 are complete. The
 [`dependency inventory`](docs/architecture/dependency-inventory.md) records all
 workspace packages, internal Cargo edges, source modules, principal source
 imports, test targets and current build/release targets. The
@@ -1168,14 +1170,15 @@ commit boundary, GUI-library mapping and incremental migration. The
 keep one repository while separating GUI/CLI versions, tags, notes, artifacts
 and workflows, with required shared-layer CI. The
 Phase 0.6 [`naming research`](docs/architecture/naming-decision.md) and rejected
-[ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md) establish why
-Colosseum should not be extended to the CLI and preserve the rejected UCI Rig
-proposal as evidence. The
+[ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md) preserve the
+real collision evidence and rejected UCI Rig proposal. The
 [`integrated review`](docs/architecture/phase-0-review.md) demonstrates complete
 module ownership, consistent dependency/release responsibilities and executable
-owners for every independence invariant; it also normalizes future-facing
-naming to provisional `<name>` / `<name>-cli` tokens. Phase 0.8 is next: select
-and apply the shared GUI/CLI name and complete the Phase-0 exit.
+owners for every independence invariant. Accepted
+[ADR-0008](docs/architecture/adr/0008-use-colosseum-through-implementation.md)
+binds Colosseum, `colosseum-gui` and `colosseum-cli` as the coherent
+implementation identity, rejects speculative rename indirection and moves an
+optional whole-product naming review to Phase 9.0. The Phase-0 exit is passed.
 
 - **(a) Current-state report.** Use `cargo metadata`, `cargo tree` and source
   inspection to write `docs/architecture/current-state.md`: crate/module
@@ -1199,27 +1202,25 @@ and apply the shared GUI/CLI name and complete the Phase-0 exit.
   GUI and CLI packages, distinct tags/artifacts/release notes, and shared-layer
   regression tests. Split repositories only if the written analysis establishes
   a concrete advantage that outweighs cross-repository core coordination.
-- **(d) Naming and migration.** Phase 0.6's collision research rejected
-  extending Colosseum to the CLI; its CLI-only UCI Rig proposal was subsequently
-  rejected before implementation. In Phase 0.8, select the replacement **with
-  the maintainer**, using one distinctive stem: public GUI/product and command
-  `<name>`, public CLI product, package and command `<name>-cli`. Repeat exact
-  web, same-domain, GitHub, crates.io/package-channel and preliminary trademark
-  searches; test spelling and spoken supportability; record rejected options.
-  Define a complete migration matrix for the repository, Cargo packages/crates,
-  binaries, version/tag/artifact/release lanes, installer/application IDs,
-  application/config/data directories, compatibility behavior and docs. The
-  decision must distinguish public names from any internal identifiers retained
-  to reduce migration risk; no surface is renamed implicitly.
+- **(d) Naming and migration.** Phase 0.6 records the genuine Colosseum search
+  and spoken-support risks and the rejected CLI-only UCI Rig proposal. Phase 0.8
+  accepts **Colosseum** / `colosseum` / `colosseum-gui` for the desktop product
+  and **Colosseum CLI** / `colosseum-cli` for the independent CLI throughout
+  implementation. Shared crates keep the `colosseum-*` stem. Do not weaken
+  names or add a speculative rebranding framework: Clean Architecture keeps
+  display, path, installer and packaging policy in outer owners. Phase 9.0 may
+  retain this identity or deliberately rename the whole product after repeating
+  exact web, same-domain, GitHub, package-channel and preliminary trademark
+  checks and defining the complete one-time migration.
 - **(e) Integrated review.** Review current/target architecture, ADRs and release
   design as one contract; demonstrate that every current module has a target
   owner, diagrams agree and each independence invariant has an executable test
   owner. Correct inconsistencies and record evidence before making the naming
   decision final.
-- **EXIT:** the integrated architecture review passes; the shared name and
-  migration contract are accepted in a replacement ADR; dependency and release
-  diagrams use that contract consistently; the independence contract in S4 is
-  testable. Only then may Phase 1/2 code start.
+- **EXIT — PASSED:** the integrated architecture review passes; ADR-0008 binds
+  the implementation identity; dependency and release diagrams use it
+  consistently; every module has a target owner and the independence contract
+  in S4 has an executable test owner. Phase 1/2 code may start.
 
 ### Phase 1 — Pentanomial statistics and normalized Elo (`core`)
 Spec 5.1 plus the fixture corpus (S6.2–S6.4). First because everything reports
@@ -1315,6 +1316,16 @@ kill/resume is identical with deterministic stubs.
 ### Phase 9 — Documentation and release
 The deliverable is a tool any engine developer can pick up.
 
+- **(0) Optional final naming review.** Reassess Colosseum only now that the
+  complete GUI/CLI product can be judged. Either retain the identity and record
+  that decision, or choose one replacement stem and perform the full one-time
+  migration before user documentation and release. A rename covers the
+  repository, Cargo packages/crates, binaries, tags, artifacts, release titles,
+  installer/application IDs, config/data paths and compatibility, updater URLs
+  and documentation. Repeat dated web, same-domain, GitHub, package-channel and
+  preliminary trademark checks. This is a decision gate, not a mandatory
+  rename, and does not justify neutral aliases or branding abstractions in the
+  implementation.
 - **(a) Documentation placement analysis.** Decide where user documentation
   lives: in-repo `docs/` published via a static site, a GitHub wiki, or
   generated command reference plus a handful of guides. Criteria: versioning
@@ -1323,16 +1334,17 @@ The deliverable is a tool any engine developer can pick up.
   whether the command reference can be generated from the argument parser so it
   cannot drift. Record the decision.
 - **(b) Write it.** README stays the front door for the whole project —
-  what the renamed GUI and CLI are, install, links. User documentation covers
+  what Colosseum GUI and Colosseum CLI are (or their Phase 9.0 replacement),
+  install, links. User documentation covers
   the CLI in depth: quickstart, command reference, run-file and tune-file
   reference, worked examples per command, a "how to trust a result" page drawn
   from S3 Tier C, and a compatibility page (what the tool needs from a UCI
   engine, and what it does with non-conforming ones). Explain that engines are
   launched as separate processes and tell users to consult the relevant licence
   terms; do not make a blanket legal conclusion.
-- **(c) Ship.** Per Phase 0(c)'s release model; all supported platforms;
-  repeat and record the Phase 0.8 name's dated
-  web/GitHub/crates.io/package-channel/preliminary-trademark screen;
+- **(c) Ship.** Per Phase 0(c)'s release model; all supported platforms; use
+  the identity accepted at Phase 9.0 and its dated
+  web/GitHub/package-channel/preliminary-trademark screen;
   smoke-test the exact published artifacts (`--version`, `--help`,
   `self-test`, one stub match, and architecture/dependency inspection).
 - **(d) Release-candidate usability exercise.** A **third-party engine pair the maintainers did not
@@ -1357,7 +1369,7 @@ The deliverable is a tool any engine developer can pick up.
 | macOS cannot enforce affinity | Advisory or unavailable, recorded per run; fail only when hard placement was explicitly requested |
 | CLI churn destabilises the released GUI | Phase 0 architecture/release design; independent releases; shared-layer regression suite |
 | Clean Architecture becomes a rewrite | Current-to-target migration map; smallest boundary refactor; retain working runner/UCI logic |
-| Name collision with an existing similar product | Phase 0.8 shared-name contract and migration ADR; dated revalidation before first release |
+| Name collision with an existing similar product | Phase 0.8 accepts coherent Colosseum implementation naming; optional Phase 9.0 revalidation and full one-time migration before release |
 | Scope creep into engine-specific work | S4 boundary, S5.13 decision, S5.14 mechanism-vs-policy test |
 | “No scripts” absorbs project CI/policy | Declarative configs and thin invocations explicitly remain with the engine |
 | SPSA diagnostics are mistaken for proof | Label trajectory signals as heuristics; no automatic continue/abandon decision |

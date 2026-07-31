@@ -19,8 +19,8 @@ to offset that cost.
 ## Decision
 
 Keep the GUI, CLI and shared packages in this repository and Cargo workspace.
-Treat the GUI and CLI product packages as independent products. Their final
-package names follow the Phase 0.8 shared-name migration contract:
+Treat the `colosseum-gui` and `colosseum-cli` product packages as independent
+products under ADR-0008's coherent Colosseum implementation identity:
 
 - each product package declares its own SemVer rather than inheriting a root
   product version;
@@ -35,8 +35,8 @@ package names follow the Phase 0.8 shared-name migration contract:
 
 Historic `v0.1.0` through `v1.0.2` tags/releases remain unchanged and are
 documented as GUI releases. The next GUI release adopts the `gui-v` namespace;
-the first CLI release uses the `cli-v` namespace chosen here. Phase 0.8 fixes
-the public binaries and package mapping without changing these release lanes.
+the first CLI release uses the `cli-v` namespace chosen here. An optional
+Phase 9.0 whole-product rename cannot change these release-lane responsibilities.
 
 GitHub's repository-wide “latest release” is not authoritative for either
 product because the most recently published GUI or CLI release would hide the

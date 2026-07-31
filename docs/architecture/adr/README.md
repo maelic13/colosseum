@@ -15,6 +15,7 @@ decision.
 | [0005](0005-incremental-boundary-migration.md) | Accepted | Migrate by abstraction around the working UCI, runner, SQLite and GUI behavior |
 | [0006](0006-one-repository-independent-product-releases.md) | Accepted | Keep one repository with independently versioned and released GUI/CLI products |
 | [0007](0007-name-the-cli-uci-rig.md) | Rejected | Name the independent CLI UCI Rig |
+| [0008](0008-use-colosseum-through-implementation.md) | Accepted | Use Colosseum consistently through implementation and defer an optional final rebrand |
 
 Phase 0.5's detailed release and CI design is in
 [`release-architecture.md`](../release-architecture.md).
@@ -22,3 +23,5 @@ Phase 0.6's collision research and rejected public-name proposal are in
 [`naming-decision.md`](../naming-decision.md).
 The Phase 0.7 cross-document and module-ownership review is in
 [`phase-0-review.md`](../phase-0-review.md).
+Phase 0.8's implementation identity and optional Phase 9.0 naming gate are in
+[ADR-0008](0008-use-colosseum-through-implementation.md).

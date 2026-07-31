@@ -3,16 +3,33 @@
 This document is the research and application record for GUIDE step 0.6. It
 records the collision evidence and the proposal made at that step. The
 maintainer rejected the CLI-only **UCI Rig** split-brand proposal before any
-implementation. It is historical evidence, not a naming instruction. Phase 0.8
-will select one shared distinctive name with the convention `<name>` for the
-GUI and `<name>-cli` for the CLI, and will replace ADR-0007.
+implementation. It is historical evidence, not a naming instruction.
+[ADR-0008](adr/0008-use-colosseum-through-implementation.md) subsequently bound
+Colosseum and `colosseum-cli` as the coherent implementation identity and
+deferred an optional whole-product review to Phase 9.0.
+
+## Current implementation identity
+
+| Surface | Name |
+|---|---|
+| Project and desktop product | **Colosseum** |
+| Desktop executable / Cargo package | `colosseum` / `colosseum-gui` |
+| CLI product | **Colosseum CLI** |
+| CLI executable / Cargo package | `colosseum-cli` |
+| Shared packages | `colosseum-*` |
+
+This accepts rather than disproves the collision evidence below. The
+maintainer prefers a meaningful, consistent identity during implementation and
+accepts the larger cost of a one-time final rename if Phase 9.0 finds it
+necessary. No neutral naming layer is introduced merely to prepare for that
+possibility.
 
 ## Rejected Phase 0.6 proposal
 
 The released desktop product remains **Colosseum**. The new independent CLI
 product is **UCI Rig**.
 
-| Surface | Binding name |
+| Surface | Rejected proposed name |
 |---|---|
 | Public product/display name | `UCI Rig` |
 | Command on every platform | `ucirig` (`ucirig.exe` on Windows) |
@@ -36,7 +53,7 @@ names. The existing `colosseum` executable remains exclusively the desktop
 GUI, so both products can be installed on one machine without a PATH collision.
 
 ADR-0007 records this proposal as rejected. Do not create this package or
-command. Phase 0.8 owns the replacement public-name and migration contract.
+command. ADR-0008 owns the replacement implementation identity.
 
 ## Evidence snapshot
 
@@ -68,10 +85,11 @@ jurisdiction- and class-specific professional clearance.
 
 ### Retain “Colosseum CLI” and use `colosseum-cli`
 
-Rejected. It avoids the existing GUI command but collides in search with an
-established ColosseumCLI, retains the spoken collision with the separate
-Coliseum chess GUI and inherits a crowded generic mark. An unused crates.io
-spelling is not enough to make the product supportable.
+Initially rejected by the Phase 0.6 proposal, then adopted for implementation
+by ADR-0008. It avoids the existing GUI command but retains the search and
+spoken collision risks documented here. The maintainer judged consistent
+whole-product naming more valuable than a premature split identity and will
+reassess the actual product at Phase 9.0.
 
 ### Retain Colosseum branding and use `colosseum-lab`
 
@@ -95,7 +113,7 @@ products, so they repeat the search problem under a new spelling.
 
 ## Revalidation rule
 
-Phase 0.8 repeats exact web, same-domain, GitHub, crates.io/package-channel and
-preliminary trademark checks for the selected shared-name candidates and
-records the date. Phase 9 revalidates the accepted name before first release.
-No name change or compatibility alias is added silently.
+Phase 9.0 repeats exact web, same-domain, GitHub, planned package-channel and
+preliminary trademark checks and records the date. It either retains Colosseum
+or explicitly performs a complete whole-product migration before documentation
+and release. No name change or compatibility alias is added silently.

@@ -22,9 +22,9 @@ Add one workspace library, `colosseum-application`, as the owner of
 presentation-independent use cases, input/output models, run invariants and
 driven-port traits.
 
-These package names are current/working identifiers. Phase 0.8 may rename them
-as part of the shared product migration without changing the accepted package
-roles or dependency edges.
+ADR-0008 binds these concrete package names through implementation. A possible
+Phase 9.0 whole-product rename may change spelling, but cannot change the
+accepted package roles or dependency edges.
 
 The target package ownership is:
 
@@ -34,8 +34,8 @@ The target package ownership is:
 | `colosseum-application` | Use cases, application models, ports and failure/commit policy |
 | `colosseum-uci` | UCI parsing/process adapter implementing application engine-session ports |
 | `colosseum-engine` | Headless runner, execution, persistence, artifact, input, topology and affinity adapters |
-| CLI product package (`<name>-cli`) | Command adapter and CLI composition root |
-| GUI product package (currently `colosseum-gui`) | Desktop adapter, GUI-owned persistence models and GUI composition root |
+| `colosseum-cli` | Command adapter and CLI composition root |
+| `colosseum-gui` | Desktop adapter, GUI-owned persistence models and GUI composition root |
 
 Allowed workspace dependency edges are:
 

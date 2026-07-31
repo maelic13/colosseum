@@ -11,11 +11,10 @@ and verifies the final publication workflows. Until those steps land,
 [`docs/DEVELOPMENT.md`](../DEVELOPMENT.md) remains the authority for the current
 GUI-only release process.
 
-Public-name tokens in this target design are intentionally provisional until
-Phase 0.8: `<name>` is the shared product stem and GUI executable; `<name>-cli`
-is the CLI product, package and executable. The Phase 0.8 migration matrix
-decides the GUI Cargo package and internal shared-crate spellings rather than
-letting release architecture rename them implicitly.
+ADR-0008 binds **Colosseum** / `colosseum` / `colosseum-gui` for the desktop
+lane and **Colosseum CLI** / `colosseum-cli` for the CLI lane throughout
+implementation. Phase 9.0 may retain that identity or explicitly migrate the
+whole product; release architecture never renames a surface implicitly.
 
 ## Current baseline and decision
 
@@ -30,10 +29,10 @@ The target keeps one repository and creates two product lanes:
 
 | Concern | GUI lane | CLI lane |
 |---|---|---|
-| Cargo product package | GUI product package (Phase 0.8 mapping) | `<name>-cli` |
+| Cargo product package | `colosseum-gui` | `colosseum-cli` |
 | Version authority | explicit package `version` | explicit package `version` |
 | Tag | `gui-v<semver>` | `cli-v<semver>` |
-| GitHub Release title | `<name> <semver>` | `<name>-cli <semver>` |
+| GitHub Release title | `Colosseum <semver>` | `Colosseum CLI <semver>` |
 | Release notes | GUI changelog section | CLI changelog section |
 | Workflow | `.github/workflows/release-gui.yml` | `.github/workflows/release-cli.yml` |
 | Artifacts | desktop archives/installers | headless binary archives |
@@ -48,8 +47,8 @@ trigger one another.
 
 ### Product packages
 
-The GUI product package and `<name>-cli` own independent SemVer values in their
-package manifests. The root workspace no longer supplies a product version.
+The `colosseum-gui` and `colosseum-cli` packages own independent SemVer values
+in their package manifests. The root workspace no longer supplies a product version.
 The GUI retains `1.0.2` when the manifests are decoupled; the CLI selects its
 initial version when its package is added.
 
@@ -68,8 +67,9 @@ Cargo versions as required by Cargo, but those versions:
 
 Product packages and currently internal shared packages declare their intended
 registry publishing policy explicitly rather than accidentally becoming
-publishable. Phase 0.8 checks and selects the package names; Phase 9 rechecks
-them before release. V1 binary distribution does not require a registry
+publishable. `colosseum-cli` starts with `publish = false`; Phase 9.0/9.4 may
+change that only after an explicit registry-distribution decision and package
+availability check. V1 binary distribution does not require registry
 publication.
 
 ### Version validation
@@ -163,9 +163,9 @@ Artifact basenames contain product, full version, OS and architecture. They do
 not use raw tag strings, so tag-prefix punctuation cannot create invalid paths.
 Every release includes a `SHA256SUMS` file covering every uploaded asset.
 
-Phase 0.8 fixes public binary/artifact basenames from the shared `<name>` stem.
-The internal product lanes and `gui-v`/`cli-v` tag namespaces remain stable as
-decided in ADR-0006, independent of branding.
+Public binary/artifact basenames use the concrete Colosseum identity. The
+internal product lanes and `gui-v`/`cli-v` tag namespaces remain stable as
+decided in ADR-0006, including after an optional Phase 9.0 rebrand.
 
 ### GUI artifacts
 
@@ -179,7 +179,7 @@ The stable GUI lane preserves the existing supported package set:
 | Arch Linux x64 | native Arch container | `.pkg.tar.zst` |
 | macOS ARM64 | `aarch64-apple-darwin` | tar.gz, DMG containing `.app` |
 
-Names follow `<name>-<version>-<os>-<arch>.<format>`. GUI archives and
+Names follow `colosseum-<version>-<os>-<arch>.<format>`. GUI archives and
 installers contain only GUI runtime/assets, licence and applicable user
 documentation. Existing desktop IDs, WiX upgrade identity and macOS bundle
 identity remain GUI-owned and are never reused for CLI installation.
@@ -197,12 +197,12 @@ release target:
 
 | Platform | Target | Required asset |
 |---|---|---|
-| Windows x64 | `x86_64-pc-windows-msvc` | ZIP containing `<name>-cli.exe` |
-| Windows ARM64 | `aarch64-pc-windows-msvc` | ZIP containing `<name>-cli.exe` |
-| Linux x64 | `x86_64-unknown-linux-gnu` | tar.gz containing `<name>-cli` |
-| macOS ARM64 | `aarch64-apple-darwin` | tar.gz containing `<name>-cli` |
+| Windows x64 | `x86_64-pc-windows-msvc` | ZIP containing `colosseum-cli.exe` |
+| Windows ARM64 | `aarch64-pc-windows-msvc` | ZIP containing `colosseum-cli.exe` |
+| Linux x64 | `x86_64-unknown-linux-gnu` | tar.gz containing `colosseum-cli` |
+| macOS ARM64 | `aarch64-apple-darwin` | tar.gz containing `colosseum-cli` |
 
-Names follow `<name>-cli-<version>-<os>-<arch>.<format>`. The archive contains
+Names follow `colosseum-cli-<version>-<os>-<arch>.<format>`. The archive contains
 the binary, licence and version-matched CLI documentation needed for offline
 use. It contains no GUI executable, icons, desktop entry, installer metadata,
 engine, book, language runtime or writable installation data. Linux package
@@ -336,8 +336,8 @@ before attachment.
 | Current surface | Target action | Delivery step |
 |---|---|---|
 | Root `[workspace.package].version = 1.0.2` inherited by all crates | Give GUI/CLI explicit product versions; give internal crates explicit non-product versions; remove root product authority | 2.2 |
-| Current `colosseum-gui` package/binary `colosseum` | Apply the Phase 0.8 GUI package/binary mapping and retain GUI-specific version lookup | 0.8, then 2.2/9.4 |
-| No CLI package/binary | Add independently versioned `<name>-cli` package/composition root and binary | 2.2 |
+| Current `colosseum-gui` package/binary `colosseum` | Preserve the identity and give it GUI-specific version lookup | 2.2/9.4 |
+| No CLI package/binary | Add independently versioned `colosseum-cli` package/composition root and binary | 2.2 |
 | `.github/workflows/release.yml` on published unscoped release | Replace with required `ci.yml`, `release-gui.yml` and `release-cli.yml`; tag push validates before publication | 2.2 baseline, 9.4 publication |
 | Global `contents: write` | Limit write permission to final publish jobs | 9.4 |
 | Raw `github.ref_name` parsed repeatedly in shell | Use one tested internal Rust release-metadata command | 2.2/9.4 |
@@ -371,6 +371,7 @@ This design assigns every current version/build/release/documentation surface,
 defines independent product versions/tags/notes/artifacts, specifies required
 shared-layer debug/release CI on all supported operating systems, and makes the
 published CLI artifact's headless behavior testable. ADR-0006 records why the
-repository remains unified. Phase 0.7 reviews the combined contract; Phase 0.8
-supplies and applies the shared public-name mapping without reopening the
-product-lane or release-independence decisions.
+repository remains unified. Phase 0.7 reviews the combined contract; ADR-0008
+supplies the concrete Colosseum mapping without reopening the product-lane or
+release-independence decisions. Phase 9.0 may reassess the identity once, but
+cannot merge those lanes.

@@ -14,12 +14,13 @@ project-specific conventions. Every current Rust source module and
 consequential public boundary has one target owner, the dependency and release
 designs agree, and every independence invariant has an executable test owner.
 
-Phase 0 has **not exited**. The accepted architecture is brand-independent, but
-the rejected Phase 0.6 split-brand decision left the future package, command,
-artifact and path names inconsistent. The review corrected those references to
-`<name>` / `<name>-cli`. Phase 0.8 must select the shared name with the
-maintainer, apply its migration matrix and replace ADR-0007 before Phase 1 or 2
-implementation starts.
+At the end of step 0.7, Phase 0 had **not exited** because public/package naming
+was unresolved. Phase 0.8 subsequently resolved that blocker in
+[ADR-0008](adr/0008-use-colosseum-through-implementation.md): implementation
+uses Colosseum, `colosseum-gui` and `colosseum-cli` consistently, with an
+optional whole-product reconsideration at Phase 9.0. The architecture remains
+the authority for responsibility placement and does not add speculative rename
+indirection. Phase 0 has now exited and Phase 1 may begin.
 
 ## Evidence reproduced
 
@@ -42,8 +43,7 @@ colosseum-gui    -> colosseum-core, colosseum-engine
 
 This matches the current-state and dependency-inventory diagrams. The source
 graph has not changed during the documentation-only Phase 0 work; package and
-module names in those two baseline documents therefore remain factual even
-though Phase 0.8 will decide their migration.
+module names in those two baseline documents therefore remain factual.
 
 The source-file stems under each `crates/*/src` directory were compared with
 the exact per-package tables under “Current-module migration map” in
@@ -103,21 +103,21 @@ Release architecture remains one repository with two release lanes. That is
 independent functionality, not separate source ownership: GUI and CLI have
 independent versions, tags, changelogs, artifacts, workflows and smoke tests,
 while shared changes are atomic and exercise both products. Historic unscoped
-GUI releases remain immutable. Phase 0.8 supplies only the public/package
+GUI releases remain immutable. ADR-0008 supplies the Colosseum public/package
 mapping; it does not change the `gui-v` / `cli-v` lane identities.
 
 ## Corrections made by this review
 
 | Finding | Correction |
 |---|---|
-| Rejected `UCI Rig` / `ucirig` remained binding in future architecture, commands and releases | Future-facing documents now use role names and `<name>` / `<name>-cli`; UCI Rig remains only in its explicitly rejected research/ADR record |
-| GUI and CLI naming work was conflated with the architecture exit | Step 0.7 is the integrated review; new step 0.8 owns the shared-name decision, migration and Phase 0 exit |
-| Default run directory still embedded the old product name | Contract now uses provisional `./<name>-runs/`, resolved by 0.8 |
-| RNG domain-separation text embedded the old brand | The unimplemented version-1 contract now uses stable, brand-neutral `chess-harness-rng-v1\0` |
+| Rejected `UCI Rig` / `ucirig` remained binding in future architecture, commands and releases | Step 0.7 first removed it from binding surfaces; ADR-0008 then applies Colosseum / `colosseum-cli` consistently while UCI Rig remains only in its rejected research/ADR record |
+| GUI and CLI naming work was conflated with the architecture exit | Step 0.7 is the integrated review; step 0.8 owns the coherent implementation identity, deferred final decision and Phase 0 exit |
+| Default run directory still embedded an unresolved product token | ADR-0008 resolves the contract to `./colosseum-runs/` |
+| RNG domain separation needed one binding version-1 namespace | Step 0.7 temporarily used a neutral token; ADR-0008 resolves the still-unimplemented contract to `colosseum-rng-v1\0`, which a later rename must preserve for compatibility or replace through an explicit version change |
 | Phase 2.2 did not visibly own the CI/release foundation assigned to it by the release design | PLAN and GUIDE now require separate version/changelog lanes and required shared-workspace push/PR CI in 2.2; final publication remains 9.4 |
 | Rejected ADR-0007 still used imperative consequence language | It is now explicitly a rejected decision with proposed, unapplied consequences |
+| Provisional tokens made the accepted architecture deliberately bland | Phase 0.8 replaces them with concrete Colosseum package, command, artifact and path names; Clean Architecture, not naming indirection, bounds a possible final rename |
 
-No Rust source, persisted format or released artifact was changed in step 0.7.
-The next architecture-affecting edit is the reviewed Phase 0.8 rename matrix;
-after that, implementation can begin without an unresolved public identity or
-an accidental GUI/CLI dependency.
+No Rust source, persisted format or released artifact was changed in steps 0.7
+or 0.8. ADR-0008 completes the reviewed contract, so implementation can begin
+without an unresolved public identity or an accidental GUI/CLI dependency.
