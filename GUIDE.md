@@ -186,11 +186,17 @@ model as well.
   names, malformed values and ambiguous/unsafe core lists are rejected — evidence:
   [`crates/colosseum-cli/src/engine_args.rs`](crates/colosseum-cli/src/engine_args.rs),
   [`docs/cli/engine-controls.md`](docs/cli/engine-controls.md)
-- ☐ **2.4** — **Model: Sol High.** Resolution order is built-in defaults < committed run TOML (with its
-  `extend` chain) < CLI; write the fully resolved JSON/config hash. Run
-  files use one parent, maximum depth 16, canonical cycle detection,
-  recursive table merge, scalar/whole-array replacement and RFC 6901
-  `unset`; preserve each file's path origin and name bad chains/pointers
+- ☑ **2.4 — DONE** — **Model: Sol High.** Implement deterministic resolution as
+  built-in defaults < inherited run TOML < CLI. One-parent chains resolve
+  relative to each declaring file, stop at depth 16 and reject canonical cycles;
+  tables merge recursively, scalars/arrays replace, and per-layer RFC 6901
+  `unset` is strict. Leaf origins survive inheritance, declared path fields are
+  canonicalized, and exact stable JSON bytes plus SHA-256 and origin sidecars are
+  written. Fixtures cover flattened/all-CLI byte identity and malformed chains,
+  pointers, arrays and Windows path aliases — evidence:
+  [`crates/colosseum-cli/src/config.rs`](crates/colosseum-cli/src/config.rs),
+  [`crates/colosseum-cli/tests/config_resolution.rs`](crates/colosseum-cli/tests/config_resolution.rs),
+  [`docs/cli/run-files.md`](docs/cli/run-files.md)
 - ☐ **2.4a** — **Model: Sol High.** One master seed derives an independent stream per consumer **by
   stream name**, not by draw order, so adding a consumer cannot shift an
   existing stream. Pin PLAN §5.0's u64/SHA-256/ChaCha12 contract, sampling

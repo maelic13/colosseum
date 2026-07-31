@@ -1315,6 +1315,15 @@ descending, repeated or excessive CPU ranges are errors. Command-specific
 composition in later steps reuses this parser rather than introducing an engine
 descriptor.
 
+**Implemented configuration resolver (2.4):** generic CLI adapter code applies
+each inherited file's RFC 6901 `unset` to its resolved parent before recursively
+merging that file, then applies command-line clearing/overrides. Canonical file
+identities, a 16-file bound and chain-rich errors cover inheritance; every leaf
+retains built-in/file/CLI origin. Command schemas enumerate their path pointers,
+which are normalized relative to those origins before stable-key JSON is hashed
+and written with an origin sidecar. Inherited/flattened and run-file/all-CLI
+fixtures are byte- and hash-identical, including Windows path-alias handling.
+
 **Exit:** two arbitrary UCI executables pass path-only workflows; run-file
 inheritance/clearing/path origins resolve identically to equivalent all-CLI or
 flattened input; seed golden vectors reproduce across platforms; durable and
