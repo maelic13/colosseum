@@ -1089,6 +1089,43 @@ supported.
 
 ## S8. Implementation plan
 
+### Model routing for numbered steps
+
+This table is the default model assignment for each numbered `GUIDE.md` step.
+It is a task-risk classification, not part of the product contract:
+
+- **Terra High** — the design is settled and the work is bounded by explicit
+  invariants, fixtures and an exit criterion.
+- **Sol High** — the step creates architecture or policy, combines several
+  failure domains, or owns mathematical, concurrency, durability or
+  cross-platform correctness.
+
+Use the assigned model when starting a step. If Terra discovers a material
+design choice not resolved by this plan, stop that step and continue it with
+Sol High rather than improvising the missing contract. If Sol High cannot
+resolve a genuinely frontier problem after inspecting the code and evidence,
+raising its effort is an explicit exception, not the default. `Ultra` is not a
+substitute for `Max`: use it only when the work can be divided into independent
+subtasks. Model names are workflow metadata and may be revised as the available
+lineup changes; tests, fixtures and phase exits remain the authority.
+
+Every identifier is covered below; ranges are inclusive.
+
+| Phase | Terra High | Sol High |
+|---|---|---|
+| 0 | 0.1, 0.6 | 0.2–0.5, 0.7 |
+| 1 | 1.1, 1.5–1.8 | 1.2–1.4, 1.9 |
+| 2 | 2.2–2.3, 2.5–2.6, 2.9 | 2.1, 2.4, 2.4a, 2.7–2.8, 2.10 |
+| 3 | 3.2, 3.4, 3.6–3.7 | 3.1, 3.3, 3.5, 3.8 |
+| 4A | 4A.1, 4A.3, 4A.6–4A.7 | 4A.2, 4A.2a, 4A.4–4A.5, 4A.8 |
+| 4B | 4B.1, 4B.4 | 4B.2–4B.3, 4B.5–4B.6 |
+| 4C | 4C.1–4C.2 | 4C.3 |
+| 5 | 5.3–5.4, 5.6, 5.8–5.9 | 5.1–5.2, 5.5, 5.7, 5.10 |
+| 6 | 6.4–6.5, 6.7–6.8 | 6.1–6.3, 6.6, 6.9 |
+| 7 | 7.1 | 7.2–7.3 |
+| 8 | — | 8.1–8.3 |
+| 9 | 9.2–9.3, 9.6 | 9.1, 9.4–9.5, 9.7 |
+
 ### Phase 0 — Current-state analysis and target architecture
 
 No CLI implementation begins until the boundary it will depend on is understood

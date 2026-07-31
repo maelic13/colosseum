@@ -26,6 +26,12 @@ specification; `GUIDE.md` is the ordered implementation tracker.
 
 One numbered `GUIDE.md` item is the normal unit of work.
 
+Use the per-step model assignment in `PLAN.md` §S8, mirrored on the numbered
+`GUIDE.md` item. When asked what comes next, state both the step and its
+recommended model/effort. If a Terra step exposes a material design choice not
+settled by the plan, stop and continue it with Sol High rather than inventing
+the contract. Keep model-label changes synchronized between PLAN and GUIDE.
+
 1. Start from a clean worktree, or identify and preserve pre-existing user
    changes. Never stage unrelated files.
 2. Implement the step, its tests, documentation, migrations, and generated
