@@ -132,6 +132,13 @@ list is deliberately short, and additions need a stated failure mode.
 - **A8. Every sequential run has a finite pair cap**, supplied explicitly or by
   a documented default. Reaching it is an inconclusive result, never an
   implicit H0.
+- **A9. The clock accounting model is explicit, versioned and recorded**
+  (S5.4a). Two harnesses that charge time differently produce different Elo for
+  the same engines and neither is wrong; the number is only interpretable
+  alongside the model that produced it.
+- **A10. One master seed governs every random choice**, and the run record
+  carries it (S5.0). A run that cannot be reproduced from its own record is not
+  a measurement.
 
 ### Tier B — Defaults. Shipped with a reason, changeable by anyone.
 
@@ -178,8 +185,17 @@ portable, reviewable and does not depend on hidden per-user state. Resolution
 order:
 
 ```text
-built-in defaults  <  run file  <  command line
+built-in defaults  <  run file (with its inherited chain)  <  command line
 ```
+
+**Run files compose.** A run file may `extend` another by relative path, so a
+project's shared conditions live in one file and each workflow — gate, long-time
+confirmation, calibration, tune, tournament, speed — overrides only what differs.
+Without this, a project with six workflows keeps six copies of the same ten
+settings and they drift apart, which is the failure mode this plan works hardest
+to prevent everywhere else. Resolution is depth-first with the extending file
+winning; an inheritance cycle is an error; the **fully resolved** configuration
+is what gets hashed, recorded and compared on resume.
 
 ### Tier C — Recommended. Documentation only, zero code impact.
 
@@ -359,7 +375,19 @@ right" is not a criterion.
   returning a legal `bestmove`, `stop` honoured promptly, clean shutdown, and
   behaviour on `ucinewgame`. UCI has no option read-back, so this is explicitly
   not called a round trip. Exit code reflects the outcome.
-- Run file and CLI arguments resolve per S3 Tier B.
+- Run file and CLI arguments resolve per S3 Tier B, including `extend`
+  inheritance. Cycles and unreadable parents are errors naming the file chain.
+- **One master seed, many named sub-streams.** A single `--seed` (generated and
+  recorded when not supplied) deterministically derives an independent stream per
+  consumer — opening order, SPSA perturbations, bootstrap resampling, position
+  order, warm-up scheduling — by a documented derivation from the master seed and
+  the stream's **name**, never by sequential draws from one shared generator.
+  The names, the derivation and the generator algorithm are part of
+  `stats_version` and are recorded.
+  Deriving by name rather than by draw order is what makes the streams
+  independent: adding a new random consumer, or changing how many values an
+  existing one takes, cannot shift any other stream — so a later feature cannot
+  silently change what an old seed reproduces.
 - `--dry-run` prints the fully resolved configuration and the exact engine
   invocations without playing a game.
 - In machine-readable mode stdout contains one documented JSON value only;
@@ -373,6 +401,12 @@ right" is not a criterion.
   paths and CLI arguments only.
 - The same run launched from a run file plus overrides resolves to
   byte-identical JSON as the equivalent all-CLI invocation.
+- An `extend` chain resolves to byte-identical JSON as the equivalent flattened
+  single file; a cycle is rejected with the chain named.
+- The same master seed and configuration reproduce every sub-stream exactly, on
+  every platform. Adding a consumer of a *new* stream leaves all existing streams
+  bit-identical — asserted by a test, because this is the property that makes an
+  old seed still mean something after the tool gains features.
 - Adding a new conforming engine requires no file in the engine's repository and
   no Rust code.
 
@@ -485,6 +519,7 @@ deterministic tests.
   increment, fixed nodes, fixed depth — plus a configurable time margin so
   scheduler jitter is not counted as a loss on time. Asymmetric controls are
   supported (odds matches, "same engine at double time").
+- **Clock accounting per S5.4a**, explicit and recorded.
 - **Adjudication:** draw, resign and max-moves each individually configurable and
   each individually **disableable**. Arbitrary engine tablebase UCI options may
   be forwarded; harness-side tablebase adjudication is deferred to Phase 8
@@ -533,6 +568,53 @@ deterministic tests.
 - Killing mid-run and resuming yields the same final statistics as an
   uninterrupted deterministic-stub run at the same seed; an incomplete pair is
   resumed without entering the official sample early.
+
+#### 5.4a Clock accounting — explicit, versioned, recorded
+
+**Why this is specified rather than left to the implementation.** A harness
+decides where the boundary of "the engine's time" lies, and reasonable
+implementations differ: whether the clock starts when the position is sent or
+when `go` is written, whether the harness's own write and read latency is
+charged to the mover, and whether increment is credited before or after the
+move's cost is deducted. Those choices are individually defensible and
+collectively worth real Elo — engines expose a move-overhead option precisely to
+compensate for a model they cannot observe. Two harnesses with different models
+produce different Elo for the same pair of engines, and neither is wrong. The
+number is therefore only interpretable next to the model, which is why A9 makes
+recording it non-negotiable and why the parity gate (Phase 4B) would otherwise
+report an unattributable divergence.
+
+**The model**
+
+- The mover's clock starts when the harness finishes writing `go` and stops when
+  the harness finishes reading `bestmove`. Everything in between is charged to
+  the mover, including its own search start-up and the harness's read latency.
+- Time spent preparing and sending `position` before `go` is **not** charged.
+- The clock is read from a monotonic source, never wall-clock time of day, so a
+  system time change cannot alter a result.
+- Increment is credited **after** the move's elapsed time is deducted; a move
+  that exhausts the remaining time is a loss even if the increment would have
+  covered it. State it because the other order is a real convention and changes
+  behaviour at the boundary.
+- The **time margin is a forfeit tolerance only.** It never adds to the engine's
+  budget and is never visible to the engine — it only prevents a marginal
+  overrun from being scored as a loss. A margin that extended the budget would
+  change how the engine plays, which is a different experiment.
+- When pondering is disabled, no time is charged to a side that is not to move.
+- Each run records the model identifier and version, the margin, and a summary
+  of the **observed harness-side overhead** (min / median / max of the interval
+  the harness itself contributes), so a user can size their engine's move
+  overhead from evidence rather than folklore.
+
+**Success criteria**
+
+- A stub engine that sleeps a commanded duration is charged that duration within
+  a stated tolerance, on every platform.
+- A stub overrunning by less than the margin is not forfeited; one overrunning by
+  more is, and the forfeit is attributed to the correct side.
+- A run whose system clock is changed mid-game produces an unchanged result.
+- Increment ordering has a fixture at the exhaustion boundary.
+- The recorded overhead summary is present and non-empty for every completed run.
 
 ### 5.5 SPSA — `colosseum-cli spsa` + `colosseum-core` schedule
 
@@ -706,10 +788,12 @@ Generated JSON per run: both engines' canonical path, SHA-256, UCI identity,
 arguments, working directory and effective options; harness version and build;
 **`schema_version` and `stats_version`**; host summary (OS, CPU model, physical
 and logical core counts, allowed CPU set, core class/NUMA where known); optional
-book path and hash; seed; resolved affinity and capability mode; time control;
-adjudication settings; concurrency; resolved configuration hash; full command
-line; UTC start/end; official terminal sample, outcome, statistics and anomaly
-counts.
+book path and hash; **master seed and the named sub-streams derived from it**;
+resolved affinity and capability mode; time control; **clock model identifier,
+version, margin and observed harness-overhead summary** (S5.4a); adjudication
+settings; concurrency; the resolved configuration hash **and the `extend` chain
+that produced it**; full command line; UTC start/end; official terminal sample,
+outcome, statistics and anomaly counts.
 
 **Versioning policy.** `schema_version` changes when the record's shape changes;
 `stats_version` changes when any reported statistic changes definition. Both are

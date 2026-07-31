@@ -98,8 +98,14 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
       `--version`/`--help`; no GUI/windowing dependency
 - [ ] 2.3 Direct engine controls: executable, optional label, arguments, cwd,
       environment, arbitrary UCI options and allocated cores
-- [ ] 2.4 Resolution order is built-in defaults < committed run TOML < CLI;
-      write the fully resolved JSON/config hash
+- [ ] 2.4 Resolution order is built-in defaults < committed run TOML (with its
+      `extend` chain) < CLI; write the fully resolved JSON/config hash. Run
+      files compose by relative-path `extend`, depth-first with the extending
+      file winning; cycles are an error naming the chain
+- [ ] 2.4a One master seed derives an independent stream per consumer **by
+      stream name**, not by draw order, so adding a consumer cannot shift an
+      existing stream. Generated and recorded when not supplied; names,
+      derivation and generator algorithm belong to `stats_version`
 - [ ] 2.5 `engine inspect`; `engine check` reports handshake, synchronisation,
       schema validation, option acceptance/no-failure, legal bounded search,
       stop/new-game/quit. Do not claim UCI option read-back
@@ -114,9 +120,12 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
       schema/stats versions, official sample, host/capability summary and
       anomalies for every run, including aborted ones
 - [ ] 2.10 **EXIT** — two arbitrary UCI executables pass path-only checks;
-      run-file/all-CLI resolution is identical; durable/status suites and
-      published-style headless `self-test` pass; architecture tests prove no
-      GUI dependency/data access; GUI suite remains green
+      run-file/all-CLI resolution is identical and an `extend` chain resolves
+      byte-identically to a flattened file; the same master seed reproduces
+      every sub-stream on every platform and a new consumer leaves existing
+      streams bit-identical; durable/status suites and published-style headless
+      `self-test` pass; architecture tests prove no GUI dependency/data access;
+      GUI suite remains green
 
 ### Phase 3 — CPU topology and affinity
 
@@ -144,6 +153,13 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
       different options allowed
 - [ ] 4A.2 Time controls per side: movetime, sudden death, base+increment,
       fixed nodes/depth and configurable time margin
+- [ ] 4A.2a **Clock accounting (PLAN §5.4a), explicit/versioned/recorded**:
+      clock runs from finishing the write of `go` to finishing the read of
+      `bestmove`, charging harness read latency and engine start-up to the
+      mover; `position` setup is not charged; monotonic source only; increment
+      credited AFTER the move's cost; the margin is a forfeit tolerance that
+      never extends the budget nor is visible to the engine; record the model
+      id/version, margin and observed harness-overhead min/median/max
 - [ ] 4A.3 Draw/resign/max-moves adjudication independently configurable and
       disableable; forward engine tablebase options but defer harness probing
 - [ ] 4A.4 Separate engine from infrastructure faults. Strict default: engine
@@ -158,7 +174,11 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
       JSON-only stdout mode and documented exit codes
 - [ ] 4A.8 **EXIT** — path-only/no-book and paired-book matches pass; fault
       injection never scores infrastructure failures; output/resume/schedule
-      tests pass
+      tests pass; a stub sleeping a commanded duration is charged it within
+      tolerance on every platform, a sub-margin overrun is not forfeited while a
+      super-margin one is and is attributed correctly, a mid-game system-clock
+      change does not alter the result, and the increment-exhaustion boundary
+      has a fixture
 
 ### Phase 4B — Pair-atomic SPRT and parity
 
