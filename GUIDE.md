@@ -18,8 +18,8 @@ numbers, internal naming or method argumentation.
 | What is missing | The Phase 2 boundary migration and independent CLI composition root; CPU affinity, match/SPRT workflows, SPSA, durable runs, run records and trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 2.4 — layered configuration resolution** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Next step | **Phase 2.5 — engine inspect/check** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -197,11 +197,16 @@ model as well.
   [`crates/colosseum-cli/src/config.rs`](crates/colosseum-cli/src/config.rs),
   [`crates/colosseum-cli/tests/config_resolution.rs`](crates/colosseum-cli/tests/config_resolution.rs),
   [`docs/cli/run-files.md`](docs/cli/run-files.md)
-- ☐ **2.4a** — **Model: Sol High.** One master seed derives an independent stream per consumer **by
-  stream name**, not by draw order, so adding a consumer cannot shift an
-  existing stream. Pin PLAN §5.0's u64/SHA-256/ChaCha12 contract, sampling
-  algorithms and golden vectors. Generate and record the seed when absent;
-  derivation changes require a `stats_version` change
+- ☑ **2.4a — DONE** — **Model: Sol High.** Implement the exact u64/SHA-256
+  named-stream derivation and explicit ChaCha12 generator, little-endian draws,
+  rejection-bounded integers, Fisher–Yates shuffle, Rademacher signs and
+  bootstrap sampling. Stable consumer names and independent-stream properties
+  have golden vectors. A supplied seed is retained; otherwise OS entropy creates
+  and inserts it before resolved-config hashing/writing. RNG version is bound to
+  the built-in `stats_version` — evidence:
+  [`crates/colosseum-core/src/rng.rs`](crates/colosseum-core/src/rng.rs),
+  [`crates/colosseum-cli/src/master_seed.rs`](crates/colosseum-cli/src/master_seed.rs),
+  [`docs/cli/randomness.md`](docs/cli/randomness.md)
 - ☐ **2.5** — **Model: Terra High.** `engine inspect`; `engine check` reports handshake, synchronisation,
   schema validation, option acceptance/no-failure, legal bounded search,
   stop/new-game/quit. Do not claim UCI option read-back

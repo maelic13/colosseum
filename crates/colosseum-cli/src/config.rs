@@ -17,6 +17,7 @@ pub enum ValueOrigin {
     BuiltIn,
     RunFile { file: PathBuf },
     CommandLine { directory: PathBuf },
+    Generated,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +71,28 @@ impl ResolvedConfig {
         let origins = serde_json::to_vec(&self.origins).expect("origins are serializable");
         write(&directory.join("config-origins.json"), &origins)
     }
+
+    pub(crate) fn seed(&self) -> Option<&Value> {
+        self.value.get("seed")
+    }
+
+    pub(crate) fn insert_generated_seed(&mut self, seed: u64) -> Result<(), ConfigError> {
+        let table = self
+            .value
+            .as_object_mut()
+            .ok_or(ConfigError::ResolvedRootNotObject)?;
+        table.insert("seed".into(), Value::from(seed));
+        self.origins.insert("/seed".into(), ValueOrigin::Generated);
+        self.rebuild_identity();
+        Ok(())
+    }
+
+    fn rebuild_identity(&mut self) {
+        sort_value(&mut self.value);
+        self.canonical_json =
+            serde_json::to_vec(&self.value).expect("JSON value serialization cannot fail");
+        self.sha256 = hex(&Sha256::digest(&self.canonical_json));
+    }
 }
 
 #[derive(Debug, Error)]
@@ -116,6 +139,10 @@ pub enum ConfigError {
     MissingOrigin(String),
     #[error("relative built-in path {0} has no filesystem origin")]
     RelativeBuiltInPath(String),
+    #[error("relative generated path {0} has no filesystem origin")]
+    RelativeGeneratedPath(String),
+    #[error("resolved configuration root must be an object")]
+    ResolvedRootNotObject,
     #[error("could not canonicalize invocation directory {path}: {source}")]
     InvocationDirectory {
         path: PathBuf,
@@ -154,7 +181,7 @@ struct FileLayer {
 pub fn built_in_defaults() -> Value {
     json!({
         "schema_version": 1,
-        "stats_version": 1
+        "stats_version": colosseum_core::rng::RNG_VERSION
     })
 }
 
@@ -256,6 +283,9 @@ fn resolved_path(
             Some(ValueOrigin::CommandLine { directory }) => directory.join(path),
             Some(ValueOrigin::BuiltIn) => {
                 return Err(ConfigError::RelativeBuiltInPath(pointer.to_owned()));
+            }
+            Some(ValueOrigin::Generated) => {
+                return Err(ConfigError::RelativeGeneratedPath(pointer.to_owned()));
             }
             None => return Err(ConfigError::MissingOrigin(pointer.to_owned())),
         }

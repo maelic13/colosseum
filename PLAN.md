@@ -1324,6 +1324,16 @@ which are normalized relative to those origins before stable-key JSON is hashed
 and written with an origin sidecar. Inherited/flattened and run-file/all-CLI
 fixtures are byte- and hash-identical, including Windows path-alias handling.
 
+**Implemented master-seed contract (2.4a):** the domain derives each stable
+ASCII stream name with the specified SHA-256 label/master-seed/name byte
+sequence and runs an explicit ChaCha12 stream at counter/stream zero. Version-1
+sampling defines little-endian u64 reads, rejection-bounded integers, descending
+Fisher–Yates, Rademacher mapping and bootstrap-with-replacement. Independent
+Python-reference-derived vectors pin all built-in names, raw bytes and sampling
+outputs. The CLI retains a configured u64 or obtains OS entropy, inserts the
+generated seed before hashing/writing and exposes the resolved value through the
+application seed port. Built-in `stats_version` is tied to `RNG_VERSION`.
+
 **Exit:** two arbitrary UCI executables pass path-only workflows; run-file
 inheritance/clearing/path origins resolve identically to equivalent all-CLI or
 flattened input; seed golden vectors reproduce across platforms; durable and

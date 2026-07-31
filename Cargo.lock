@@ -782,9 +782,11 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "colosseum-application",
+ "colosseum-core",
  "colosseum-engine",
  "colosseum-uci",
  "dunce",
+ "getrandom 0.3.4",
  "serde",
  "serde_json",
  "sha2",
@@ -798,6 +800,7 @@ name = "colosseum-core"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "sha2",
  "thiserror 2.0.18",
  "toml",
  "uuid",
