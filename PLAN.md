@@ -439,6 +439,10 @@ right" is not a criterion.
   invocations without playing a game.
 - In machine-readable mode stdout contains one documented JSON value only;
   progress and diagnostics go to stderr.
+- Implemented CLI output represents exact process invocations as an executable
+  plus argument vector, working directory and environment rather than a
+  platform-dependent shell string. `--dry-run` resolves paths and configuration
+  identity but does not require the executable to exist or launch it.
 - `self-test` launches an internal deterministic UCI stub mode from the same
   executable and checks process, protocol, persistence and one short match.
 - Engine processes run in an owned OS containment mechanism where available

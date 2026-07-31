@@ -64,3 +64,57 @@ fn inspect_launch_failure_is_nonzero_and_diagnostic() {
             .contains("engine inspect failed")
     );
 }
+
+#[test]
+fn dry_run_resolves_a_missing_engine_without_launching_it() {
+    let root = tempfile::tempdir().unwrap();
+    let missing = root.path().join("missing-uci-engine");
+    let output = cli()
+        .args(["--json", "engine", "inspect", "--dry-run"])
+        .arg(&missing)
+        .args([
+            "--engine-arg=--uci",
+            "--env",
+            "MODE=test",
+            "--option",
+            "Hash=32",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["type"], "dry-run");
+    assert_eq!(value["command"], "engine-inspect");
+    assert_eq!(value["invocations"][0]["arguments"][0], "--uci");
+    assert_eq!(value["invocations"][0]["environment"]["MODE"], "test");
+    assert!(value["config_sha256"].as_str().unwrap().len() == 64);
+    assert!(
+        value["resolved_configuration"]["engine"]["executable"]
+            .as_str()
+            .unwrap()
+            .contains("missing-uci-engine")
+    );
+}
+
+#[test]
+fn json_failure_keeps_stdout_empty_and_diagnostics_on_stderr() {
+    let root = tempfile::tempdir().unwrap();
+    let output = cli()
+        .args(["engine", "inspect", "--json"])
+        .arg(root.path().join("missing"))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("engine inspect failed")
+    );
+}

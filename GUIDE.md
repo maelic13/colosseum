@@ -217,8 +217,13 @@ model as well.
   [`crates/colosseum-application/src/check.rs`](crates/colosseum-application/src/check.rs),
   [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
   [`crates/colosseum-uci/src/session.rs`](crates/colosseum-uci/src/session.rs)
-- ☐ **2.6** — **Model: Terra High.** `--dry-run`; JSON mode emits JSON only on stdout and diagnostics on
-  stderr
+- ☑ **2.6 — DONE** — **Model: Terra High.** `--dry-run` resolves path-aware
+  configuration identity and prints exact structured process invocations
+  without launching; `--json` emits one typed JSON document on successful
+  stdout while failures leave stdout empty and diagnostics use stderr — evidence:
+  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
+  [`docs/cli/output.md`](docs/cli/output.md)
 - ☐ **2.7** — **Model: Sol High.** `self-test` launches the exact executable's hidden deterministic UCI
   stub mode and tests protocol, process containment/reaping, bounded
   stdout/stderr draining, persistence failures and one short match
