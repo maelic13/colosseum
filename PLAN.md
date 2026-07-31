@@ -193,9 +193,27 @@ project's shared conditions live in one file and each workflow — gate, long-ti
 confirmation, calibration, tune, tournament, speed — overrides only what differs.
 Without this, a project with six workflows keeps six copies of the same ten
 settings and they drift apart, which is the failure mode this plan works hardest
-to prevent everywhere else. Resolution is depth-first with the extending file
-winning; an inheritance cycle is an error; the **fully resolved** configuration
-is what gets hashed, recorded and compared on resume.
+to prevent everywhere else.
+
+Composition has one portable definition:
+
+- Each file has at most one `extend`. Its path is relative to the file that
+  declares it, not the process working directory. Parent files are resolved
+  first; canonical file identities are used for cycle detection; the maximum
+  chain depth is 16.
+- Tables merge recursively. A child scalar replaces its parent value and a child
+  array replaces the whole parent array; arrays are never merged by position.
+- A child may clear inherited optional values with `unset`, an array of RFC 6901
+  JSON Pointers applied after the parent is resolved and before the child is
+  overlaid. An invalid pointer is an error naming the declaring file and pointer.
+  `extend` and `unset` are control keys and do not appear in the result.
+- A path value declared in a run file is resolved relative to that declaring
+  file; a CLI path is resolved relative to the invocation directory. This rule
+  survives inheritance, so moving the leaf file cannot reinterpret a parent's
+  engine or book path.
+- The final value is normalized to the documented schema and serialized as
+  canonical JSON (stable key order and canonical units). This **fully resolved**
+  value is what gets hashed, recorded and compared on resume.
 
 ### Tier C — Recommended. Documentation only, zero code impact.
 
@@ -264,7 +282,7 @@ the CLI or the GUI.
 
 | Layer | Responsibility | Allowed dependencies |
 |---|---|---|
-| Domain/entities | Scores, pair outcomes, statistical models, schedules, run-state invariants | Standard library and pure math only |
+| Domain/entities | Scores, pair outcomes, statistical models, schedules, run-state invariants and opaque identity values | Side-effect-free value/math/serialization libraries only; no I/O, OS, clocks or entropy sources |
 | Application/use cases | Match, SPRT, calibration, SPSA, NPS, tournament, suite, status; ports for engines, persistence, time, affinity and progress | Domain |
 | Interface adapters | CLI parsing/config resolution, GUI mapping, UCI adapter, SQLite/run-directory adapter, PGN/external-log adapters | Application + domain |
 | Frameworks/drivers | Tokio/processes, filesystem, `rusqlite`, OS topology/affinity, terminal and GUI frameworks | Adapters |
@@ -293,8 +311,9 @@ colosseum-gui           desktop adapter          ← map GUI library entries to 
   `EngineLibrary`, `AppConfig`, `AppDirs` and rating writeback remain in the GUI
   adapter. They are mapped to runtime specifications at the boundary.
 - Application use cases receive ports such as `EngineSessionFactory`,
-  `RunRepository`, `ArtifactSink`, `CpuPlacement`, `Clock` and `ProgressSink`;
-  they do not open global paths or select concrete databases.
+  `RunRepository`, `ArtifactSink`, `CpuPlacement`, `Clock`, `IdGenerator`,
+  `MasterSeedSource` and `ProgressSink`; they do not open global paths, obtain
+  entropy, generate process-global identities or select concrete databases.
 - Framework types (`rusqlite::Connection`, Tokio handles, GUI types, OS handles)
   do not cross into the domain.
 - Paths and artifact sinks are injected. No process-wide mutable/global output
@@ -376,7 +395,8 @@ right" is not a criterion.
   behaviour on `ucinewgame`. UCI has no option read-back, so this is explicitly
   not called a round trip. Exit code reflects the outcome.
 - Run file and CLI arguments resolve per S3 Tier B, including `extend`
-  inheritance. Cycles and unreadable parents are errors naming the file chain.
+  inheritance, `unset`, path origins, merge rules and the depth limit. Cycles,
+  excessive depth and unreadable parents are errors naming the file chain.
 - **One master seed, many named sub-streams.** A single `--seed` (generated and
   recorded when not supplied) deterministically derives an independent stream per
   consumer — opening order, SPSA perturbations, bootstrap resampling, position
@@ -388,12 +408,30 @@ right" is not a criterion.
   independent: adding a new random consumer, or changing how many values an
   existing one takes, cannot shift any other stream — so a later feature cannot
   silently change what an old seed reproduces.
+  The version-1 contract is exact: the displayed master seed is an unsigned
+  64-bit integer; a stream seed is
+  `SHA-256("colosseum-rng-v1\0" || master-seed-u64-LE || stream-name-UTF-8)`;
+  those 32 bytes seed ChaCha12 at its initial stream position. Stream names are
+  stable ASCII identifiers. Shuffle, bounded-integer, Rademacher and bootstrap
+  sampling algorithms are specified rather than delegated to dependency helper
+  APIs, and golden vectors pin derivation and the first samples. A future change
+  requires a `stats_version` change; resume keeps the stored version.
 - `--dry-run` prints the fully resolved configuration and the exact engine
   invocations without playing a game.
 - In machine-readable mode stdout contains one documented JSON value only;
   progress and diagnostics go to stderr.
 - `self-test` launches an internal deterministic UCI stub mode from the same
   executable and checks process, protocol, persistence and one short match.
+- Engine processes run in an owned OS containment mechanism where available
+  (process group/job object). Normal shutdown is bounded and escalates from UCI
+  `quit` to termination; cancellation and harness failure leave no owned engine
+  or descendant running.
+- Stdout and stderr are drained concurrently. Protocol lines and in-memory
+  queues have documented finite limits; traffic is streamed to artifacts
+  outside the clock-critical path. An over-limit protocol line is an
+  engine-attributable protocol fault. Queue saturation, artifact write failure
+  or inability to drain/contain a process is an infrastructure failure and is
+  never converted into a game result.
 
 **Success criteria**
 
@@ -402,13 +440,19 @@ right" is not a criterion.
 - The same run launched from a run file plus overrides resolves to
   byte-identical JSON as the equivalent all-CLI invocation.
 - An `extend` chain resolves to byte-identical JSON as the equivalent flattened
-  single file; a cycle is rejected with the chain named.
+  single file; recursive-table/scalar/array replacement, `unset`, per-file path
+  origins and maximum depth have fixtures; a cycle is rejected with the chain
+  named.
 - The same master seed and configuration reproduce every sub-stream exactly, on
   every platform. Adding a consumer of a *new* stream leaves all existing streams
   bit-identical — asserted by a test, because this is the property that makes an
   old seed still mean something after the tool gains features.
 - Adding a new conforming engine requires no file in the engine's repository and
   no Rust code.
+- Flooding either engine pipe cannot deadlock or grow memory without bound; a
+  stub that ignores `quit` or spawns a descendant is fully reaped on every
+  supported platform; injected artifact-write failure invalidates rather than
+  scores the game.
 
 ### 5.1 Pentanomial statistics and normalized Elo — `colosseum-core`
 
@@ -592,29 +636,38 @@ report an unattributable divergence.
 - Time spent preparing and sending `position` before `go` is **not** charged.
 - The clock is read from a monotonic source, never wall-clock time of day, so a
   system time change cannot alter a result.
-- Increment is credited **after** the move's elapsed time is deducted; a move
-  that exhausts the remaining time is a loss even if the increment would have
-  covered it. State it because the other order is a real convention and changes
-  behaviour at the boundary.
+- Increment is credited **after** the move's elapsed time is deducted. Let `R`
+  be the remaining time before the move, `E` the charged elapsed time,
+  `M` the configured margin and `I` the increment. If `E > R + M`, the mover
+  forfeits before receiving increment. Otherwise the move is accepted and the
+  new clock is `max(0, R - E) + I`. Equality at `R + M` is accepted, avoiding a
+  rounding-dependent boundary. This makes the deduction/increment order and the
+  margin interaction explicit.
 - The **time margin is a forfeit tolerance only.** It never adds to the engine's
   budget and is never visible to the engine — it only prevents a marginal
   overrun from being scored as a loss. A margin that extended the budget would
   change how the engine plays, which is a different experiment.
 - When pondering is disabled, no time is charged to a side that is not to move.
-- Each run records the model identifier and version, the margin, and a summary
-  of the **observed harness-side overhead** (min / median / max of the interval
-  the harness itself contributes), so a user can size their engine's move
-  overhead from evidence rather than folklore.
+- Each run records the model identifier and version, the margin, monotonic-clock
+  resolution and the charged-elapsed min / median / max. The harness cannot
+  portably separate engine search time from pipe, scheduler and read latency
+  inside the charged interval, so it does **not** report invented
+  "harness-overhead" numbers. Separately measurable pre/post-I/O diagnostics may
+  be recorded, but are labelled by the operation actually measured.
 
 **Success criteria**
 
 - A stub engine that sleeps a commanded duration is charged that duration within
   a stated tolerance, on every platform.
 - A stub overrunning by less than the margin is not forfeited; one overrunning by
-  more is, and the forfeit is attributed to the correct side.
+  more is, exact equality is accepted, and the forfeit is attributed to the
+  correct side.
 - A run whose system clock is changed mid-game produces an unchanged result.
-- Increment ordering has a fixture at the exhaustion boundary.
-- The recorded overhead summary is present and non-empty for every completed run.
+- Increment ordering has fixtures below, at and above the exhaustion/margin
+  boundaries.
+- Clock model/version, margin, resolution and charged-elapsed summary are present
+  for every completed clock-based run and are not mislabelled as engine or
+  harness overhead.
 
 ### 5.5 SPSA — `colosseum-cli spsa` + `colosseum-core` schedule
 
@@ -790,8 +843,9 @@ arguments, working directory and effective options; harness version and build;
 and logical core counts, allowed CPU set, core class/NUMA where known); optional
 book path and hash; **master seed and the named sub-streams derived from it**;
 resolved affinity and capability mode; time control; **clock model identifier,
-version, margin and observed harness-overhead summary** (S5.4a); adjudication
-settings; concurrency; the resolved configuration hash **and the `extend` chain
+version, margin, monotonic-clock resolution and charged-elapsed summary**
+(S5.4a); adjudication settings; concurrency; the resolved configuration hash
+**and the `extend` chain
 that produced it**; full command line; UTC start/end; official terminal sample,
 outcome, statistics and anomaly counts.
 
@@ -978,9 +1032,12 @@ the measurement meant to catch it.
    external tools cover their shared logistic/trinomial surface and scheduling.
    A documented generator extends the corpus from any engine pair. A
    disagreement is recorded and root-caused, never averaged away.
-3. **⛔ No test may depend on a path outside the repository.** Enforced in CI.
-   This is what makes the project independently buildable and testable by
-   anyone who clones it.
+3. **⛔ The required test suite is hermetic.** CI rejects any required test that
+   reads a path outside the repository. Explicitly opt-in real-engine smoke
+   tests may consume an environment-provided executable, but are excluded from
+   the required suite, have no hard-coded machine path and cannot establish a
+   supported-platform or release pass. This keeps every clone independently
+   buildable while preserving useful local interoperability checks.
 4. **Analytic fixtures** with hand-derived expected values, so correctness does
    not rest on any external tool being right.
 5. **Property-based tests** for statistics and the SPSA schedule.
@@ -989,8 +1046,10 @@ the measurement meant to catch it.
    This exercises the exact published artifact without shipping a second public
    executable. Test-only fault modes replace current Windows-only shell stubs.
 7. **Fault injection:** crash at handshake / mid-search / on quit; timeout;
-   illegal move; never answering `isready`; garbage on stdout. Each must produce
-   a specific tested outcome and none may be silently absorbed into a result.
+   illegal move; never answering `isready`; garbage or an over-limit line on
+   stdout; stdout/stderr flood; ignored `quit`; descendant process; artifact
+   write failure. Each must produce a specific tested outcome, remain bounded,
+   leave no owned process behind and never be silently absorbed into a result.
 8. **Determinism:** same seed and stubs ⇒ same pairings, opening order and final
    statistics, on every platform.
 9. **Durable-run suite** (S5.11) against every long command.
@@ -1042,7 +1101,10 @@ and recorded.
   boundaries; current GUI/CLI release coupling; and each violation of the S4
   dependency rule. Explicitly cover `EngineMeta`, `EngineLibrary`,
   `AppConfig`/`AppDirs`, `RatingWriteback`, incident output and the SQLite
-  scheduler.
+  scheduler; `colosseum-core` UUID generation and branding/path policy; and the
+  current hard-coded external-engine test fallbacks. Audit workspace-version
+  inheritance, GUI-only build/release scripts and the absence or presence of a
+  required cross-platform CI workflow rather than assuming release independence.
 - **(b) Clean Architecture design.** Write
   `docs/architecture/target-architecture.md` with layer/package diagram, use
   cases, port contracts, runtime data types, composition roots, run-directory
@@ -1066,7 +1128,8 @@ and recorded.
 ### Phase 1 — Pentanomial statistics and normalized Elo (`core`)
 Spec 5.1 plus the fixture corpus (S6.2–S6.4). First because everything reports
 through it and it needs no I/O or platform surface. **Exit:** analytic fixtures
-pass; the per-field oracle matrix passes; no test reads outside the repo.
+pass; the per-field oracle matrix passes; the required suite is hermetic and
+any opt-in real-engine smoke test is clearly excluded from release evidence.
 
 ### Phase 2 — Architecture migration, CLI skeleton and durable foundation
 Implement the Phase-0 migration needed by Specs 5.0 + 5.8 + 5.11: generic
@@ -1074,11 +1137,17 @@ runtime participant type, application ports/use cases, GUI mapping adapter, CLI
 composition root and independently versioned CLI package. Add argument parsing,
 run file resolution, inspect/check, dry-run, JSON/stdout contract, `self-test`,
 run records, run directories, two-generation checkpoints and common status.
+Move identity generation out of the domain, and replace hard-coded live-engine
+test paths with explicitly opt-in environment-only smoke tests.
 
-**Exit:** two arbitrary UCI executables pass path-only workflows; run file plus
-overrides resolves identically to all-CLI; durable/status suites pass against
-the internal stub; architecture tests prove no GUI dependency or GUI-data access;
-GUI tests remain green; a headless CLI artifact is produced independently.
+**Exit:** two arbitrary UCI executables pass path-only workflows; run-file
+inheritance/clearing/path origins resolve identically to equivalent all-CLI or
+flattened input; seed golden vectors reproduce across platforms; durable and
+status suites pass against the internal stub; identity generation is outside
+the domain and hard-coded live-engine paths are gone; pipe floods remain bounded
+and ignored-quit/descendant stubs are reaped; architecture tests prove no GUI
+dependency or GUI-data access; GUI tests remain green; a headless CLI artifact
+is produced independently.
 
 ### Phase 3 — CPU topology and affinity
 Spec 5.2, including the `capabilities` command. **Exit:** SMT, hybrid,

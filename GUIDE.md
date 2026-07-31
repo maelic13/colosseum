@@ -52,13 +52,17 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
       `cargo metadata`, `cargo tree` and source inspection
 - [ ] 0.2 Write `docs/architecture/current-state.md`: responsibilities, public
       boundary types, I/O/global state, framework dependencies, GUI/release
-      coupling and every violation of PLAN §S4
+      coupling and every violation of PLAN §S4; explicitly audit UUID
+      generation and branding/path policy in `colosseum-core`, GUI config/store
+      seams, incident globals, SQLite scheduling, external-engine test paths,
+      workspace-version inheritance, GUI-only release automation and CI coverage
 - [ ] 0.3 Write `docs/architecture/target-architecture.md` using Clean
       Architecture: domain, application use cases/ports, adapters, drivers,
       composition roots, error/cancellation flow and current-to-target migration
 - [ ] 0.4 Record ADRs for package boundaries, runtime `EngineLaunchSpec`,
-      injected persistence/artifact/affinity ports, GUI-library mapping and the
-      smallest refactor that enforces inward dependencies
+      injected persistence/artifact/affinity/identity/master-seed ports,
+      GUI-library mapping and the smallest refactor that enforces inward
+      dependencies
 - [ ] 0.5 Design independent CLI/GUI versions, tags, artifacts, release notes
       and shared-layer regression CI. Prefer one repo; split only with a
       documented concrete advantage
@@ -86,7 +90,9 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
       engines through `fastchess` and `cutechess-cli`; commit engine/tool
       identity, versions, hashes/licence provenance, exact commands and logs.
       Define a per-field oracle matrix plus analytic hand-derived fixtures
-- [ ] 1.8 CI check that **no test reads a path outside the repository**
+- [ ] 1.8 Make the required CI suite hermetic: no required test reads outside
+      the repository; real-engine smoke tests are explicit opt-in,
+      environment-only and never count as release/platform evidence
 - [ ] 1.9 **EXIT** — analytic fixtures and every compatible oracle-matrix cell
       pass; no unsupported field is compared or silently guessed
 
@@ -100,19 +106,22 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
       environment, arbitrary UCI options and allocated cores
 - [ ] 2.4 Resolution order is built-in defaults < committed run TOML (with its
       `extend` chain) < CLI; write the fully resolved JSON/config hash. Run
-      files compose by relative-path `extend`, depth-first with the extending
-      file winning; cycles are an error naming the chain
+      files use one parent, maximum depth 16, canonical cycle detection,
+      recursive table merge, scalar/whole-array replacement and RFC 6901
+      `unset`; preserve each file's path origin and name bad chains/pointers
 - [ ] 2.4a One master seed derives an independent stream per consumer **by
       stream name**, not by draw order, so adding a consumer cannot shift an
-      existing stream. Generated and recorded when not supplied; names,
-      derivation and generator algorithm belong to `stats_version`
+      existing stream. Pin PLAN §5.0's u64/SHA-256/ChaCha12 contract, sampling
+      algorithms and golden vectors. Generate and record the seed when absent;
+      derivation changes require a `stats_version` change
 - [ ] 2.5 `engine inspect`; `engine check` reports handshake, synchronisation,
       schema validation, option acceptance/no-failure, legal bounded search,
       stop/new-game/quit. Do not claim UCI option read-back
 - [ ] 2.6 `--dry-run`; JSON mode emits JSON only on stdout and diagnostics on
       stderr
 - [ ] 2.7 `self-test` launches the exact executable's hidden deterministic UCI
-      stub mode and tests protocol, process, persistence and one short match
+      stub mode and tests protocol, process containment/reaping, bounded
+      stdout/stderr draining, persistence failures and one short match
 - [ ] 2.8 Run directories: unique default under `./colosseum-runs`; explicit
       `--dir` to resume; archive-on-restart; append-only logs; checksummed
       two-generation atomic checkpoints; config mismatch refusal
@@ -121,11 +130,14 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
       anomalies for every run, including aborted ones
 - [ ] 2.10 **EXIT** — two arbitrary UCI executables pass path-only checks;
       run-file/all-CLI resolution is identical and an `extend` chain resolves
-      byte-identically to a flattened file; the same master seed reproduces
-      every sub-stream on every platform and a new consumer leaves existing
-      streams bit-identical; durable/status suites and published-style headless
-      `self-test` pass; architecture tests prove no GUI dependency/data access;
-      GUI suite remains green
+      byte-identically to a flattened file under every merge/unset/path-origin
+      rule; the same master seed reproduces every sub-stream on every platform
+      and a new consumer leaves existing streams bit-identical; durable/status
+      suites and published-style headless `self-test` pass; identity generation
+      is outside the domain, no hard-coded live-engine test path remains,
+      pipe floods stay bounded, ignored-quit/descendant stubs are reaped,
+      architecture tests prove no GUI dependency/data access, and the GUI
+      suite remains green
 
 ### Phase 3 — CPU topology and affinity
 
@@ -155,11 +167,12 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
       fixed nodes/depth and configurable time margin
 - [ ] 4A.2a **Clock accounting (PLAN §5.4a), explicit/versioned/recorded**:
       clock runs from finishing the write of `go` to finishing the read of
-      `bestmove`, charging harness read latency and engine start-up to the
+      `bestmove`, charging harness read latency and engine search start-up to the
       mover; `position` setup is not charged; monotonic source only; increment
-      credited AFTER the move's cost; the margin is a forfeit tolerance that
-      never extends the budget nor is visible to the engine; record the model
-      id/version, margin and observed harness-overhead min/median/max
+      follows `E > R + M` forfeit, otherwise `max(0, R-E) + I`, with equality
+      accepted; the margin is not sent to the engine; record model/version,
+      margin, clock resolution and charged-elapsed min/median/max without
+      claiming engine/harness overhead can be separated
 - [ ] 4A.3 Draw/resign/max-moves adjudication independently configurable and
       disableable; forward engine tablebase options but defer harness probing
 - [ ] 4A.4 Separate engine from infrastructure faults. Strict default: engine
@@ -176,9 +189,9 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
       injection never scores infrastructure failures; output/resume/schedule
       tests pass; a stub sleeping a commanded duration is charged it within
       tolerance on every platform, a sub-margin overrun is not forfeited while a
-      super-margin one is and is attributed correctly, a mid-game system-clock
-      change does not alter the result, and the increment-exhaustion boundary
-      has a fixture
+      super-margin one is and is attributed correctly, exact equality is
+      accepted, a mid-game system-clock change does not alter the result, and
+      below/at/above increment-margin boundaries have fixtures
 
 ### Phase 4B — Pair-atomic SPRT and parity
 
@@ -358,11 +371,14 @@ cargo test -p colosseum-core
 
 ```text
 Pick the next unchecked step  ->  implement + test  ->  demonstrate its exit
-criterion  ->  tick it here AND in PLAN.md in the same commit.
+criterion  ->  tick it here AND in PLAN.md  ->  commit that step before the next.
 ```
 
 Long game jobs (optional calibrations, parity runs, real gates) run on a real
 machine and are pasted back; everything else is verified locally by tests.
+Use a focused imperative commit subject, stage only the step's files and never
+add co-author or assistant-attribution trailers; `AGENTS.md` is the binding
+repository workflow.
 
 ## Decision rules
 
