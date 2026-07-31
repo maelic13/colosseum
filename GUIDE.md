@@ -1,25 +1,25 @@
-# Colosseum CLI — development guide
+# UCI Rig — development guide
 
 The short operational view: where the harness stands and what to do next.
 Rationale, specifications, success criteria and evidence live in
 [`PLAN.md`](PLAN.md).
 
 **This file and `PLAN.md` are the maintainer-facing pair.** `README.md` is the
-user-facing front door for the whole project (what Colosseum is, the GUI, the
-CLI); the user documentation is user-facing CLI detail. Neither may carry phase
+user-facing front door for the whole project (the Colosseum GUI and UCI Rig);
+the user documentation is user-facing CLI detail. Neither may carry phase
 numbers, internal naming or method argumentation.
 
 ## Current checkpoint
 
 | | |
 |---|---|
-| Branch / version | `cli`; Colosseum GUI **1.0.2** released. CLI: **not started** |
-| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0.1–0.5 have inventoried, audited and designed the architecture, binding boundaries and independent product releases/CI |
-| What is missing | Public CLI/product naming decision, pentanomial/nElo, CPU affinity, the CLI itself, SPSA, durable runs, run records, trustworthy NPS |
+| Branch / version | `cli`; Colosseum GUI **1.0.2** released. UCI Rig: **not started** |
+| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0.1–0.6 have inventoried, audited and designed the architecture, binding boundaries, independent product releases/CI and the UCI Rig / `ucirig` public identity |
+| What is missing | Phase 0 exit review, pentanomial/nElo, CPU affinity, UCI Rig itself, SPSA, durable runs, run records, trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 0.6 — resolve the public CLI/product naming collision** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 0.7 — review and demonstrate the Phase 0 architecture exit** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -78,8 +78,12 @@ model as well.
   documented concrete advantage — evidence:
   [`docs/architecture/release-architecture.md`](docs/architecture/release-architecture.md)
   and [ADR-0006](docs/architecture/adr/0006-one-repository-independent-product-releases.md)
-- ☐ **0.6** — **Model: Terra High.** Resolve the existing “Coliseum” naming/search/package collision and
-  record the decision plus rejected alternatives
+- ☑ **0.6 — DONE** — **Model: Terra High.** Resolve the existing “Coliseum” naming/search/package collision and
+  record the decision plus rejected alternatives — outcome: keep Colosseum as
+  the desktop product; name the independent CLI **UCI Rig**, package/command
+  `ucirig` — evidence:
+  [`docs/architecture/naming-decision.md`](docs/architecture/naming-decision.md)
+  and [ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md)
 - ☐ **0.7** — **EXIT · Model: Sol High.** Both architecture documents and ADRs reviewed; every module
   has a target owner; dependency/release diagrams and independence tests are
   specified; naming/release decisions recorded
@@ -313,8 +317,8 @@ model as well.
   `stats_version` exists), discoverability, offline availability,
   contribution friction, and whether the command reference can be generated
   from the argument parser so it cannot drift. Record the decision
-- ☐ **9.2** — **Model: Terra High.** README as the project front door — what Colosseum is, the GUI, the
-  CLI, install, links
+- ☐ **9.2** — **Model: Terra High.** README as the project front door — what the Colosseum GUI and UCI Rig
+  are, install, links
 - ☐ **9.3** — **Model: Terra High.** User documentation: quickstart, command reference, run-file and
   tune-file reference, a worked example per command, "how to trust a result"
   from PLAN §S3 Tier C, and a compatibility page (what the tool needs from a
@@ -322,6 +326,7 @@ model as well.
   separate processes and direct users to applicable licences; make no
   blanket legal conclusion
 - ☐ **9.4** — **Model: Sol High.** Ship per Phase 0.5's release model; all supported platforms;
+  repeat and record the dated UCI Rig web/GitHub/crates.io/TMview screen;
   smoke-test the exact published artifacts (`--version`, `--help`,
   `self-test`, one deterministic JSON workflow, dependency inspection)
 - ☐ **9.5** — **Model: Sol High. Coverage acceptance** (PLAN §5.14) — archive replaced generic
@@ -361,20 +366,17 @@ Not steps — they are never "done".
 - Compare old/new resolved inputs, schedule, durable artifacts and statistics.
 - Archive the old generic implementation only after parity; retain declarative
   configs and thin project-policy/CI invocation.
-- Record an exception as either a Colosseum mechanism gap or intentional
+- Record an exception as either a UCI Rig mechanism gap or intentional
   engine-specific policy.
 
 ## What to do now
 
-**Phase 0.6 — resolve the public CLI/product naming collision. Model: GPT-5.6
-Terra — High.** Check package availability, search ambiguity, trademark risk
-and spoken supportability; decide whether to retain Colosseum with a distinct
-CLI binary, rename only the CLI, or rename the product, and record rejected
-alternatives.
-
-Phase 0.7 then reviews the complete architecture and demonstrates the Phase 0
-exit. Only after that exit may implementation move to **Phase 1 — pentanomial
-statistics**.
+**Phase 0.7 — review and demonstrate the Phase 0 architecture exit. Model:
+GPT-5.6 Sol — High.** Review the current/target architecture, ADRs, release and
+naming decisions as one contract; confirm every module has a target owner,
+dependency/release diagrams agree, and every independence test is specified.
+Record concrete review evidence and close any inconsistency before marking the
+exit. Only then may implementation move to **Phase 1 — pentanomial statistics**.
 
 ```
 git diff --check
@@ -407,5 +409,5 @@ repository workflow.
 | Feature exists in an external runner but not here | Phase 8.2 decides, with "does a general engine developer need it?" as the tie-breaker |
 | Tempted to add engine-specific logic | It belongs in the engine's own tooling, not here |
 | Engine project still needs scheduling/statistics/tuning/recovery code | Generic mechanism gap: add or explicitly decline it |
-| Engine project keeps a run file or thin CI command | Expected project policy, not a Colosseum gap |
+| Engine project keeps a run file or thin CI command | Expected project policy, not a UCI Rig gap |
 | Diagnostic heuristic looks stable | Report the observation; do not call it convergence or causation |

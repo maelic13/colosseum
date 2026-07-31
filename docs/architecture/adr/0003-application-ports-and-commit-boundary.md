@@ -119,7 +119,7 @@ it does not fabricate results or weaken persistence requirements.
 - `colosseum-uci` implements engine sessions/process lifecycle.
 - `colosseum-engine` implements game execution, Tokio execution pool, SQLite
   and run-directory repositories, artifacts/openings and platform placement.
-- `colosseum-cli` and `colosseum-gui` implement presentation progress and
+- `ucirig` and `colosseum-gui` implement presentation progress and
   cancellation sources and assemble adapters.
 - application tests implement deterministic in-memory/fake ports.
 

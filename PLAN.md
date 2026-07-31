@@ -1,6 +1,6 @@
-# Colosseum CLI — engine-development harness plan
+# UCI Rig — engine-development harness plan
 
-`colosseum-cli` is a headless, cross-platform harness for **developing** chess
+`ucirig` is a headless, cross-platform harness for **developing** chess
 engines on one machine: SPRT gates, SPSA tuning, fixed matches, tournaments,
 speed measurement, position suites, and the run-record machinery that makes
 those numbers trustworthy. Its only contract with an engine is a UCI
@@ -19,14 +19,14 @@ between projects, the tool ships a default with a stated reason and lets the
 user change it — see S3.
 
 **It is deliberately local.** Distributed workers, source checkout, compilation
-and result coordination belong to systems such as testing farms. Colosseum owns
+and result coordination belong to systems such as testing farms. UCI Rig owns
 the generic mechanics of a trustworthy experiment on one host; the engine
 project owns its source, build, correctness and experiment policy.
 
 **Document audiences.** This file and [`GUIDE.md`](GUIDE.md) are the
 maintainer-facing pair: specifications, success criteria, evidence, forward
-plan. `README.md` is user-facing and covers the whole project — what Colosseum
-is, the GUI, and the CLI — at an introductory level. The **user documentation**
+plan. `README.md` is user-facing and covers the whole project — the Colosseum
+GUI and UCI Rig — at an introductory level. The **user documentation**
 (placement decided in Phase 9) is also user-facing and carries CLI detail:
 command reference, worked examples, and how to trust a result. Neither
 user-facing surface may carry phase numbers, internal naming or method
@@ -37,6 +37,12 @@ argumentation.
 ## S1. Current state
 
 **The CLI is not built yet. This document is step 0 for that work.**
+
+The released desktop keeps the **Colosseum** name. The independent CLI product
+is **UCI Rig**, invoked as `ucirig`; shared implementation packages retain the
+`colosseum-*` prefix. The evidence and complete surface mapping are recorded in
+the [naming decision](docs/architecture/naming-decision.md) and
+[ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md).
 
 What exists is the reason the plan can reuse rather than rewrite:
 `colosseum-core`, `colosseum-uci` and `colosseum-engine` are already headless
@@ -298,7 +304,7 @@ colosseum-core          domain/entities          ← pure statistics and invaria
 colosseum-application   use cases + ports        ← new by default; no OS/UI/storage
 colosseum-uci           UCI driven adapter       ← engine sessions/process protocol
 colosseum-engine        infrastructure adapters  ← runner, store, topology, affinity
-colosseum-cli           command-line adapter     ← parse, compose, present
+ucirig                  command-line adapter     ← parse, compose, present
 colosseum-gui           desktop adapter          ← map GUI library entries to use cases
 ```
 
@@ -324,7 +330,7 @@ colosseum-gui           desktop adapter          ← map GUI library entries to 
 
 - The CLI reads no GUI engine library, configuration or application-data path.
 - Every CLI run is self-contained in its selected run directory (S5.11).
-- `cargo tree -p <cli-package>` contains no GUI/windowing dependencies.
+- `cargo tree -p ucirig` contains no GUI/windowing dependencies.
 - The published CLI starts and completes `self-test` on a headless host.
 - CLI and GUI have separate versions, tags, artifacts and release notes even if
   they stay in one repository.
@@ -518,7 +524,7 @@ right" is not a criterion.
   residency; skipped with a clear message where the OS cannot enforce it.
 - `capabilities` command prints what this platform can and cannot do.
 
-### 5.3 Calibration — `colosseum-cli calibrate`
+### 5.3 Calibration — `ucirig calibrate`
 
 An optional end-to-end symmetry test on the actual machine. It does not prove
 correctness and is never a prerequisite for another command.
@@ -540,7 +546,7 @@ correctness and is never a prerequisite for another command.
 through persistence and resume; PASS/FAIL/inconclusive/invalid each have
 deterministic tests.
 
-### 5.4 Fixed match and SPRT — `colosseum-cli match|sprt`
+### 5.4 Fixed match and SPRT — `ucirig match|sprt`
 
 **Requirements**
 
@@ -669,7 +675,7 @@ report an unattributable divergence.
   for every completed clock-based run and are not mislabelled as engine or
   harness overhead.
 
-### 5.5 SPSA — `colosseum-cli spsa` + `colosseum-core` schedule
+### 5.5 SPSA — `ucirig spsa` + `colosseum-core` schedule
 
 **Requirements**
 
@@ -723,7 +729,7 @@ report an unattributable divergence.
   completion, and on demand mid-run, emit the rounded mean of the final 10% of
   completed centre vectors (window configurable and frozen in the run record) as
   (a) a ready-to-paste `setoption` list, (b) JSON, and (c) a run file fragment.
-  `colosseum-cli sprt --apply <result.json>` then gates the tuned values against
+  `ucirig sprt --apply <result.json>` then gates the tuned values against
   the original vector **using the same executable and UCI options only** — no
   source edit, rebuild or engine-specific baking step. The artifact contains
   executable hash, original/tuned vectors, tune conditions, schema and schedule
@@ -747,7 +753,7 @@ report an unattributable divergence.
 - **Loop test:** a tune over a stub engine produces a result file that
   `sprt --apply` consumes without hand-editing.
 
-#### 5.5a SPSA sizing — `colosseum-cli spsa plan`
+#### 5.5a SPSA sizing — `ucirig spsa plan`
 
 Offline, no games. Validate the exact schedule and report total iterations,
 games and pairs; `c/a/r` trajectories; the first rounding-resolution hazard;
@@ -764,7 +770,7 @@ distance.
 the wall-clock estimator covers a controlled stub run; a synthetic simulation
 is reproducible by seed and clearly separated from factual schedule output.
 
-#### 5.5b SPSA diagnostics — `colosseum-cli spsa status`
+#### 5.5b SPSA diagnostics — `ucirig spsa status`
 
 Read an atomic snapshot of a run directory without touching the running tune.
 Report iteration, percent, ETA, per-knob current value and trajectory, plus a
@@ -780,7 +786,7 @@ clipping or an unsuitable range; never automatically advise continue/abandon.
 reports insufficient history rather than inventing a trend; status against a
 live atomically-updated run neither blocks nor mutates it.
 
-### 5.6 Speed / NPS A/B — `colosseum-cli nps`
+### 5.6 Speed / NPS A/B — `ucirig nps`
 
 **Requirements**
 
@@ -819,7 +825,7 @@ live atomically-updated run neither blocks nor mutates it.
 - Cold/warm modes, scaling efficiency and fixed/per-thread Hash policies match
   hand-computed fixtures.
 
-### 5.7 Tournaments — `colosseum-cli tournament`
+### 5.7 Tournaments — `ucirig tournament`
 
 Expose both formats already supported by the shared core:
 
@@ -858,7 +864,7 @@ a test asserts every observable field is populated and every not-applicable
 optional field is explicitly null with a reason; a schema-version bump fails a
 test that pins the current schema unless the changelog is updated.
 
-### 5.9 Book tools — `colosseum-cli book`
+### 5.9 Book tools — `ucirig book`
 
 `slice` (deterministic given a seed), `hash`, `stats` (count, ply depth, eval
 band where present), `verify` (every position legal and parseable).
@@ -866,9 +872,9 @@ band where present), `verify` (every position legal and parseable).
 **Success criteria:** slicing is byte-reproducible across platforms; `verify`
 rejects a known-bad fixture.
 
-### 5.10 Statistics replay — `colosseum-cli stats`
+### 5.10 Statistics replay — `ucirig stats`
 
-Read a Colosseum run, a PGN, or a supported external result log and report the
+Read a UCI Rig run, a PGN, or a supported external result log and report the
 same block used live. External formats and versions are explicitly listed; when
 pair/opening identity is absent, fall back to labelled unpaired statistics
 rather than guessing pairs.
@@ -928,7 +934,7 @@ or silent pooling of incomparable work.
   verified previous generation.
 - Interrupting is a supported operation, not an accident: a clean stop and a
   hard kill must both be recoverable.
-- `colosseum-cli status <run-directory>` reads an atomic snapshot without
+- `ucirig status <run-directory>` reads an atomic snapshot without
   mutation and reports command type/state, owning-process liveness where
   detectable, last durable checkpoint, completed/running/pending/failed units,
   current official statistics, anomalies and ETA. Command-specific status (for
@@ -943,7 +949,7 @@ read-only and consistent with the last committed checkpoint.
 
 ---
 
-### 5.12 Position suites — `colosseum-cli suite`
+### 5.12 Position suites — `ucirig suite`
 
 Run standard UCI searches over EPD/FEN position sets at fixed time, nodes or
 depth. Support EPD `bm`/`am` expectations, per-position outcome and latency,
@@ -1005,7 +1011,7 @@ can own them:
 - profiling (sampling profilers, platform trace tooling)
 - correctness suites tied to the engine's own move generator or search
 - engine-specific diagnostic counters and their readouts
-- declarative Colosseum configs and thin CI/release-policy invocations
+- declarative UCI Rig run files and thin CI/release-policy invocations
 - non-UCI evaluation tuning and training-data extraction, labelling/filtering
 - baking tuned values into source, if the project prefers that to UCI options
 
@@ -1131,7 +1137,7 @@ Every identifier is covered below; ranges are inclusive.
 No CLI implementation begins until the boundary it will depend on is understood
 and recorded.
 
-**Progress:** Steps 0.1 through 0.5 are complete. The
+**Progress:** Steps 0.1 through 0.6 are complete. The
 [`dependency inventory`](docs/architecture/dependency-inventory.md) records all
 workspace packages, internal Cargo edges, source modules, principal source
 imports, test targets and current build/release targets. The
@@ -1150,8 +1156,12 @@ commit boundary, GUI-library mapping and incremental migration. The
 [`release architecture`](docs/architecture/release-architecture.md) and
 [ADR-0006](docs/architecture/adr/0006-one-repository-independent-product-releases.md)
 keep one repository while separating GUI/CLI versions, tags, notes, artifacts
-and workflows, with required shared-layer CI. Step 0.6 is next: resolve the
-public naming collision.
+and workflows, with required shared-layer CI. The
+[`naming decision`](docs/architecture/naming-decision.md) and
+[ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md) keep Colosseum as
+the released desktop name and bind the independent CLI product, package and
+command to UCI Rig / `ucirig`. Step 0.7 is next: review and demonstrate the
+complete Phase-0 exit.
 
 - **(a) Current-state report.** Use `cargo metadata`, `cargo tree` and source
   inspection to write `docs/architecture/current-state.md`: crate/module
@@ -1178,7 +1188,11 @@ public naming collision.
 - **(d) Naming.** Resolve the existing “Coliseum” search/package collision:
   retain the product name with a distinct CLI binary, rename only the CLI, or
   rename the product. Check package availability, search ambiguity, trademark
-  risk and spoken supportability; record rejected options.
+  risk and spoken supportability; record rejected options. **Resolved:** keep
+  the Colosseum desktop and name the independent CLI **UCI Rig**, command and
+  package `ucirig`; see the
+  [evidence record](docs/architecture/naming-decision.md) and
+  [ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md).
 - **EXIT:** current and target documents plus ADRs are reviewed; every current
   module has a target owner; dependency and release diagrams are internally
   consistent; the independence contract in S4 is testable; naming and release
@@ -1283,7 +1297,7 @@ The deliverable is a tool any engine developer can pick up.
   whether the command reference can be generated from the argument parser so it
   cannot drift. Record the decision.
 - **(b) Write it.** README stays the front door for the whole project —
-  what Colosseum is, the GUI, the CLI, install, links. User documentation covers
+  what the Colosseum GUI and UCI Rig are, install, links. User documentation covers
   the CLI in depth: quickstart, command reference, run-file and tune-file
   reference, worked examples per command, a "how to trust a result" page drawn
   from S3 Tier C, and a compatibility page (what the tool needs from a UCI
@@ -1291,6 +1305,7 @@ The deliverable is a tool any engine developer can pick up.
   launched as separate processes and tell users to consult the relevant licence
   terms; do not make a blanket legal conclusion.
 - **(c) Ship.** Per Phase 0(c)'s release model; all supported platforms;
+  repeat and record the dated UCI Rig web/GitHub/crates.io/TMview screen;
   smoke-test the exact published artifacts (`--version`, `--help`,
   `self-test`, one stub match, and architecture/dependency inspection).
 - **(d) Release-candidate usability exercise.** A **third-party engine pair the maintainers did not
@@ -1315,7 +1330,7 @@ The deliverable is a tool any engine developer can pick up.
 | macOS cannot enforce affinity | Advisory or unavailable, recorded per run; fail only when hard placement was explicitly requested |
 | CLI churn destabilises the released GUI | Phase 0 architecture/release design; independent releases; shared-layer regression suite |
 | Clean Architecture becomes a rewrite | Current-to-target migration map; smallest boundary refactor; retain working runner/UCI logic |
-| Name collision with an existing similar product | Phase 0(d) |
+| Name collision with an existing similar product | UCI Rig / `ucirig` naming contract, dated revalidation before first release (Phase 0(d), ADR-0007) |
 | Scope creep into engine-specific work | S4 boundary, S5.13 decision, S5.14 mechanism-vs-policy test |
 | “No scripts” absorbs project CI/policy | Declarative configs and thin invocations explicitly remain with the engine |
 | SPSA diagnostics are mistaken for proof | Label trajectory signals as heuristics; no automatic continue/abandon decision |

@@ -24,7 +24,7 @@ adapters. Keep the other package names and give them narrower ownership:
 | `colosseum-application` | UI-independent use cases, input/output models, run invariants and ports; no process, filesystem, database, OS, GUI or async-runtime implementation |
 | `colosseum-uci` | UCI protocol and process adapter implementing application engine-session ports |
 | `colosseum-engine` | Headless infrastructure adapters: game execution, opening/position input, PGN and forensic artifacts, SQLite/run-directory repositories, topology and affinity |
-| `colosseum-cli` | CLI driving adapter and composition root; added in Phase 2 |
+| `ucirig` | UCI Rig CLI driving adapter and composition root; added in Phase 2 |
 | `colosseum-gui` | GUI driving adapter, GUI-only library/configuration/read models and independent composition root |
 
 This is the smallest package change that creates a stable inward-facing seam.
@@ -42,7 +42,7 @@ flowchart BT
     APP["colosseum-application<br/>use cases and ports"]
     UCI["colosseum-uci<br/>UCI/process adapter"]
     ENGINE["colosseum-engine<br/>runner and infrastructure adapters"]
-    CLI["colosseum-cli<br/>CLI adapter + composition root"]
+    CLI["ucirig<br/>UCI Rig adapter + composition root"]
     GUI["colosseum-gui<br/>GUI adapter + composition root"]
 
     APP --> CORE
@@ -71,7 +71,7 @@ The logical layers are stricter than package visibility alone:
 - Adapters translate application models to UCI, SQLite, files, platform APIs
   and presentation models. Concrete adapter errors do not cross inward.
 - Drivers own runtimes, processes, threads, channels and shutdown mechanics.
-- Only `colosseum-cli` and `colosseum-gui` assemble concrete implementations.
+- Only `ucirig` and `colosseum-gui` assemble concrete implementations.
   Neither composition root calls or reads the other.
 
 `colosseum-engine` may depend on `colosseum-uci` because its retained game
@@ -179,7 +179,7 @@ executable.
 
 ### CLI root
 
-`colosseum-cli::main` parses CLI/run files, selects or creates the run directory
+`ucirig::main` parses CLI/run files, selects or creates the run directory
 and constructs the runtime. It then assembles UCI sessions, the game executor,
 bounded execution pool, run repository, artifact sink, opening source, CPU
 placement, clocks, identity, seed, progress and cancellation adapters. The root
@@ -200,7 +200,7 @@ successful application result; it is not tournament/domain policy.
 
 The GUI may retain its existing shared history database and stored JSON/TOML
 formats. Adapter mappers preserve those formats while the inner model changes.
-The GUI does not import or call `colosseum-cli`.
+The GUI does not import or call `ucirig`.
 
 ### Test roots
 
@@ -462,7 +462,7 @@ dependency assertions:
   filesystem/database or OS-topology package;
 - `cargo tree -p colosseum-application` contains neither `colosseum-uci` nor
   `colosseum-engine`, Tokio, crossbeam, rusqlite, eframe/egui or OS drivers;
-- `cargo tree -p colosseum-cli` contains no `colosseum-gui`, eframe, egui or GUI
+- `cargo tree -p ucirig` contains no `colosseum-gui`, eframe, egui or GUI
   configuration feature;
 - a compile-time boundary test proves application use cases can be composed
   entirely from fake ports;
@@ -485,5 +485,6 @@ routed to their test and release-design steps.
 
 Step 0.4 records the package boundary, launch specification, port/commit set,
 GUI mapping and incremental-refactor choices in accepted ADRs. Step 0.5 records
-one-repository independent product releases and shared-layer CI. Step 0.6 now
-resolves the public product/CLI naming token without reopening those boundaries.
+one-repository independent product releases and shared-layer CI. Step 0.6 names
+the CLI product UCI Rig and its package/command `ucirig` without reopening those
+boundaries. Phase 0.7 performs the integrated exit review.

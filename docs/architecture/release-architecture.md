@@ -24,10 +24,10 @@ The target keeps one repository and creates two product lanes:
 
 | Concern | GUI lane | CLI lane |
 |---|---|---|
-| Cargo product package | `colosseum-gui` | `colosseum-cli` |
+| Cargo product package | `colosseum-gui` | `ucirig` |
 | Version authority | explicit package `version` | explicit package `version` |
 | Tag | `gui-v<semver>` | `cli-v<semver>` |
-| GitHub Release title | `Colosseum GUI <semver>` | `Colosseum CLI <semver>`; public name updated after Phase 0.6 if needed |
+| GitHub Release title | `Colosseum GUI <semver>` | `UCI Rig <semver>` |
 | Release notes | GUI changelog section | CLI changelog section |
 | Workflow | `.github/workflows/release-gui.yml` | `.github/workflows/release-cli.yml` |
 | Artifacts | desktop archives/installers | headless binary archives |
@@ -42,7 +42,7 @@ trigger one another.
 
 ### Product packages
 
-`colosseum-gui` and `colosseum-cli` own independent SemVer values in their
+`colosseum-gui` and `ucirig` own independent SemVer values in their
 package manifests. The root workspace no longer supplies a product version.
 The GUI retains `1.0.2` when the manifests are decoupled; the CLI selects its
 initial version when its public name/package is added.
@@ -62,8 +62,9 @@ Cargo versions as required by Cargo, but those versions:
 
 Product packages and currently internal shared packages declare their intended
 registry publishing policy explicitly rather than accidentally becoming
-publishable. Whether the final CLI name is available on a registry belongs to
-Phase 0.6; v1 binary distribution does not require a registry publication.
+publishable. Phase 0.6 selected the available-at-audit package name `ucirig`;
+Phase 9 rechecks it before release. V1 binary distribution does not require a
+registry publication.
 
 ### Version validation
 
@@ -118,7 +119,7 @@ SemVer, not a manually inconsistent checkbox.
 Historic unscoped `v0.1.0`–`v1.0.2` releases remain immutable GUI history. They
 are not duplicated or retagged. The next GUI version begins the new namespace.
 
-GitHub provides only one repository-wide “latest” release, so Colosseum does
+GitHub provides only one repository-wide “latest” release, so this project does
 not use it as a product update contract:
 
 - the GUI updater lists releases and selects the highest compatible stable
@@ -156,8 +157,8 @@ Artifact basenames contain product, full version, OS and architecture. They do
 not use raw tag strings, so tag-prefix punctuation cannot create invalid paths.
 Every release includes a `SHA256SUMS` file covering every uploaded asset.
 
-`<cli-name>` below is a deliberate Phase-0.6 token. The product lane/tag remains
-`cli`; Phase 0.6 replaces the public binary/artifact basename consistently.
+Phase 0.6 fixes the public binary/artifact basename as `ucirig`. The internal
+product lane and `cli-v` tag namespace remain `cli` as decided in ADR-0006.
 
 ### GUI artifacts
 
@@ -189,12 +190,12 @@ release target:
 
 | Platform | Target | Required asset |
 |---|---|---|
-| Windows x64 | `x86_64-pc-windows-msvc` | ZIP containing `<cli-name>.exe` |
-| Windows ARM64 | `aarch64-pc-windows-msvc` | ZIP containing `<cli-name>.exe` |
-| Linux x64 | `x86_64-unknown-linux-gnu` | tar.gz containing `<cli-name>` |
-| macOS ARM64 | `aarch64-apple-darwin` | tar.gz containing `<cli-name>` |
+| Windows x64 | `x86_64-pc-windows-msvc` | ZIP containing `ucirig.exe` |
+| Windows ARM64 | `aarch64-pc-windows-msvc` | ZIP containing `ucirig.exe` |
+| Linux x64 | `x86_64-unknown-linux-gnu` | tar.gz containing `ucirig` |
+| macOS ARM64 | `aarch64-apple-darwin` | tar.gz containing `ucirig` |
 
-Names follow `<cli-name>-<version>-<os>-<arch>.<format>`. The archive contains
+Names follow `ucirig-<version>-<os>-<arch>.<format>`. The archive contains
 the binary, licence and version-matched CLI documentation needed for offline
 use. It contains no GUI executable, icons, desktop entry, installer metadata,
 engine, book, language runtime or writable installation data. Linux package
@@ -329,7 +330,7 @@ before attachment.
 |---|---|---|
 | Root `[workspace.package].version = 1.0.2` inherited by all crates | Give GUI/CLI explicit product versions; give internal crates explicit non-product versions; remove root product authority | 2.2 |
 | `colosseum-gui` binary `colosseum` | Preserve GUI package/binary and GUI-specific version lookup | 2.2/9.4 |
-| No CLI package/binary | Add independently versioned package/composition root; public binary name comes from 0.6 | 2.2 |
+| No CLI package/binary | Add independently versioned `ucirig` package/composition root and binary | 2.2 |
 | `.github/workflows/release.yml` on published unscoped release | Replace with required `ci.yml`, `release-gui.yml` and `release-cli.yml`; tag push validates before publication | 2.2 baseline, 9.4 publication |
 | Global `contents: write` | Limit write permission to final publish jobs | 9.4 |
 | Raw `github.ref_name` parsed repeatedly in shell | Use one tested internal Rust release-metadata command | 2.2/9.4 |
@@ -349,7 +350,7 @@ its complete artifact matrix from a `gui-v` tag.
 
 ## Release responsibility boundary
 
-Colosseum release automation verifies its own source, binary, dependencies,
+Repository release automation verifies its own source, binary, dependencies,
 artifacts and test evidence. It does not build user chess engines, compare their
 compilers/flags, inspect source trees, run custom engine fingerprints or certify
 that two user executables are comparable. Those remain engine-project policy.
@@ -363,5 +364,6 @@ This design assigns every current version/build/release/documentation surface,
 defines independent product versions/tags/notes/artifacts, specifies required
 shared-layer debug/release CI on all supported operating systems, and makes the
 published CLI artifact's headless behavior testable. ADR-0006 records why the
-repository remains unified. Phase 0.6 can now resolve the public CLI/product
-name without reopening the product-lane or release-independence decisions.
+repository remains unified. Phase 0.6 resolves the public CLI product as UCI
+Rig / `ucirig` without reopening the product-lane or release-independence
+decisions. Phase 0.7 reviews the combined contract.

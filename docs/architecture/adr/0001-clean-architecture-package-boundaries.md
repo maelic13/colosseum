@@ -30,7 +30,7 @@ The target package ownership is:
 | `colosseum-application` | Use cases, application models, ports and failure/commit policy |
 | `colosseum-uci` | UCI parsing/process adapter implementing application engine-session ports |
 | `colosseum-engine` | Headless runner, execution, persistence, artifact, input, topology and affinity adapters |
-| `colosseum-cli` | Command adapter and CLI composition root |
+| `ucirig` | UCI Rig command adapter and CLI composition root |
 | `colosseum-gui` | Desktop adapter, GUI-owned persistence models and GUI composition root |
 
 Allowed workspace dependency edges are:
@@ -100,7 +100,7 @@ real engine executable.
 Rejected. It would either keep concrete Tokio/SQLite/UCI dependencies in use
 cases or require an internal layering convention that Cargo cannot enforce.
 
-### Put shared workflows in `colosseum-cli`
+### Put shared workflows in `ucirig`
 
 Rejected. The GUI would depend on the CLI or duplicate experiment policy, so
 the command adapter would incorrectly own application behavior.

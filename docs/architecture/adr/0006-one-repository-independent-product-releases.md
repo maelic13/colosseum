@@ -19,7 +19,8 @@ to offset that cost.
 ## Decision
 
 Keep the GUI, CLI and shared packages in this repository and Cargo workspace.
-Treat `colosseum-gui` and `colosseum-cli` as independent products:
+Treat `colosseum-gui` and the CLI product package (subsequently named `ucirig`
+by ADR-0007) as independent products:
 
 - each product package declares its own SemVer rather than inheriting a root
   product version;
@@ -34,8 +35,8 @@ Treat `colosseum-gui` and `colosseum-cli` as independent products:
 
 Historic `v0.1.0` through `v1.0.2` tags/releases remain unchanged and are
 documented as GUI releases. The next GUI release adopts the `gui-v` namespace;
-the first CLI release uses the `cli-v` namespace chosen here regardless of the
-public binary name resolved by Phase 0.6.
+the first UCI Rig release uses the `cli-v` namespace chosen here. ADR-0007 fixes
+the public binary and package name without changing this release lane.
 
 GitHub's repository-wide “latest release” is not authoritative for either
 product because the most recently published GUI or CLI release would hide the
