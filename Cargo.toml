@@ -1,17 +1,15 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "tools/release"]
 
 [workspace.package]
-version = "1.0.2"
 edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/maelic13/colosseum"
 authors = ["Miloslav Macůrek <macurek.m@gmail.com>"]
 
-# Releases are built by .github/workflows/release.yml (triggered by v* tags):
-# Windows ZIP + MSI (x64/arm64), Linux tar.gz + .deb + .rpm, macOS DMG + tar.gz.
+# GUI and CLI products own independent versions in their package manifests.
 
 # ── Release profile ───────────────────────────────────────────────────────────
 # Optimize the shipped binary; engine I/O timing benefits from opt builds.

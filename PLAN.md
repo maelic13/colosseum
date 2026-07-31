@@ -1297,6 +1297,15 @@ runtime mapper. Core identities accept injected values and no longer acquire
 entropy. Architecture and fake-port tests enforce inward dependencies and
 commit-before-publication.
 
+**Implemented independent product baseline (2.2):** the headless
+`colosseum-cli` package has its own `0.1.0` version, help/version contract and
+transitive no-windowing architecture test. The GUI retains `1.0.2`; internal
+packages use non-product versions and every package is explicitly
+non-publishable. Product changelogs and `gui-v`/`cli-v` metadata validation are
+separate. Required push/PR CI exposes `workflow_call`, runs Windows/Linux/macOS
+debug and release suites, and builds the CLI artifact independently. The legacy
+GUI publication workflow remains until Phase 9.4 replaces publication lanes.
+
 **Exit:** two arbitrary UCI executables pass path-only workflows; run-file
 inheritance/clearing/path origins resolve identically to equivalent all-CLI or
 flattened input; seed golden vectors reproduce across platforms; durable and

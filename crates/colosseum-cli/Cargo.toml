@@ -1,0 +1,25 @@
+[package]
+name = "colosseum-cli"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Headless chess-engine testing and experiment harness"
+keywords = ["chess", "engine", "testing", "uci", "sprt"]
+categories = ["command-line-utilities", "games"]
+
+[[bin]]
+name = "colosseum-cli"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.51", features = ["derive"] }
+colosseum-application = { path = "../colosseum-application" }
+colosseum-engine = { path = "../colosseum-engine" }
+colosseum-uci = { path = "../colosseum-uci" }
+
+[dev-dependencies]
+serde_json = "1.0.150"

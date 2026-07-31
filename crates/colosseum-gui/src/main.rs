@@ -111,6 +111,11 @@ fn main() -> eframe::Result<()> {
         set_app_user_model_id();
     }
 
+    if std::env::args().any(|argument| argument == "--version") {
+        println!("colosseum {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     // `--portable` keeps all data (config, database, engines) next to the binary.
     let portable = std::env::args().any(|a| a == "--portable");
 

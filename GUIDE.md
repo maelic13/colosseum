@@ -168,11 +168,17 @@ model as well.
   [`crates/colosseum-uci/src/session.rs`](crates/colosseum-uci/src/session.rs),
   [`crates/colosseum-gui/src/runtime_adapter.rs`](crates/colosseum-gui/src/runtime_adapter.rs),
   [`crates/colosseum-application/tests/architecture.rs`](crates/colosseum-application/tests/architecture.rs)
-- ☐ **2.2** — **Model: Terra High.** Add independently versioned package and composition root
-  `colosseum-cli`;
-  `--version`/`--help`; no GUI/windowing dependency. Establish the separate
-  GUI/CLI version and changelog lanes plus required push/PR shared-workspace CI
-  baseline from the Phase 0.5 release design; publication workflows remain 9.4
+- ☑ **2.2 — DONE** — **Model: Terra High.** Add the independently versioned,
+  non-publishable `colosseum-cli` package and headless composition root with
+  tested `--version`/`--help` and a dependency-graph rejection of GUI/windowing
+  packages. GUI/CLI versions and changelogs now have separate authorities; the
+  cross-platform push/PR workflow tests debug and release workspaces and builds
+  the CLI independently. The shared release-metadata tool validates product tag,
+  version and changelog routing; publication workflows remain 9.4 — evidence:
+  [`crates/colosseum-cli/`](crates/colosseum-cli/),
+  [`tools/release/`](tools/release/),
+  [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
+  [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
 - ☐ **2.3** — **Model: Terra High.** Direct engine controls: executable, optional label, arguments, cwd,
   environment, arbitrary UCI options and allocated cores
 - ☐ **2.4** — **Model: Sol High.** Resolution order is built-in defaults < committed run TOML (with its

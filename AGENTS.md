@@ -90,4 +90,5 @@ consistency validation; they do not require rerunning unchanged Rust tests.
   internal method argumentation.
 - `docs/DEVELOPMENT.md`: implemented build/test/release facts; update it when
   the workspace or release process actually changes, not merely when planned.
-- `CHANGELOG.md`: released user-visible changes only.
+- `CHANGELOG-GUI.md` and `CHANGELOG-CLI.md`: released user-visible changes for
+  their independently versioned products; root `CHANGELOG.md` is only the index.

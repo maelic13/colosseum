@@ -49,6 +49,7 @@ no extra step.
 git clone https://github.com/maelic13/colosseum.git
 cd colosseum
 cargo run --release --bin colosseum
+cargo run -p colosseum-cli -- --help
 ```
 
 One-step scripts put a distributable artifact in `dist/`:
@@ -69,7 +70,7 @@ to other Macs requires codesigning and notarization — see
 
 ```bash
 cargo check --workspace --tests
-cargo clippy --workspace
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 ```
 
@@ -109,13 +110,16 @@ afterwards.
 ```
 colosseum/
 ├─ crates/
-│  ├─ colosseum-core/     Pure domain: config, pairings, standings, ML ratings, adjudication
+│  ├─ colosseum-core/     Pure domain rules, statistics and opaque identity values
+│  ├─ colosseum-application/ Runtime-neutral use cases and ports
 │  ├─ colosseum-uci/      UCI protocol & async engine process management (tokio)
 │  ├─ colosseum-engine/   Orchestration: scheduler, game runner, SQLite store, openings
-│  └─ colosseum-gui/      eframe/egui GUI — the shipped binary
+│  ├─ colosseum-gui/      eframe/egui GUI composition root
+│  └─ colosseum-cli/      independent headless CLI composition root
+├─ tools/release/         product tag/version/changelog validation
 ├─ packaging/             Linux desktop entry + icon (.deb / .rpm / Arch assets)
 ├─ docs/                  This guide, design guidelines, macOS signing notes
-└─ .github/workflows/     release.yml (release-triggered cross-platform packaging)
+└─ .github/workflows/     push/PR CI plus the legacy GUI release workflow
 ```
 
 The GUI never blocks on engine I/O: a tokio runtime drives all engine
@@ -123,15 +127,20 @@ processes, and live state is published behind shared snapshots the UI reads
 each frame. Visual rules for the GUI are binding and live in
 [`design/GUIDELINES.md`](design/GUIDELINES.md).
 
-## Releasing
+## Product versions and release lanes
 
-1. Bump `version` in the workspace `Cargo.toml`, update
-   [`CHANGELOG.md`](../CHANGELOG.md) and the version line in the README.
-2. Commit as `Version X.Y.Z` and push.
-3. On GitHub: **Releases → Draft a new release**, create the `vX.Y.Z` tag,
-   write the description, and publish.
+The GUI and CLI own independent explicit versions in
+`crates/colosseum-gui/Cargo.toml` and `crates/colosseum-cli/Cargo.toml`.
+Their release notes are similarly separate in
+[`CHANGELOG-GUI.md`](../CHANGELOG-GUI.md) and
+[`CHANGELOG-CLI.md`](../CHANGELOG-CLI.md). Product tags use `gui-v<semver>` and
+`cli-v<semver>`; validate a prepared tag locally with:
 
-Publishing triggers `release.yml`, which builds Windows (x64 + ARM64), Linux,
-and macOS binaries, runs smoke tests, and attaches the
-MSI / ZIP / DEB / RPM / pkg.tar.zst / DMG / tar.gz assets to that release a few
-minutes later. The hand-written description is never touched.
+```bash
+cargo run -p colosseum-release -- gui-v1.0.2
+```
+
+Push/pull-request CI runs the hermetic workspace on Windows, Linux and macOS in
+debug and release profiles, and independently builds the headless CLI artifact.
+The existing `release.yml` remains the legacy GUI publication workflow until
+the product-specific publication workflows are implemented.

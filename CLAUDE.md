@@ -1,25 +1,26 @@
 # Colosseum
 
-Desktop GUI (Rust + egui/eframe) for running UCI chess-engine-vs-engine
-tournaments: round robin and gauntlet formats, parallel games, live board
-view, ML Elo ratings, PGN/CSV export. GPL-3.0. Windows/Linux/macOS via
-the repository release workflow; the primary dev machine is Windows.
+One repository for the independently versioned Colosseum desktop GUI and
+headless Colosseum CLI chess-engine testing products. GPL-3.0. The primary
+development machine is Windows.
 
 ## Workspace
 
 | Crate | Role |
 |---|---|
 | `colosseum-core` | Pure domain logic, no I/O: config types, pairings, standings, rating math (`ml_ratings`, `performance_rating`, `rating_error`), SPRT/LOS stats, adjudication |
+| `colosseum-application` | Runtime-neutral use cases, launch/run models and driven ports |
 | `colosseum-uci` | UCI protocol + engine process management (spawn, handshake, search) |
-| `colosseum-engine` | Tournament scheduler/driver (tokio), game runner, SQLite store, PGN, openings, incident forensics, app dirs/config |
-| `colosseum-gui` | eframe app; one module per tab (`tournament_tab`, `results_tab` = the Arena tab, `engines_tab`) plus `live_view`, `theme`, `widgets`, `backend` (GUI↔engine bridge) |
+| `colosseum-engine` | Tournament scheduler/driver (tokio), game runner, SQLite store, PGN, openings and incident forensics |
+| `colosseum-gui` | eframe GUI composition root plus GUI-owned library/config/path adapters |
+| `colosseum-cli` | Independent headless composition root; ordinary UCI executables only |
 
 Commands: `cargo check --workspace --tests`, `cargo clippy --workspace`,
-`cargo test --workspace --all-targets`, run with
-`cargo run -p colosseum-gui`.
+`cargo test --workspace --all-targets`; run the GUI with
+`cargo run -p colosseum-gui` and the CLI with `cargo run -p colosseum-cli -- --help`.
 Before implementation work, read `AGENTS.md`, `PLAN.md` and `GUIDE.md`.
 `PLAN.md` and `GUIDE.md` are the maintainer-facing CLI specification/tracker;
-`README.md` and `CHANGELOG.md` are **user-facing** (keep them simple, no
+`README.md` and the product changelogs are **user-facing** (keep them simple, no
 phase/internal-method detail); `docs/DEVELOPMENT.md` holds implemented build,
 test, workspace and release facts.
 App data lives in `%APPDATA%\colosseum\` (`config/engines.json`,

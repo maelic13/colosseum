@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -12,8 +13,8 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  required-tests:
-    name: Required hermetic tests
+  quality:
+    name: Format, architecture and lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -31,11 +32,46 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Check formatting
+        run: cargo fmt --all --check
+
       - name: Check workspace tests
         run: cargo check --workspace --tests
 
       - name: Lint workspace
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Run required hermetic tests
+      - name: Build independent headless CLI artifact
+        run: cargo build --release -p colosseum-cli
+
+  platform-tests:
+    name: ${{ matrix.os }} / ${{ matrix.profile }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        profile: [debug, release]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run required hermetic tests (debug)
+        if: matrix.profile == 'debug'
         run: cargo test --workspace --all-targets
+
+      - name: Run required hermetic tests (release)
+        if: matrix.profile == 'release'
+        run: cargo test --workspace --all-targets --release
