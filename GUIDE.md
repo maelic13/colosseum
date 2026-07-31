@@ -18,8 +18,8 @@ numbers, internal naming or method argumentation.
 | What is missing | The Phase 2 boundary migration and independent CLI composition root; CPU affinity, match/SPRT workflows, SPSA, durable runs, run records and trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 2.1 — Clean Architecture boundary migration** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Next step | **Phase 2.2 — independent CLI composition root** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -159,8 +159,15 @@ model as well.
 
 ### Phase 2 — Architecture migration, CLI skeleton and durable foundation
 
-- ☐ **2.1** — **Model: Sol High.** Implement the Phase-0 boundary migration: generic runtime participant
-  type, application use cases/ports and GUI adapter for library/config data
+- ☑ **2.1 — DONE** — **Model: Sol High.** Implement the Phase-0 boundary migration: generic runtime
+  participant and launch types, framework-independent application use cases and
+  ports, a concrete UCI session adapter, and a GUI library-to-runtime adapter.
+  Identity entropy and product/config path policy now live outside the domain;
+  GUI engine-library/config serialization remains compatible — evidence:
+  [`crates/colosseum-application/`](crates/colosseum-application/),
+  [`crates/colosseum-uci/src/session.rs`](crates/colosseum-uci/src/session.rs),
+  [`crates/colosseum-gui/src/runtime_adapter.rs`](crates/colosseum-gui/src/runtime_adapter.rs),
+  [`crates/colosseum-application/tests/architecture.rs`](crates/colosseum-application/tests/architecture.rs)
 - ☐ **2.2** — **Model: Terra High.** Add independently versioned package and composition root
   `colosseum-cli`;
   `--version`/`--help`; no GUI/windowing dependency. Establish the separate

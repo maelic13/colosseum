@@ -1170,7 +1170,7 @@ impl EnginesTab {
             return;
         };
         let mut cloned = src.clone();
-        cloned.id = colosseum_core::EngineId::new();
+        cloned.id = colosseum_core::EngineId::from_uuid(uuid::Uuid::new_v4());
         // Copy the logo file so the clone owns an independent copy.
         if let Some(file) = cloned.meta.extra.get("logo").cloned() {
             match logo::import(&logos_dir, cloned.id, &logos_dir.join(&file)) {
@@ -2402,7 +2402,10 @@ fn set_or_remove(map: &mut BTreeMap<String, String>, key: &str, value: &str) {
 
 /// Create an `EngineConfig` from detection results (not yet in the library).
 fn engine_from_detect(path: PathBuf, result: DetectResult) -> EngineConfig {
-    let mut cfg = EngineConfig::new(path);
+    let mut cfg = EngineConfig::new(
+        colosseum_core::EngineId::from_uuid(uuid::Uuid::new_v4()),
+        path,
+    );
     match result.name {
         Some(id_name) => {
             let (name, version) = split_name_version(&id_name);

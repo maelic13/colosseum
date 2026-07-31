@@ -8,14 +8,19 @@ use colosseum_engine::{PendingGame, Store};
 fn bulk_insert_of_10500_games_is_fast_on_disk() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("timing.sqlite")).unwrap();
-    let tid = TournamentId::new();
+    let tid = TournamentId::from_uuid(uuid::Uuid::new_v4());
     store
         .create_tournament(tid, "Timing", &TournamentConfig::default())
         .unwrap();
 
-    let (a, b) = (EngineId::new(), EngineId::new());
+    let (a, b) = (
+        EngineId::from_uuid(uuid::Uuid::new_v4()),
+        EngineId::from_uuid(uuid::Uuid::new_v4()),
+    );
     let opening = vec!["e2e4".to_string(), "e7e5".to_string()];
-    let ids: Vec<GameId> = (0..10_500).map(|_| GameId::new()).collect();
+    let ids: Vec<GameId> = (0..10_500)
+        .map(|_| GameId::from_uuid(uuid::Uuid::new_v4()))
+        .collect();
     let rows: Vec<PendingGame<'_>> = ids
         .iter()
         .enumerate()

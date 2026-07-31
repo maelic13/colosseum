@@ -13,6 +13,7 @@
 mod app;
 mod backend;
 mod board;
+mod config;
 mod dialog;
 mod eco;
 mod engines_tab;
@@ -21,18 +22,20 @@ mod icon;
 mod live_view;
 mod logo;
 mod presets;
+mod product;
 mod results_tab;
+mod runtime_adapter;
 mod theme;
 mod tournament_tab;
 mod update;
 mod widgets;
 
-use colosseum_core::branding::DISPLAY_NAME;
-use colosseum_engine::AppDirs;
 use eframe::egui;
 
 use crate::app::ColosseumApp;
 use crate::backend::Backend;
+use crate::config::AppDirs;
+use crate::product::DISPLAY_NAME;
 
 /// Re-attach stdout/stderr to the parent process's console (if any), so a GUI-
 /// subsystem binary still prints tracing output when launched from a terminal.

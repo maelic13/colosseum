@@ -1288,6 +1288,15 @@ test paths with explicitly opt-in environment-only smoke tests. Establish the
 separate GUI/CLI version and changelog lanes and the required push/pull-request
 shared-workspace CI baseline; Phase 9 owns final publication workflows.
 
+**Implemented boundary baseline (2.1):** `colosseum-application` owns the
+runtime participant/launch contract, typed application failures, use cases and
+driven ports without runtime/framework dependencies. `colosseum-uci` implements
+the session port, GUI detection now traverses the application use case, and the
+GUI owns its product/config/path policy plus the explicit saved-library to
+runtime mapper. Core identities accept injected values and no longer acquire
+entropy. Architecture and fake-port tests enforce inward dependencies and
+commit-before-publication.
+
 **Exit:** two arbitrary UCI executables pass path-only workflows; run-file
 inheritance/clearing/path origins resolve identically to equivalent all-CLI or
 flattened input; seed golden vectors reproduce across platforms; durable and

@@ -3386,7 +3386,11 @@ mod tests {
 
     #[test]
     fn sort_rows_by_points_descending() {
-        let (a, b, c) = (EngineId::new(), EngineId::new(), EngineId::new());
+        let (a, b, c) = (
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+        );
         let mut rows = vec![
             row(a, 1.0, 1500.0, None),
             row(b, 3.0, 1500.0, None),
@@ -3406,7 +3410,10 @@ mod tests {
 
     #[test]
     fn sort_rows_by_nps_handles_missing() {
-        let (a, b) = (EngineId::new(), EngineId::new());
+        let (a, b) = (
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+        );
         let mut rows = vec![row(a, 0.0, 1500.0, None), row(b, 0.0, 1500.0, Some(5))];
         sort_rows(
             &mut rows,

@@ -16,7 +16,10 @@ use colosseum_engine::scheduler::{TournamentStatus, create_tournament, resume_to
 use colosseum_engine::store::{self, Store};
 
 fn engine_cfg(name: &str, exe: &Path, opts: &[(&str, &str)]) -> EngineConfig {
-    let mut cfg = EngineConfig::new(exe.to_path_buf());
+    let mut cfg = EngineConfig::new(
+        colosseum_core::EngineId::from_uuid(uuid::Uuid::new_v4()),
+        exe.to_path_buf(),
+    );
     cfg.meta.name = name.to_string();
     for (key, value) in opts {
         cfg.options.insert(
@@ -425,9 +428,18 @@ fn openings_assigned_per_encounter_and_persisted() {
 
     // 3 engines -> 3 encounters; with 2 openings the third encounter cycles back.
     let engines = vec![
-        EngineConfig::new("/nonexistent/a".into()),
-        EngineConfig::new("/nonexistent/b".into()),
-        EngineConfig::new("/nonexistent/c".into()),
+        EngineConfig::new(
+            colosseum_core::EngineId::from_uuid(uuid::Uuid::new_v4()),
+            "/nonexistent/a".into(),
+        ),
+        EngineConfig::new(
+            colosseum_core::EngineId::from_uuid(uuid::Uuid::new_v4()),
+            "/nonexistent/b".into(),
+        ),
+        EngineConfig::new(
+            colosseum_core::EngineId::from_uuid(uuid::Uuid::new_v4()),
+            "/nonexistent/c".into(),
+        ),
     ];
     let (events_tx, _rx) = crossbeam_channel::unbounded();
     let (tournament, _driver) =

@@ -711,14 +711,19 @@ mod tests {
     #[test]
     fn bulk_insert_and_reset_round_trip() {
         let store = Store::open_in_memory().unwrap();
-        let tid = TournamentId::new();
+        let tid = TournamentId::from_uuid(uuid::Uuid::new_v4());
         store
             .create_tournament(tid, "Bulk", &TournamentConfig::default())
             .unwrap();
 
-        let (a, b) = (EngineId::new(), EngineId::new());
+        let (a, b) = (
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+        );
         let opening = vec!["e2e4".to_string(), "e7e5".to_string()];
-        let games: Vec<(GameId, u32)> = (0..500).map(|i| (GameId::new(), i / 2 + 1)).collect();
+        let games: Vec<(GameId, u32)> = (0..500)
+            .map(|i| (GameId::from_uuid(uuid::Uuid::new_v4()), i / 2 + 1))
+            .collect();
         let rows: Vec<PendingGame<'_>> = games
             .iter()
             .map(|(id, round)| PendingGame {
@@ -769,19 +774,22 @@ mod tests {
     fn round_trips_tournaments_and_games() {
         let store = Store::open_in_memory().unwrap();
 
-        let mut engine = EngineConfig::new("stockfish".into());
+        let mut engine = EngineConfig::new(
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            "stockfish".into(),
+        );
         engine.meta.name = "Stockfish".into();
         engine.meta.elo = Some(3600);
 
-        let tid = TournamentId::new();
+        let tid = TournamentId::from_uuid(uuid::Uuid::new_v4());
         let config = TournamentConfig::default();
         store.create_tournament(tid, "Test", &config).unwrap();
         store
             .add_tournament_engine(tid, engine.id, &engine, 0, 3600.0)
             .unwrap();
 
-        let other = EngineId::new();
-        let gid = GameId::new();
+        let other = EngineId::from_uuid(uuid::Uuid::new_v4());
+        let gid = GameId::from_uuid(uuid::Uuid::new_v4());
         store
             .insert_pending_game(gid, tid, 1, engine.id, other, None, &[])
             .unwrap();
@@ -803,7 +811,7 @@ mod tests {
             .unwrap();
 
         // A second game carrying an assigned opening (start FEN + pre-moves).
-        let gid2 = GameId::new();
+        let gid2 = GameId::from_uuid(uuid::Uuid::new_v4());
         let fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
         store
             .insert_pending_game(

@@ -18,9 +18,10 @@ use colosseum_core::{
     OpeningBook, OpeningFormat, OpeningOrder, RatingWriteback, ResignAdjudication, StartPosition,
     TimeControl, TimeUnit, TournamentConfig, UciOption, UciOptionValue,
 };
-use colosseum_engine::{AppConfig, summarize};
+use colosseum_engine::summarize;
 
 use crate::backend::Backend;
+use crate::config::AppConfig;
 use crate::presets::{PresetData, PresetFormatKind, PresetManager, PresetTcKind};
 use crate::theme;
 use crate::widgets;
@@ -2735,7 +2736,11 @@ mod tests {
     #[test]
     fn estimated_games_round_robin() {
         let mut form = TournamentForm {
-            selected: vec![EngineId::new(), EngineId::new(), EngineId::new()],
+            selected: vec![
+                EngineId::from_uuid(uuid::Uuid::new_v4()),
+                EngineId::from_uuid(uuid::Uuid::new_v4()),
+                EngineId::from_uuid(uuid::Uuid::new_v4()),
+            ],
             ..TournamentForm::default()
         };
         // 3 engines -> 3 pairs * 2 games/pair * 1 cycle = 6.
@@ -2772,7 +2777,10 @@ mod tests {
     #[test]
     fn estimated_duration_scales_with_lanes() {
         let mut form = TournamentForm {
-            selected: vec![EngineId::new(), EngineId::new()],
+            selected: vec![
+                EngineId::from_uuid(uuid::Uuid::new_v4()),
+                EngineId::from_uuid(uuid::Uuid::new_v4()),
+            ],
             tc_kind: TcKind::PerMove,
             tc_value: 1000.0,
             tc_unit: TimeUnit::Milliseconds,

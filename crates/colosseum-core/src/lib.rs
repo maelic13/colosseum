@@ -6,7 +6,6 @@
 //! game/result types.
 
 pub mod adjudication;
-pub mod branding;
 pub mod engine;
 pub mod event;
 pub mod export;
@@ -28,7 +27,7 @@ pub use engine::{EngineConfig, EngineMeta};
 pub use event::TournamentEvent;
 pub use export::{ExportRow, crosstable_csv, standings_csv};
 pub use game::{GameResult, GameStats, Pairing, Termination};
-pub use ids::{EngineId, GameId, TournamentId};
+pub use ids::{EngineId, GameId, PairId, ParticipantId, RunId, TournamentId, UnitId};
 pub use options::{
     UciOption, UciOptionValue, is_hash_option, is_tablebase_option, is_thread_option,
 };

@@ -12,6 +12,7 @@ authors.workspace = true
 real-engine-smoke = []
 
 [dependencies]
+colosseum-application = { path = "../colosseum-application" }
 colosseum-core = { path = "../colosseum-core" }
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }

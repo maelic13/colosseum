@@ -6,20 +6,17 @@
 //! updater, SQLite persistence with tournament history + resume (Steps 5–6), and
 //! config/engine-library file I/O with `--portable` mode (Step 6).
 
-pub mod config;
 pub mod detect;
 pub mod error;
 pub mod incidents;
 pub mod live;
 pub mod openings;
-pub mod paths;
 pub mod pgn;
 pub mod runner;
 pub mod scheduler;
 pub mod store;
 
 pub use colosseum_uci::Score;
-pub use config::{AppConfig, AppDirs, EngineLibrary};
 pub use detect::{DetectResult, detect_engine, split_name_version};
 pub use error::EngineError;
 pub use live::{EvalPoint, LiveGameHandle, LiveGameState, LiveSearch};

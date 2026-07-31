@@ -12,9 +12,11 @@ pub mod parse;
 pub mod position;
 pub mod process;
 pub mod score;
+pub mod session;
 
 pub use error::UciError;
 pub use parse::{InfoLine, parse_bestmove, parse_info_line, parse_option_line};
 pub use position::{GoLimits, UciPosition};
 pub use process::{EngineProcess, HandshakeInfo, SearchOutput, SpawnOptions};
 pub use score::Score;
+pub use session::UciSessionFactory;

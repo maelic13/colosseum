@@ -235,7 +235,7 @@ pub fn create_tournament(
         ));
     }
 
-    let id = TournamentId::new();
+    let id = TournamentId::from_uuid(uuid::Uuid::new_v4());
     store.create_tournament(id, name, &config)?;
 
     // Resolve per-engine templates and register participants.
@@ -287,7 +287,7 @@ pub fn create_tournament(
     let pairings = generate_schedule(&ids, &config);
     let mut schedule = Vec::with_capacity(pairings.len());
     for (i, pairing) in pairings.into_iter().enumerate() {
-        let game_id = GameId::new();
+        let game_id = GameId::from_uuid(uuid::Uuid::new_v4());
         let (start_fen, opening_moves) = if openings.is_empty() {
             (None, Vec::new())
         } else {
@@ -1276,7 +1276,10 @@ mod tests {
     use std::path::PathBuf;
 
     fn test_engine() -> EngineConfig {
-        let mut engine = EngineConfig::new(PathBuf::from("engine.exe"));
+        let mut engine = EngineConfig::new(
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            PathBuf::from("engine.exe"),
+        );
         engine.detected_options = vec![
             colosseum_core::UciOption::Spin {
                 name: "Hash".into(),
@@ -1345,7 +1348,10 @@ mod tests {
     /// the genuine count option ("Max CPUs") should receive the thread value.
     #[test]
     fn thread_mapping_leaves_cpu_usage_and_bool_toggles_alone() {
-        let mut engine = EngineConfig::new(PathBuf::from("rybka.exe"));
+        let mut engine = EngineConfig::new(
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            PathBuf::from("rybka.exe"),
+        );
         engine.detected_options = vec![
             colosseum_core::UciOption::Spin {
                 name: "Max CPUs".into(),

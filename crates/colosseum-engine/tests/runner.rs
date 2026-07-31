@@ -47,13 +47,13 @@ async fn stockfish_self_play_one_game() {
     let (_guard, exe) = common::smoke_engine();
 
     let white = spec(
-        EngineId::new(),
+        EngineId::from_uuid(uuid::Uuid::new_v4()),
         "SF-Strong",
         &exe,
         vec![("Threads", "1"), ("Hash", "16")],
     );
     let black = spec(
-        EngineId::new(),
+        EngineId::from_uuid(uuid::Uuid::new_v4()),
         "SF-Weak",
         &exe,
         vec![
@@ -65,7 +65,7 @@ async fn stockfish_self_play_one_game() {
     );
 
     let game = GameSpec {
-        game_id: GameId::new(),
+        game_id: GameId::from_uuid(uuid::Uuid::new_v4()),
         event: "Colosseum Test".into(),
         site: "Local".into(),
         date: "2026.06.08".into(),
@@ -124,11 +124,21 @@ async fn stockfish_self_play_one_game() {
 async fn game_pre_plays_opening_moves() {
     let (_guard, exe) = common::smoke_engine();
 
-    let white = spec(EngineId::new(), "SF-W", &exe, vec![("Threads", "1")]);
-    let black = spec(EngineId::new(), "SF-B", &exe, vec![("Threads", "1")]);
+    let white = spec(
+        EngineId::from_uuid(uuid::Uuid::new_v4()),
+        "SF-W",
+        &exe,
+        vec![("Threads", "1")],
+    );
+    let black = spec(
+        EngineId::from_uuid(uuid::Uuid::new_v4()),
+        "SF-B",
+        &exe,
+        vec![("Threads", "1")],
+    );
 
     let game = GameSpec {
-        game_id: GameId::new(),
+        game_id: GameId::from_uuid(uuid::Uuid::new_v4()),
         event: "Opening Test".into(),
         site: "Local".into(),
         date: "2026.06.09".into(),
@@ -176,11 +186,21 @@ async fn game_starts_from_fen() {
     // Position after 1.e4 e5 2.Nf3 (Black to move).
     let fen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2";
 
-    let white = spec(EngineId::new(), "SF-W", &exe, vec![("Threads", "1")]);
-    let black = spec(EngineId::new(), "SF-B", &exe, vec![("Threads", "1")]);
+    let white = spec(
+        EngineId::from_uuid(uuid::Uuid::new_v4()),
+        "SF-W",
+        &exe,
+        vec![("Threads", "1")],
+    );
+    let black = spec(
+        EngineId::from_uuid(uuid::Uuid::new_v4()),
+        "SF-B",
+        &exe,
+        vec![("Threads", "1")],
+    );
 
     let game = GameSpec {
-        game_id: GameId::new(),
+        game_id: GameId::from_uuid(uuid::Uuid::new_v4()),
         event: "FEN Start".into(),
         site: "Local".into(),
         date: "2026.06.09".into(),
@@ -224,7 +244,7 @@ async fn setup_failure_writes_incident() {
     colosseum_engine::incidents::set_dir(dir.path().to_path_buf());
 
     let bogus = |name: &str| EngineGameSpec {
-        id: EngineId::new(),
+        id: EngineId::from_uuid(uuid::Uuid::new_v4()),
         name: name.to_string(),
         spawn: SpawnOptions {
             path: "cmd".into(),
@@ -236,7 +256,7 @@ async fn setup_failure_writes_incident() {
     };
 
     let game = GameSpec {
-        game_id: GameId::new(),
+        game_id: GameId::from_uuid(uuid::Uuid::new_v4()),
         event: "Setup Fail".into(),
         site: "Local".into(),
         date: "2026.07.04".into(),

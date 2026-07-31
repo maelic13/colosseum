@@ -10,15 +10,24 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use colosseum_core::{
-    EngineConfig,
-    branding::{APP_DIR_NAME, ORGANIZATION, QUALIFIER},
-};
+use colosseum_core::EngineConfig;
 use directories::ProjectDirs;
 
-use crate::error::EngineError;
+use crate::product::{APP_DIR_NAME, ORGANIZATION, QUALIFIER};
 
-type Result<T> = std::result::Result<T, EngineError>;
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("configuration parse error: {0}")]
+    TomlDe(#[from] toml::de::Error),
+    #[error("configuration serialization error: {0}")]
+    TomlSer(#[from] toml::ser::Error),
+    #[error("engine library serialization error: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+type Result<T> = std::result::Result<T, ConfigError>;
 
 // ---------------------------------------------------------------------------
 // AppDirs
@@ -212,9 +221,9 @@ impl AppConfig {
     /// Propagates any other I/O or TOML parse error.
     pub fn load(path: &Path) -> Result<Self> {
         match std::fs::read_to_string(path) {
-            Ok(text) => toml::from_str(&text).map_err(EngineError::TomlDe),
+            Ok(text) => toml::from_str(&text).map_err(ConfigError::TomlDe),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(e) => Err(EngineError::Io(e)),
+            Err(e) => Err(ConfigError::Io(e)),
         }
     }
 
@@ -223,7 +232,7 @@ impl AppConfig {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let text = toml::to_string_pretty(self).map_err(EngineError::TomlSer)?;
+        let text = toml::to_string_pretty(self).map_err(ConfigError::TomlSer)?;
         std::fs::write(path, text)?;
         Ok(())
     }
@@ -246,9 +255,9 @@ impl EngineLibrary {
     /// Returns an empty `Vec` when the file does not exist (first run).
     pub fn load(path: &Path) -> Result<Vec<EngineConfig>> {
         match std::fs::read_to_string(path) {
-            Ok(text) => serde_json::from_str(&text).map_err(EngineError::Serde),
+            Ok(text) => serde_json::from_str(&text).map_err(ConfigError::Json),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-            Err(e) => Err(EngineError::Io(e)),
+            Err(e) => Err(ConfigError::Io(e)),
         }
     }
 
@@ -260,7 +269,7 @@ impl EngineLibrary {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let text = serde_json::to_string_pretty(engines).map_err(EngineError::Serde)?;
+        let text = serde_json::to_string_pretty(engines).map_err(ConfigError::Json)?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &text)?;
         std::fs::rename(&tmp, path)?;
@@ -309,8 +318,14 @@ mod tests {
         let path = dir.path().join("engines.json");
 
         let engines = vec![
-            colosseum_core::EngineConfig::new("/engines/sf".into()),
-            colosseum_core::EngineConfig::new("/engines/lc0".into()),
+            colosseum_core::EngineConfig::new(
+                colosseum_core::EngineId::from_uuid(uuid::Uuid::new_v4()),
+                "/engines/sf".into(),
+            ),
+            colosseum_core::EngineConfig::new(
+                colosseum_core::EngineId::from_uuid(uuid::Uuid::new_v4()),
+                "/engines/lc0".into(),
+            ),
         ];
         EngineLibrary::save(&engines, &path).unwrap();
 

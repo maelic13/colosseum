@@ -22,10 +22,11 @@ use colosseum_core::{
     EngineConfig, EngineId, RatingWriteback, TournamentConfig, TournamentEvent, TournamentId,
 };
 use colosseum_engine::{
-    AppConfig, AppDirs, EngineLibrary, Store, Tournament, TournamentResults, TournamentRow,
-    TournamentSnapshot, TournamentStatus, create_tournament, load_tournament_results,
-    resume_tournament,
+    Store, Tournament, TournamentResults, TournamentRow, TournamentSnapshot, TournamentStatus,
+    create_tournament, load_tournament_results, resume_tournament,
 };
+
+use crate::config::{AppConfig, AppDirs, EngineLibrary};
 
 /// Target redraw cadence while a tournament is running (~30 Hz).
 pub const LIVE_REPAINT: Duration = Duration::from_millis(33);
@@ -270,6 +271,11 @@ impl Backend {
         config: TournamentConfig,
         engines: Vec<EngineConfig>,
     ) -> anyhow::Result<()> {
+        let runtime_participants: Vec<_> = engines
+            .iter()
+            .map(crate::runtime_adapter::runtime_participant)
+            .collect();
+        debug_assert_eq!(runtime_participants.len(), engines.len());
         let participants: Vec<ParticipantInfo> = engines
             .iter()
             .map(|e| ParticipantInfo {

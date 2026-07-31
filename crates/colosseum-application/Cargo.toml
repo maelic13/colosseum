@@ -1,16 +1,14 @@
 [package]
-name = "colosseum-core"
-version.workspace = true
+name = "colosseum-application"
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+description = "Runtime-neutral application use cases and ports for Colosseum"
 
 [dependencies]
+colosseum-core = { path = "../colosseum-core" }
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
-uuid = { version = "1.23.2", features = ["serde"] }
-
-[dev-dependencies]
-toml = "1.1.2"
