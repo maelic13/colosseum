@@ -23,7 +23,14 @@ pub trait EngineSession: Send {
         &mut self,
         request: SearchRequest,
     ) -> PortFuture<'_, Result<SearchObservation, ApplicationError>>;
-    fn stop(&mut self) -> PortFuture<'_, Result<(), ApplicationError>>;
+    fn start_search(
+        &mut self,
+        request: SearchRequest,
+    ) -> PortFuture<'_, Result<(), ApplicationError>>;
+    fn stop(
+        &mut self,
+        deadline_ms: u64,
+    ) -> PortFuture<'_, Result<SearchObservation, ApplicationError>>;
     fn shutdown(&mut self) -> PortFuture<'_, Result<(), ApplicationError>>;
 }
 

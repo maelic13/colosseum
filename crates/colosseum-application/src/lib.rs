@@ -3,11 +3,13 @@
 //! This package owns use-case inputs, outputs and ports. It deliberately has no
 //! process, filesystem, database, GUI, channel or async-runtime implementation.
 
+pub mod check;
 pub mod commit;
 pub mod inspect;
 pub mod model;
 pub mod ports;
 
+pub use check::{CheckEngine, ComplianceCheck, ComplianceReport, ComplianceStatus};
 pub use commit::{CommitUnit, CommitUnitDependencies};
 pub use inspect::InspectEngine;
 pub use model::*;

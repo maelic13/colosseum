@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | The Phase 2 boundary migration and independent CLI composition root; CPU affinity, match/SPRT workflows, SPSA, durable runs, run records and trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 2.5 — engine inspect/check** |
+| Next step | **Phase 2.6 — dry-run and JSON stream discipline** |
 | Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
@@ -207,9 +207,16 @@ model as well.
   [`crates/colosseum-core/src/rng.rs`](crates/colosseum-core/src/rng.rs),
   [`crates/colosseum-cli/src/master_seed.rs`](crates/colosseum-cli/src/master_seed.rs),
   [`docs/cli/randomness.md`](docs/cli/randomness.md)
-- ☐ **2.5** — **Model: Terra High.** `engine inspect`; `engine check` reports handshake, synchronisation,
-  schema validation, option acceptance/no-failure, legal bounded search,
-  stop/new-game/quit. Do not claim UCI option read-back
+- ☑ **2.5 — DONE** — **Model: Terra High.** Add `engine inspect` for UCI identity
+  and advertised schema plus `engine check` with individual handshake,
+  synchronization, requested-value/schema validation, option acceptance plus
+  readyok, legal bounded start-position search, bounded stop/bestmove,
+  ucinewgame/readyok and quit checks. Reports explicitly say UCI has no option
+  read-back; failures produce nonzero status. Application fake-port tests pin
+  orchestration and prevent invalid options from being sent — evidence:
+  [`crates/colosseum-application/src/check.rs`](crates/colosseum-application/src/check.rs),
+  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
+  [`crates/colosseum-uci/src/session.rs`](crates/colosseum-uci/src/session.rs)
 - ☐ **2.6** — **Model: Terra High.** `--dry-run`; JSON mode emits JSON only on stdout and diagnostics on
   stderr
 - ☐ **2.7** — **Model: Sol High.** `self-test` launches the exact executable's hidden deterministic UCI

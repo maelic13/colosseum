@@ -3,12 +3,12 @@
 use std::time::Duration;
 
 use colosseum_application::{
-    ApplicationError, EngineInspection, EngineSession, EngineSessionFactory, PortFuture,
-    RuntimeParticipant, SearchObservation, SearchRequest, UciOptionSchema,
+    ApplicationError, CpuAllocation, EngineInspection, EngineSession, EngineSessionFactory,
+    PortFuture, RuntimeParticipant, SearchObservation, SearchRequest, UciOptionSchema,
 };
 use colosseum_core::{ParticipantId, UciOption};
 
-use crate::{EngineProcess, GoLimits, SpawnOptions, UciError, UciPosition};
+use crate::{EngineProcess, GoLimits, SearchOutput, SpawnOptions, UciError, UciPosition};
 
 #[derive(Debug, Clone, Default)]
 pub struct UciSessionFactory;
@@ -21,6 +21,12 @@ impl EngineSessionFactory for UciSessionFactory {
         let id = participant.id;
         let launch = participant.launch.clone();
         Box::pin(async move {
+            if !matches!(launch.allocated_cpus, CpuAllocation::Unrestricted) {
+                return Err(ApplicationError::ConfigurationFault(
+                    "logical CPU allocation is not available until the topology/affinity adapter is composed"
+                        .into(),
+                ));
+            }
             let process = EngineProcess::spawn(SpawnOptions {
                 path: launch.executable,
                 args: launch.arguments,
@@ -118,16 +124,7 @@ impl EngineSession for UciSession {
         let id = self.id;
         let process = self.process();
         Box::pin(async move {
-            let position = if request.position == "startpos" {
-                UciPosition::StartPos {
-                    moves: request.moves,
-                }
-            } else {
-                UciPosition::Fen {
-                    fen: request.position,
-                    moves: request.moves,
-                }
-            };
+            let position = position(request.position, request.moves);
             let output = process?
                 .search(
                     &position,
@@ -137,22 +134,40 @@ impl EngineSession for UciSession {
                 )
                 .await
                 .map_err(|error| engine_error(id, error))?;
-            Ok(SearchObservation {
-                best_move: output.best_move,
-                ponder: output.ponder,
-                diagnostics: Vec::new(),
-            })
+            Ok(observation(output))
         })
     }
 
-    fn stop(&mut self) -> PortFuture<'_, Result<(), ApplicationError>> {
+    fn start_search(
+        &mut self,
+        request: SearchRequest,
+    ) -> PortFuture<'_, Result<(), ApplicationError>> {
         let id = self.id;
         let process = self.process();
         Box::pin(async move {
+            let position = position(request.position, request.moves);
             process?
-                .kill()
+                .start_search(
+                    &position,
+                    &GoLimits::MoveTime(Duration::from_millis(request.move_time_ms)),
+                )
                 .await
                 .map_err(|error| engine_error(id, error))
+        })
+    }
+
+    fn stop(
+        &mut self,
+        deadline_ms: u64,
+    ) -> PortFuture<'_, Result<SearchObservation, ApplicationError>> {
+        let id = self.id;
+        let process = self.process();
+        Box::pin(async move {
+            let output = process?
+                .stop_search(Duration::from_millis(deadline_ms), |_| {})
+                .await
+                .map_err(|error| engine_error(id, error))?;
+            Ok(observation(output))
         })
     }
 
@@ -168,6 +183,25 @@ impl EngineSession for UciSession {
                 .await
                 .map_err(|error| engine_error(id, error))
         })
+    }
+}
+
+fn position(position: String, moves: Vec<String>) -> UciPosition {
+    if position == "startpos" {
+        UciPosition::StartPos { moves }
+    } else {
+        UciPosition::Fen {
+            fen: position,
+            moves,
+        }
+    }
+}
+
+fn observation(output: SearchOutput) -> SearchObservation {
+    SearchObservation {
+        best_move: output.best_move,
+        ponder: output.ponder,
+        diagnostics: Vec::new(),
     }
 }
 

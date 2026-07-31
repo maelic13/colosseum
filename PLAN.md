@@ -1334,6 +1334,15 @@ outputs. The CLI retains a configured u64 or obtains OS entropy, inserts the
 generated seed before hashing/writing and exposes the resolved value through the
 application seed port. Built-in `stats_version` is tied to `RNG_VERSION`.
 
+**Implemented engine diagnosis (2.5):** `engine inspect` launches the supplied
+ordinary executable with direct process controls and reports handshake identity
+and the advertised option schema. `engine check` owns its compliance sequence in
+the application layer and emits separate handshake, ready, requested-schema,
+option-command-plus-readyok, bounded legal start-position search, bounded
+stop/bestmove, new-game/readyok and shutdown results. It never calls option
+acceptance a read-back. The UCI adapter now supports start/stop collection and
+reports a quit timeout after killing/reaping rather than mislabelling it clean.
+
 **Exit:** two arbitrary UCI executables pass path-only workflows; run-file
 inheritance/clearing/path origins resolve identically to equivalent all-CLI or
 flattened input; seed golden vectors reproduce across platforms; durable and

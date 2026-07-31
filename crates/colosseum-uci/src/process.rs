@@ -273,8 +273,29 @@ impl EngineProcess {
         deadline: Duration,
         on_info: impl FnMut(&parse::InfoLine),
     ) -> Result<SearchOutput, UciError> {
+        self.start_search(position, limits).await?;
+        self.await_bestmove(Instant::now(), deadline, on_info).await
+    }
+
+    /// Start a normal search and return immediately, leaving `bestmove` to be
+    /// collected by [`Self::stop_search`].
+    pub async fn start_search(
+        &mut self,
+        position: &UciPosition,
+        limits: &GoLimits,
+    ) -> Result<(), UciError> {
         self.send(&position.to_command()).await?;
-        self.send(&limits.to_command()).await?;
+        self.send(&limits.to_command()).await
+    }
+
+    /// Issue `stop` for an active normal search and require a bounded
+    /// `bestmove` response.
+    pub async fn stop_search(
+        &mut self,
+        deadline: Duration,
+        on_info: impl FnMut(&parse::InfoLine),
+    ) -> Result<SearchOutput, UciError> {
+        self.send("stop").await?;
         self.await_bestmove(Instant::now(), deadline, on_info).await
     }
 
@@ -428,7 +449,8 @@ impl EngineProcess {
             Ok(Err(err)) => Err(UciError::Io(err)),
             Err(_elapsed) => {
                 let _ = self.child.start_kill();
-                Ok(())
+                let _ = self.child.wait().await;
+                Err(UciError::ShutdownTimeout)
             }
         }
     }

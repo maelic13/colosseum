@@ -166,7 +166,17 @@ impl EngineSession for FakeSession {
         unreachable!()
     }
 
-    fn stop(&mut self) -> PortFuture<'_, Result<(), ApplicationError>> {
+    fn start_search(
+        &mut self,
+        _request: colosseum_application::SearchRequest,
+    ) -> PortFuture<'_, Result<(), ApplicationError>> {
+        unreachable!()
+    }
+
+    fn stop(
+        &mut self,
+        _deadline_ms: u64,
+    ) -> PortFuture<'_, Result<colosseum_application::SearchObservation, ApplicationError>> {
         unreachable!()
     }
 

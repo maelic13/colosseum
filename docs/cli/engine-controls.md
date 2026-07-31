@@ -18,3 +18,17 @@ UCI option names are preserved exactly and validated against the schema the
 engine advertises during its normal handshake. Duplicate names and duplicate or
 descending CPU allocations are errors. No engine manifest, compiler metadata,
 build command or custom engine feature is read or required.
+
+## Inspection and compliance
+
+`colosseum-cli engine inspect <EXECUTABLE>` performs the normal `uci`/`isready`
+handshake and prints the engine-reported name, author and complete advertised
+option schema.
+
+`colosseum-cli engine check <EXECUTABLE>` reports PASS, FAIL or SKIP separately
+for handshake, readiness, requested-value/schema validation, option acceptance,
+a bounded legal search, `stop`, `ucinewgame` and shutdown. “Option acceptance”
+means only that `setoption` caused no protocol/process failure and a subsequent
+`isready` completed. UCI defines no option read-back, so Colosseum does not call
+this a round trip or claim that the engine used the value internally. The
+command exits nonzero if any requirement does not pass.

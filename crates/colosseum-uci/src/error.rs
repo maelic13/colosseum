@@ -17,6 +17,9 @@ pub enum UciError {
     #[error("engine terminated unexpectedly")]
     Terminated,
 
+    #[error("engine did not exit after quit before the shutdown deadline")]
+    ShutdownTimeout,
+
     #[error("protocol error: {0}")]
     Protocol(String),
 }

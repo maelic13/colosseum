@@ -24,3 +24,43 @@ fn help_is_headless_and_names_the_product() {
     assert!(stdout.contains("Usage: colosseum-cli"));
     assert!(output.stderr.is_empty());
 }
+
+#[test]
+fn engine_subcommand_help_exposes_direct_controls() {
+    for action in ["inspect", "check"] {
+        let output = cli().args(["engine", action, "--help"]).output().unwrap();
+        assert!(output.status.success());
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        for control in [
+            "<EXECUTABLE>",
+            "--label",
+            "--engine-arg",
+            "--cwd",
+            "--env",
+            "--option",
+            "--button",
+            "--cores",
+        ] {
+            assert!(stdout.contains(control), "{action} help omitted {control}");
+        }
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn inspect_launch_failure_is_nonzero_and_diagnostic() {
+    let root = tempfile::tempdir().unwrap();
+    let missing = root.path().join("missing-uci-engine");
+    let output = cli()
+        .args(["engine", "inspect"])
+        .arg(missing)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("engine inspect failed")
+    );
+}
