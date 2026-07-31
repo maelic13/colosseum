@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. CLI: **not started** |
-| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0.1's inventory, 0.2's current-state analysis, 0.3's target Clean Architecture and 0.4's binding ADRs are complete |
-| What is missing | Independent release/naming decisions, pentanomial/nElo, CPU affinity, the CLI itself, SPSA, durable runs, run records, trustworthy NPS |
+| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0.1–0.5 have inventoried, audited and designed the architecture, binding boundaries and independent product releases/CI |
+| What is missing | Public CLI/product naming decision, pentanomial/nElo, CPU affinity, the CLI itself, SPSA, durable runs, run records, trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 0.5 — design independent CLI/GUI releases and shared-layer CI** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Next step | **Phase 0.6 — resolve the public CLI/product naming collision** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -73,9 +73,11 @@ model as well.
   GUI-library mapping and the smallest refactor that enforces inward
   dependencies — evidence:
   [`docs/architecture/adr/README.md`](docs/architecture/adr/README.md)
-- ☐ **0.5** — **Model: Sol High.** Design independent CLI/GUI versions, tags, artifacts, release notes
+- ☑ **0.5 — DONE** — **Model: Sol High.** Design independent CLI/GUI versions, tags, artifacts, release notes
   and shared-layer regression CI. Prefer one repo; split only with a
-  documented concrete advantage
+  documented concrete advantage — evidence:
+  [`docs/architecture/release-architecture.md`](docs/architecture/release-architecture.md)
+  and [ADR-0006](docs/architecture/adr/0006-one-repository-independent-product-releases.md)
 - ☐ **0.6** — **Model: Terra High.** Resolve the existing “Coliseum” naming/search/package collision and
   record the decision plus rejected alternatives
 - ☐ **0.7** — **EXIT · Model: Sol High.** Both architecture documents and ADRs reviewed; every module
@@ -364,14 +366,15 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 0.5 — design independent CLI/GUI releases and shared-layer CI. Model:
-GPT-5.6 Sol — High.** Define independent versions, tags, artifacts and release
-notes; specify regression and published-artifact checks for shared changes.
-Prefer one repository and split only if a documented concrete advantage
-outweighs cross-repository coordination.
+**Phase 0.6 — resolve the public CLI/product naming collision. Model: GPT-5.6
+Terra — High.** Check package availability, search ambiguity, trademark risk
+and spoken supportability; decide whether to retain Colosseum with a distinct
+CLI binary, rename only the CLI, or rename the product, and record rejected
+alternatives.
 
-Phase 0.6 then resolves naming before the Phase 0 exit review. Only after that
-exit may implementation move to **Phase 1 — pentanomial statistics**.
+Phase 0.7 then reviews the complete architecture and demonstrates the Phase 0
+exit. Only after that exit may implementation move to **Phase 1 — pentanomial
+statistics**.
 
 ```
 git diff --check

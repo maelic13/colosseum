@@ -9,8 +9,9 @@ The design is intentionally incremental. Colosseum gains an application
 boundary and independent CLI composition root without replacing the working UCI
 parser, process lifecycle, chess-game runner, opening parser, SQLite history or
 GUI. The consequential choices below are accepted in the
-[`adr/`](adr/README.md) decision records. Step 0.5 owns the independent version,
-CI and release design.
+[`adr/`](adr/README.md) decision records. The independent product/version/CI
+model is specified in
+[`release-architecture.md`](release-architecture.md).
 
 ## Architectural decision
 
@@ -483,6 +484,6 @@ audit. CS-01 through CS-10 have inward-facing resolutions; CS-11 and CS-12 are
 routed to their test and release-design steps.
 
 Step 0.4 records the package boundary, launch specification, port/commit set,
-GUI mapping and incremental-refactor choices in accepted ADRs. Step 0.5 now
-defines independent release/versioning and shared-layer CI; this document and
-the architecture ADRs do not pre-empt those decisions.
+GUI mapping and incremental-refactor choices in accepted ADRs. Step 0.5 records
+one-repository independent product releases and shared-layer CI. Step 0.6 now
+resolves the public product/CLI naming token without reopening those boundaries.

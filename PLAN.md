@@ -1131,7 +1131,7 @@ Every identifier is covered below; ranges are inclusive.
 No CLI implementation begins until the boundary it will depend on is understood
 and recorded.
 
-**Progress:** Steps 0.1 through 0.4 are complete. The
+**Progress:** Steps 0.1 through 0.5 are complete. The
 [`dependency inventory`](docs/architecture/dependency-inventory.md) records all
 workspace packages, internal Cargo edges, source modules, principal source
 imports, test targets and current build/release targets. The
@@ -1146,8 +1146,12 @@ use cases and inward-facing ports, separates GUI library data from
 flow and the smallest safe migration. The accepted
 [`architecture decisions`](docs/architecture/adr/README.md) bind the package
 graph, minimal launch specification, runtime-neutral port and authoritative
-commit boundary, GUI-library mapping and incremental migration. Step 0.5 is
-next: design independent release/versioning and shared-layer CI.
+commit boundary, GUI-library mapping and incremental migration. The
+[`release architecture`](docs/architecture/release-architecture.md) and
+[ADR-0006](docs/architecture/adr/0006-one-repository-independent-product-releases.md)
+keep one repository while separating GUI/CLI versions, tags, notes, artifacts
+and workflows, with required shared-layer CI. Step 0.6 is next: resolve the
+public naming collision.
 
 - **(a) Current-state report.** Use `cargo metadata`, `cargo tree` and source
   inspection to write `docs/architecture/current-state.md`: crate/module
