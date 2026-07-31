@@ -21,5 +21,8 @@ statistical parity.
 | Typed invalid-input and `NaN`/`Inf` prevention | Compare | Never | Never | External behaviour is forensic evidence only |
 
 The matrix deliberately has no “closest” or “approximately similar” rule.
-Unsupported fields are excluded, not silently approximated. Phase 1.9 must
-list every fixture/matrix cell it executes and fail on an unexplained mismatch.
+Unsupported fields are excluded, not silently approximated. The executed
+cells and reasoned exclusions are listed in
+[`phase-1-acceptance.toml`](phase-1-acceptance.toml); the required
+`statistics_fixtures` test rejects missing, duplicate or unknown mappings and
+fails on every unexplained mismatch.

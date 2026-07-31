@@ -85,11 +85,14 @@ aborts).
 
 ## Verifying changes
 
-Unit/integration tests cover core math, store, scheduler, and GUI logic
-(`cargo test --workspace --all-targets`; scheduler integration tests stub engines with
-`cmd /c`). Live-view/UI changes need a real run: launch the app, start a
-short tournament (e.g. 2 engines, 100 ms/move) with engines from
-`D:\chess\engines\`, and delete the test tournament afterwards.
+Unit/integration tests cover core math, committed statistics fixtures, store,
+scheduler, and GUI logic (`cargo test --workspace --all-targets`). The required
+suite is repository-only. Real-engine runner/scheduler/UCI smoke targets require
+the explicit `real-engine-smoke` feature and `COLOSSEUM_SMOKE_ENGINE`; they do
+not count as release or platform evidence. Live-view/UI changes need a real
+run: launch the app, start a short tournament (e.g. 2 engines, 100 ms/move)
+with engines from `D:\chess\engines\`, and delete the test tournament
+afterwards.
 
 ## Implementation and commits
 

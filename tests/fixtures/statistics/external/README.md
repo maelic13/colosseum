@@ -14,5 +14,6 @@ prove that the fixture policy does not silently accept runner output outside
 Colosseum’s typed-error domain.
 
 The generated console logs and PGNs are preserved as reviewed runner artifacts.
-They are not parsed by the current test suite; Phase 1.9 adds the explicit
-fixture/matrix checks.
+The required `statistics_fixtures` test parses their complete colour pairs and
+W/D/L fields—the compatible cells named in `phase-1-acceptance.toml`. It does
+not treat their degenerate Elo, LOS or SPRT presentation as an oracle.

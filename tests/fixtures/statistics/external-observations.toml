@@ -1,0 +1,34 @@
+schema_version = 1
+description = "Comparable fields extracted from the reviewed external runner artifacts."
+
+[[observation]]
+id = "fastchess-clean-sweep"
+runner = "fastchess"
+console = "external/fastchess.console.txt"
+pgn = "external/fastchess.pgn"
+engine_a = "Rarog"
+engine_b = "Stockfish"
+wins = 0
+draws = 0
+losses = 6
+score = 0.0
+draw_ratio = 0.0
+complete_pairs = 3
+counts = [3, 0, 0, 0, 0]
+console_score = "Score of Rarog vs Stockfish: 0 - 6 - 0 [0.000] 6"
+
+[[observation]]
+id = "cutechess-clean-sweep"
+runner = "cutechess-cli"
+console = "external/cutechess.console.txt"
+pgn = "external/cutechess.pgn"
+engine_a = "Rarog"
+engine_b = "Stockfish"
+wins = 0
+draws = 0
+losses = 2
+score = 0.0
+draw_ratio = 0.0
+complete_pairs = 1
+counts = [1, 0, 0, 0, 0]
+console_score = "Score of Rarog vs Stockfish: 0 - 2 - 0 [0.000] 2"

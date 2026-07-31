@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent CLI: **not started** |
-| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform and released for Windows/Linux/macOS incl. arm64. The workspace suite passes. `core/stats.rs` has the five-bin paired sample, pentanomial estimates and diagnostics, selectable normalized/logistic SPRT, explicit-assumption fixed-N difference planning and descriptive achieved resolution. Phase 0's Clean Architecture and independent-release contract is complete |
-| What is missing | Hermetic fixture execution; CPU affinity, the CLI itself, SPSA, durable runs, run records and trustworthy NPS |
+| What exists | Phase 0 architecture and Phase 1 statistics are complete. `colosseum-core` / `-uci` / `-engine` are headless; paired normalized/logistic statistics, SPRT, fixed-N planning/resolution, typed errors, property tests, hermetic fixtures and explicit external-oracle boundaries pass in required CI |
+| What is missing | The Phase 2 boundary migration and independent CLI composition root; CPU affinity, match/SPRT workflows, SPSA, durable runs, run records and trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 1.8 — hermetic CI suite** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 2.1 — Clean Architecture boundary migration** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -149,8 +149,13 @@ model as well.
   [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
   [`crates/colosseum-engine/tests/hermetic_ci.rs`](crates/colosseum-engine/tests/hermetic_ci.rs),
   [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
-- ☐ **1.9** — **EXIT · Model: Sol High.** Analytic fixtures and every compatible oracle-matrix cell
-  pass; no unsupported field is compared or silently guessed
+- ☑ **1.9 — EXIT PASSED** — **Model: Sol High.** Parse and execute every analytic statistics fixture;
+  reconstruct complete colour pairs and W/D/L from the reviewed Fastchess and
+  Cutechess PGNs; enforce a machine-readable list of all accepted matrix cells
+  and reasoned exclusions, with no unsupported comparison or guessed value —
+  evidence:
+  [`crates/colosseum-core/tests/statistics_fixtures.rs`](crates/colosseum-core/tests/statistics_fixtures.rs),
+  [`tests/fixtures/statistics/phase-1-acceptance.toml`](tests/fixtures/statistics/phase-1-acceptance.toml)
 
 ### Phase 2 — Architecture migration, CLI skeleton and durable foundation
 
@@ -423,9 +428,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 1.9 — fixture validation exit. Model: GPT-5.6 Sol — High.** Prove
-analytic fixtures and each compatible oracle-matrix cell pass, without
-comparing unsupported fields or silently guessing values.
+**Phase 2.1 — Clean Architecture boundary migration. Model: GPT-5.6 Sol —
+High.** Implement the Phase-0 target boundary: generic runtime participants,
+application use cases and ports, plus GUI adapters for library/config data.
 
 ```
 git diff --check

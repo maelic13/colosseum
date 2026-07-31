@@ -6,6 +6,8 @@ statistics. It has two deliberately separate sources of truth:
 | Source | Purpose | CI role |
 |---|---|---|
 | `analytic-pentanomial.toml` | Hand-derived inputs and expected values for every Colosseum formula and error boundary | Hermetic regression oracle |
+| `external-observations.toml` | Comparable W/D/L, pair and score fields extracted from the reviewed raw artifacts | Hermetic external-artifact oracle |
+| `phase-1-acceptance.toml` | Exact oracle-matrix cells executed or deliberately excluded, with reasons | Binding Phase 1 acceptance manifest |
 | `external/` | Raw output from current `fastchess` and `cutechess-cli` runs, plus immutable tool/engine provenance | Compatibility evidence; never required by a test that launches an external program |
 
 The oracle matrix in [oracle-matrix.md](oracle-matrix.md) says exactly which
@@ -55,5 +57,6 @@ adjudication and command conditions in a new fixture directory.
 - Never make an external engine, local path, or runner installation a required
   CI input. Phase 1.8 owns that enforcement.
 - Analytic fixture values are independently derived from the formulas in
-  `PLAN.md` §5.1. Phase 1.9 wires every analytic case and compatible matrix
-  cell into the automated acceptance check.
+  `PLAN.md` §5.1. The `colosseum-core` `statistics_fixtures` integration test
+  executes every accepted cell and fails if the acceptance manifest, fixture
+  schema, raw runner W/D/L, colour-pair identity or expected value drifts.

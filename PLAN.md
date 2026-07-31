@@ -52,7 +52,8 @@ requirement to rename.
 What exists is the reason the plan can reuse rather than rewrite:
 `colosseum-core`, `colosseum-uci` and `colosseum-engine` are already headless
 (no `egui` dependency anywhere in them), already cross-platform, already
-released for Windows/Linux/macOS including arm64, and already carry 149 tests.
+released for Windows/Linux/macOS including arm64, and the workspace carries
+more than 160 required tests.
 
 They are not yet the final CLI architecture. The shared model still contains
 GUI engine-library metadata and rating-writeback policy, while
@@ -1269,6 +1270,12 @@ Spec 5.1 plus the fixture corpus (S6.2–S6.4). First because everything reports
 through it and it needs no I/O or platform surface. **Exit:** analytic fixtures
 pass; the per-field oracle matrix passes; the required suite is hermetic and
 any opt-in real-engine smoke test is clearly excluded from release evidence.
+
+**Accepted:** Phase 1.9 executes the hand-derived statistics, pentanomial and
+trinomial SPRT, fixed-N planning/resolution and typed-error fixtures. It also
+reconstructs W/D/L and complete colour pairs from both reviewed external PGNs,
+while the machine-readable acceptance manifest records every compared field
+and every reasoned exclusion. Required CI remains repository-only.
 
 ### Phase 2 — Architecture migration, CLI skeleton and durable foundation
 Implement the Phase-0 migration needed by Specs 5.0 + 5.8 + 5.11: generic

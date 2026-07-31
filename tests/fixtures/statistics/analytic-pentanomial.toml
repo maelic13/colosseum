@@ -1,11 +1,31 @@
 schema_version = 1
 description = "Hand-derived regression inputs for PLAN.md §5.1; values use pair-average scores [0, 0.25, 0.5, 0.75, 1]."
 
+[[pair_binning]]
+id = "all-pair-outcomes"
+pairs = [
+  ["loss", "loss"],
+  ["loss", "draw"],
+  ["draw", "loss"],
+  ["loss", "win"],
+  ["draw", "draw"],
+  ["win", "loss"],
+  ["draw", "win"],
+  ["win", "draw"],
+  ["win", "win"],
+]
+counts = [1, 2, 3, 2, 1]
+central_win_loss_pairs = 2
+central_double_draw_pairs = 1
+drawn_games = 6
+
 [[statistics]]
 id = "symmetric-nine-pair"
 counts = [1, 2, 3, 2, 1]
 pairs = 9
 unpaired_games = 1
+central_win_loss_pairs = 2
+central_double_draw_pairs = 1
 z = 1.959963984540054
 score = 0.5
 variance = 0.08333333333333333
@@ -31,6 +51,20 @@ upper = 2.9444389791664403
 logistic_llr = 4.02364937272566
 normalized_llr = 3.31154720975704
 
+[[trinomial_sprt]]
+id = "logistic-1000-games"
+wins = 700
+draws = 200
+losses = 100
+elo0 = 0.0
+elo1 = 5.0
+alpha = 0.05
+beta = 0.05
+lower = -2.9444389791664403
+upper = 2.9444389791664403
+llr = 10.6643428565379
+decision = "accept-h1"
+
 [[fixed_n]]
 id = "symmetric-assumed-distribution"
 probabilities = [0.1, 0.2, 0.4, 0.2, 0.1]
@@ -41,6 +75,21 @@ significance = 0.05
 power = 0.8
 normalized_required_pairs = 18949
 logistic_required_pairs = 11371
+
+[[achieved_resolution]]
+id = "both-models-1150-pairs"
+counts = [100, 200, 400, 300, 150]
+unpaired_games = 1
+significance = 0.05
+confidence = 0.95
+normalized_estimate = 37.8520446335054
+normalized_lower = 23.6530213512715
+normalized_upper = 52.0510679157393
+normalized_resolution = 14.1990232822339
+logistic_estimate = 30.2882855752473
+logistic_lower = 18.8973850853074
+logistic_upper = 41.7445314220905
+logistic_resolution = 11.4562458468432
 
 [[error]]
 id = "zero-pairs"
