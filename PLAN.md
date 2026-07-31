@@ -496,7 +496,16 @@ right" is not a criterion.
   A zero ratio denominator is undefined, never infinity.
 - SPRT over both the pentanomial/normalized and logistic models, selectable,
   reporting LLR and both bounds with H0/H1/continue — and always naming the
-  model in force (A6).
+  model in force (A6). Both are generalized multinomial likelihood-ratio tests
+  over `x_i = [0, 0.25, 0.5, 0.75, 1]`. Logistic hypotheses constrain
+  `E[x] = 1/(1+10^(-elo/400))`; normalized hypotheses constrain
+  `(E[x]-0.5)/sqrt(Var[x]) = nElo*sqrt(2)/(800/ln(10))`. For each hypothesis,
+  maximize the multinomial likelihood subject to its constraint and compute
+  `LLR = Σ n_i*ln(p_i,H1/p_i,H0)`. Match maintained Fishtest support handling:
+  replace an empty bin by `0.001` only while solving the constrained MLE. The
+  displayed pair count remains the real count, and a genuinely degenerate real
+  sample is still an error rather than being legitimized by that prior. Wald
+  bounds are exactly `ln(beta/(1-alpha))` and `ln((1-beta)/alpha)`.
 - Fixed-N design and achieved-resolution calculations with explicit
   significance, power and assumed pair distribution; never infer an MDE from
   game count alone.

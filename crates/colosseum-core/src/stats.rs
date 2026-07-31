@@ -201,7 +201,6 @@ pub struct PentanomialStatistics {
 /// this temporary absence signal with the plan's typed statistical errors.
 #[must_use]
 pub fn pentanomial_statistics(sample: &PentanomialVector, z: f64) -> Option<PentanomialStatistics> {
-    const SCORES: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
     const NORMALIZED_ELO_SCALE: f64 = 800.0 / std::f64::consts::LN_10;
 
     let pairs = sample.pairs();
@@ -213,13 +212,13 @@ pub fn pentanomial_statistics(sample: &PentanomialVector, z: f64) -> Option<Pent
     let counts = sample.counts();
     let score = counts
         .iter()
-        .zip(SCORES)
+        .zip(PENTANOMIAL_SCORES)
         .map(|(&count, value)| f64::from(count) * value)
         .sum::<f64>()
         / pairs_f;
     let variance = counts
         .iter()
-        .zip(SCORES)
+        .zip(PENTANOMIAL_SCORES)
         .map(|(&count, value)| f64::from(count) * (value - score).powi(2))
         .sum::<f64>()
         / pairs_f;
@@ -386,6 +385,331 @@ pub struct SprtResult {
     pub decision: SprtDecision,
 }
 
+/// Elo parameterization used by a paired pentanomial SPRT.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SprtEloModel {
+    /// Constrain the expected pair-average score after applying the logistic
+    /// Elo-to-score transform.
+    Logistic,
+    /// Constrain the standardized pair-average score represented by
+    /// normalized Elo.
+    Normalized,
+}
+
+impl SprtEloModel {
+    /// Stable user-facing name for reports and persisted run records.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Logistic => "logistic",
+            Self::Normalized => "normalized",
+        }
+    }
+}
+
+/// Self-contained result of a paired pentanomial SPRT.
+///
+/// The model and hypotheses are retained with the LLR so callers cannot report
+/// a result whose Elo parameterization is ambiguous.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PentanomialSprtResult {
+    pub model: SprtEloModel,
+    /// Complete pairs in the official sequential sample.
+    pub pairs: u32,
+    /// Completed games reported for diagnostics but excluded from the LLR.
+    pub unpaired_games: u32,
+    pub elo0: f64,
+    pub elo1: f64,
+    pub alpha: f64,
+    pub beta: f64,
+    /// Generalized log-likelihood ratio of H1 over H0.
+    pub llr: f64,
+    /// Wald lower decision bound (accept H0 at or below).
+    pub lower: f64,
+    /// Wald upper decision bound (accept H1 at or above).
+    pub upper: f64,
+    pub decision: SprtDecision,
+}
+
+/// Sequential probability ratio test over complete colour-reversed pairs.
+///
+/// H0 is `elo0` and H1 is `elo1` in the explicitly selected model. Logistic
+/// Elo constrains the expected pair-average score; normalized Elo constrains
+/// its standardized mean. In both cases the LLR compares the two constrained
+/// maximum-likelihood pentanomial distributions.
+///
+/// Unpaired games are excluded. Until Phase 1.5 introduces typed statistical
+/// errors, `None` reports invalid hypotheses/error rates, fewer than two pairs,
+/// a degenerate observed distribution, or a failed likelihood solve.
+#[must_use]
+pub fn pentanomial_sprt(
+    sample: &PentanomialVector,
+    model: SprtEloModel,
+    elo0: f64,
+    elo1: f64,
+    alpha: f64,
+    beta: f64,
+) -> Option<PentanomialSprtResult> {
+    let pairs = sample.pairs();
+    if pairs < 2
+        || !elo0.is_finite()
+        || !elo1.is_finite()
+        || elo0 >= elo1
+        || !valid_error_rate(alpha)
+        || !valid_error_rate(beta)
+        || alpha + beta >= 1.0
+        || observed_variance(sample.counts()) <= 0.0
+    {
+        return None;
+    }
+
+    let llr = pentanomial_llr(sample.counts(), model, elo0, elo1)?;
+    let lower = (beta / (1.0 - alpha)).ln();
+    let upper = ((1.0 - beta) / alpha).ln();
+    if !llr.is_finite() || !lower.is_finite() || !upper.is_finite() {
+        return None;
+    }
+
+    Some(PentanomialSprtResult {
+        model,
+        pairs,
+        unpaired_games: sample.unpaired_games(),
+        elo0,
+        elo1,
+        alpha,
+        beta,
+        llr,
+        lower,
+        upper,
+        decision: sprt_decision(llr, lower, upper),
+    })
+}
+
+const PENTANOMIAL_SCORES: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+const EMPTY_BIN_PRIOR: f64 = 1e-3;
+const NELO_PER_T_VALUE: f64 = 800.0 / std::f64::consts::LN_10;
+
+fn valid_error_rate(value: f64) -> bool {
+    value.is_finite() && (0.0..1.0).contains(&value)
+}
+
+fn sprt_decision(llr: f64, lower: f64, upper: f64) -> SprtDecision {
+    if llr >= upper {
+        SprtDecision::AcceptH1
+    } else if llr <= lower {
+        SprtDecision::AcceptH0
+    } else {
+        SprtDecision::Continue
+    }
+}
+
+fn observed_variance(counts: [u32; 5]) -> f64 {
+    let pairs = counts.iter().copied().sum::<u32>();
+    if pairs == 0 {
+        return 0.0;
+    }
+
+    let pairs_f = f64::from(pairs);
+    let mean = counts
+        .iter()
+        .zip(PENTANOMIAL_SCORES)
+        .map(|(&count, value)| f64::from(count) * value)
+        .sum::<f64>()
+        / pairs_f;
+    counts
+        .iter()
+        .zip(PENTANOMIAL_SCORES)
+        .map(|(&count, value)| f64::from(count) * (value - mean).powi(2))
+        .sum::<f64>()
+        / pairs_f
+}
+
+fn pentanomial_llr(counts: [u32; 5], model: SprtEloModel, elo0: f64, elo1: f64) -> Option<f64> {
+    let actual_pairs = counts.iter().copied().sum::<u32>();
+    if actual_pairs == 0 {
+        return Some(0.0);
+    }
+
+    // Empty observed bins cannot support the constrained multinomial MLE.
+    // The small prior matches the maintained Fishtest definition and affects
+    // the likelihood solve only; public pair counts remain the real sample.
+    let regularized = counts.map(|count| {
+        if count == 0 {
+            EMPTY_BIN_PRIOR
+        } else {
+            f64::from(count)
+        }
+    });
+    let effective_pairs = regularized.iter().sum::<f64>();
+    let empirical = regularized.map(|count| count / effective_pairs);
+
+    let (hypothesis0, hypothesis1, statistic) = match model {
+        SprtEloModel::Logistic => (
+            elo_to_score(elo0),
+            elo_to_score(elo1),
+            LikelihoodStatistic::Mean,
+        ),
+        SprtEloModel::Normalized => (
+            elo0 * std::f64::consts::SQRT_2 / NELO_PER_T_VALUE,
+            elo1 * std::f64::consts::SQRT_2 / NELO_PER_T_VALUE,
+            LikelihoodStatistic::TValue,
+        ),
+    };
+
+    let mle0 = constrained_mle(&PENTANOMIAL_SCORES, &empirical, hypothesis0, statistic)?;
+    let mle1 = constrained_mle(&PENTANOMIAL_SCORES, &empirical, hypothesis1, statistic)?;
+    let llr = empirical
+        .iter()
+        .enumerate()
+        .map(|(index, &probability)| probability * (mle1[index] / mle0[index]).ln())
+        .sum::<f64>()
+        * effective_pairs;
+    llr.is_finite().then_some(llr)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum LikelihoodStatistic {
+    Mean,
+    TValue,
+}
+
+fn constrained_mle<const N: usize>(
+    values: &[f64; N],
+    empirical: &[f64; N],
+    hypothesis: f64,
+    statistic: LikelihoodStatistic,
+) -> Option<[f64; N]> {
+    if !hypothesis.is_finite() {
+        return None;
+    }
+    match statistic {
+        LikelihoodStatistic::Mean => constrained_mean_mle(values, empirical, hypothesis),
+        LikelihoodStatistic::TValue => constrained_t_value_mle(values, empirical, 0.5, hypothesis),
+    }
+}
+
+fn constrained_mean_mle<const N: usize>(
+    values: &[f64; N],
+    empirical: &[f64; N],
+    target_mean: f64,
+) -> Option<[f64; N]> {
+    let shifted = std::array::from_fn(|index| values[index] - target_mean);
+    let root = secular_root(&shifted, empirical)?;
+    let distribution =
+        std::array::from_fn(|index| empirical[index] / (1.0 + root * shifted[index]));
+    valid_distribution(&distribution).then_some(distribution)
+}
+
+fn constrained_t_value_mle<const N: usize>(
+    values: &[f64; N],
+    empirical: &[f64; N],
+    reference: f64,
+    target_t: f64,
+) -> Option<[f64; N]> {
+    if N < 2 {
+        return None;
+    }
+
+    let mut distribution = [1.0 / N as f64; N];
+    for _ in 0..10 {
+        let previous = distribution;
+        let (mean, variance) = distribution_stats(values, &previous);
+        if !variance.is_finite() || variance <= 0.0 {
+            return None;
+        }
+        let sigma = variance.sqrt();
+        let shifted = std::array::from_fn(|index| {
+            values[index]
+                - reference
+                - target_t * sigma * (1.0 + ((mean - values[index]) / sigma).powi(2)) / 2.0
+        });
+        let root = secular_root(&shifted, empirical)?;
+        distribution =
+            std::array::from_fn(|index| empirical[index] / (1.0 + root * shifted[index]));
+        if !valid_distribution(&distribution) {
+            return None;
+        }
+        let converged = previous
+            .iter()
+            .zip(distribution)
+            .all(|(&before, after)| (before - after).abs() < 1e-9);
+        if converged {
+            break;
+        }
+    }
+
+    let (mean, variance) = distribution_stats(values, &distribution);
+    let achieved_t = (mean - reference) / variance.sqrt();
+    (achieved_t.is_finite() && (achieved_t - target_t).abs() < 1e-5).then_some(distribution)
+}
+
+fn secular_root<const N: usize>(values: &[f64; N], probabilities: &[f64; N]) -> Option<f64> {
+    const ENDPOINT_EPSILON: f64 = 1e-9;
+
+    let minimum = values.iter().copied().fold(f64::INFINITY, f64::min);
+    let maximum = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if !minimum.is_finite() || !maximum.is_finite() || minimum >= 0.0 || maximum <= 0.0 {
+        return None;
+    }
+
+    let evaluate = |root: f64| {
+        values
+            .iter()
+            .zip(probabilities)
+            .map(|(&value, &probability)| probability * value / (1.0 + root * value))
+            .sum::<f64>()
+    };
+    let mut lower = -1.0 / maximum + ENDPOINT_EPSILON;
+    let mut upper = -1.0 / minimum - ENDPOINT_EPSILON;
+    let lower_value = evaluate(lower);
+    let upper_value = evaluate(upper);
+    if !lower_value.is_finite()
+        || !upper_value.is_finite()
+        || lower_value < 0.0
+        || upper_value > 0.0
+    {
+        return None;
+    }
+
+    // The secular function is strictly decreasing inside this bracket.
+    // Bisection avoids an optimization dependency and 128 iterations exceed
+    // f64 precision for every practical hypothesis range.
+    for _ in 0..128 {
+        let midpoint = (lower + upper) / 2.0;
+        let value = evaluate(midpoint);
+        if !value.is_finite() {
+            return None;
+        }
+        if value > 0.0 {
+            lower = midpoint;
+        } else {
+            upper = midpoint;
+        }
+    }
+    Some((lower + upper) / 2.0)
+}
+
+fn distribution_stats<const N: usize>(values: &[f64; N], probabilities: &[f64; N]) -> (f64, f64) {
+    let mean = values
+        .iter()
+        .zip(probabilities)
+        .map(|(&value, &probability)| value * probability)
+        .sum::<f64>();
+    let variance = values
+        .iter()
+        .zip(probabilities)
+        .map(|(&value, &probability)| probability * (value - mean).powi(2))
+        .sum::<f64>();
+    (mean, variance)
+}
+
+fn valid_distribution<const N: usize>(probabilities: &[f64; N]) -> bool {
+    probabilities
+        .iter()
+        .all(|probability| probability.is_finite() && *probability > 0.0)
+        && (probabilities.iter().sum::<f64>() - 1.0).abs() < 1e-6
+}
+
 /// Sequential probability ratio test for "is engine A stronger than B?".
 ///
 /// H0: Elo difference = `elo0`; H1: Elo difference = `elo1` (`elo1 > elo0`).
@@ -424,13 +748,7 @@ pub fn sprt(
         f64::from(wins) * (w1 / w0).ln() + f64::from(losses) * (l1 / l0).ln()
     };
 
-    let decision = if llr >= upper {
-        SprtDecision::AcceptH1
-    } else if llr <= lower {
-        SprtDecision::AcceptH0
-    } else {
-        SprtDecision::Continue
-    };
+    let decision = sprt_decision(llr, lower, upper);
 
     SprtResult {
         llr,
@@ -446,6 +764,26 @@ mod tests {
 
     fn approx(a: f64, b: f64, eps: f64) -> bool {
         (a - b).abs() < eps
+    }
+
+    fn pentanomial_sample(counts: [u32; 5]) -> PentanomialVector {
+        use PairGameResult::{Draw, Loss, Win};
+
+        let representatives = [
+            (Loss, Loss),
+            (Loss, Draw),
+            (Draw, Draw),
+            (Draw, Win),
+            (Win, Win),
+        ];
+        let mut sample = PentanomialVector::default();
+        for ((first, second), count) in representatives.into_iter().zip(counts) {
+            for _ in 0..count {
+                sample.record_pair(first, second);
+            }
+        }
+        assert_eq!(sample.counts(), counts);
+        sample
     }
 
     #[test]
@@ -501,6 +839,124 @@ mod tests {
         let r = sprt(100, 200, 700, 0.0, 5.0, 0.05, 0.05);
         assert_eq!(r.decision, SprtDecision::AcceptH0);
         assert!(r.llr <= r.lower);
+    }
+
+    #[test]
+    fn constrained_mles_match_binary_closed_forms() {
+        let values = [0.0, 1.0];
+        let empirical = [0.7, 0.3];
+
+        // On binary support, fixing the mean to p uniquely fixes [1-p, p].
+        let mean_mle = constrained_mean_mle(&values, &empirical, 0.6).unwrap();
+        assert!(approx(mean_mle[0], 0.4, 1e-12));
+        assert!(approx(mean_mle[1], 0.6, 1e-12));
+
+        // For Bernoulli p, t=(p-1/2)/sqrt(p(1-p)), hence
+        // p=1/2+t/(2*sqrt(1+t^2)).
+        let target_t: f64 = 0.5;
+        let expected_p = 0.5 + target_t / (2.0 * (1.0f64 + target_t.powi(2)).sqrt());
+        let t_mle = constrained_t_value_mle(&values, &empirical, 0.5, target_t).unwrap();
+        assert!(approx(t_mle[0], 1.0 - expected_p, 1e-9));
+        assert!(approx(t_mle[1], expected_p, 1e-9));
+    }
+
+    #[test]
+    fn pentanomial_sprt_names_and_separates_both_models() {
+        // Maintained Fishtest model spot values for this all-positive empirical
+        // distribution. Phase 1.7 owns the versioned external oracle corpus.
+        let sample = pentanomial_sample([100, 200, 400, 300, 150]);
+        let logistic =
+            pentanomial_sprt(&sample, SprtEloModel::Logistic, 0.0, 5.0, 0.05, 0.05).unwrap();
+        let normalized =
+            pentanomial_sprt(&sample, SprtEloModel::Normalized, 0.0, 5.0, 0.05, 0.05).unwrap();
+
+        assert_eq!(logistic.model, SprtEloModel::Logistic);
+        assert_eq!(logistic.model.as_str(), "logistic");
+        assert_eq!(normalized.model, SprtEloModel::Normalized);
+        assert_eq!(normalized.model.as_str(), "normalized");
+        assert_eq!(logistic.pairs, 1_150);
+        assert_eq!(normalized.pairs, 1_150);
+        assert!(approx(logistic.elo0, 0.0, f64::EPSILON));
+        assert!(approx(logistic.elo1, 5.0, f64::EPSILON));
+        assert!(approx(logistic.alpha, 0.05, f64::EPSILON));
+        assert!(approx(logistic.beta, 0.05, f64::EPSILON));
+        assert!(approx(logistic.lower, (0.05f64 / 0.95).ln(), 1e-12));
+        assert!(approx(logistic.upper, (0.95f64 / 0.05).ln(), 1e-12));
+        assert!(approx(logistic.llr, 4.023_649_372_725_66, 1e-9));
+        assert!(approx(normalized.llr, 3.311_547_209_757_04, 1e-9));
+        assert_eq!(logistic.decision, SprtDecision::AcceptH1);
+        assert_eq!(normalized.decision, SprtDecision::AcceptH1);
+    }
+
+    #[test]
+    fn symmetric_pentanomial_sample_has_zero_llr_in_both_models() {
+        let sample = pentanomial_sample([1, 2, 3, 2, 1]);
+        for model in [SprtEloModel::Logistic, SprtEloModel::Normalized] {
+            let result = pentanomial_sprt(&sample, model, -5.0, 5.0, 0.05, 0.05).unwrap();
+            assert!(approx(result.llr, 0.0, 1e-12));
+            assert_eq!(result.decision, SprtDecision::Continue);
+        }
+    }
+
+    #[test]
+    fn pentanomial_sprt_excludes_unpaired_games() {
+        let mut sample = pentanomial_sample([10, 20, 30, 40, 50]);
+        let before = pentanomial_sprt(&sample, SprtEloModel::Normalized, 0.0, 5.0, 0.05, 0.05);
+        sample.record_unpaired_game();
+        sample.record_unpaired_game();
+        let after = pentanomial_sprt(&sample, SprtEloModel::Normalized, 0.0, 5.0, 0.05, 0.05);
+        let before = before.unwrap();
+        let after = after.unwrap();
+        assert_eq!(after.pairs, before.pairs);
+        assert_eq!(after.unpaired_games, 2);
+        assert_eq!(after.llr, before.llr);
+        assert_eq!(after.decision, before.decision);
+    }
+
+    #[test]
+    fn pentanomial_sprt_regularizes_empty_bins_without_inflating_pair_count() {
+        let sample = pentanomial_sample([0, 2, 5, 3, 0]);
+        let logistic =
+            pentanomial_sprt(&sample, SprtEloModel::Logistic, 0.0, 5.0, 0.05, 0.05).unwrap();
+        let normalized =
+            pentanomial_sprt(&sample, SprtEloModel::Normalized, 0.0, 5.0, 0.05, 0.05).unwrap();
+
+        assert_eq!(logistic.pairs, 10);
+        assert_eq!(normalized.pairs, 10);
+        assert!(approx(logistic.llr, 0.049_333_177_176_969, 1e-12));
+        assert!(approx(normalized.llr, 0.026_697_182_964_011_1, 1e-12));
+    }
+
+    #[test]
+    fn pentanomial_sprt_rejects_invalid_or_degenerate_inputs() {
+        use PairGameResult::Draw;
+
+        let empty = PentanomialVector::default();
+        assert_eq!(
+            pentanomial_llr([0; 5], SprtEloModel::Logistic, 0.0, 5.0),
+            Some(0.0)
+        );
+        assert!(pentanomial_sprt(&empty, SprtEloModel::Logistic, 0.0, 5.0, 0.05, 0.05).is_none());
+
+        let mut one_pair = PentanomialVector::default();
+        one_pair.record_pair(Draw, Draw);
+        assert!(
+            pentanomial_sprt(&one_pair, SprtEloModel::Normalized, 0.0, 5.0, 0.05, 0.05).is_none()
+        );
+
+        let all_draws = pentanomial_sample([0, 0, 10, 0, 0]);
+        assert!(
+            pentanomial_sprt(&all_draws, SprtEloModel::Logistic, 0.0, 5.0, 0.05, 0.05).is_none()
+        );
+
+        let valid = pentanomial_sample([1, 2, 3, 4, 5]);
+        for invalid in [
+            pentanomial_sprt(&valid, SprtEloModel::Logistic, 5.0, 0.0, 0.05, 0.05),
+            pentanomial_sprt(&valid, SprtEloModel::Logistic, 0.0, 5.0, 0.0, 0.05),
+            pentanomial_sprt(&valid, SprtEloModel::Logistic, 0.0, 5.0, 0.6, 0.4),
+        ] {
+            assert!(invalid.is_none());
+        }
     }
 
     #[test]

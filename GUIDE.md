@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent CLI: **not started** |
-| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform and released for Windows/Linux/macOS incl. arm64. The workspace suite passes. `core/stats.rs` now has the five-bin paired sample, pentanomial variance, logistic and normalized Elo intervals, paired LOS and diagnostic ratios in addition to the existing trinomial statistics and ML ratings. Phase 0's Clean Architecture and independent-release contract is complete |
-| What is missing | Dual-model pentanomial SPRT, fixed-N planning, typed statistical errors and oracle fixtures; CPU affinity, the CLI itself, SPSA, durable runs, run records and trustworthy NPS |
+| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform and released for Windows/Linux/macOS incl. arm64. The workspace suite passes. `core/stats.rs` now has the five-bin paired sample, pentanomial estimates and diagnostics, plus selectable generalized-likelihood SPRT for normalized or logistic Elo with the model retained in every result. Phase 0's Clean Architecture and independent-release contract is complete |
+| What is missing | Fixed-N planning, typed statistical errors, statistical properties and oracle fixtures; CPU affinity, the CLI itself, SPSA, durable runs, run records and trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 1.3 — normalized and logistic pentanomial SPRT** |
+| Next step | **Phase 1.4 — fixed-N planning and achieved resolution** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -109,8 +109,12 @@ model as well.
   inside the central bin and return undefined ratios without NaN/Inf — evidence:
   [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
   and the exact formulas in PLAN §5.1
-- ☐ **1.3** — **Model: Sol High.** SPRT over **both** the pentanomial/normalized and logistic models,
-  selectable, always naming the model in force
+- ☑ **1.3 — DONE** — **Model: Sol High.** Implement selectable generalized
+  multinomial SPRT for both normalized and logistic Elo over complete pairs;
+  retain the selected model, hypotheses, error rates, LLR, Wald bounds and
+  H0/H1/continue decision in the result, with unpaired games excluded —
+  evidence: [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
+  and the exact likelihood contract in PLAN §5.1
 - ☐ **1.4** — **Model: Sol High.** Fixed-N planning/achieved-resolution primitives with explicit
   significance, power and assumed pair distribution; SPRT conclusions
   remain limited to their declared hypotheses
@@ -398,11 +402,11 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 1.3 — normalized and logistic pentanomial SPRT. Model: GPT-5.6 Sol —
-High.** Implement both selectable paired models over the five-bin sample,
-return LLR, bounds and H0/H1/continue, and make the model identity explicit in
-the result contract. Demonstrate analytic and symmetry behavior without
-claiming the Phase 1.7 external-oracle gate early.
+**Phase 1.4 — fixed-N planning and achieved resolution. Model: GPT-5.6 Sol —
+High.** Add prospective pair-count design from explicit significance, power
+and an assumed pentanomial distribution, plus retrospective achieved interval
+resolution. Keep fixed-N interval conclusions distinct from sequential SPRT
+hypotheses and demonstrate both against hand-derived fixtures.
 
 ```
 git diff --check
