@@ -1,10 +1,13 @@
-# CLI naming decision
+# Phase 0.6 naming research and rejected proposal
 
 This document is the research and application record for GUIDE step 0.6. It
-fixes the public name left open by the release architecture without changing
-its one-repository, two-product model.
+records the collision evidence and the proposal made at that step. The
+maintainer rejected the CLI-only **UCI Rig** split-brand proposal before any
+implementation. It is historical evidence, not a naming instruction. Phase 0.8
+will select one shared distinctive name with the convention `<name>` for the
+GUI and `<name>-cli` for the CLI, and will replace ADR-0007.
 
-## Decision
+## Rejected Phase 0.6 proposal
 
 The released desktop product remains **Colosseum**. The new independent CLI
 product is **UCI Rig**.
@@ -32,8 +35,8 @@ The repository and shared implementation packages retain their existing
 names. The existing `colosseum` executable remains exclusively the desktop
 GUI, so both products can be installed on one machine without a PATH collision.
 
-ADR-0007 makes this decision binding. Phase 2 creates the package and command;
-Phase 9 applies the public documentation and release names.
+ADR-0007 records this proposal as rejected. Do not create this package or
+command. Phase 0.8 owns the replacement public-name and migration contract.
 
 ## Evidence snapshot
 
@@ -92,8 +95,7 @@ products, so they repeat the search problem under a new spelling.
 
 ## Revalidation rule
 
-Before the first public UCI Rig release, Phase 9 repeats exact web, GitHub,
-crates.io and TMview checks and records the date. If the package name has become
-unavailable, or a same-domain product or material trademark conflict appears,
-a new ADR decides the affected package or product identity before release. No
-name change or compatibility alias is added silently.
+Phase 0.8 repeats exact web, same-domain, GitHub, crates.io/package-channel and
+preliminary trademark checks for the selected shared-name candidates and
+records the date. Phase 9 revalidates the accepted name before first release.
+No name change or compatibility alias is added silently.

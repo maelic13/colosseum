@@ -1,6 +1,6 @@
-# UCI Rig — engine-development harness plan
+# Colosseum GUI and CLI — engine-development harness plan
 
-`ucirig` is a headless, cross-platform harness for **developing** chess
+The planned CLI is a headless, cross-platform harness for **developing** chess
 engines on one machine: SPRT gates, SPSA tuning, fixed matches, tournaments,
 speed measurement, position suites, and the run-record machinery that makes
 those numbers trustworthy. Its only contract with an engine is a UCI
@@ -19,14 +19,14 @@ between projects, the tool ships a default with a stated reason and lets the
 user change it — see S3.
 
 **It is deliberately local.** Distributed workers, source checkout, compilation
-and result coordination belong to systems such as testing farms. UCI Rig owns
+and result coordination belong to systems such as testing farms. The CLI owns
 the generic mechanics of a trustworthy experiment on one host; the engine
 project owns its source, build, correctness and experiment policy.
 
 **Document audiences.** This file and [`GUIDE.md`](GUIDE.md) are the
 maintainer-facing pair: specifications, success criteria, evidence, forward
 plan. `README.md` is user-facing and covers the whole project — the Colosseum
-GUI and UCI Rig — at an introductory level. The **user documentation**
+GUI and CLI — at an introductory level. The **user documentation**
 (placement decided in Phase 9) is also user-facing and carries CLI detail:
 command reference, worked examples, and how to trust a result. Neither
 user-facing surface may carry phase numbers, internal naming or method
@@ -38,11 +38,15 @@ argumentation.
 
 **The CLI is not built yet. This document is step 0 for that work.**
 
-The released desktop keeps the **Colosseum** name. The independent CLI product
-is **UCI Rig**, invoked as `ucirig`; shared implementation packages retain the
-`colosseum-*` prefix. The evidence and complete surface mapping are recorded in
-the [naming decision](docs/architecture/naming-decision.md) and
-[ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md).
+**Colosseum is the current released name, not the target public identity.**
+Phase 0.6 established that it is too crowded to extend to the CLI, but its
+CLI-only **UCI Rig** proposal was rejected by the maintainer before
+implementation. Phase 0.8 selects one distinctive shared product name together
+and binds the convention `<name>` for the GUI and `<name>-cli` for the CLI. The
+Phase 0.6 evidence is retained in the
+[naming research](docs/architecture/naming-decision.md) and rejected
+[ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md); neither name is
+an implementation instruction.
 
 What exists is the reason the plan can reuse rather than rewrite:
 `colosseum-core`, `colosseum-uci` and `colosseum-engine` are already headless
@@ -1119,7 +1123,7 @@ Every identifier is covered below; ranges are inclusive.
 
 | Phase | Terra High | Sol High |
 |---|---|---|
-| 0 | 0.1, 0.6 | 0.2–0.5, 0.7 |
+| 0 | 0.1, 0.6 | 0.2–0.5, 0.7–0.8 |
 | 1 | 1.1, 1.5–1.8 | 1.2–1.4, 1.9 |
 | 2 | 2.2–2.3, 2.5–2.6, 2.9 | 2.1, 2.4, 2.4a, 2.7–2.8, 2.10 |
 | 3 | 3.2, 3.4, 3.6–3.7 | 3.1, 3.3, 3.5, 3.8 |
@@ -1157,11 +1161,12 @@ commit boundary, GUI-library mapping and incremental migration. The
 [ADR-0006](docs/architecture/adr/0006-one-repository-independent-product-releases.md)
 keep one repository while separating GUI/CLI versions, tags, notes, artifacts
 and workflows, with required shared-layer CI. The
-[`naming decision`](docs/architecture/naming-decision.md) and
-[ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md) keep Colosseum as
-the released desktop name and bind the independent CLI product, package and
-command to UCI Rig / `ucirig`. Step 0.7 is next: review and demonstrate the
-complete Phase-0 exit.
+Phase 0.6 [`naming research`](docs/architecture/naming-decision.md) and rejected
+[ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md) establish why
+Colosseum should not be extended to the CLI and preserve the rejected UCI Rig
+proposal as evidence. Step 0.7 is next: review the architecture as one coherent,
+testable contract. Phase 0.8 then selects and binds the shared GUI/CLI name and
+is the Phase-0 exit.
 
 - **(a) Current-state report.** Use `cargo metadata`, `cargo tree` and source
   inspection to write `docs/architecture/current-state.md`: crate/module
@@ -1185,18 +1190,27 @@ complete Phase-0 exit.
   GUI and CLI packages, distinct tags/artifacts/release notes, and shared-layer
   regression tests. Split repositories only if the written analysis establishes
   a concrete advantage that outweighs cross-repository core coordination.
-- **(d) Naming.** Resolve the existing “Coliseum” search/package collision:
-  retain the product name with a distinct CLI binary, rename only the CLI, or
-  rename the product. Check package availability, search ambiguity, trademark
-  risk and spoken supportability; record rejected options. **Resolved:** keep
-  the Colosseum desktop and name the independent CLI **UCI Rig**, command and
-  package `ucirig`; see the
-  [evidence record](docs/architecture/naming-decision.md) and
-  [ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md).
-- **EXIT:** current and target documents plus ADRs are reviewed; every current
-  module has a target owner; dependency and release diagrams are internally
-  consistent; the independence contract in S4 is testable; naming and release
-  decisions are recorded. Only then may Phase 1/2 code start.
+- **(d) Naming and migration.** Phase 0.6's collision research rejected
+  extending Colosseum to the CLI; its CLI-only UCI Rig proposal was subsequently
+  rejected before implementation. In Phase 0.8, select the replacement **with
+  the maintainer**, using one distinctive stem: public GUI/product and command
+  `<name>`, public CLI product, package and command `<name>-cli`. Repeat exact
+  web, same-domain, GitHub, crates.io/package-channel and preliminary trademark
+  searches; test spelling and spoken supportability; record rejected options.
+  Define a complete migration matrix for the repository, Cargo packages/crates,
+  binaries, version/tag/artifact/release lanes, installer/application IDs,
+  application/config/data directories, compatibility behavior and docs. The
+  decision must distinguish public names from any internal identifiers retained
+  to reduce migration risk; no surface is renamed implicitly.
+- **(e) Integrated review.** Review current/target architecture, ADRs and release
+  design as one contract; demonstrate that every current module has a target
+  owner, diagrams agree and each independence invariant has an executable test
+  owner. Correct inconsistencies and record evidence before making the naming
+  decision final.
+- **EXIT:** the integrated architecture review passes; the shared name and
+  migration contract are accepted in a replacement ADR; dependency and release
+  diagrams use that contract consistently; the independence contract in S4 is
+  testable. Only then may Phase 1/2 code start.
 
 ### Phase 1 — Pentanomial statistics and normalized Elo (`core`)
 Spec 5.1 plus the fixture corpus (S6.2–S6.4). First because everything reports

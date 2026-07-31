@@ -1,11 +1,11 @@
-# UCI Rig — development guide
+# Colosseum GUI and CLI — development guide
 
 The short operational view: where the harness stands and what to do next.
 Rationale, specifications, success criteria and evidence live in
 [`PLAN.md`](PLAN.md).
 
 **This file and `PLAN.md` are the maintainer-facing pair.** `README.md` is the
-user-facing front door for the whole project (the Colosseum GUI and UCI Rig);
+user-facing front door for the whole project (the GUI and CLI);
 the user documentation is user-facing CLI detail. Neither may carry phase
 numbers, internal naming or method argumentation.
 
@@ -13,12 +13,12 @@ numbers, internal naming or method argumentation.
 
 | | |
 |---|---|
-| Branch / version | `cli`; Colosseum GUI **1.0.2** released. UCI Rig: **not started** |
-| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0.1–0.6 have inventoried, audited and designed the architecture, binding boundaries, independent product releases/CI and the UCI Rig / `ucirig` public identity |
-| What is missing | Phase 0 exit review, pentanomial/nElo, CPU affinity, UCI Rig itself, SPSA, durable runs, run records, trustworthy NPS |
+| Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent CLI: **not started** |
+| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0.1–0.6 have inventoried, audited and designed the architecture and independent product releases/CI; Phase 0.6 also documents why Colosseum is too crowded to extend to the CLI |
+| What is missing | Integrated architecture review, a shared distinctive GUI/CLI name and migration contract, pentanomial/nElo, CPU affinity, the CLI itself, SPSA, durable runs, run records, trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 0.7 — review and demonstrate the Phase 0 architecture exit** |
+| Next step | **Phase 0.7 — integrated architecture review** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -78,15 +78,24 @@ model as well.
   documented concrete advantage — evidence:
   [`docs/architecture/release-architecture.md`](docs/architecture/release-architecture.md)
   and [ADR-0006](docs/architecture/adr/0006-one-repository-independent-product-releases.md)
-- ☑ **0.6 — DONE** — **Model: Terra High.** Resolve the existing “Coliseum” naming/search/package collision and
-  record the decision plus rejected alternatives — outcome: keep Colosseum as
-  the desktop product; name the independent CLI **UCI Rig**, package/command
-  `ucirig` — evidence:
+- ☑ **0.6 — DONE** — **Model: Terra High.** Research the existing “Coliseum” naming/search/package collision
+  and record the proposal plus rejected alternatives — outcome: extending
+  Colosseum to the CLI is unsuitable; the CLI-only **UCI Rig** proposal was
+  rejected by the maintainer before implementation and is retained as evidence:
   [`docs/architecture/naming-decision.md`](docs/architecture/naming-decision.md)
   and [ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md)
-- ☐ **0.7** — **EXIT · Model: Sol High.** Both architecture documents and ADRs reviewed; every module
-  has a target owner; dependency/release diagrams and independence tests are
-  specified; naming/release decisions recorded
+- ☐ **0.7** — **Model: Sol High.** Review the current/target architecture, ADRs and release design as one
+  contract; demonstrate that every module has a target owner, dependency and
+  release diagrams agree, and every independence invariant has an executable
+  test owner; correct inconsistencies and record review evidence
+- ☐ **0.8** — **EXIT · Model: Sol High.** Select a distinctive shared product name **with the maintainer** and
+  bind `<name>` for the GUI/product and command plus `<name>-cli` for the CLI
+  product, package and command. Repeat web, same-domain, GitHub,
+  crates.io/package-channel and preliminary trademark checks; test spelling and
+  spoken supportability; record rejected names. Define and apply a reviewed
+  migration matrix covering repository, Cargo packages/crates, binaries,
+  tags/artifacts/release lanes, installer/application IDs, config/data paths,
+  compatibility and documentation; re-run the Phase-0 consistency review
 
 ### Phase 1 — Pentanomial statistics and nElo (`colosseum-core`)
 
@@ -371,12 +380,13 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 0.7 — review and demonstrate the Phase 0 architecture exit. Model:
-GPT-5.6 Sol — High.** Review the current/target architecture, ADRs, release and
-naming decisions as one contract; confirm every module has a target owner,
-dependency/release diagrams agree, and every independence test is specified.
-Record concrete review evidence and close any inconsistency before marking the
-exit. Only then may implementation move to **Phase 1 — pentanomial statistics**.
+**Phase 0.7 — integrated architecture review. Model: GPT-5.6 Sol — High.**
+Review the current/target architecture, ADRs and release design as one contract;
+confirm every module has a target owner, dependency/release diagrams agree, and
+every independence test has an executable owner. Record concrete review
+evidence and close inconsistencies. Phase 0.8 then selects the shared name with
+the maintainer and completes the Phase-0 exit; only after 0.8 may implementation
+move to **Phase 1 — pentanomial statistics**.
 
 ```
 git diff --check

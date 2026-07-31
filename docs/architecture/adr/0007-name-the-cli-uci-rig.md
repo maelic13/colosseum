@@ -1,6 +1,7 @@
 # ADR-0007: Name the independent CLI UCI Rig
 
-- **Status:** Accepted
+- **Status:** Rejected (accepted as the Phase 0.6 proposal, rejected by the
+  maintainer before implementation on 2026-07-31)
 - **Date:** 2026-07-31
 - **Relates to:** PLAN Phase 0(d); ADR-0006
 
@@ -16,6 +17,9 @@ The CLI must remain independently identifiable and co-installable without
 renaming working GUI storage, installer and application identities.
 
 ## Decision
+
+This decision is rejected and must not be implemented. Phase 0.8 will replace
+it with a shared GUI/CLI product name using `<name>` and `<name>-cli`.
 
 Keep **Colosseum** as the desktop product name. Name the independent CLI product
 **UCI Rig**, with Cargo package, crate and executable `ucirig` and workspace path

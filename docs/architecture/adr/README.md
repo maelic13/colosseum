@@ -14,9 +14,9 @@ decision.
 | [0004](0004-gui-library-runtime-mapping.md) | Accepted | Keep saved engine/library policy in the GUI and map it explicitly to runtime input |
 | [0005](0005-incremental-boundary-migration.md) | Accepted | Migrate by abstraction around the working UCI, runner, SQLite and GUI behavior |
 | [0006](0006-one-repository-independent-product-releases.md) | Accepted | Keep one repository with independently versioned and released GUI/CLI products |
-| [0007](0007-name-the-cli-uci-rig.md) | Accepted | Name the independent CLI UCI Rig |
+| [0007](0007-name-the-cli-uci-rig.md) | Rejected | Name the independent CLI UCI Rig |
 
 Phase 0.5's detailed release and CI design is in
 [`release-architecture.md`](../release-architecture.md).
-Phase 0.6's research record and complete public-name mapping is in
+Phase 0.6's collision research and rejected public-name proposal are in
 [`naming-decision.md`](../naming-decision.md).
