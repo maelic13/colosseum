@@ -35,7 +35,9 @@ numbers, internal naming or method argumentation.
         use a normal `-` bullet, and indent their continuations another 2.
      5. Once implementation starts, NEVER renumber existing items — commits
         reference them. To insert before the first item use a .0.
-     6. Mirror any status change into PLAN.md in the same commit.
+     6. Always mark a completed step here in the same commit. Add status or
+        evidence to PLAN.md when it improves the durable specification; do not
+        duplicate routine tracker detail there.
      7. Blank line AFTER the `###` heading, then NO blank lines between
         bullets: one continuous list per phase.
      8. ONLY NUMBERED STEPS live here. Recurring procedures go in their own
@@ -371,7 +373,8 @@ cargo test -p colosseum-core
 
 ```text
 Pick the next ☐ step  ->  implement + test  ->  demonstrate its exit
-criterion  ->  tick it here AND in PLAN.md  ->  commit that step before the next.
+criterion  ->  mark it ☑ here  ->  update PLAN.md when useful  ->  commit before
+the next step.
 ```
 
 Long game jobs (optional calibrations, parity runs, real gates) run on a real

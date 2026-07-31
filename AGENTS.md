@@ -34,10 +34,12 @@ One numbered `GUIDE.md` item is the normal unit of work.
    checks from `CLAUDE.md`.
 4. Demonstrate the exit criterion. A compiling change is not automatically
    complete.
-5. Mark the step `☑` in `GUIDE.md` with the required outcome label and record
-   corresponding status/evidence in `PLAN.md` in the same change. Use `☐` for
-   todo and `◐` only while genuinely in progress; do not use GitHub `[ ]` task
-   syntax because the Codex renderer does not display it reliably.
+5. Always mark the finished step `☑` in `GUIDE.md` with the required outcome
+   label in the same change. Add corresponding status/evidence to `PLAN.md`
+   when it improves the durable specification or records a consequential
+   result; do not duplicate routine detail there. Use `☐` for todo and `◐`
+   only while genuinely in progress; do not use GitHub `[ ]` task syntax
+   because the Codex renderer does not display it reliably.
 6. Commit the completed step before starting another numbered step.
 
 Use a short imperative commit subject that names the outcome, preferably with
