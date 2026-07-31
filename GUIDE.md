@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent CLI: **not started** |
-| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0 is complete: it inventoried, audited, designed and reviewed the Clean Architecture target and independent product releases/CI as one contract, then bound coherent Colosseum / `colosseum-cli` implementation naming while deferring any optional whole-product rebrand to Phase 9.0 |
-| What is missing | Pentanomial/nElo, CPU affinity, the CLI itself, SPSA, durable runs, run records, trustworthy NPS |
+| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform and released for Windows/Linux/macOS incl. arm64. The workspace suite passes. `core/stats.rs` now has the five-bin paired sample, pentanomial variance, logistic and normalized Elo intervals, paired LOS and diagnostic ratios in addition to the existing trinomial statistics and ML ratings. Phase 0's Clean Architecture and independent-release contract is complete |
+| What is missing | Dual-model pentanomial SPRT, fixed-N planning, typed statistical errors and oracle fixtures; CPU affinity, the CLI itself, SPSA, durable runs, run records and trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 1.1 — pair-level pentanomial scoring** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 1.3 — normalized and logistic pentanomial SPRT** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -103,8 +103,12 @@ model as well.
   vector; incomplete games are explicitly counted as unpaired and cannot enter
   a pentanomial SPRT input — evidence:
   [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
-- ☐ **1.2** — **Model: Sol High.** Pentanomial variance, normalized Elo, logistic Elo ± error, LOS, draw
-  ratio, pairs ratio, WL/DD ratio
+- ☑ **1.2 — DONE** — **Model: Sol High.** Implement population pentanomial
+  variance and paired standard error, normalized and logistic Elo intervals,
+  paired LOS, draw ratio, pairs ratio and WL/DD ratio; retain the WL/DD split
+  inside the central bin and return undefined ratios without NaN/Inf — evidence:
+  [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
+  and the exact formulas in PLAN §5.1
 - ☐ **1.3** — **Model: Sol High.** SPRT over **both** the pentanomial/normalized and logistic models,
   selectable, always naming the model in force
 - ☐ **1.4** — **Model: Sol High.** Fixed-N planning/achieved-resolution primitives with explicit
@@ -394,11 +398,11 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 1.1 — pair-level pentanomial scoring. Model: GPT-5.6 Terra — High.**
-Implement the five-bin paired-game result mapping in `colosseum-core`. Exclude
-incomplete pairs from pentanomial SPRT and label them unpaired in other output.
-Demonstrate the mapping and exclusion behavior with focused tests before
-marking and committing the step.
+**Phase 1.3 — normalized and logistic pentanomial SPRT. Model: GPT-5.6 Sol —
+High.** Implement both selectable paired models over the five-bin sample,
+return LLR, bounds and H0/H1/continue, and make the model identity explicit in
+the result contract. Demonstrate analytic and symmetry behavior without
+claiming the Phase 1.7 external-oracle gate early.
 
 ```
 git diff --check

@@ -36,8 +36,8 @@ pub use pairing::{gauntlet, generate_schedule, round_robin};
 pub use rating::{ml_ratings, ml_ratings_anchored, performance_rating, rating_error};
 pub use standings::{EngineStanding, GameOutcome, HeadToHead, PairGameResult, Standings};
 pub use stats::{
-    EloEstimate, PentanomialBin, PentanomialVector, SprtDecision, SprtResult, elo_with_error, los,
-    sprt,
+    EloEstimate, NormalizedEloEstimate, PentanomialBin, PentanomialStatistics, PentanomialVector,
+    SprtDecision, SprtResult, elo_with_error, los, pentanomial_statistics, sprt,
 };
 pub use time::{TimeControl, TimeUnit};
 pub use tournament::{

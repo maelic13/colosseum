@@ -483,6 +483,17 @@ right" is not a criterion.
   pair score in {0, 0.5, 1, 1.5, 2} → the pentanomial vector.
 - Pentanomial variance; normalized Elo; logistic Elo with error bars; LOS; draw
   ratio; pairs ratio; WL/DD ratio.
+  The definitions are exact. For `N` complete pairs, let `n_i` be the five bin
+  counts and `x_i = [0, 0.25, 0.5, 0.75, 1]` the pair-average game scores:
+  `mu = Σ(n_i*x_i)/N`, population variance
+  `v = Σ(n_i*(x_i-mu)^2)/N`, and `SE = sqrt(v/N)`. Logistic Elo is
+  `400*log10(mu/(1-mu))`; transform `mu ± z*SE` for its interval. Normalized
+  Elo is `(mu-0.5)*800/(ln(10)*sqrt(2*v))`; its interval uses the same fixed
+  empirical `v`. LOS is `Φ((mu-0.5)/SE)`. Draw ratio is individual draws in
+  complete pairs divided by `2N`; pairs ratio is pairs above one point divided
+  by pairs below one point; WL/DD is one-win/one-loss pairs divided by
+  draw/draw pairs. Retain the WL-vs-DD split behind the central pentanomial bin.
+  A zero ratio denominator is undefined, never infinity.
 - SPRT over both the pentanomial/normalized and logistic models, selectable,
   reporting LLR and both bounds with H0/H1/continue — and always naming the
   model in force (A6).

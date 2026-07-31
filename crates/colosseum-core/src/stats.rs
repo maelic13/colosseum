@@ -1,7 +1,7 @@
 //! Match statistics for two-engine comparisons: Elo with confidence interval,
 //! likelihood-of-superiority (LOS), and a sequential probability ratio test
-//! (SPRT). All pure functions over win/draw/loss counts so they are easy to
-//! unit-test and reuse from both the live view and the History tab.
+//! (SPRT). The calculations are pure functions over game or paired-outcome
+//! counts so they are easy to unit-test and reuse across presentation layers.
 
 use crate::standings::PairGameResult;
 
@@ -52,6 +52,9 @@ impl PentanomialBin {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PentanomialVector {
     counts: [u32; 5],
+    win_loss_pairs: u32,
+    double_draw_pairs: u32,
+    drawn_games: u32,
     unpaired_games: u32,
 }
 
@@ -64,6 +67,22 @@ impl PentanomialVector {
     pub fn record_pair(&mut self, first: PairGameResult, second: PairGameResult) {
         let bin = PentanomialBin::from_pair(first, second);
         self.counts[bin.index()] += 1;
+
+        self.drawn_games += match first {
+            PairGameResult::Draw => 1,
+            PairGameResult::Win | PairGameResult::Loss => 0,
+        };
+        self.drawn_games += match second {
+            PairGameResult::Draw => 1,
+            PairGameResult::Win | PairGameResult::Loss => 0,
+        };
+
+        match (first, second) {
+            (PairGameResult::Win, PairGameResult::Loss)
+            | (PairGameResult::Loss, PairGameResult::Win) => self.win_loss_pairs += 1,
+            (PairGameResult::Draw, PairGameResult::Draw) => self.double_draw_pairs += 1,
+            _ => {}
+        }
     }
 
     /// Record one completed game whose colour-reversed companion is absent.
@@ -90,6 +109,157 @@ impl PentanomialVector {
     pub const fn unpaired_games(&self) -> u32 {
         self.unpaired_games
     }
+
+    /// Fraction of individual games drawn within complete pairs.
+    #[must_use]
+    pub fn draw_ratio(&self) -> Option<f64> {
+        let pairs = self.pairs();
+        if pairs == 0 {
+            None
+        } else {
+            Some(f64::from(self.drawn_games) / (2.0 * f64::from(pairs)))
+        }
+    }
+
+    /// Ratio of pairs scoring above one point to pairs scoring below one point.
+    ///
+    /// Returns `None` when there are no losing pairs, rather than producing an
+    /// infinite or undefined value.
+    #[must_use]
+    pub fn pairs_ratio(&self) -> Option<f64> {
+        let losing_pairs = self.counts[0] + self.counts[1];
+        if losing_pairs == 0 {
+            None
+        } else {
+            Some(f64::from(self.counts[3] + self.counts[4]) / f64::from(losing_pairs))
+        }
+    }
+
+    /// Ratio of one-win/one-loss pairs to double-draw pairs.
+    ///
+    /// Both outcomes occupy the central one-point pentanomial bin, so their
+    /// split is retained separately. Returns `None` when there are no
+    /// double-draw pairs.
+    #[must_use]
+    pub fn win_loss_to_double_draw_ratio(&self) -> Option<f64> {
+        if self.double_draw_pairs == 0 {
+            None
+        } else {
+            Some(f64::from(self.win_loss_pairs) / f64::from(self.double_draw_pairs))
+        }
+    }
+
+    /// `(win/loss, draw/draw)` counts inside the central one-point bin.
+    #[must_use]
+    pub const fn central_pair_breakdown(&self) -> (u32, u32) {
+        (self.win_loss_pairs, self.double_draw_pairs)
+    }
+}
+
+/// Normalized-Elo estimate and confidence interval.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NormalizedEloEstimate {
+    pub elo: f64,
+    pub lower: f64,
+    pub upper: f64,
+}
+
+impl NormalizedEloEstimate {
+    /// Half-width of the interval, i.e. the "± margin".
+    #[must_use]
+    pub fn margin(&self) -> f64 {
+        (self.upper - self.lower) / 2.0
+    }
+}
+
+/// Estimates derived from complete colour-reversed pairs.
+///
+/// `variance` is the empirical population variance of the pair-average score
+/// values `[0, 0.25, 0.5, 0.75, 1]`. `standard_error` is therefore
+/// `sqrt(variance / pairs)`. Unpaired games are reported but excluded from
+/// every field in this structure.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PentanomialStatistics {
+    pub pairs: u32,
+    pub unpaired_games: u32,
+    pub score: f64,
+    pub variance: f64,
+    pub standard_error: f64,
+    pub logistic_elo: EloEstimate,
+    pub normalized_elo: NormalizedEloEstimate,
+    pub los: f64,
+    pub draw_ratio: f64,
+    pub pairs_ratio: Option<f64>,
+    pub win_loss_to_double_draw_ratio: Option<f64>,
+}
+
+/// Calculate paired statistics with a two-sided confidence interval at `z`
+/// standard deviations (for example, `1.959963984540054` for 95%).
+///
+/// Returns `None` for fewer than two pairs, zero variance, non-finite input or
+/// an interval that leaves the finite logistic-score domain. Phase 1.5 replaces
+/// this temporary absence signal with the plan's typed statistical errors.
+#[must_use]
+pub fn pentanomial_statistics(sample: &PentanomialVector, z: f64) -> Option<PentanomialStatistics> {
+    const SCORES: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+    const NORMALIZED_ELO_SCALE: f64 = 800.0 / std::f64::consts::LN_10;
+
+    let pairs = sample.pairs();
+    if pairs < 2 || !z.is_finite() || z < 0.0 {
+        return None;
+    }
+
+    let pairs_f = f64::from(pairs);
+    let counts = sample.counts();
+    let score = counts
+        .iter()
+        .zip(SCORES)
+        .map(|(&count, value)| f64::from(count) * value)
+        .sum::<f64>()
+        / pairs_f;
+    let variance = counts
+        .iter()
+        .zip(SCORES)
+        .map(|(&count, value)| f64::from(count) * (value - score).powi(2))
+        .sum::<f64>()
+        / pairs_f;
+
+    if !(0.0..1.0).contains(&score) || !variance.is_finite() || variance <= 0.0 {
+        return None;
+    }
+
+    let standard_error = (variance / pairs_f).sqrt();
+    let lower_score = score - z * standard_error;
+    let upper_score = score + z * standard_error;
+    if !(0.0..1.0).contains(&lower_score) || !(0.0..1.0).contains(&upper_score) {
+        return None;
+    }
+
+    let normalized_scale = NORMALIZED_ELO_SCALE / (2.0 * variance).sqrt();
+    let normalized = |value: f64| (value - 0.5) * normalized_scale;
+
+    Some(PentanomialStatistics {
+        pairs,
+        unpaired_games: sample.unpaired_games(),
+        score,
+        variance,
+        standard_error,
+        logistic_elo: EloEstimate {
+            elo: score_to_elo(score),
+            score,
+            lower: score_to_elo(lower_score),
+            upper: score_to_elo(upper_score),
+        },
+        normalized_elo: NormalizedEloEstimate {
+            elo: normalized(score),
+            lower: normalized(lower_score),
+            upper: normalized(upper_score),
+        },
+        los: normal_cdf((score - 0.5) / standard_error),
+        draw_ratio: sample.draw_ratio()?,
+        pairs_ratio: sample.pairs_ratio(),
+        win_loss_to_double_draw_ratio: sample.win_loss_to_double_draw_ratio(),
+    })
 }
 
 /// Standard normal cumulative distribution function Φ(x), via an `erf`
@@ -376,5 +546,107 @@ mod tests {
         assert_eq!(vector.counts(), [1, 2, 3, 2, 1]);
         assert_eq!(vector.pairs(), 9);
         assert_eq!(vector.unpaired_games(), 1);
+        assert_eq!(vector.central_pair_breakdown(), (2, 1));
+        assert!(approx(vector.draw_ratio().unwrap(), 1.0 / 3.0, 1e-12));
+        assert!(approx(vector.pairs_ratio().unwrap(), 1.0, 1e-12));
+        assert!(approx(
+            vector.win_loss_to_double_draw_ratio().unwrap(),
+            2.0,
+            1e-12
+        ));
+    }
+
+    #[test]
+    fn pentanomial_statistics_match_hand_derived_symmetric_fixture() {
+        use PairGameResult::{Draw, Loss, Win};
+
+        // The Cartesian product of W/D/L gives bins [1, 2, 3, 2, 1].
+        // Pair-average mean = 1/2 and population variance = 1/12.
+        let mut sample = PentanomialVector::default();
+        for first in [Loss, Draw, Win] {
+            for second in [Loss, Draw, Win] {
+                sample.record_pair(first, second);
+            }
+        }
+        sample.record_unpaired_game();
+
+        let stats = pentanomial_statistics(&sample, 1.959_963_984_540_054).unwrap();
+        assert_eq!(stats.pairs, 9);
+        assert_eq!(stats.unpaired_games, 1);
+        assert!(approx(stats.score, 0.5, 1e-12));
+        assert!(approx(stats.variance, 1.0 / 12.0, 1e-12));
+        assert!(approx(stats.standard_error, (1.0f64 / 108.0).sqrt(), 1e-12));
+        assert!(approx(stats.logistic_elo.elo, 0.0, 1e-12));
+        assert!(approx(
+            stats.logistic_elo.margin(),
+            137.857_437_832_269,
+            1e-9
+        ));
+        assert!(approx(stats.normalized_elo.elo, 0.0, 1e-12));
+        assert!(approx(
+            stats.normalized_elo.margin(),
+            160.504_102_230_314,
+            1e-9
+        ));
+        assert!(approx(stats.los, 0.5, 1e-7));
+        assert!(approx(stats.draw_ratio, 1.0 / 3.0, 1e-12));
+        assert!(approx(stats.pairs_ratio.unwrap(), 1.0, 1e-12));
+        assert!(approx(
+            stats.win_loss_to_double_draw_ratio.unwrap(),
+            2.0,
+            1e-12
+        ));
+    }
+
+    #[test]
+    fn pentanomial_statistics_match_fastchess_reference_values() {
+        use PairGameResult::{Draw, Loss, Win};
+
+        let mut sample = PentanomialVector::default();
+        let categories = [
+            (Loss, Loss, 34),
+            (Loss, Draw, 54),
+            (Loss, Win, 31),
+            (Draw, Draw, 32),
+            (Win, Draw, 64),
+            (Win, Win, 75),
+        ];
+        for (first, second, count) in categories {
+            for _ in 0..count {
+                sample.record_pair(first, second);
+            }
+        }
+
+        let stats = pentanomial_statistics(&sample, 1.959_963_984_540_054).unwrap();
+        assert!(approx(stats.score, 0.579, 0.001));
+        assert!(approx(stats.logistic_elo.elo, 55.58, 0.01));
+        assert!(approx(stats.logistic_elo.margin(), 27.65, 0.01));
+        assert!(approx(stats.normalized_elo.elo, 57.94, 0.01));
+        assert!(approx(stats.normalized_elo.margin(), 28.28, 0.01));
+        assert!(stats.los > 0.999_9);
+        assert!(approx(stats.draw_ratio, 182.0 / 580.0, 1e-12));
+        assert!(approx(stats.pairs_ratio.unwrap(), 139.0 / 88.0, 1e-12));
+        assert!(approx(
+            stats.win_loss_to_double_draw_ratio.unwrap(),
+            31.0 / 32.0,
+            1e-12
+        ));
+    }
+
+    #[test]
+    fn ratios_are_absent_instead_of_infinite_when_denominators_are_zero() {
+        use PairGameResult::{Draw, Win};
+
+        let empty = PentanomialVector::default();
+        assert_eq!(empty.draw_ratio(), None);
+        assert_eq!(empty.pairs_ratio(), None);
+        assert_eq!(empty.win_loss_to_double_draw_ratio(), None);
+
+        let mut winning = PentanomialVector::default();
+        winning.record_pair(Win, Win);
+        winning.record_pair(Win, Draw);
+        assert_eq!(winning.pairs_ratio(), None);
+        assert_eq!(winning.win_loss_to_double_draw_ratio(), None);
+        assert_eq!(pentanomial_statistics(&winning, 1.96), None);
     }
 }
