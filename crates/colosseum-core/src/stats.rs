@@ -268,6 +268,28 @@ pub fn normal_cdf(x: f64) -> f64 {
     0.5 * (1.0 + erf(x / std::f64::consts::SQRT_2))
 }
 
+/// Invert [`normal_cdf`] for an interior probability.
+fn normal_quantile(probability: f64) -> Option<f64> {
+    if !probability.is_finite() || !(0.0..1.0).contains(&probability) {
+        return None;
+    }
+
+    let mut lower = -8.0;
+    let mut upper = 8.0;
+    if probability <= normal_cdf(lower) || probability >= normal_cdf(upper) {
+        return None;
+    }
+    for _ in 0..80 {
+        let midpoint = (lower + upper) / 2.0;
+        if normal_cdf(midpoint) < probability {
+            lower = midpoint;
+        } else {
+            upper = midpoint;
+        }
+    }
+    Some((lower + upper) / 2.0)
+}
+
 /// Error function approximation (Abramowitz & Stegun 7.1.26).
 fn erf(x: f64) -> f64 {
     let sign = if x < 0.0 { -1.0 } else { 1.0 };
@@ -385,9 +407,9 @@ pub struct SprtResult {
     pub decision: SprtDecision,
 }
 
-/// Elo parameterization used by a paired pentanomial SPRT.
+/// Elo parameterization used by paired statistics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SprtEloModel {
+pub enum EloModel {
     /// Constrain the expected pair-average score after applying the logistic
     /// Elo-to-score transform.
     Logistic,
@@ -396,7 +418,7 @@ pub enum SprtEloModel {
     Normalized,
 }
 
-impl SprtEloModel {
+impl EloModel {
     /// Stable user-facing name for reports and persisted run records.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -407,13 +429,247 @@ impl SprtEloModel {
     }
 }
 
+/// Assumed distribution of pair-average scores `[0, 0.25, 0.5, 0.75, 1]`.
+///
+/// Fixed-N planning requires this explicit input because game count alone does
+/// not determine the variance, and therefore cannot determine detectable Elo.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PentanomialDistribution {
+    probabilities: [f64; 5],
+}
+
+impl PentanomialDistribution {
+    /// Validate and normalize five finite, non-negative probabilities.
+    ///
+    /// Returns `None` unless they sum to one (within floating-point input
+    /// tolerance) and describe a non-degenerate distribution.
+    #[must_use]
+    pub fn new(probabilities: [f64; 5]) -> Option<Self> {
+        if probabilities
+            .iter()
+            .any(|probability| !probability.is_finite() || *probability < 0.0)
+        {
+            return None;
+        }
+        let total = probabilities.iter().sum::<f64>();
+        if !total.is_finite() || (total - 1.0).abs() > 1e-9 {
+            return None;
+        }
+
+        let probabilities = probabilities.map(|probability| probability / total);
+        let distribution = Self { probabilities };
+        (distribution.variance() > 0.0).then_some(distribution)
+    }
+
+    #[must_use]
+    pub const fn probabilities(self) -> [f64; 5] {
+        self.probabilities
+    }
+
+    #[must_use]
+    pub fn mean(self) -> f64 {
+        distribution_stats(&PENTANOMIAL_SCORES, &self.probabilities).0
+    }
+
+    #[must_use]
+    pub fn variance(self) -> f64 {
+        distribution_stats(&PENTANOMIAL_SCORES, &self.probabilities).1
+    }
+}
+
+/// Rejection region used by a fixed-sample difference test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixedNTestTails {
+    /// Detect an effect in the pre-declared direction.
+    OneSided,
+    /// Detect an effect in either direction.
+    TwoSided,
+}
+
+impl FixedNTestTails {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OneSided => "one-sided",
+            Self::TwoSided => "two-sided",
+        }
+    }
+}
+
+/// Prospective normal-approximation design for a fixed-sample difference test.
+///
+/// Every planning assumption is retained in the result. This is a design
+/// estimate, not a stopping rule and not an SPRT conclusion.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FixedNPlan {
+    pub model: EloModel,
+    pub tails: FixedNTestTails,
+    /// Positive Elo distance from the null to the alternative, in `model`.
+    pub target_effect: f64,
+    pub significance: f64,
+    pub power: f64,
+    pub assumed_distribution: PentanomialDistribution,
+    /// Target effect after conversion to pair-average score units.
+    pub score_effect: f64,
+    pub critical_value: f64,
+    pub power_quantile: f64,
+    pub required_pairs: u64,
+}
+
+impl FixedNPlan {
+    /// Games implied by two colour-reversed games per complete pair.
+    #[must_use]
+    pub const fn required_games(&self) -> u64 {
+        self.required_pairs * 2
+    }
+}
+
+/// Estimate the required complete pairs for a fixed-sample difference test.
+///
+/// The null is zero Elo and `target_effect` is a positive alternative in the
+/// selected model. `significance` is alpha; `power` is `1-beta`. The assumed
+/// pentanomial variance is treated as known and the pair mean as normally
+/// distributed. The returned count is rounded up and never below two pairs.
+///
+/// This primitive does not implement equivalence/TOST planning; that objective
+/// requires an equivalence margin and an assumed true effect, and is composed
+/// separately by the experiment-planning workflow.
+#[must_use]
+pub fn fixed_n_plan(
+    assumed_distribution: PentanomialDistribution,
+    model: EloModel,
+    tails: FixedNTestTails,
+    target_effect: f64,
+    significance: f64,
+    power: f64,
+) -> Option<FixedNPlan> {
+    if !target_effect.is_finite()
+        || target_effect <= 0.0
+        || !valid_significance(significance)
+        || !power.is_finite()
+        || power <= 0.5
+        || power >= 1.0
+    {
+        return None;
+    }
+
+    let variance = assumed_distribution.variance();
+    let score_effect = match model {
+        EloModel::Logistic => elo_to_score(target_effect) - 0.5,
+        EloModel::Normalized => target_effect * (2.0 * variance).sqrt() / NELO_PER_T_VALUE,
+    };
+    if !score_effect.is_finite() || score_effect <= 0.0 || score_effect >= 0.5 {
+        return None;
+    }
+
+    let critical_probability = match tails {
+        FixedNTestTails::OneSided => 1.0 - significance,
+        FixedNTestTails::TwoSided => 1.0 - significance / 2.0,
+    };
+    let critical_value = normal_quantile(critical_probability)?;
+    let power_quantile = normal_quantile(power)?;
+    let required = variance * ((critical_value + power_quantile) / score_effect).powi(2);
+    if !required.is_finite() || required <= 0.0 || required > (u64::MAX / 2) as f64 {
+        return None;
+    }
+
+    Some(FixedNPlan {
+        model,
+        tails,
+        target_effect,
+        significance,
+        power,
+        assumed_distribution,
+        score_effect,
+        critical_value,
+        power_quantile,
+        required_pairs: (required.ceil() as u64).max(2),
+    })
+}
+
+/// Retrospective confidence interval and conservative achieved resolution.
+///
+/// This is descriptive fixed-sample output. It deliberately has no hypothesis
+/// decision field and must not be presented as post-hoc power, a back-fitted
+/// MDE, or an SPRT verdict.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FixedNAchievedResolution {
+    pub model: EloModel,
+    pub pairs: u32,
+    pub unpaired_games: u32,
+    pub significance: f64,
+    pub confidence: f64,
+    pub estimate: f64,
+    pub lower: f64,
+    pub upper: f64,
+}
+
+impl FixedNAchievedResolution {
+    #[must_use]
+    pub fn lower_error(&self) -> f64 {
+        self.estimate - self.lower
+    }
+
+    #[must_use]
+    pub fn upper_error(&self) -> f64 {
+        self.upper - self.estimate
+    }
+
+    /// Larger distance from the estimate to either interval endpoint.
+    ///
+    /// Normalized-Elo intervals are symmetric; logistic-Elo intervals need not
+    /// be, so using the larger side avoids overstating achieved precision.
+    #[must_use]
+    pub fn resolution(&self) -> f64 {
+        self.lower_error().max(self.upper_error())
+    }
+}
+
+/// Calculate the achieved two-sided `(1-significance)` interval of a completed
+/// fixed sample in the explicitly selected model.
+#[must_use]
+pub fn fixed_n_achieved_resolution(
+    sample: &PentanomialVector,
+    model: EloModel,
+    significance: f64,
+) -> Option<FixedNAchievedResolution> {
+    if !valid_significance(significance) {
+        return None;
+    }
+    let critical_value = normal_quantile(1.0 - significance / 2.0)?;
+    let statistics = pentanomial_statistics(sample, critical_value)?;
+    let (estimate, lower, upper) = match model {
+        EloModel::Logistic => (
+            statistics.logistic_elo.elo,
+            statistics.logistic_elo.lower,
+            statistics.logistic_elo.upper,
+        ),
+        EloModel::Normalized => (
+            statistics.normalized_elo.elo,
+            statistics.normalized_elo.lower,
+            statistics.normalized_elo.upper,
+        ),
+    };
+
+    Some(FixedNAchievedResolution {
+        model,
+        pairs: statistics.pairs,
+        unpaired_games: statistics.unpaired_games,
+        significance,
+        confidence: 1.0 - significance,
+        estimate,
+        lower,
+        upper,
+    })
+}
+
 /// Self-contained result of a paired pentanomial SPRT.
 ///
 /// The model and hypotheses are retained with the LLR so callers cannot report
 /// a result whose Elo parameterization is ambiguous.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PentanomialSprtResult {
-    pub model: SprtEloModel,
+    pub model: EloModel,
     /// Complete pairs in the official sequential sample.
     pub pairs: u32,
     /// Completed games reported for diagnostics but excluded from the LLR.
@@ -444,7 +700,7 @@ pub struct PentanomialSprtResult {
 #[must_use]
 pub fn pentanomial_sprt(
     sample: &PentanomialVector,
-    model: SprtEloModel,
+    model: EloModel,
     elo0: f64,
     elo1: f64,
     alpha: f64,
@@ -490,7 +746,11 @@ const EMPTY_BIN_PRIOR: f64 = 1e-3;
 const NELO_PER_T_VALUE: f64 = 800.0 / std::f64::consts::LN_10;
 
 fn valid_error_rate(value: f64) -> bool {
-    value.is_finite() && (0.0..1.0).contains(&value)
+    value.is_finite() && value > 0.0 && value < 1.0
+}
+
+fn valid_significance(value: f64) -> bool {
+    value.is_finite() && value > 0.0 && value < 0.5
 }
 
 fn sprt_decision(llr: f64, lower: f64, upper: f64) -> SprtDecision {
@@ -524,7 +784,7 @@ fn observed_variance(counts: [u32; 5]) -> f64 {
         / pairs_f
 }
 
-fn pentanomial_llr(counts: [u32; 5], model: SprtEloModel, elo0: f64, elo1: f64) -> Option<f64> {
+fn pentanomial_llr(counts: [u32; 5], model: EloModel, elo0: f64, elo1: f64) -> Option<f64> {
     let actual_pairs = counts.iter().copied().sum::<u32>();
     if actual_pairs == 0 {
         return Some(0.0);
@@ -544,12 +804,12 @@ fn pentanomial_llr(counts: [u32; 5], model: SprtEloModel, elo0: f64, elo1: f64) 
     let empirical = regularized.map(|count| count / effective_pairs);
 
     let (hypothesis0, hypothesis1, statistic) = match model {
-        SprtEloModel::Logistic => (
+        EloModel::Logistic => (
             elo_to_score(elo0),
             elo_to_score(elo1),
             LikelihoodStatistic::Mean,
         ),
-        SprtEloModel::Normalized => (
+        EloModel::Normalized => (
             elo0 * std::f64::consts::SQRT_2 / NELO_PER_T_VALUE,
             elo1 * std::f64::consts::SQRT_2 / NELO_PER_T_VALUE,
             LikelihoodStatistic::TValue,
@@ -842,6 +1102,192 @@ mod tests {
     }
 
     #[test]
+    fn assumed_pentanomial_distribution_is_explicit_and_non_degenerate() {
+        let distribution = PentanomialDistribution::new([0.1, 0.2, 0.4, 0.2, 0.1]).unwrap();
+        for (actual, expected) in distribution
+            .probabilities()
+            .into_iter()
+            .zip([0.1, 0.2, 0.4, 0.2, 0.1])
+        {
+            assert!(approx(actual, expected, 1e-12));
+        }
+        assert!(approx(distribution.mean(), 0.5, 1e-12));
+        assert!(approx(distribution.variance(), 0.075, 1e-12));
+
+        assert!(PentanomialDistribution::new([0.0; 5]).is_none());
+        assert!(PentanomialDistribution::new([0.0, 0.0, 1.0, 0.0, 0.0]).is_none());
+        assert!(PentanomialDistribution::new([0.1, 0.2, 0.3, 0.2, 0.1]).is_none());
+        assert!(PentanomialDistribution::new([f64::NAN, 0.0, 0.0, 0.0, 1.0]).is_none());
+    }
+
+    #[test]
+    fn normal_quantiles_match_standard_reference_values() {
+        assert!(approx(normal_quantile(0.8).unwrap(), 0.841_621_23, 2e-6));
+        assert!(approx(normal_quantile(0.95).unwrap(), 1.644_853_63, 2e-6));
+        assert!(approx(normal_quantile(0.975).unwrap(), 1.959_963_98, 2e-6));
+        assert!(normal_quantile(0.0).is_none());
+        assert!(normal_quantile(1.0).is_none());
+    }
+
+    #[test]
+    fn fixed_n_plans_match_hand_derived_normal_approximation() {
+        let distribution = PentanomialDistribution::new([0.1, 0.2, 0.4, 0.2, 0.1]).unwrap();
+        let normalized = fixed_n_plan(
+            distribution,
+            EloModel::Normalized,
+            FixedNTestTails::TwoSided,
+            5.0,
+            0.05,
+            0.8,
+        )
+        .unwrap();
+        let logistic = fixed_n_plan(
+            distribution,
+            EloModel::Logistic,
+            FixedNTestTails::TwoSided,
+            5.0,
+            0.05,
+            0.8,
+        )
+        .unwrap();
+
+        assert_eq!(normalized.model, EloModel::Normalized);
+        assert_eq!(normalized.tails, FixedNTestTails::TwoSided);
+        assert_eq!(normalized.tails.as_str(), "two-sided");
+        assert!(approx(normalized.target_effect, 5.0, f64::EPSILON));
+        assert!(approx(normalized.significance, 0.05, f64::EPSILON));
+        assert!(approx(normalized.power, 0.8, f64::EPSILON));
+        assert_eq!(normalized.assumed_distribution, distribution);
+        assert!(approx(normalized.critical_value, 1.959_963_98, 2e-6));
+        assert!(approx(normalized.power_quantile, 0.841_621_23, 2e-6));
+        assert_eq!(normalized.required_pairs, 18_949);
+        assert_eq!(normalized.required_games(), 37_898);
+
+        assert_eq!(logistic.model, EloModel::Logistic);
+        assert_eq!(logistic.required_pairs, 11_371);
+        assert_ne!(logistic.score_effect, normalized.score_effect);
+
+        // A wider assumed pair distribution increases logistic-Elo sample
+        // size. Normalized Elo absorbs that variance into its scale.
+        let wider = PentanomialDistribution::new([0.2, 0.1, 0.4, 0.1, 0.2]).unwrap();
+        let wider_logistic = fixed_n_plan(
+            wider,
+            EloModel::Logistic,
+            FixedNTestTails::TwoSided,
+            5.0,
+            0.05,
+            0.8,
+        )
+        .unwrap();
+        let wider_normalized = fixed_n_plan(
+            wider,
+            EloModel::Normalized,
+            FixedNTestTails::TwoSided,
+            5.0,
+            0.05,
+            0.8,
+        )
+        .unwrap();
+        assert_eq!(wider_logistic.required_pairs, 17_057);
+        assert_eq!(wider_normalized.required_pairs, normalized.required_pairs);
+    }
+
+    #[test]
+    fn one_sided_fixed_n_plan_matches_one_standard_deviation_fixture() {
+        let distribution = PentanomialDistribution::new([0.1, 0.2, 0.4, 0.2, 0.1]).unwrap();
+        // A normalized-Elo effect of NELO_PER_T_VALUE/sqrt(2) is exactly one
+        // assumed pair standard deviation. N=(z_.95+z_.90)^2=8.564 -> 9.
+        let one_sigma_nelo = NELO_PER_T_VALUE / std::f64::consts::SQRT_2;
+        let plan = fixed_n_plan(
+            distribution,
+            EloModel::Normalized,
+            FixedNTestTails::OneSided,
+            one_sigma_nelo,
+            0.05,
+            0.9,
+        )
+        .unwrap();
+        assert_eq!(plan.tails.as_str(), "one-sided");
+        assert!(approx(
+            plan.score_effect,
+            distribution.variance().sqrt(),
+            1e-12
+        ));
+        assert_eq!(plan.required_pairs, 9);
+    }
+
+    #[test]
+    fn fixed_n_plan_rejects_missing_or_impossible_assumptions() {
+        let distribution = PentanomialDistribution::new([0.1, 0.2, 0.4, 0.2, 0.1]).unwrap();
+        for plan in [
+            fixed_n_plan(
+                distribution,
+                EloModel::Normalized,
+                FixedNTestTails::TwoSided,
+                0.0,
+                0.05,
+                0.8,
+            ),
+            fixed_n_plan(
+                distribution,
+                EloModel::Normalized,
+                FixedNTestTails::TwoSided,
+                5.0,
+                0.0,
+                0.8,
+            ),
+            fixed_n_plan(
+                distribution,
+                EloModel::Normalized,
+                FixedNTestTails::TwoSided,
+                5.0,
+                0.05,
+                0.5,
+            ),
+        ] {
+            assert!(plan.is_none());
+        }
+    }
+
+    #[test]
+    fn achieved_resolution_reports_interval_without_a_verdict() {
+        let mut sample = pentanomial_sample([100, 200, 400, 300, 150]);
+        sample.record_unpaired_game();
+        let normalized = fixed_n_achieved_resolution(&sample, EloModel::Normalized, 0.05).unwrap();
+        let logistic = fixed_n_achieved_resolution(&sample, EloModel::Logistic, 0.05).unwrap();
+
+        assert_eq!(normalized.model, EloModel::Normalized);
+        assert_eq!(normalized.pairs, 1_150);
+        assert_eq!(normalized.unpaired_games, 1);
+        assert!(approx(normalized.significance, 0.05, f64::EPSILON));
+        assert!(approx(normalized.confidence, 0.95, f64::EPSILON));
+        assert!(approx(normalized.estimate, 37.852_044_633_505_43, 1e-9));
+        let expected_normalized_resolution =
+            normal_quantile(0.975).unwrap() * NELO_PER_T_VALUE / (2.0 * 1_150.0f64).sqrt();
+        assert!(approx(
+            normalized.resolution(),
+            expected_normalized_resolution,
+            1e-9
+        ));
+        assert!(approx(
+            normalized.lower_error(),
+            normalized.upper_error(),
+            1e-9
+        ));
+
+        assert_eq!(logistic.model, EloModel::Logistic);
+        assert!(approx(logistic.estimate, 30.288_285_575_247_304, 1e-9));
+        assert!(logistic.upper_error() > logistic.lower_error());
+        assert!(approx(logistic.resolution(), 11.456_245_846_843_164, 1e-4));
+
+        assert!(fixed_n_achieved_resolution(&sample, EloModel::Normalized, 0.0).is_none());
+        assert!(
+            fixed_n_achieved_resolution(&PentanomialVector::default(), EloModel::Normalized, 0.05)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn constrained_mles_match_binary_closed_forms() {
         let values = [0.0, 1.0];
         let empirical = [0.7, 0.3];
@@ -865,14 +1311,13 @@ mod tests {
         // Maintained Fishtest model spot values for this all-positive empirical
         // distribution. Phase 1.7 owns the versioned external oracle corpus.
         let sample = pentanomial_sample([100, 200, 400, 300, 150]);
-        let logistic =
-            pentanomial_sprt(&sample, SprtEloModel::Logistic, 0.0, 5.0, 0.05, 0.05).unwrap();
+        let logistic = pentanomial_sprt(&sample, EloModel::Logistic, 0.0, 5.0, 0.05, 0.05).unwrap();
         let normalized =
-            pentanomial_sprt(&sample, SprtEloModel::Normalized, 0.0, 5.0, 0.05, 0.05).unwrap();
+            pentanomial_sprt(&sample, EloModel::Normalized, 0.0, 5.0, 0.05, 0.05).unwrap();
 
-        assert_eq!(logistic.model, SprtEloModel::Logistic);
+        assert_eq!(logistic.model, EloModel::Logistic);
         assert_eq!(logistic.model.as_str(), "logistic");
-        assert_eq!(normalized.model, SprtEloModel::Normalized);
+        assert_eq!(normalized.model, EloModel::Normalized);
         assert_eq!(normalized.model.as_str(), "normalized");
         assert_eq!(logistic.pairs, 1_150);
         assert_eq!(normalized.pairs, 1_150);
@@ -891,7 +1336,7 @@ mod tests {
     #[test]
     fn symmetric_pentanomial_sample_has_zero_llr_in_both_models() {
         let sample = pentanomial_sample([1, 2, 3, 2, 1]);
-        for model in [SprtEloModel::Logistic, SprtEloModel::Normalized] {
+        for model in [EloModel::Logistic, EloModel::Normalized] {
             let result = pentanomial_sprt(&sample, model, -5.0, 5.0, 0.05, 0.05).unwrap();
             assert!(approx(result.llr, 0.0, 1e-12));
             assert_eq!(result.decision, SprtDecision::Continue);
@@ -901,10 +1346,10 @@ mod tests {
     #[test]
     fn pentanomial_sprt_excludes_unpaired_games() {
         let mut sample = pentanomial_sample([10, 20, 30, 40, 50]);
-        let before = pentanomial_sprt(&sample, SprtEloModel::Normalized, 0.0, 5.0, 0.05, 0.05);
+        let before = pentanomial_sprt(&sample, EloModel::Normalized, 0.0, 5.0, 0.05, 0.05);
         sample.record_unpaired_game();
         sample.record_unpaired_game();
-        let after = pentanomial_sprt(&sample, SprtEloModel::Normalized, 0.0, 5.0, 0.05, 0.05);
+        let after = pentanomial_sprt(&sample, EloModel::Normalized, 0.0, 5.0, 0.05, 0.05);
         let before = before.unwrap();
         let after = after.unwrap();
         assert_eq!(after.pairs, before.pairs);
@@ -916,10 +1361,9 @@ mod tests {
     #[test]
     fn pentanomial_sprt_regularizes_empty_bins_without_inflating_pair_count() {
         let sample = pentanomial_sample([0, 2, 5, 3, 0]);
-        let logistic =
-            pentanomial_sprt(&sample, SprtEloModel::Logistic, 0.0, 5.0, 0.05, 0.05).unwrap();
+        let logistic = pentanomial_sprt(&sample, EloModel::Logistic, 0.0, 5.0, 0.05, 0.05).unwrap();
         let normalized =
-            pentanomial_sprt(&sample, SprtEloModel::Normalized, 0.0, 5.0, 0.05, 0.05).unwrap();
+            pentanomial_sprt(&sample, EloModel::Normalized, 0.0, 5.0, 0.05, 0.05).unwrap();
 
         assert_eq!(logistic.pairs, 10);
         assert_eq!(normalized.pairs, 10);
@@ -933,27 +1377,23 @@ mod tests {
 
         let empty = PentanomialVector::default();
         assert_eq!(
-            pentanomial_llr([0; 5], SprtEloModel::Logistic, 0.0, 5.0),
+            pentanomial_llr([0; 5], EloModel::Logistic, 0.0, 5.0),
             Some(0.0)
         );
-        assert!(pentanomial_sprt(&empty, SprtEloModel::Logistic, 0.0, 5.0, 0.05, 0.05).is_none());
+        assert!(pentanomial_sprt(&empty, EloModel::Logistic, 0.0, 5.0, 0.05, 0.05).is_none());
 
         let mut one_pair = PentanomialVector::default();
         one_pair.record_pair(Draw, Draw);
-        assert!(
-            pentanomial_sprt(&one_pair, SprtEloModel::Normalized, 0.0, 5.0, 0.05, 0.05).is_none()
-        );
+        assert!(pentanomial_sprt(&one_pair, EloModel::Normalized, 0.0, 5.0, 0.05, 0.05).is_none());
 
         let all_draws = pentanomial_sample([0, 0, 10, 0, 0]);
-        assert!(
-            pentanomial_sprt(&all_draws, SprtEloModel::Logistic, 0.0, 5.0, 0.05, 0.05).is_none()
-        );
+        assert!(pentanomial_sprt(&all_draws, EloModel::Logistic, 0.0, 5.0, 0.05, 0.05).is_none());
 
         let valid = pentanomial_sample([1, 2, 3, 4, 5]);
         for invalid in [
-            pentanomial_sprt(&valid, SprtEloModel::Logistic, 5.0, 0.0, 0.05, 0.05),
-            pentanomial_sprt(&valid, SprtEloModel::Logistic, 0.0, 5.0, 0.0, 0.05),
-            pentanomial_sprt(&valid, SprtEloModel::Logistic, 0.0, 5.0, 0.6, 0.4),
+            pentanomial_sprt(&valid, EloModel::Logistic, 5.0, 0.0, 0.05, 0.05),
+            pentanomial_sprt(&valid, EloModel::Logistic, 0.0, 5.0, 0.0, 0.05),
+            pentanomial_sprt(&valid, EloModel::Logistic, 0.0, 5.0, 0.6, 0.4),
         ] {
             assert!(invalid.is_none());
         }

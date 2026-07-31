@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent CLI: **not started** |
-| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform and released for Windows/Linux/macOS incl. arm64. The workspace suite passes. `core/stats.rs` now has the five-bin paired sample, pentanomial estimates and diagnostics, plus selectable generalized-likelihood SPRT for normalized or logistic Elo with the model retained in every result. Phase 0's Clean Architecture and independent-release contract is complete |
-| What is missing | Fixed-N planning, typed statistical errors, statistical properties and oracle fixtures; CPU affinity, the CLI itself, SPSA, durable runs, run records and trustworthy NPS |
+| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform and released for Windows/Linux/macOS incl. arm64. The workspace suite passes. `core/stats.rs` has the five-bin paired sample, pentanomial estimates and diagnostics, selectable normalized/logistic SPRT, explicit-assumption fixed-N difference planning and descriptive achieved resolution. Phase 0's Clean Architecture and independent-release contract is complete |
+| What is missing | Typed statistical errors, statistical properties and oracle fixtures; CPU affinity, the CLI itself, SPSA, durable runs, run records and trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 1.4 — fixed-N planning and achieved resolution** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Next step | **Phase 1.5 — typed statistical errors** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -115,9 +115,12 @@ model as well.
   H0/H1/continue decision in the result, with unpaired games excluded —
   evidence: [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
   and the exact likelihood contract in PLAN §5.1
-- ☐ **1.4** — **Model: Sol High.** Fixed-N planning/achieved-resolution primitives with explicit
-  significance, power and assumed pair distribution; SPRT conclusions
-  remain limited to their declared hypotheses
+- ☑ **1.4 — DONE** — **Model: Sol High.** Implement one-/two-sided fixed-N
+  difference planning with explicit Elo model, target effect, significance,
+  power and assumed five-bin distribution, plus empirical achieved intervals
+  and conservative resolution that cannot carry an SPRT verdict — evidence:
+  [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
+  and the exact normal-approximation contract in PLAN §5.1
 - ☐ **1.5** — **Model: Terra High.** Typed errors for degenerate inputs — no NaN/Inf escapes
 - ☐ **1.6** — **Model: Terra High.** Property tests: LLR zero at N=0, monotone in score, arm-swap symmetry,
   bounds equal `log(β/(1−α))` and `log((1−β)/α)`
@@ -402,11 +405,11 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 1.4 — fixed-N planning and achieved resolution. Model: GPT-5.6 Sol —
-High.** Add prospective pair-count design from explicit significance, power
-and an assumed pentanomial distribution, plus retrospective achieved interval
-resolution. Keep fixed-N interval conclusions distinct from sequential SPRT
-hypotheses and demonstrate both against hand-derived fixtures.
+**Phase 1.5 — typed statistical errors. Model: GPT-5.6 Terra — High.** Replace
+temporary `Option` failure signals throughout pentanomial estimates, SPRT,
+fixed-N planning and achieved resolution with one shared typed error contract.
+Name invalid probabilities/hypotheses and degenerate samples precisely; prove
+that zero games, one pair, all draws and clean sweeps cannot emit NaN or Inf.
 
 ```
 git diff --check

@@ -508,7 +508,22 @@ right" is not a criterion.
   bounds are exactly `ln(beta/(1-alpha))` and `ln((1-beta)/alpha)`.
 - Fixed-N design and achieved-resolution calculations with explicit
   significance, power and assumed pair distribution; never infer an MDE from
-  game count alone.
+  game count alone. The core difference-test planner assumes the pair mean is
+  normally distributed with known assumed variance `v`. For target score shift
+  `delta`, required pairs are
+  `ceil(v*((z_critical+z_power)/delta)^2)`, with
+  `z_critical=z_(1-alpha)` for a declared one-sided test or
+  `z_(1-alpha/2)` for two-sided, and `z_power=z_(power)`. Logistic target Elo is
+  converted by `delta=L(target)-0.5`; normalized target Elo by
+  `delta=nElo*sqrt(2v)/(800/ln(10))`. Report the model, tails, alpha, power,
+  assumed five-bin probabilities/variance, converted shift and quantiles with
+  the rounded pair count. This is a planning approximation, not a stopping
+  guarantee. Equivalence is a distinct TOST objective requiring a margin and
+  assumed true effect; Phase 6.6 composes it explicitly rather than reusing the
+  difference formula. Post-run achieved resolution is the empirical two-sided
+  `(1-alpha)` interval in the selected model; report both endpoints and use the
+  larger asymmetric Elo error as conservative resolution. It is not post-hoc
+  power, a back-fitted MDE, or an SPRT verdict.
 - An unpaired fallback for imported data and tournaments, clearly labelled.
   An incomplete colour pair is never admitted to a pentanomial SPRT.
 
