@@ -3,7 +3,7 @@
 Desktop GUI (Rust + egui/eframe) for running UCI chess-engine-vs-engine
 tournaments: round robin and gauntlet formats, parallel games, live board
 view, ML Elo ratings, PGN/CSV export. GPL-3.0. Windows/Linux/macOS via
-cargo-dist; the primary dev machine is Windows.
+the repository release workflow; the primary dev machine is Windows.
 
 ## Workspace
 
@@ -15,11 +15,13 @@ cargo-dist; the primary dev machine is Windows.
 | `colosseum-gui` | eframe app; one module per tab (`tournament_tab`, `results_tab` = the Arena tab, `engines_tab`) plus `live_view`, `theme`, `widgets`, `backend` (GUI↔engine bridge) |
 
 Commands: `cargo check --workspace --tests`, `cargo clippy --workspace`,
-`cargo test --workspace`, run with `cargo run -p colosseum-gui`.
-Docs split: `README.md` and `CHANGELOG.md` are **user-facing** (keep them
-simple, no build/internals detail); `docs/DEVELOPMENT.md` holds the
-maintainer material (build prerequisites, tests, workspace layout, release
-process).
+`cargo test --workspace --all-targets`, run with
+`cargo run -p colosseum-gui`.
+Before implementation work, read `AGENTS.md`, `PLAN.md` and `GUIDE.md`.
+`PLAN.md` and `GUIDE.md` are the maintainer-facing CLI specification/tracker;
+`README.md` and `CHANGELOG.md` are **user-facing** (keep them simple, no
+phase/internal-method detail); `docs/DEVELOPMENT.md` holds implemented build,
+test, workspace and release facts.
 App data lives in `%APPDATA%\colosseum\` (`config/engines.json`,
 `data/colosseum.db`, `data/logs/` incl. per-game incident reports);
 `--portable` keeps everything next to the exe. The user's real engine
@@ -84,7 +86,16 @@ aborts).
 ## Verifying changes
 
 Unit/integration tests cover core math, store, scheduler, and GUI logic
-(`cargo test --workspace`; scheduler integration tests stub engines with
+(`cargo test --workspace --all-targets`; scheduler integration tests stub engines with
 `cmd /c`). Live-view/UI changes need a real run: launch the app, start a
 short tournament (e.g. 2 engines, 100 ms/move) with engines from
 `D:\chess\engines\`, and delete the test tournament afterwards.
+
+## Implementation and commits
+
+`GUIDE.md` numbered items are implemented in order, with the phase exit
+demonstrated before proceeding. Complete one numbered step—including tests,
+documentation and status evidence—then commit it before starting the next.
+Use a short imperative subject naming the outcome, preferably including the
+step identifier. Never add `Co-authored-by` or assistant-attribution trailers.
+The full worktree, architecture and commit rules are binding in `AGENTS.md`.
