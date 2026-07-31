@@ -445,6 +445,10 @@ right" is not a criterion.
   identity but does not require the executable to exist or launch it.
 - `self-test` launches an internal deterministic UCI stub mode from the same
   executable and checks process, protocol, persistence and one short match.
+- The implemented run-directory adapter uses checksummed single-file checkpoint
+  envelopes so checksum and payload cannot tear independently. Atomic current
+  publication retains one previous valid generation; invalid current state
+  falls back, while two invalid generations refuse recovery.
 - Engine processes run in an owned OS containment mechanism where available
   (process group/job object). Normal shutdown is bounded and escalates from UCI
   `quit` to termination; cancellation and harness failure leave no owned engine

@@ -234,9 +234,15 @@ model as well.
   [`crates/colosseum-cli/src/uci_stub.rs`](crates/colosseum-cli/src/uci_stub.rs),
   [`crates/colosseum-uci/src/process.rs`](crates/colosseum-uci/src/process.rs),
   [`docs/cli/self-test.md`](docs/cli/self-test.md)
-- ☐ **2.8** — **Model: Sol High.** Run directories: unique default under `./colosseum-runs`; explicit
-  `--dir` to resume; archive-on-restart; append-only logs; checksummed
-  two-generation atomic checkpoints; config mismatch refusal
+- ☑ **2.8 — DONE** — **Model: Sol High.** The reusable CLI run-directory
+  adapter creates collision-safe defaults under `./colosseum-runs`, treats an
+  explicit directory as resume with exact configuration-hash refusal, archives
+  complete old state before restart, syncs append-only logs, and atomically
+  publishes checksummed current/previous checkpoint generations with fallback
+  recovery — evidence:
+  [`crates/colosseum-cli/src/run_directory.rs`](crates/colosseum-cli/src/run_directory.rs),
+  [`crates/colosseum-cli/tests/run_directory.rs`](crates/colosseum-cli/tests/run_directory.rs),
+  [`docs/cli/run-directories.md`](docs/cli/run-directories.md)
 - ☐ **2.9** — **Model: Terra High.** Common read-only `status <run-dir>` plus run records containing
   schema/stats versions, official sample, host/capability summary and
   anomalies for every run, including aborted ones
