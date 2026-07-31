@@ -1,0 +1,13 @@
+{
+  "phase": 2,
+  "gates": [
+    { "id": "path-only-engines", "owner": "colosseum-cli/tests/phase2_acceptance.rs" },
+    { "id": "configuration-equivalence", "owner": "colosseum-cli/tests/config_resolution.rs" },
+    { "id": "named-random-streams", "owner": "colosseum-core/src/rng.rs" },
+    { "id": "durable-recovery", "owner": "colosseum-cli/tests/run_directory.rs and run_record.rs" },
+    { "id": "published-self-test", "owner": "colosseum-cli/tests/command_line.rs" },
+    { "id": "process-hardening", "owner": "colosseum-cli/src/self_test.rs" },
+    { "id": "architecture-independence", "owner": "colosseum-application/tests/architecture.rs and colosseum-cli/tests/architecture.rs" },
+    { "id": "gui-regression", "owner": "cargo test --workspace --all-targets" }
+  ]
+}

@@ -13,13 +13,13 @@ numbers, internal naming or method argumentation.
 
 | | |
 |---|---|
-| Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent CLI: **not started** |
-| What exists | Phase 0 architecture and Phase 1 statistics are complete. `colosseum-core` / `-uci` / `-engine` are headless; paired normalized/logistic statistics, SPRT, fixed-N planning/resolution, typed errors, property tests, hermetic fixtures and explicit external-oracle boundaries pass in required CI |
-| What is missing | The Phase 2 boundary migration and independent CLI composition root; CPU affinity, match/SPRT workflows, SPSA, durable runs, run records and trustworthy NPS |
+| Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
+| What exists | Phases 0–2 are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run directories/checkpoints and read-only official status |
+| What is missing | CPU topology/affinity; full match and pair-atomic SPRT execution; optional calibration; SPSA; benchmarking; Texel/data-generation and the remaining reporting/release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 2.6 — dry-run and JSON stream discipline** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Platform status | Windows ☑ local Phase 2 suite · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 3.1 — physical-core and sibling topology detection** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -252,16 +252,17 @@ model as well.
   [`crates/colosseum-cli/src/run_record.rs`](crates/colosseum-cli/src/run_record.rs),
   [`crates/colosseum-cli/tests/run_record.rs`](crates/colosseum-cli/tests/run_record.rs),
   [`docs/cli/status.md`](docs/cli/status.md)
-- ☐ **2.10** — **EXIT · Model: Sol High.** Two arbitrary UCI executables pass path-only checks;
-  run-file/all-CLI resolution is identical and an `extend` chain resolves
-  byte-identically to a flattened file under every merge/unset/path-origin
-  rule; the same master seed reproduces every sub-stream on every platform
-  and a new consumer leaves existing streams bit-identical; durable/status
-  suites and published-style headless `self-test` pass; identity generation
-  is outside the domain, no hard-coded live-engine test path remains,
-  pipe floods stay bounded, ignored-quit/descendant stubs are reaped,
-  architecture tests prove no GUI dependency/data access, and the GUI
-  suite remains green
+- ☑ **2.10 — EXIT PASSED** — **Model: Sol High.** Hermetic acceptance proves
+  two independently copied ordinary UCI executables pass path-only compliance,
+  isolated CLI execution does not touch sentinel GUI state, and every exit gate
+  has an executable owner. Local path-only checks also passed with Rarog and
+  Basilisk without committing either path. Configuration/randomness,
+  durable/status, copied-executable self-test, bounded flood/descendant reaping,
+  inward-dependency and complete GUI/workspace suites pass; the unused legacy
+  engine/SQLite CLI dependency was removed — evidence:
+  [`crates/colosseum-cli/tests/phase2_acceptance.rs`](crates/colosseum-cli/tests/phase2_acceptance.rs),
+  [`docs/fixtures/phase2/acceptance.json`](docs/fixtures/phase2/acceptance.json),
+  [`docs/architecture/phase-2-exit.md`](docs/architecture/phase-2-exit.md)
 
 ### Phase 3 — CPU topology and affinity
 

@@ -1361,6 +1361,18 @@ stop/bestmove, new-game/readyok and shutdown results. It never calls option
 acceptance a read-back. The UCI adapter now supports start/stop collection and
 reports a quit timeout after killing/reaping rather than mislabelling it clean.
 
+**Accepted (2.10):** the complete hermetic exit corpus covers two independent
+path-only UCI executables, isolated GUI-state sentinels, configuration
+equivalence, named-stream invariance, copied-executable self-test, bounded pipe
+and descendant containment, durable recovery, aborted/terminal status and
+inward dependencies. The same path-only compliance command also passed locally
+with the independently developed Rarog (Rust) and Basilisk (C++) engines; their
+machine paths are deliberately not repository inputs. The CLI's unused legacy
+engine/SQLite dependency was removed. The full workspace/GUI suite remained
+green. Detailed criterion ownership and intentional later-phase boundaries are
+recorded in `docs/architecture/phase-2-exit.md` and the machine-readable Phase 2
+acceptance manifest.
+
 **Exit:** two arbitrary UCI executables pass path-only workflows; run-file
 inheritance/clearing/path origins resolve identically to equivalent all-CLI or
 flattened input; seed golden vectors reproduce across platforms; durable and

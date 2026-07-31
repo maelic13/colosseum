@@ -120,6 +120,23 @@ fn json_failure_keeps_stdout_empty_and_diagnostics_on_stderr() {
 }
 
 #[test]
+fn dry_run_is_rejected_for_read_only_commands() {
+    for arguments in [
+        vec!["self-test", "--dry-run", "--json"],
+        vec!["status", "--dry-run", "--json", "missing-run"],
+    ] {
+        let output = cli().args(arguments).output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("not meaningful")
+        );
+    }
+}
+
+#[test]
 fn copied_executable_passes_headless_self_test_in_isolated_directory() {
     let root = tempfile::tempdir().unwrap();
     let source = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));

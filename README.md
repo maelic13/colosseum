@@ -93,6 +93,9 @@ Start Colosseum with `--portable` to keep everything next to the program instead
 ## Help & more
 
 - Something broken or missing? [Open an issue](https://github.com/maelic13/colosseum/issues).
+- Developing chess engines? The independent headless CLI can already inspect
+  and compliance-check ordinary UCI executables; see the
+  [CLI guide](docs/cli/README.md). Experiment runners are still under development.
 - What changed in each version: [CHANGELOG.md](CHANGELOG.md)
 - Building from source: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 

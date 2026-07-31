@@ -78,7 +78,9 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
+        Command::SelfTest if cli.dry_run => unsupported_dry_run("self-test"),
         Command::SelfTest => run_self_test(cli.json).await,
+        Command::Status { .. } if cli.dry_run => unsupported_dry_run("status"),
         Command::Status { run_directory } => run_status(&run_directory, cli.json),
         Command::UciStub(args) => match uci_stub::run(args).await {
             Ok(()) => ExitCode::SUCCESS,
@@ -88,6 +90,11 @@ async fn main() -> ExitCode {
             }
         },
     }
+}
+
+fn unsupported_dry_run(command: &str) -> ExitCode {
+    eprintln!("configuration error: --dry-run is not meaningful for read-only {command}");
+    ExitCode::from(2)
 }
 
 async fn run_engine(command: EngineAction, machine: bool, dry_run: bool) -> ExitCode {

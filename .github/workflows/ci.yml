@@ -42,7 +42,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Build independent headless CLI artifact
-        run: cargo build --release -p colosseum-cli
+        run: cargo build --release -p colosseum-cli --bin colosseum-cli
 
   platform-tests:
     name: ${{ matrix.os }} / ${{ matrix.profile }}

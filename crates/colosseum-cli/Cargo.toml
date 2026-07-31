@@ -1,5 +1,6 @@
 [package]
 name = "colosseum-cli"
+autobins = false
 version = "0.1.0"
 publish = false
 edition.workspace = true
@@ -15,11 +16,15 @@ categories = ["command-line-utilities", "games"]
 name = "colosseum-cli"
 path = "src/main.rs"
 
+[[bin]]
+name = "colosseum-uci-fixture"
+path = "src/bin/uci_fixture.rs"
+test = false
+
 [dependencies]
 clap = { version = "4.5.51", features = ["derive"] }
 colosseum-application = { path = "../colosseum-application" }
 colosseum-core = { path = "../colosseum-core" }
-colosseum-engine = { path = "../colosseum-engine" }
 colosseum-uci = { path = "../colosseum-uci" }
 dunce = "1.0.5"
 getrandom = "0.3.4"

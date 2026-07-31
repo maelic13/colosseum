@@ -85,8 +85,11 @@ fn product_versions_are_owned_by_product_manifests() {
 
 #[test]
 fn cli_source_has_no_gui_state_or_app_directory_access() {
-    let source =
-        fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/main.rs")).unwrap();
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let source = source_files(&source_root)
+        .into_iter()
+        .map(|path| fs::read_to_string(path).unwrap())
+        .collect::<String>();
     for forbidden in [
         "AppDirs",
         "EngineLibrary",
@@ -100,4 +103,25 @@ fn cli_source_has_no_gui_state_or_app_directory_access() {
             "CLI source contains {forbidden}"
         );
     }
+}
+
+#[test]
+fn current_cli_has_no_unused_legacy_database_adapter_dependency() {
+    let manifest =
+        fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+    assert!(!manifest.contains("colosseum-engine"));
+    assert!(!manifest.contains("rusqlite"));
+}
+
+fn source_files(directory: &std::path::Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(directory).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            files.extend(source_files(&path));
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            files.push(path);
+        }
+    }
+    files
 }
