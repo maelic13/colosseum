@@ -172,9 +172,19 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
 - [ ] 5.7 **Close the loop** — emit the tail-mean vector as a `setoption` list,
       JSON and a run-file fragment; `sprt --apply <result.json>` gates the tuned
       values via UCI options with no source edit or rebuild
-- [ ] 5.8 **EXIT** — schedule property tests; every hard audit class rejected by
-      a fixture; kill/resume continues the schedule; synthetic noisy-quadratic
-      run lands in a stated RMSE band; a stub tune feeds `sprt --apply` unedited
+- [ ] 5.8 `spsa plan` — offline sizing (no games): given horizon, knob count,
+      mini-match size, per-iteration cost and a noise model, report expected
+      convergence and wall clock. The unit of error here is machine-nights
+- [ ] 5.9 `spsa status` — read a run directory without disturbing it: iteration,
+      ETA, per-knob trajectory, and a **thirds comparison** rather than
+      eyeballed single iterations. Flag knobs pinned at a bound, knobs returned
+      to seed (a result, not a failure), and knobs whose perturbation has
+      decayed below the engine's rounding resolution
+- [ ] 5.10 **EXIT** — schedule property tests; every hard audit class rejected
+      by a fixture; kill/resume continues the schedule; synthetic
+      noisy-quadratic run lands in a stated RMSE band; a stub tune feeds
+      `sprt --apply` unedited; `plan`'s predicted band contains an actual run's
+      observed RMSE; `status` matches hand-computed values on a fixture
 
 ### Phase 6 — Speed/NPS, book tools, statistics replay
 
@@ -183,12 +193,25 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
       arm-level median/best-of, bootstrap CI, per-round SD
 - [ ] 6.2 One or more executables per arm with per-executable medians; self pair
       recommended, optional, warned outside a configurable ±0.5%
-- [ ] 6.3 `book slice` / `hash` / `stats` / `verify`
-- [ ] 6.4 `stats` replays Colosseum runs, PGN and supported external result logs
-      through the same reporting code used live
-- [ ] 6.5 **EXIT** — injected left-skewed sample reproduces the known bias in a
+- [ ] 6.3 Scaling sweep across a list of worker counts, with the position set
+      pinned and recorded so a later sweep is comparable
+- [ ] 6.4 `book slice` / `hash` / `stats` / `verify`
+- [ ] 6.5 `stats` replays Colosseum runs, PGN and supported external result logs
+      through the same reporting code used live. **The durable artifact is
+      authoritative, not the console** — a buffered or truncated log is not
+      evidence about a run
+- [ ] 6.6 PGN search telemetry: per-engine mean/median depth, time per move and
+      implied nps where annotations exist; a clear "unavailable" where they do
+      not
+- [ ] 6.7 **EXIT** — injected left-skewed sample reproduces the known bias in a
       naive alternating-pair estimator and NOT in the shipped one; slicing is
-      byte-reproducible; every golden fixture replays through the CLI
+      byte-reproducible; every golden fixture replays through the CLI; telemetry
+      matches hand-computed values on a fixture PGN
+- [ ] 6.8 ⚖ **Scope decision — `datagen`** (PLAN §5.12). Self-play/engine-vs-
+      engine games at a fixed node or depth limit, appending PGN, with the same
+      placement and durability guarantees as any other long run. Generating
+      games is in scope; extraction, filtering and labelling stay with the
+      trainer. Decide adopt or decline, and record it
 
 ### Phase 7 — Gauntlet
 
@@ -231,7 +254,11 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
 - [ ] 9.4 Ship per Phase 0.2's release model; all supported platforms;
       smoke-test the exact published artifacts (`--version`, `--help`,
       `engine check` against the shipped stub, one stub match)
-- [ ] 9.5 **EXIT / ACCEPTANCE** — a **third-party engine pair the maintainers
+- [ ] 9.5 **Coverage acceptance** (PLAN §5.13) — both validation engines delete
+      every harness script the CLI claims to replace and keep only the residual
+      list (build, profiling, engine-specific correctness and diagnostics,
+      training-data extraction). Any exception is recorded as a named gap
+- [ ] 9.6 **EXIT / ACCEPTANCE** — a **third-party engine pair the maintainers
       did not write**, driven by someone following only the published docs,
       completes a fixed match, an SPRT and a short SPSA. Plus both validation
       engines running one real gate through the released artifact on ≥2

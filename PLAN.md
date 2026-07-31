@@ -479,6 +479,10 @@ deterministic tests.
 - A self pair is recommended and optional; warn when a matching recorded self
   pair lies outside a configurable tolerance (default ±0.5%).
 - Report per-round SD as a machine-noise indicator.
+- **Scaling sweep:** measure across a list of worker counts (e.g. 1, 2, 4, 8,
+  16) and report speed and efficiency per count. Answers "does this engine
+  scale?" without a second tool, and the position set must be pinned and
+  recorded so a later sweep is comparable.
 
 **Success criteria**
 
@@ -526,8 +530,84 @@ rejects a known-bad fixture.
 Read a Colosseum run, a PGN, or a supported external result log and report the
 same block used live.
 
-**Success criterion:** every golden fixture replays through the command with the
-same result as the library API.
+**The durable artifact is authoritative, not the console.** A console log can be
+buffered, truncated by a lost terminal, or simply not flushed for hours; none of
+that is evidence about the run. Every command that reports live must be
+reproducible from the run directory and the PGN afterwards, and `stats` is how.
+A stalled log must never be the only way to ask "is this run alive?" — that is
+what `status` (5.5c, generalised to every long command) answers.
+
+**Search telemetry from a PGN.** Where move annotations are present, report per
+engine: mean and median reported depth, time per move, and implied nodes per
+second. At a fixed node limit this is the cleanest available comparison of how
+two engines spend the same budget, and it needs no instrumentation in either.
+
+**Success criteria:** every golden fixture replays through the command with the
+same result as the library API; telemetry aggregates match hand-computed values
+on a fixture PGN; a PGN written without annotations produces a clear
+"unavailable" rather than zeros.
+
+### 5.5b SPSA sizing — `colosseum-cli spsa plan`
+
+Offline, no games. Given a horizon, a knob count, a mini-match size, a measured
+or assumed per-iteration cost and a noise model, simulate the shipped schedule
+and report expected convergence, the wall-clock estimate, and how the answer
+changes with the horizon.
+
+**Why it earns its place:** the alternative to modelling a tune is folklore, and
+the unit of error is *machine-nights*. A run that would have needed 5,000
+iterations, launched at 1,500, produces a fitted-looking vector that is barely
+distinguishable from its seed — and nothing in the output says so. This is a few
+hundred lines of arithmetic that prevents that.
+
+**Success criteria:** given a synthetic objective whose optimum is known, the
+predicted RMSE band contains the observed RMSE of an actual `spsa` run over the
+same objective; the wall-clock estimate is within 10% of a measured short run.
+
+### 5.5c SPSA diagnostics — `colosseum-cli spsa status`
+
+Reads a run directory and reports, without touching the running tune: iteration
+and percent complete, ETA, per-knob current value and trajectory, and a
+**convergence check on the trajectory rather than on single iterations** —
+compare each knob's mean over the second and third thirds of the run, normalised
+to its range, because single-iteration values are far too noisy to eyeball and
+SPSA wanders even at low gain.
+
+Also flags, per knob: values pinned at a bound (the range was wrong, not the
+value converged), values that have returned to their seed and stayed there (the
+tuner has *rejected* that knob — a result, not a failure), and knobs whose
+perturbation has decayed below the engine's rounding resolution (no longer
+measured, still being updated).
+
+**Why it earns its place:** deciding whether to abandon a multi-night tune is a
+routine operation, and doing it by hand means parsing a multi-hundred-megabyte
+log correctly under time pressure. The tool has the state; it should answer the
+question.
+
+**Success criteria:** on a recorded fixture run, the thirds comparison, the rail
+detection and the dead-knob detection each match hand-computed values; running
+`status` against a live run directory neither blocks nor mutates it.
+
+### 5.12 Data generation — `colosseum-cli datagen`  ⚖ scope decision
+
+**Proposed in scope, to be confirmed.** Self-play or engine-vs-engine games at a
+fixed node or depth limit from a book, written as PGN, appending across runs, at
+full concurrency with the same placement and durability guarantees as any other
+long run.
+
+The argument for: this is exactly what the harness already does — schedule games,
+place them on cores, survive interruption, write PGN. Every engine project that
+trains anything needs it, and re-implementing it outside means a second
+scheduler with none of the durability or placement work.
+
+The line: **generating games is in scope; interpreting them is not.** Extraction
+into a training format, position filtering, deduplication and label construction
+are specific to a trainer and stay with whoever owns it. The tool's output is
+PGN.
+
+**Success criteria (if adopted):** a datagen run resumes per S5.11 and appends
+without duplicating games; a fixed node limit produces the documented node count
+per move; concurrency and placement behave as in `match`.
 
 ### 5.11 Durable runs — one contract for every long command
 
@@ -560,6 +640,48 @@ a truncation attempt on the log fails; a state file corrupted mid-write is
 detected and the previous state used.
 
 ---
+
+### 5.13 Coverage target — what the CLI must replace
+
+The point of the tool is that an engine project keeps **no harness scripts of
+its own**. That is only auditable if the boundary is written down, so here is
+the mapping against a real, mature harness (~3,400 lines of PowerShell plus
+Python across two engines). Anything in the left column that is not claimed by a
+spec above is a gap in this plan, not a script the user should keep writing.
+
+| Existing tool | Replaced by |
+|---|---|
+| SPRT driver, null calibration | 5.3, 5.4 |
+| SPSA driver | 5.5 |
+| SPSA config audit | 5.5 audit classes |
+| SPSA sizing model | 5.5b |
+| "is my tune converging?" log analysis | 5.5c |
+| Gauntlet driver | 5.7 |
+| NPS A/B, multi-build pooling | 5.6 |
+| Thread-scaling sweep | 5.6 scaling sweep |
+| UCI probe / handshake helper | 5.0 `engine inspect` / `check` |
+| Result recomputation from PGN | 5.10 |
+| Per-engine depth/time from PGN | 5.10 telemetry |
+| Affinity, topology, concurrency, seeds, hashing | 5.2, 5.8 |
+| Console log filtering and tee | CLI logging + 5.10 |
+| Book handling and slicing | 5.9 |
+| Self-play data generation | 5.12 (if adopted) |
+| Runner/tuner fetching and patching | evaporates — nothing to vendor or patch |
+
+**Residual, and deliberately so — these stay with the engine, forever.** They
+depend on the engine's source, build system or internals, so no general harness
+can own them:
+
+- building engines, PGO/instruction-set flavours, artifact naming
+- profiling (sampling profilers, platform trace tooling)
+- correctness suites tied to the engine's own move generator or search
+- engine-specific diagnostic counters and their readouts
+- evaluation tuning and training-data extraction, labelling and filtering
+- baking tuned values into source, if the project prefers that to UCI options
+
+**Success criterion (checked at Phase 9):** both validation engines can delete
+every script in the left column and keep only the residual list, with no
+workflow lost. Any exception is recorded here as a named gap with a decision.
 
 ## S6. Testing requirements — binding
 
@@ -724,6 +846,11 @@ The deliverable is a tool any engine developer can pick up.
   demonstrate it because their authors know too much. Additionally the two
   validation engines each run one real gate through the released artifact on at
   least two operating systems, agreeing with 8(a).
+- **(e) Coverage acceptance.** Both validation engines delete every harness
+  script covered by S5.13 and retain only the residual list, with no workflow
+  lost. Any exception is recorded in S5.13 as a named gap with a decision —
+  because "as little tooling as possible" is only real if the scripts actually
+  go away.
 
 ---
 
