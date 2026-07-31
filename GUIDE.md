@@ -224,9 +224,16 @@ model as well.
   [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/output.md`](docs/cli/output.md)
-- ☐ **2.7** — **Model: Sol High.** `self-test` launches the exact executable's hidden deterministic UCI
-  stub mode and tests protocol, process containment/reaping, bounded
-  stdout/stderr draining, persistence failures and one short match
+- ☑ **2.7 — DONE** — **Model: Sol High.** `self-test` launches the exact
+  executable's hidden deterministic UCI stub and verifies compliance, a
+  deterministic four-ply two-process exchange, finite stdout/stderr handling,
+  over-limit protocol rejection, required persistence-failure propagation and
+  bounded process-tree reaping of an ignored-quit engine with a descendant.
+  Engine processes use Windows kill-on-close Job Objects or Unix process groups
+  — evidence: [`crates/colosseum-cli/src/self_test.rs`](crates/colosseum-cli/src/self_test.rs),
+  [`crates/colosseum-cli/src/uci_stub.rs`](crates/colosseum-cli/src/uci_stub.rs),
+  [`crates/colosseum-uci/src/process.rs`](crates/colosseum-uci/src/process.rs),
+  [`docs/cli/self-test.md`](docs/cli/self-test.md)
 - ☐ **2.8** — **Model: Sol High.** Run directories: unique default under `./colosseum-runs`; explicit
   `--dir` to resume; archive-on-restart; append-only logs; checksummed
   two-generation atomic checkpoints; config mismatch refusal

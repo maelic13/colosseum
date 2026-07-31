@@ -876,10 +876,12 @@ version = "0.1.0"
 dependencies = [
  "colosseum-application",
  "colosseum-core",
+ "libc",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

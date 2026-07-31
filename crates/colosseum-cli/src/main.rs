@@ -14,6 +14,9 @@ use colosseum_uci::UciSessionFactory;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+mod self_test;
+mod uci_stub;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "colosseum-cli",
@@ -38,6 +41,11 @@ struct Cli {
 enum Command {
     /// Inspect or compliance-check an ordinary UCI executable.
     Engine(EngineCommand),
+    /// Verify this exact executable's protocol, process and persistence paths.
+    SelfTest,
+    /// Internal deterministic UCI fixture. Not a public engine interface.
+    #[command(name = "__uci-stub", hide = true)]
+    UciStub(uci_stub::StubArgs),
 }
 
 #[derive(Debug, Args)]
@@ -65,6 +73,14 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
+        Command::SelfTest => run_self_test(cli.json).await,
+        Command::UciStub(args) => match uci_stub::run(args).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("internal UCI stub failed: {error}");
+                ExitCode::FAILURE
+            }
+        },
     }
 }
 
@@ -181,6 +197,27 @@ enum MachineOutput<'a> {
     EngineCompliance {
         report: ComplianceReport,
     },
+    SelfTest {
+        report: self_test::SelfTestReport,
+    },
+}
+
+async fn run_self_test(machine: bool) -> ExitCode {
+    let report = self_test::execute().await;
+    let success = report.success;
+    if machine {
+        print_json(&MachineOutput::SelfTest { report });
+    } else {
+        for check in &report.checks {
+            let status = if check.success { "PASS" } else { "FAIL" };
+            println!("[{status}] {} — {}", check.name, check.detail);
+        }
+    }
+    if success {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 fn print_output(output: &MachineOutput<'_>, machine: bool) {

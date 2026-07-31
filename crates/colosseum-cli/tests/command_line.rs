@@ -118,3 +118,37 @@ fn json_failure_keeps_stdout_empty_and_diagnostics_on_stderr() {
             .contains("engine inspect failed")
     );
 }
+
+#[test]
+fn copied_executable_passes_headless_self_test_in_isolated_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let source = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+    let copied = root.path().join(if cfg!(windows) {
+        "colosseum-cli.exe"
+    } else {
+        "colosseum-cli"
+    });
+    std::fs::copy(source, &copied).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&copied).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&copied, permissions).unwrap();
+    }
+    let output = Command::new(&copied)
+        .args(["self-test", "--json"])
+        .current_dir(root.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["type"], "self-test");
+    assert_eq!(value["report"]["success"], true);
+    assert_eq!(value["report"]["checks"].as_array().unwrap().len(), 5);
+}

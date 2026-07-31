@@ -2,12 +2,9 @@
 //!
 //! Responsibilities: spawn (with args/workdir/env), the `uci`/`isready` handshake,
 //! `setoption`/`ucinewgame`, running a search to `bestmove` under a deadline, and
-//! clean shutdown. The child is configured with `kill_on_drop(true)` so an engine is
-//! never leaked if the handle is dropped (e.g. on Force-Stop or a panic).
-//!
-//! Note: `kill_on_drop` reaps the engine process itself. UCI engines do not normally
-//! spawn helper processes; hardening against grandchildren (Unix process groups /
-//! Windows job objects) is a documented follow-up.
+//! clean shutdown. Each child is owned by a kill-on-close Windows Job Object or
+//! dedicated Unix process group, and `kill_on_drop(true)` is retained as a second
+//! guard for the direct child.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
@@ -16,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use colosseum_core::UciOption;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::time::timeout;
 
@@ -74,12 +71,24 @@ pub struct SearchOutput {
 const TRANSCRIPT_CAP: usize = 120;
 /// How many recent stderr lines are kept (crash/assert messages).
 const STDERR_CAP: usize = 40;
+/// Maximum accepted UCI protocol line, excluding the newline.
+pub const MAX_PROTOCOL_LINE_BYTES: usize = 64 * 1024;
+/// Maximum bytes retained for one stderr line.
+pub const MAX_STDERR_LINE_BYTES: usize = 16 * 1024;
+
+/// Return whether a PID still denotes a running process. This is intentionally
+/// narrow and exists so the executable self-test can verify reaping.
+#[must_use]
+pub fn process_is_alive(pid: u32) -> bool {
+    process_alive_platform(pid)
+}
 
 /// A running UCI engine.
 pub struct EngineProcess {
+    containment: ProcessContainment,
     child: Child,
     stdin: ChildStdin,
-    lines: Lines<BufReader<ChildStdout>>,
+    stdout: BufReader<ChildStdout>,
     info: HandshakeInfo,
     /// Recent protocol traffic ("> sent" / "< received"), for incident
     /// reports. Consecutive `info` lines are collapsed to the latest so the
@@ -110,21 +119,30 @@ impl EngineProcess {
         for (key, value) in &options.env {
             std_cmd.env(key, value);
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            std_cmd.process_group(0);
+        }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             // CREATE_NO_WINDOW: don't pop up a console for each engine.
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            std_cmd.creation_flags(CREATE_NO_WINDOW);
+            const CREATE_SUSPENDED: u32 = 0x0000_0004;
+            std_cmd.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
         }
 
         let mut command = Command::from(std_cmd);
         command.kill_on_drop(true);
 
         let mut child = command.spawn()?;
+        let containment = ProcessContainment::attach(&child)?;
+        #[cfg(windows)]
+        containment.resume(&child)?;
         let stdin = child.stdin.take().ok_or(UciError::Terminated)?;
         let stdout = child.stdout.take().ok_or(UciError::Terminated)?;
-        let lines = BufReader::new(stdout).lines();
+        let stdout = BufReader::new(stdout);
 
         // Drain stderr in the background into a small tail buffer — engines
         // print crash/assert messages there, which is exactly what an
@@ -133,22 +151,15 @@ impl EngineProcess {
         if let Some(stderr) = child.stderr.take() {
             let tail = Arc::clone(&stderr_tail);
             tokio::spawn(async move {
-                let mut lines = BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    if let Ok(mut tail) = tail.lock() {
-                        if tail.len() >= STDERR_CAP {
-                            tail.pop_front();
-                        }
-                        tail.push_back(line);
-                    }
-                }
+                drain_stderr(stderr, tail).await;
             });
         }
 
         Ok(Self {
+            containment,
             child,
             stdin,
-            lines,
+            stdout,
             info: HandshakeInfo::default(),
             transcript: VecDeque::new(),
             stderr_tail,
@@ -448,6 +459,7 @@ impl EngineProcess {
             Ok(Ok(_status)) => Ok(()),
             Ok(Err(err)) => Err(UciError::Io(err)),
             Err(_elapsed) => {
+                self.containment.terminate();
                 let _ = self.child.start_kill();
                 let _ = self.child.wait().await;
                 Err(UciError::ShutdownTimeout)
@@ -457,7 +469,15 @@ impl EngineProcess {
 
     /// Immediately kill the engine (for Force-Stop). Waits for the process to be reaped.
     pub async fn kill(&mut self) -> Result<(), UciError> {
-        self.child.kill().await.map_err(UciError::Io)
+        self.containment.terminate();
+        let _ = self.child.start_kill();
+        self.child.wait().await.map(|_| ()).map_err(UciError::Io)
+    }
+
+    /// OS process identifier, used by containment acceptance tests.
+    #[must_use]
+    pub fn id(&self) -> Option<u32> {
+        self.child.id()
     }
 
     /// Write a command line to the engine and flush.
@@ -482,7 +502,7 @@ impl EngineProcess {
         let Some(remaining) = until.checked_duration_since(Instant::now()) else {
             return Err(timeout_err);
         };
-        match timeout(remaining, self.lines.next_line()).await {
+        match timeout(remaining, read_bounded_line(&mut self.stdout)).await {
             Err(_elapsed) => Err(timeout_err),
             Ok(Ok(Some(line))) => {
                 tracing::trace!(target: "uci", direction = "recv", "{line}");
@@ -490,7 +510,231 @@ impl EngineProcess {
                 Ok(line)
             }
             Ok(Ok(None)) => Err(UciError::Terminated),
-            Ok(Err(err)) => Err(UciError::Io(err)),
+            Ok(Err(err)) => Err(err),
         }
+    }
+}
+
+async fn read_bounded_line(
+    reader: &mut BufReader<ChildStdout>,
+) -> Result<Option<String>, UciError> {
+    let mut bytes = Vec::new();
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            return if bytes.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+            };
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let take = newline.map_or(available.len(), |index| index + 1);
+        let content = if newline.is_some() { take - 1 } else { take };
+        if bytes.len().saturating_add(content) > MAX_PROTOCOL_LINE_BYTES {
+            return Err(UciError::Protocol(format!(
+                "protocol line exceeds {MAX_PROTOCOL_LINE_BYTES} bytes"
+            )));
+        }
+        bytes.extend_from_slice(&available[..content]);
+        reader.consume(take);
+        if newline.is_some() {
+            if bytes.last() == Some(&b'\r') {
+                bytes.pop();
+            }
+            return Ok(Some(String::from_utf8_lossy(&bytes).into_owned()));
+        }
+    }
+}
+
+async fn drain_stderr(mut stderr: tokio::process::ChildStderr, tail: Arc<Mutex<VecDeque<String>>>) {
+    let mut buffer = [0_u8; 4096];
+    let mut line = Vec::new();
+    let mut truncated = false;
+    while let Ok(count) = stderr.read(&mut buffer).await {
+        if count == 0 {
+            if !line.is_empty() || truncated {
+                push_stderr(&tail, &line, truncated);
+            }
+            break;
+        }
+        for byte in &buffer[..count] {
+            if *byte == b'\n' {
+                if line.last() == Some(&b'\r') {
+                    line.pop();
+                }
+                push_stderr(&tail, &line, truncated);
+                line.clear();
+                truncated = false;
+            } else if line.len() < MAX_STDERR_LINE_BYTES {
+                line.push(*byte);
+            } else {
+                truncated = true;
+            }
+        }
+    }
+}
+
+fn push_stderr(tail: &Arc<Mutex<VecDeque<String>>>, line: &[u8], truncated: bool) {
+    if let Ok(mut tail) = tail.lock() {
+        if tail.len() >= STDERR_CAP {
+            tail.pop_front();
+        }
+        let mut text = String::from_utf8_lossy(line).into_owned();
+        if truncated {
+            text.push_str("…[truncated]");
+        }
+        tail.push_back(text);
+    }
+}
+
+#[cfg(unix)]
+struct ProcessContainment {
+    process_group: i32,
+}
+
+#[cfg(unix)]
+impl ProcessContainment {
+    fn attach(child: &Child) -> Result<Self, UciError> {
+        Ok(Self {
+            process_group: child.id().ok_or(UciError::Terminated)? as i32,
+        })
+    }
+
+    fn terminate(&self) {
+        // SAFETY: a negative PID targets the process group created for this engine.
+        unsafe { libc::kill(-self.process_group, libc::SIGKILL) };
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ProcessContainment {
+    fn drop(&mut self) {
+        self.terminate();
+    }
+}
+
+#[cfg(unix)]
+fn process_alive_platform(pid: u32) -> bool {
+    // SAFETY: signal zero performs existence/permission checking only.
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
+#[cfg(windows)]
+struct ProcessContainment {
+    job: windows_sys::Win32::Foundation::HANDLE,
+}
+
+// SAFETY: the owned job HANDLE has no thread affinity and access is immutable;
+// CloseHandle is performed exactly once by Drop.
+#[cfg(windows)]
+unsafe impl Send for ProcessContainment {}
+
+#[cfg(windows)]
+impl ProcessContainment {
+    fn attach(child: &Child) -> Result<Self, UciError> {
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject,
+        };
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+        };
+
+        // SAFETY: handles are checked and closed on every branch.
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                return Err(UciError::Io(std::io::Error::last_os_error()));
+            }
+            let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                std::ptr::addr_of!(limits).cast(),
+                std::mem::size_of_val(&limits) as u32,
+            ) == 0
+            {
+                windows_sys::Win32::Foundation::CloseHandle(job);
+                return Err(UciError::Io(std::io::Error::last_os_error()));
+            }
+            let process = OpenProcess(
+                PROCESS_SET_QUOTA | PROCESS_TERMINATE,
+                0,
+                child.id().ok_or(UciError::Terminated)?,
+            );
+            if process.is_null() {
+                windows_sys::Win32::Foundation::CloseHandle(job);
+                return Err(UciError::Io(std::io::Error::last_os_error()));
+            }
+            let assigned = AssignProcessToJobObject(job, process);
+            windows_sys::Win32::Foundation::CloseHandle(process);
+            if assigned == 0 {
+                windows_sys::Win32::Foundation::CloseHandle(job);
+                return Err(UciError::Io(std::io::Error::last_os_error()));
+            }
+            Ok(Self { job })
+        }
+    }
+
+    fn resume(&self, child: &Child) -> Result<(), UciError> {
+        // Tokio exposes only the process ID, so enumerate-free resumption uses
+        // NtResumeProcess through ntdll below.
+        #[link(name = "ntdll")]
+        unsafe extern "system" {
+            fn NtResumeProcess(process: windows_sys::Win32::Foundation::HANDLE) -> i32;
+        }
+        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SUSPEND_RESUME};
+        // SAFETY: process handle is checked, used for one OS operation and closed.
+        unsafe {
+            let process = OpenProcess(
+                PROCESS_SUSPEND_RESUME,
+                0,
+                child.id().ok_or(UciError::Terminated)?,
+            );
+            if process.is_null() {
+                return Err(UciError::Io(std::io::Error::last_os_error()));
+            }
+            let status = NtResumeProcess(process);
+            windows_sys::Win32::Foundation::CloseHandle(process);
+            if status < 0 {
+                return Err(UciError::Io(std::io::Error::from_raw_os_error(status)));
+            }
+            Ok(())
+        }
+    }
+
+    fn terminate(&self) {
+        // SAFETY: job is owned by this object and remains valid until Drop.
+        unsafe {
+            windows_sys::Win32::System::JobObjects::TerminateJobObject(self.job, 1);
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ProcessContainment {
+    fn drop(&mut self) {
+        // KILL_ON_JOB_CLOSE terminates every descendant still in the job.
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.job) };
+    }
+}
+
+#[cfg(windows)]
+fn process_alive_platform(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject};
+    const SYNCHRONIZE: u32 = 0x0010_0000;
+    // SAFETY: handle is checked and closed exactly once.
+    unsafe {
+        let process = OpenProcess(SYNCHRONIZE, 0, pid);
+        if process.is_null() {
+            return false;
+        }
+        let result = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+        CloseHandle(process);
+        result
     }
 }

@@ -449,12 +449,18 @@ right" is not a criterion.
   (process group/job object). Normal shutdown is bounded and escalates from UCI
   `quit` to termination; cancellation and harness failure leave no owned engine
   or descendant running.
+- Implemented containment uses a kill-on-close Windows Job Object and a
+  dedicated Unix process group. Windows children are created suspended,
+  assigned before execution and then resumed, closing the assignment race.
 - Stdout and stderr are drained concurrently. Protocol lines and in-memory
   queues have documented finite limits; traffic is streamed to artifacts
   outside the clock-critical path. An over-limit protocol line is an
   engine-attributable protocol fault. Queue saturation, artifact write failure
   or inability to drain/contain a process is an infrastructure failure and is
   never converted into a game result.
+- The implemented protocol-line limit is 64 KiB excluding newline; stderr keeps
+  forty lines with at most 16 KiB per line. The executable self-test floods both
+  pipes, crosses the line limit and verifies ignored-quit descendant reaping.
 
 **Success criteria**
 
