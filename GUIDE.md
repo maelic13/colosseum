@@ -243,9 +243,15 @@ model as well.
   [`crates/colosseum-cli/src/run_directory.rs`](crates/colosseum-cli/src/run_directory.rs),
   [`crates/colosseum-cli/tests/run_directory.rs`](crates/colosseum-cli/tests/run_directory.rs),
   [`docs/cli/run-directories.md`](docs/cli/run-directories.md)
-- ☐ **2.9** — **Model: Terra High.** Common read-only `status <run-dir>` plus run records containing
-  schema/stats versions, official sample, host/capability summary and
-  anomalies for every run, including aborted ones
+- ☑ **2.9 — DONE** — **Model: Terra High.** Common read-only
+  `status <run-dir>` reports a versioned atomic run record containing exact
+  configuration identity, official committed/pentanomial sample,
+  host/capability summary and structured anomalies. A lifecycle owner writes
+  running state immediately and records `aborted` on an unclosed exit, including
+  zero-sample attempts; tests prove status changes no run bytes — evidence:
+  [`crates/colosseum-cli/src/run_record.rs`](crates/colosseum-cli/src/run_record.rs),
+  [`crates/colosseum-cli/tests/run_record.rs`](crates/colosseum-cli/tests/run_record.rs),
+  [`docs/cli/status.md`](docs/cli/status.md)
 - ☐ **2.10** — **EXIT · Model: Sol High.** Two arbitrary UCI executables pass path-only checks;
   run-file/all-CLI resolution is identical and an `extend` chain resolves
   byte-identically to a flattened file under every merge/unset/path-origin

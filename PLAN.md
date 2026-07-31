@@ -449,6 +449,10 @@ right" is not a criterion.
   envelopes so checksum and payload cannot tear independently. Atomic current
   publication retains one previous valid generation; invalid current state
   falls back, while two invalid generations refuse recovery.
+- `run-record.json` is the common read-only status authority. It is written at
+  workflow start and every official transition; an ownership guard records an
+  aborted state and anomaly if execution ends without an explicit terminal
+  transition. Status never attempts recovery or changes run bytes.
 - Engine processes run in an owned OS containment mechanism where available
   (process group/job object). Normal shutdown is bounded and escalates from UCI
   `quit` to termination; cancellation and harness failure leave no owned engine

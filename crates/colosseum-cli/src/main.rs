@@ -8,7 +8,7 @@ use colosseum_application::{
     CheckEngine, ComplianceReport, ComplianceStatus, EngineInspection, EngineLaunchSpec,
     InspectEngine, RuntimeParticipant, UciOptionSchema,
 };
-use colosseum_cli::{EngineArgs, built_in_defaults, resolve_config};
+use colosseum_cli::{EngineArgs, RunRecord, built_in_defaults, resolve_config};
 use colosseum_core::ParticipantId;
 use colosseum_uci::UciSessionFactory;
 use serde::Serialize;
@@ -43,6 +43,11 @@ enum Command {
     Engine(EngineCommand),
     /// Verify this exact executable's protocol, process and persistence paths.
     SelfTest,
+    /// Read the official state of any CLI run without modifying it.
+    Status {
+        /// Self-contained run directory to inspect.
+        run_directory: std::path::PathBuf,
+    },
     /// Internal deterministic UCI fixture. Not a public engine interface.
     #[command(name = "__uci-stub", hide = true)]
     UciStub(uci_stub::StubArgs),
@@ -74,6 +79,7 @@ async fn main() -> ExitCode {
     match cli.command {
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
         Command::SelfTest => run_self_test(cli.json).await,
+        Command::Status { run_directory } => run_status(&run_directory, cli.json),
         Command::UciStub(args) => match uci_stub::run(args).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
@@ -200,6 +206,37 @@ enum MachineOutput<'a> {
     SelfTest {
         report: self_test::SelfTestReport,
     },
+    RunStatus {
+        run_directory: &'a Path,
+        record: RunRecord,
+    },
+}
+
+fn run_status(run_directory: &Path, machine: bool) -> ExitCode {
+    let record = match RunRecord::read(run_directory) {
+        Ok(record) => record,
+        Err(error) => {
+            eprintln!("status failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if machine {
+        print_json(&MachineOutput::RunStatus {
+            run_directory,
+            record,
+        });
+    } else {
+        println!("command: {}", record.command);
+        println!("status: {:?}", record.status);
+        println!("config: {}", record.config_sha256);
+        println!(
+            "committed units: {}",
+            record.official_sample.committed_units
+        );
+        println!("scored games: {}", record.official_sample.scored_games);
+        println!("anomalies: {}", record.anomalies.len());
+    }
+    ExitCode::SUCCESS
 }
 
 async fn run_self_test(machine: bool) -> ExitCode {
