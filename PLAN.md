@@ -493,7 +493,12 @@ right" is not a criterion.
   complete pairs divided by `2N`; pairs ratio is pairs above one point divided
   by pairs below one point; WL/DD is one-win/one-loss pairs divided by
   draw/draw pairs. Retain the WL-vs-DD split behind the central pentanomial bin.
-  A zero ratio denominator is undefined, never infinity.
+  A zero ratio denominator is undefined, never infinity. These diagnostic
+  ratios are optional observations; all statistical calculations instead return
+  `Result<_, StatisticsError>`, naming invalid scalar inputs, invalid
+  probabilities/hypotheses, insufficient samples, zero variance, unavailable
+  logistic intervals and failed constrained likelihood solves. No successful
+  calculation may contain `NaN` or infinity.
 - SPRT over both the pentanomial/normalized and logistic models, selectable,
   reporting LLR and both bounds with H0/H1/continue — and always naming the
   model in force (A6). Both are generalized multinomial likelihood-ratio tests

@@ -15,10 +15,10 @@ numbers, internal naming or method argumentation.
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent CLI: **not started** |
 | What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform and released for Windows/Linux/macOS incl. arm64. The workspace suite passes. `core/stats.rs` has the five-bin paired sample, pentanomial estimates and diagnostics, selectable normalized/logistic SPRT, explicit-assumption fixed-N difference planning and descriptive achieved resolution. Phase 0's Clean Architecture and independent-release contract is complete |
-| What is missing | Typed statistical errors, statistical properties and oracle fixtures; CPU affinity, the CLI itself, SPSA, durable runs, run records and trustworthy NPS |
+| What is missing | Statistical properties and oracle fixtures; CPU affinity, the CLI itself, SPSA, durable runs, run records and trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 1.5 — typed statistical errors** |
+| Next step | **Phase 1.6 — statistical properties** |
 | Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
@@ -121,7 +121,13 @@ model as well.
   and conservative resolution that cannot carry an SPRT verdict — evidence:
   [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
   and the exact normal-approximation contract in PLAN §5.1
-- ☐ **1.5** — **Model: Terra High.** Typed errors for degenerate inputs — no NaN/Inf escapes
+- ☑ **1.5 — DONE** — **Model: Terra High.** Replace temporary `Option` failure
+  signals across pentanomial estimates, SPRT, fixed-N planning and achieved
+  resolution with the public `StatisticsError` contract; validate scalar
+  inputs, probabilities and hypotheses precisely, while retaining optional
+  diagnostic ratios for unavailable denominators. Zero games, one pair, all
+  draws and clean sweeps now return named errors rather than `NaN`/`Inf` —
+  evidence: [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
 - ☐ **1.6** — **Model: Terra High.** Property tests: LLR zero at N=0, monotone in score, arm-swap symmetry,
   bounds equal `log(β/(1−α))` and `log((1−β)/α)`
 - ☐ **1.7** — **Model: Terra High. Fixture corpus:** a documented generator that plays any two UCI
@@ -405,11 +411,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 1.5 — typed statistical errors. Model: GPT-5.6 Terra — High.** Replace
-temporary `Option` failure signals throughout pentanomial estimates, SPRT,
-fixed-N planning and achieved resolution with one shared typed error contract.
-Name invalid probabilities/hypotheses and degenerate samples precisely; prove
-that zero games, one pair, all draws and clean sweeps cannot emit NaN or Inf.
+**Phase 1.6 — statistical properties. Model: GPT-5.6 Terra — High.** Add
+property tests for the pentanomial kernel: LLR is zero at zero pairs, monotone
+in score at fixed N, symmetric under arm swapping, and uses the exact Wald
+bounds `log(β/(1−α))` and `log((1−β)/α)`.
 
 ```
 git diff --check

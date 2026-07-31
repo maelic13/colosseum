@@ -4,6 +4,57 @@
 //! counts so they are easy to unit-test and reuse across presentation layers.
 
 use crate::standings::PairGameResult;
+use thiserror::Error;
+
+/// A rejected statistical request.
+///
+/// Public statistics entry points use this type instead of encoding invalid
+/// input or an undefined estimate as `None`, `NaN`, or infinity. Diagnostic
+/// ratios on [`PentanomialVector`] remain optional because an unavailable
+/// denominator is descriptive data, not a failed statistical calculation.
+#[derive(Debug, Clone, Copy, PartialEq, Error)]
+pub enum StatisticsError {
+    #[error("at least two complete colour-reversed pairs are required; got {pairs}")]
+    InsufficientPairs { pairs: u32 },
+    #[error("at least one game is required; got {games}")]
+    InsufficientGames { games: u64 },
+    #[error("the observed sample has zero variance")]
+    ZeroVariance,
+    #[error("{parameter} must be finite; got {value}")]
+    NonFiniteInput { parameter: &'static str, value: f64 },
+    #[error("confidence multiplier must be non-negative; got {z}")]
+    InvalidConfidenceMultiplier { z: f64 },
+    #[error("expected score must be strictly between zero and one; got {score}")]
+    InvalidScore { score: f64 },
+    #[error("confidence interval leaves the logistic-score domain: [{lower}, {upper}]")]
+    IntervalOutsideLogisticDomain { lower: f64, upper: f64 },
+    #[error("normal probability must be strictly between zero and one; got {probability}")]
+    InvalidProbability { probability: f64 },
+    #[error("significance must be strictly between zero and 0.5; got {significance}")]
+    InvalidSignificance { significance: f64 },
+    #[error("power must be strictly between 0.5 and one; got {power}")]
+    InvalidPower { power: f64 },
+    #[error("target effect must be finite and positive; got {target_effect}")]
+    InvalidTargetEffect { target_effect: f64 },
+    #[error("SPRT hypotheses must be finite and ordered (elo0 < elo1); got {elo0}, {elo1}")]
+    InvalidHypotheses { elo0: f64, elo1: f64 },
+    #[error(
+        "SPRT alpha and beta must be finite, in (0, 1), and sum to less than one; got {alpha}, {beta}"
+    )]
+    InvalidErrorRates { alpha: f64, beta: f64 },
+    #[error(
+        "distribution probability at index {index} must be finite and non-negative; got {probability}"
+    )]
+    InvalidDistributionProbability { index: usize, probability: f64 },
+    #[error("distribution probabilities must sum to one; got {total}")]
+    DistributionNotNormalized { total: f64 },
+    #[error("assumed distribution has zero variance")]
+    DegenerateDistribution,
+    #[error("the constrained pentanomial likelihood could not be solved")]
+    LikelihoodSolveFailed,
+    #[error("required pair count is not representable")]
+    RequiredPairsOutOfRange,
+}
 
 /// One of the five possible scores for a two-game, colour-reversed opening
 /// pair, from the tested engine's perspective.
@@ -196,16 +247,26 @@ pub struct PentanomialStatistics {
 /// Calculate paired statistics with a two-sided confidence interval at `z`
 /// standard deviations (for example, `1.959963984540054` for 95%).
 ///
-/// Returns `None` for fewer than two pairs, zero variance, non-finite input or
-/// an interval that leaves the finite logistic-score domain. Phase 1.5 replaces
-/// this temporary absence signal with the plan's typed statistical errors.
-#[must_use]
-pub fn pentanomial_statistics(sample: &PentanomialVector, z: f64) -> Option<PentanomialStatistics> {
+/// Returns a precise [`StatisticsError`] for degenerate samples, invalid input,
+/// or an interval that leaves the finite logistic-score domain.
+pub fn pentanomial_statistics(
+    sample: &PentanomialVector,
+    z: f64,
+) -> Result<PentanomialStatistics, StatisticsError> {
     const NORMALIZED_ELO_SCALE: f64 = 800.0 / std::f64::consts::LN_10;
 
     let pairs = sample.pairs();
-    if pairs < 2 || !z.is_finite() || z < 0.0 {
-        return None;
+    if pairs < 2 {
+        return Err(StatisticsError::InsufficientPairs { pairs });
+    }
+    if !z.is_finite() {
+        return Err(StatisticsError::NonFiniteInput {
+            parameter: "confidence multiplier",
+            value: z,
+        });
+    }
+    if z < 0.0 {
+        return Err(StatisticsError::InvalidConfidenceMultiplier { z });
     }
 
     let pairs_f = f64::from(pairs);
@@ -223,39 +284,51 @@ pub fn pentanomial_statistics(sample: &PentanomialVector, z: f64) -> Option<Pent
         .sum::<f64>()
         / pairs_f;
 
-    if !(0.0..1.0).contains(&score) || !variance.is_finite() || variance <= 0.0 {
-        return None;
+    if !score.is_finite() || !(0.0..1.0).contains(&score) {
+        return Err(StatisticsError::InvalidScore { score });
+    }
+    if !variance.is_finite() {
+        return Err(StatisticsError::NonFiniteInput {
+            parameter: "sample variance",
+            value: variance,
+        });
+    }
+    if variance <= 0.0 {
+        return Err(StatisticsError::ZeroVariance);
     }
 
     let standard_error = (variance / pairs_f).sqrt();
     let lower_score = score - z * standard_error;
     let upper_score = score + z * standard_error;
     if !(0.0..1.0).contains(&lower_score) || !(0.0..1.0).contains(&upper_score) {
-        return None;
+        return Err(StatisticsError::IntervalOutsideLogisticDomain {
+            lower: lower_score,
+            upper: upper_score,
+        });
     }
 
     let normalized_scale = NORMALIZED_ELO_SCALE / (2.0 * variance).sqrt();
     let normalized = |value: f64| (value - 0.5) * normalized_scale;
 
-    Some(PentanomialStatistics {
+    Ok(PentanomialStatistics {
         pairs,
         unpaired_games: sample.unpaired_games(),
         score,
         variance,
         standard_error,
         logistic_elo: EloEstimate {
-            elo: score_to_elo(score),
+            elo: score_to_elo(score)?,
             score,
-            lower: score_to_elo(lower_score),
-            upper: score_to_elo(upper_score),
+            lower: score_to_elo(lower_score)?,
+            upper: score_to_elo(upper_score)?,
         },
         normalized_elo: NormalizedEloEstimate {
             elo: normalized(score),
             lower: normalized(lower_score),
             upper: normalized(upper_score),
         },
-        los: normal_cdf((score - 0.5) / standard_error),
-        draw_ratio: sample.draw_ratio()?,
+        los: normal_cdf((score - 0.5) / standard_error)?,
+        draw_ratio: sample.draw_ratio().expect("non-zero complete pair count"),
         pairs_ratio: sample.pairs_ratio(),
         win_loss_to_double_draw_ratio: sample.win_loss_to_double_draw_ratio(),
     })
@@ -263,31 +336,53 @@ pub fn pentanomial_statistics(sample: &PentanomialVector, z: f64) -> Option<Pent
 
 /// Standard normal cumulative distribution function Φ(x), via an `erf`
 /// approximation (Abramowitz & Stegun 7.1.26, ~1e-7 accuracy).
-#[must_use]
-pub fn normal_cdf(x: f64) -> f64 {
+pub fn normal_cdf(x: f64) -> Result<f64, StatisticsError> {
+    if !x.is_finite() {
+        return Err(StatisticsError::NonFiniteInput {
+            parameter: "normal variate",
+            value: x,
+        });
+    }
+    let probability = normal_cdf_finite(x);
+    probability
+        .is_finite()
+        .then_some(probability)
+        .ok_or(StatisticsError::NonFiniteInput {
+            parameter: "normal CDF result",
+            value: probability,
+        })
+}
+
+fn normal_cdf_finite(x: f64) -> f64 {
     0.5 * (1.0 + erf(x / std::f64::consts::SQRT_2))
 }
 
 /// Invert [`normal_cdf`] for an interior probability.
-fn normal_quantile(probability: f64) -> Option<f64> {
-    if !probability.is_finite() || !(0.0..1.0).contains(&probability) {
-        return None;
+fn normal_quantile(probability: f64) -> Result<f64, StatisticsError> {
+    if !probability.is_finite() {
+        return Err(StatisticsError::NonFiniteInput {
+            parameter: "normal probability",
+            value: probability,
+        });
+    }
+    if !(0.0..1.0).contains(&probability) {
+        return Err(StatisticsError::InvalidProbability { probability });
     }
 
     let mut lower = -8.0;
     let mut upper = 8.0;
-    if probability <= normal_cdf(lower) || probability >= normal_cdf(upper) {
-        return None;
+    if probability <= normal_cdf_finite(lower) || probability >= normal_cdf_finite(upper) {
+        return Err(StatisticsError::InvalidProbability { probability });
     }
     for _ in 0..80 {
         let midpoint = (lower + upper) / 2.0;
-        if normal_cdf(midpoint) < probability {
+        if normal_cdf_finite(midpoint) < probability {
             lower = midpoint;
         } else {
             upper = midpoint;
         }
     }
-    Some((lower + upper) / 2.0)
+    Ok((lower + upper) / 2.0)
 }
 
 /// Error function approximation (Abramowitz & Stegun 7.1.26).
@@ -304,15 +399,34 @@ fn erf(x: f64) -> f64 {
 }
 
 /// Convert an expected score in (0, 1) to an Elo difference.
-#[must_use]
-pub fn score_to_elo(score: f64) -> f64 {
-    -400.0 * (1.0 / score - 1.0).log10()
+pub fn score_to_elo(score: f64) -> Result<f64, StatisticsError> {
+    if !score.is_finite() {
+        return Err(StatisticsError::NonFiniteInput {
+            parameter: "expected score",
+            value: score,
+        });
+    }
+    if !(0.0..1.0).contains(&score) {
+        return Err(StatisticsError::InvalidScore { score });
+    }
+    let elo = -400.0 * (1.0 / score - 1.0).log10();
+    elo.is_finite()
+        .then_some(elo)
+        .ok_or(StatisticsError::NonFiniteInput {
+            parameter: "Elo result",
+            value: elo,
+        })
 }
 
-/// Convert an Elo difference to an expected score in (0, 1).
-#[must_use]
-pub fn elo_to_score(elo: f64) -> f64 {
-    1.0 / (1.0 + 10f64.powf(-elo / 400.0))
+/// Convert a finite Elo difference to an expected score in [0, 1].
+pub fn elo_to_score(elo: f64) -> Result<f64, StatisticsError> {
+    if !elo.is_finite() {
+        return Err(StatisticsError::NonFiniteInput {
+            parameter: "Elo difference",
+            value: elo,
+        });
+    }
+    Ok(1.0 / (1.0 + 10f64.powf(-elo / 400.0)))
 }
 
 /// Elo estimate with a symmetric-ish confidence interval (in Elo points).
@@ -339,22 +453,35 @@ impl EloEstimate {
 /// Estimate the Elo difference for engine A (wins/draws/losses from A's view)
 /// with a confidence interval at the given `z` (e.g. 1.96 for 95%).
 ///
-/// Returns `None` when there are no games, or the score is a clean 0 or 1
-/// (Elo is undefined / infinite there).
-#[must_use]
-pub fn elo_with_error(wins: u32, draws: u32, losses: u32, z: f64) -> Option<EloEstimate> {
-    let n = wins + draws + losses;
-    if n == 0 {
-        return None;
+/// Returns a typed error when there are no games, the score is a clean 0 or 1
+/// (Elo is undefined there), or `z` is invalid.
+pub fn elo_with_error(
+    wins: u32,
+    draws: u32,
+    losses: u32,
+    z: f64,
+) -> Result<EloEstimate, StatisticsError> {
+    if !z.is_finite() {
+        return Err(StatisticsError::NonFiniteInput {
+            parameter: "confidence multiplier",
+            value: z,
+        });
     }
-    let n_f = f64::from(n);
+    if z < 0.0 {
+        return Err(StatisticsError::InvalidConfidenceMultiplier { z });
+    }
+    let n = u64::from(wins) + u64::from(draws) + u64::from(losses);
+    if n == 0 {
+        return Err(StatisticsError::InsufficientGames { games: n });
+    }
+    let n_f = n as f64;
     let w = f64::from(wins);
     let d = f64::from(draws);
     let l = f64::from(losses);
 
     let mu = (w + 0.5 * d) / n_f;
     if mu <= 0.0 || mu >= 1.0 {
-        return None;
+        return Err(StatisticsError::InvalidScore { score: mu });
     }
 
     // Per-game score variance, then standard error of the mean.
@@ -364,11 +491,11 @@ pub fn elo_with_error(wins: u32, draws: u32, losses: u32, z: f64) -> Option<EloE
     let lo_score = (mu - z * stderr).clamp(1e-9, 1.0 - 1e-9);
     let hi_score = (mu + z * stderr).clamp(1e-9, 1.0 - 1e-9);
 
-    Some(EloEstimate {
-        elo: score_to_elo(mu),
+    Ok(EloEstimate {
+        elo: score_to_elo(mu)?,
         score: mu,
-        lower: score_to_elo(lo_score),
-        upper: score_to_elo(hi_score),
+        lower: score_to_elo(lo_score)?,
+        upper: score_to_elo(hi_score)?,
     })
 }
 
@@ -376,12 +503,12 @@ pub fn elo_with_error(wins: u32, draws: u32, losses: u32, z: f64) -> Option<EloE
 /// Returns 0.5 when there are no decisive games.
 #[must_use]
 pub fn los(wins: u32, losses: u32) -> f64 {
-    let decisive = wins + losses;
+    let decisive = u64::from(wins) + u64::from(losses);
     if decisive == 0 {
         return 0.5;
     }
     let diff = f64::from(wins) - f64::from(losses);
-    normal_cdf(diff / f64::from(decisive).sqrt())
+    normal_cdf_finite(diff / (decisive as f64).sqrt())
 }
 
 /// SPRT verdict.
@@ -441,24 +568,26 @@ pub struct PentanomialDistribution {
 impl PentanomialDistribution {
     /// Validate and normalize five finite, non-negative probabilities.
     ///
-    /// Returns `None` unless they sum to one (within floating-point input
-    /// tolerance) and describe a non-degenerate distribution.
-    #[must_use]
-    pub fn new(probabilities: [f64; 5]) -> Option<Self> {
-        if probabilities
-            .iter()
-            .any(|probability| !probability.is_finite() || *probability < 0.0)
-        {
-            return None;
+    /// Returns a precise [`StatisticsError`] unless they sum to one (within
+    /// floating-point input tolerance) and describe a non-degenerate
+    /// distribution.
+    pub fn new(probabilities: [f64; 5]) -> Result<Self, StatisticsError> {
+        for (index, probability) in probabilities.into_iter().enumerate() {
+            if !probability.is_finite() || probability < 0.0 {
+                return Err(StatisticsError::InvalidDistributionProbability { index, probability });
+            }
         }
         let total = probabilities.iter().sum::<f64>();
         if !total.is_finite() || (total - 1.0).abs() > 1e-9 {
-            return None;
+            return Err(StatisticsError::DistributionNotNormalized { total });
         }
 
         let probabilities = probabilities.map(|probability| probability / total);
         let distribution = Self { probabilities };
-        (distribution.variance() > 0.0).then_some(distribution)
+        if !distribution.variance().is_finite() || distribution.variance() <= 0.0 {
+            return Err(StatisticsError::DegenerateDistribution);
+        }
+        Ok(distribution)
     }
 
     #[must_use]
@@ -534,7 +663,6 @@ impl FixedNPlan {
 /// This primitive does not implement equivalence/TOST planning; that objective
 /// requires an equivalence margin and an assumed true effect, and is composed
 /// separately by the experiment-planning workflow.
-#[must_use]
 pub fn fixed_n_plan(
     assumed_distribution: PentanomialDistribution,
     model: EloModel,
@@ -542,24 +670,36 @@ pub fn fixed_n_plan(
     target_effect: f64,
     significance: f64,
     power: f64,
-) -> Option<FixedNPlan> {
-    if !target_effect.is_finite()
-        || target_effect <= 0.0
-        || !valid_significance(significance)
-        || !power.is_finite()
-        || power <= 0.5
-        || power >= 1.0
-    {
-        return None;
+) -> Result<FixedNPlan, StatisticsError> {
+    if !target_effect.is_finite() || target_effect <= 0.0 {
+        return Err(StatisticsError::InvalidTargetEffect { target_effect });
+    }
+    if !significance.is_finite() {
+        return Err(StatisticsError::NonFiniteInput {
+            parameter: "significance",
+            value: significance,
+        });
+    }
+    if !valid_significance(significance) {
+        return Err(StatisticsError::InvalidSignificance { significance });
+    }
+    if !power.is_finite() {
+        return Err(StatisticsError::NonFiniteInput {
+            parameter: "power",
+            value: power,
+        });
+    }
+    if power <= 0.5 || power >= 1.0 {
+        return Err(StatisticsError::InvalidPower { power });
     }
 
     let variance = assumed_distribution.variance();
     let score_effect = match model {
-        EloModel::Logistic => elo_to_score(target_effect) - 0.5,
+        EloModel::Logistic => elo_to_score(target_effect)? - 0.5,
         EloModel::Normalized => target_effect * (2.0 * variance).sqrt() / NELO_PER_T_VALUE,
     };
     if !score_effect.is_finite() || score_effect <= 0.0 || score_effect >= 0.5 {
-        return None;
+        return Err(StatisticsError::InvalidTargetEffect { target_effect });
     }
 
     let critical_probability = match tails {
@@ -570,10 +710,10 @@ pub fn fixed_n_plan(
     let power_quantile = normal_quantile(power)?;
     let required = variance * ((critical_value + power_quantile) / score_effect).powi(2);
     if !required.is_finite() || required <= 0.0 || required > (u64::MAX / 2) as f64 {
-        return None;
+        return Err(StatisticsError::RequiredPairsOutOfRange);
     }
 
-    Some(FixedNPlan {
+    Ok(FixedNPlan {
         model,
         tails,
         target_effect,
@@ -627,14 +767,19 @@ impl FixedNAchievedResolution {
 
 /// Calculate the achieved two-sided `(1-significance)` interval of a completed
 /// fixed sample in the explicitly selected model.
-#[must_use]
 pub fn fixed_n_achieved_resolution(
     sample: &PentanomialVector,
     model: EloModel,
     significance: f64,
-) -> Option<FixedNAchievedResolution> {
+) -> Result<FixedNAchievedResolution, StatisticsError> {
+    if !significance.is_finite() {
+        return Err(StatisticsError::NonFiniteInput {
+            parameter: "significance",
+            value: significance,
+        });
+    }
     if !valid_significance(significance) {
-        return None;
+        return Err(StatisticsError::InvalidSignificance { significance });
     }
     let critical_value = normal_quantile(1.0 - significance / 2.0)?;
     let statistics = pentanomial_statistics(sample, critical_value)?;
@@ -651,7 +796,7 @@ pub fn fixed_n_achieved_resolution(
         ),
     };
 
-    Some(FixedNAchievedResolution {
+    Ok(FixedNAchievedResolution {
         model,
         pairs: statistics.pairs,
         unpaired_games: statistics.unpaired_games,
@@ -694,10 +839,9 @@ pub struct PentanomialSprtResult {
 /// its standardized mean. In both cases the LLR compares the two constrained
 /// maximum-likelihood pentanomial distributions.
 ///
-/// Unpaired games are excluded. Until Phase 1.5 introduces typed statistical
-/// errors, `None` reports invalid hypotheses/error rates, fewer than two pairs,
-/// a degenerate observed distribution, or a failed likelihood solve.
-#[must_use]
+/// Unpaired games are excluded. Invalid hypotheses/error rates, insufficient
+/// pairs, degenerate samples, and likelihood failures are named by
+/// [`StatisticsError`].
 pub fn pentanomial_sprt(
     sample: &PentanomialVector,
     model: EloModel,
@@ -705,28 +849,29 @@ pub fn pentanomial_sprt(
     elo1: f64,
     alpha: f64,
     beta: f64,
-) -> Option<PentanomialSprtResult> {
+) -> Result<PentanomialSprtResult, StatisticsError> {
     let pairs = sample.pairs();
-    if pairs < 2
-        || !elo0.is_finite()
-        || !elo1.is_finite()
-        || elo0 >= elo1
-        || !valid_error_rate(alpha)
-        || !valid_error_rate(beta)
-        || alpha + beta >= 1.0
-        || observed_variance(sample.counts()) <= 0.0
-    {
-        return None;
+    if pairs < 2 {
+        return Err(StatisticsError::InsufficientPairs { pairs });
+    }
+    if !elo0.is_finite() || !elo1.is_finite() || elo0 >= elo1 {
+        return Err(StatisticsError::InvalidHypotheses { elo0, elo1 });
+    }
+    if !valid_error_rate(alpha) || !valid_error_rate(beta) || alpha + beta >= 1.0 {
+        return Err(StatisticsError::InvalidErrorRates { alpha, beta });
+    }
+    if observed_variance(sample.counts()) <= 0.0 {
+        return Err(StatisticsError::ZeroVariance);
     }
 
     let llr = pentanomial_llr(sample.counts(), model, elo0, elo1)?;
     let lower = (beta / (1.0 - alpha)).ln();
     let upper = ((1.0 - beta) / alpha).ln();
     if !llr.is_finite() || !lower.is_finite() || !upper.is_finite() {
-        return None;
+        return Err(StatisticsError::LikelihoodSolveFailed);
     }
 
-    Some(PentanomialSprtResult {
+    Ok(PentanomialSprtResult {
         model,
         pairs,
         unpaired_games: sample.unpaired_games(),
@@ -784,10 +929,15 @@ fn observed_variance(counts: [u32; 5]) -> f64 {
         / pairs_f
 }
 
-fn pentanomial_llr(counts: [u32; 5], model: EloModel, elo0: f64, elo1: f64) -> Option<f64> {
+fn pentanomial_llr(
+    counts: [u32; 5],
+    model: EloModel,
+    elo0: f64,
+    elo1: f64,
+) -> Result<f64, StatisticsError> {
     let actual_pairs = counts.iter().copied().sum::<u32>();
     if actual_pairs == 0 {
-        return Some(0.0);
+        return Ok(0.0);
     }
 
     // Empty observed bins cannot support the constrained multinomial MLE.
@@ -805,8 +955,8 @@ fn pentanomial_llr(counts: [u32; 5], model: EloModel, elo0: f64, elo1: f64) -> O
 
     let (hypothesis0, hypothesis1, statistic) = match model {
         EloModel::Logistic => (
-            elo_to_score(elo0),
-            elo_to_score(elo1),
+            elo_to_score(elo0)?,
+            elo_to_score(elo1)?,
             LikelihoodStatistic::Mean,
         ),
         EloModel::Normalized => (
@@ -816,15 +966,19 @@ fn pentanomial_llr(counts: [u32; 5], model: EloModel, elo0: f64, elo1: f64) -> O
         ),
     };
 
-    let mle0 = constrained_mle(&PENTANOMIAL_SCORES, &empirical, hypothesis0, statistic)?;
-    let mle1 = constrained_mle(&PENTANOMIAL_SCORES, &empirical, hypothesis1, statistic)?;
+    let mle0 = constrained_mle(&PENTANOMIAL_SCORES, &empirical, hypothesis0, statistic)
+        .ok_or(StatisticsError::LikelihoodSolveFailed)?;
+    let mle1 = constrained_mle(&PENTANOMIAL_SCORES, &empirical, hypothesis1, statistic)
+        .ok_or(StatisticsError::LikelihoodSolveFailed)?;
     let llr = empirical
         .iter()
         .enumerate()
         .map(|(index, &probability)| probability * (mle1[index] / mle0[index]).ln())
         .sum::<f64>()
         * effective_pairs;
-    llr.is_finite().then_some(llr)
+    llr.is_finite()
+        .then_some(llr)
+        .ok_or(StatisticsError::LikelihoodSolveFailed)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -977,7 +1131,6 @@ fn valid_distribution<const N: usize>(probabilities: &[f64; N]) -> bool {
 /// the hypotheses (the win/loss split is set to match each hypothesis' expected
 /// score) — the standard approach used by cutechess-cli. The draw term then
 /// cancels from the LLR. `alpha`/`beta` are the type-I/II error rates.
-#[must_use]
 pub fn sprt(
     wins: u32,
     draws: u32,
@@ -986,19 +1139,25 @@ pub fn sprt(
     elo1: f64,
     alpha: f64,
     beta: f64,
-) -> SprtResult {
+) -> Result<SprtResult, StatisticsError> {
+    if !elo0.is_finite() || !elo1.is_finite() || elo0 >= elo1 {
+        return Err(StatisticsError::InvalidHypotheses { elo0, elo1 });
+    }
+    if !valid_error_rate(alpha) || !valid_error_rate(beta) || alpha + beta >= 1.0 {
+        return Err(StatisticsError::InvalidErrorRates { alpha, beta });
+    }
     let lower = (beta / (1.0 - alpha)).ln();
     let upper = ((1.0 - beta) / alpha).ln();
 
-    let n = wins + draws + losses;
+    let n = u64::from(wins) + u64::from(draws) + u64::from(losses);
     let llr = if n == 0 {
-        0.0
+        return Err(StatisticsError::InsufficientGames { games: n });
     } else {
-        let n_f = f64::from(n);
+        let n_f = n as f64;
         let draw_rate = f64::from(draws) / n_f;
         // Win/loss probabilities under each hypothesis, draw rate fixed.
         let split = |elo: f64| {
-            let s = elo_to_score(elo);
+            let s = elo_to_score(elo).expect("validated finite hypothesis");
             let pw = (s - draw_rate / 2.0).clamp(1e-9, 1.0);
             let pl = (1.0 - s - draw_rate / 2.0).clamp(1e-9, 1.0);
             (pw, pl)
@@ -1010,12 +1169,12 @@ pub fn sprt(
 
     let decision = sprt_decision(llr, lower, upper);
 
-    SprtResult {
+    Ok(SprtResult {
         llr,
         lower,
         upper,
         decision,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -1049,9 +1208,13 @@ mod tests {
     #[test]
     fn elo_score_roundtrip() {
         for &s in &[0.25, 0.4, 0.5, 0.6, 0.75] {
-            assert!(approx(elo_to_score(score_to_elo(s)), s, 1e-9));
+            assert!(approx(
+                elo_to_score(score_to_elo(s).unwrap()).unwrap(),
+                s,
+                1e-9
+            ));
         }
-        assert!(approx(score_to_elo(0.5), 0.0, 1e-9));
+        assert!(approx(score_to_elo(0.5).unwrap(), 0.0, 1e-9));
     }
 
     #[test]
@@ -1072,31 +1235,44 @@ mod tests {
 
     #[test]
     fn elo_undefined_at_clean_sweep_or_no_games() {
-        assert!(elo_with_error(0, 0, 0, 1.96).is_none());
-        assert!(elo_with_error(5, 0, 0, 1.96).is_none()); // score = 1.0
-        assert!(elo_with_error(0, 0, 5, 1.96).is_none()); // score = 0.0
+        assert_eq!(
+            elo_with_error(0, 0, 0, 1.96),
+            Err(StatisticsError::InsufficientGames { games: 0 })
+        );
+        assert_eq!(
+            elo_with_error(5, 0, 0, 1.96),
+            Err(StatisticsError::InvalidScore { score: 1.0 })
+        );
+        assert_eq!(
+            elo_with_error(0, 0, 5, 1.96),
+            Err(StatisticsError::InvalidScore { score: 0.0 })
+        );
     }
 
     #[test]
     fn sprt_bounds_match_error_rates() {
-        let r = sprt(0, 0, 0, 0.0, 5.0, 0.05, 0.05);
+        let r = sprt(1, 0, 1, 0.0, 5.0, 0.05, 0.05).unwrap();
         assert!(approx(r.lower, (0.05f64 / 0.95).ln(), 1e-9));
         assert!(approx(r.upper, (0.95f64 / 0.05).ln(), 1e-9));
         assert_eq!(r.decision, SprtDecision::Continue);
-        assert!(approx(r.llr, 0.0, 1e-12));
+        assert!(r.llr.is_finite());
+        assert_eq!(
+            sprt(0, 0, 0, 0.0, 5.0, 0.05, 0.05),
+            Err(StatisticsError::InsufficientGames { games: 0 })
+        );
     }
 
     #[test]
     fn sprt_accepts_h1_for_a_strong_result() {
         // A dominant score should eventually push the LLR over the upper bound.
-        let r = sprt(700, 200, 100, 0.0, 5.0, 0.05, 0.05);
+        let r = sprt(700, 200, 100, 0.0, 5.0, 0.05, 0.05).unwrap();
         assert_eq!(r.decision, SprtDecision::AcceptH1);
         assert!(r.llr >= r.upper);
     }
 
     #[test]
     fn sprt_accepts_h0_for_a_losing_result() {
-        let r = sprt(100, 200, 700, 0.0, 5.0, 0.05, 0.05);
+        let r = sprt(100, 200, 700, 0.0, 5.0, 0.05, 0.05).unwrap();
         assert_eq!(r.decision, SprtDecision::AcceptH0);
         assert!(r.llr <= r.lower);
     }
@@ -1114,10 +1290,22 @@ mod tests {
         assert!(approx(distribution.mean(), 0.5, 1e-12));
         assert!(approx(distribution.variance(), 0.075, 1e-12));
 
-        assert!(PentanomialDistribution::new([0.0; 5]).is_none());
-        assert!(PentanomialDistribution::new([0.0, 0.0, 1.0, 0.0, 0.0]).is_none());
-        assert!(PentanomialDistribution::new([0.1, 0.2, 0.3, 0.2, 0.1]).is_none());
-        assert!(PentanomialDistribution::new([f64::NAN, 0.0, 0.0, 0.0, 1.0]).is_none());
+        assert!(matches!(
+            PentanomialDistribution::new([0.0; 5]),
+            Err(StatisticsError::DistributionNotNormalized { total: 0.0 })
+        ));
+        assert_eq!(
+            PentanomialDistribution::new([0.0, 0.0, 1.0, 0.0, 0.0]),
+            Err(StatisticsError::DegenerateDistribution)
+        );
+        assert!(matches!(
+            PentanomialDistribution::new([0.1, 0.2, 0.3, 0.2, 0.1]),
+            Err(StatisticsError::DistributionNotNormalized { .. })
+        ));
+        assert!(matches!(
+            PentanomialDistribution::new([f64::NAN, 0.0, 0.0, 0.0, 1.0]),
+            Err(StatisticsError::InvalidDistributionProbability { index: 0, .. })
+        ));
     }
 
     #[test]
@@ -1125,8 +1313,14 @@ mod tests {
         assert!(approx(normal_quantile(0.8).unwrap(), 0.841_621_23, 2e-6));
         assert!(approx(normal_quantile(0.95).unwrap(), 1.644_853_63, 2e-6));
         assert!(approx(normal_quantile(0.975).unwrap(), 1.959_963_98, 2e-6));
-        assert!(normal_quantile(0.0).is_none());
-        assert!(normal_quantile(1.0).is_none());
+        assert_eq!(
+            normal_quantile(0.0),
+            Err(StatisticsError::InvalidProbability { probability: 0.0 })
+        );
+        assert_eq!(
+            normal_quantile(1.0),
+            Err(StatisticsError::InvalidProbability { probability: 1.0 })
+        );
     }
 
     #[test]
@@ -1245,7 +1439,7 @@ mod tests {
                 0.5,
             ),
         ] {
-            assert!(plan.is_none());
+            assert!(plan.is_err());
         }
     }
 
@@ -1280,10 +1474,13 @@ mod tests {
         assert!(logistic.upper_error() > logistic.lower_error());
         assert!(approx(logistic.resolution(), 11.456_245_846_843_164, 1e-4));
 
-        assert!(fixed_n_achieved_resolution(&sample, EloModel::Normalized, 0.0).is_none());
-        assert!(
-            fixed_n_achieved_resolution(&PentanomialVector::default(), EloModel::Normalized, 0.05)
-                .is_none()
+        assert_eq!(
+            fixed_n_achieved_resolution(&sample, EloModel::Normalized, 0.0),
+            Err(StatisticsError::InvalidSignificance { significance: 0.0 })
+        );
+        assert_eq!(
+            fixed_n_achieved_resolution(&PentanomialVector::default(), EloModel::Normalized, 0.05),
+            Err(StatisticsError::InsufficientPairs { pairs: 0 })
         );
     }
 
@@ -1378,24 +1575,39 @@ mod tests {
         let empty = PentanomialVector::default();
         assert_eq!(
             pentanomial_llr([0; 5], EloModel::Logistic, 0.0, 5.0),
-            Some(0.0)
+            Ok(0.0)
         );
-        assert!(pentanomial_sprt(&empty, EloModel::Logistic, 0.0, 5.0, 0.05, 0.05).is_none());
+        assert_eq!(
+            pentanomial_sprt(&empty, EloModel::Logistic, 0.0, 5.0, 0.05, 0.05),
+            Err(StatisticsError::InsufficientPairs { pairs: 0 })
+        );
 
         let mut one_pair = PentanomialVector::default();
         one_pair.record_pair(Draw, Draw);
-        assert!(pentanomial_sprt(&one_pair, EloModel::Normalized, 0.0, 5.0, 0.05, 0.05).is_none());
+        assert_eq!(
+            pentanomial_sprt(&one_pair, EloModel::Normalized, 0.0, 5.0, 0.05, 0.05),
+            Err(StatisticsError::InsufficientPairs { pairs: 1 })
+        );
 
         let all_draws = pentanomial_sample([0, 0, 10, 0, 0]);
-        assert!(pentanomial_sprt(&all_draws, EloModel::Logistic, 0.0, 5.0, 0.05, 0.05).is_none());
+        assert_eq!(
+            pentanomial_sprt(&all_draws, EloModel::Logistic, 0.0, 5.0, 0.05, 0.05),
+            Err(StatisticsError::ZeroVariance)
+        );
 
         let valid = pentanomial_sample([1, 2, 3, 4, 5]);
-        for invalid in [
+        assert!(matches!(
             pentanomial_sprt(&valid, EloModel::Logistic, 5.0, 0.0, 0.05, 0.05),
+            Err(StatisticsError::InvalidHypotheses { .. })
+        ));
+        for invalid in [
             pentanomial_sprt(&valid, EloModel::Logistic, 0.0, 5.0, 0.0, 0.05),
             pentanomial_sprt(&valid, EloModel::Logistic, 0.0, 5.0, 0.6, 0.4),
         ] {
-            assert!(invalid.is_none());
+            assert!(matches!(
+                invalid,
+                Err(StatisticsError::InvalidErrorRates { .. })
+            ));
         }
     }
 
@@ -1543,6 +1755,67 @@ mod tests {
         winning.record_pair(Win, Draw);
         assert_eq!(winning.pairs_ratio(), None);
         assert_eq!(winning.win_loss_to_double_draw_ratio(), None);
-        assert_eq!(pentanomial_statistics(&winning, 1.96), None);
+        assert!(matches!(
+            pentanomial_statistics(&winning, 1.96),
+            Err(StatisticsError::IntervalOutsideLogisticDomain { .. })
+        ));
+    }
+
+    #[test]
+    fn degenerate_pentanomial_statistics_are_named_and_never_non_finite() {
+        use PairGameResult::{Draw, Win};
+
+        let empty = PentanomialVector::default();
+        assert_eq!(
+            pentanomial_statistics(&empty, 1.96),
+            Err(StatisticsError::InsufficientPairs { pairs: 0 })
+        );
+
+        let mut one_pair = PentanomialVector::default();
+        one_pair.record_pair(Draw, Draw);
+        assert_eq!(
+            pentanomial_statistics(&one_pair, 1.96),
+            Err(StatisticsError::InsufficientPairs { pairs: 1 })
+        );
+
+        let all_draws = pentanomial_sample([0, 0, 2, 0, 0]);
+        assert_eq!(
+            pentanomial_statistics(&all_draws, 1.96),
+            Err(StatisticsError::ZeroVariance)
+        );
+
+        let mut clean_sweep = PentanomialVector::default();
+        clean_sweep.record_pair(Win, Win);
+        clean_sweep.record_pair(Win, Win);
+        assert_eq!(
+            pentanomial_statistics(&clean_sweep, 1.96),
+            Err(StatisticsError::InvalidScore { score: 1.0 })
+        );
+
+        assert!(matches!(
+            pentanomial_statistics(&pentanomial_sample([1, 2, 3, 2, 1]), f64::NAN),
+            Err(StatisticsError::NonFiniteInput {
+                parameter: "confidence multiplier",
+                ..
+            })
+        ));
+        assert_eq!(
+            score_to_elo(1.0),
+            Err(StatisticsError::InvalidScore { score: 1.0 })
+        );
+        assert!(matches!(
+            elo_to_score(f64::INFINITY),
+            Err(StatisticsError::NonFiniteInput {
+                parameter: "Elo difference",
+                ..
+            })
+        ));
+        assert!(matches!(
+            normal_cdf(f64::NEG_INFINITY),
+            Err(StatisticsError::NonFiniteInput {
+                parameter: "normal variate",
+                ..
+            })
+        ));
     }
 }

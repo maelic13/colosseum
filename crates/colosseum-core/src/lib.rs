@@ -38,8 +38,9 @@ pub use standings::{EngineStanding, GameOutcome, HeadToHead, PairGameResult, Sta
 pub use stats::{
     EloEstimate, EloModel, FixedNAchievedResolution, FixedNPlan, FixedNTestTails,
     NormalizedEloEstimate, PentanomialBin, PentanomialDistribution, PentanomialSprtResult,
-    PentanomialStatistics, PentanomialVector, SprtDecision, SprtResult, elo_with_error,
-    fixed_n_achieved_resolution, fixed_n_plan, los, pentanomial_sprt, pentanomial_statistics, sprt,
+    PentanomialStatistics, PentanomialVector, SprtDecision, SprtResult, StatisticsError,
+    elo_with_error, fixed_n_achieved_resolution, fixed_n_plan, los, pentanomial_sprt,
+    pentanomial_statistics, sprt,
 };
 pub use time::{TimeControl, TimeUnit};
 pub use tournament::{
