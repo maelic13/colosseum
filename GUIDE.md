@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. CLI: **not started** |
-| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings |
+| What exists | `colosseum-core` / `-uci` / `-engine` are headless (no `egui` dependency), cross-platform, released for Windows/Linux/macOS incl. arm64, 149 passing tests. `core/stats.rs` has trinomial SPRT, Elo ± error, LOS, ML ratings. Phase 0.1's dependency/module inventory is complete |
 | What is missing | Clean Architecture boundary design, pentanomial/nElo, CPU affinity, the CLI itself, SPSA, durable runs, run records, trustworthy NPS |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☐ · Linux ☐ · macOS ☐ — support requires the full debug/release suite and documented capability fallbacks; calibration is optional and machine-specific |
-| Next step | **Phase 0 — current-state analysis and target architecture**, then Phase 1 |
+| Next step | **Phase 0.2 — write the current-state architecture analysis** |
 
 ## Forward tracker
 
@@ -48,8 +48,9 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
 
 ### Phase 0 — Current-state analysis and target architecture
 
-- [ ] 0.1 Inventory the current crate/module dependency graph with
-      `cargo metadata`, `cargo tree` and source inspection
+- [x] 0.1 **[DONE]** Inventory the current crate/module dependency graph with
+      `cargo metadata`, `cargo tree` and source inspection — evidence:
+      [`docs/architecture/dependency-inventory.md`](docs/architecture/dependency-inventory.md)
 - [ ] 0.2 Write `docs/architecture/current-state.md`: responsibilities, public
       boundary types, I/O/global state, framework dependencies, GUI/release
       coupling and every violation of PLAN §S4; explicitly audit UUID
@@ -354,14 +355,15 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 0 — analyse the current architecture before creating the CLI crate.**
-Produce the current dependency/ownership report, target Clean Architecture,
-ADRs and migration map. This determines which existing headless code is reused
-unchanged and which GUI/library boundaries must move.
+**Phase 0.2 — write the current-state architecture analysis before creating the
+CLI crate.** Use the completed
+[`dependency inventory`](docs/architecture/dependency-inventory.md) to classify
+responsibilities, public boundary types, I/O/global state, framework and
+GUI/release coupling, and every violation of PLAN §S4.
 
-Resolve independent release/versioning and naming in the same phase. Then begin
-**Phase 1 — pentanomial statistics**, which needs no machine time or platform
-surface.
+The later Phase 0 steps design the target boundaries, migration, independent
+release/versioning and naming. Only after the Phase 0 exit may implementation
+move to **Phase 1 — pentanomial statistics**.
 
 ```
 cargo test -p colosseum-core
