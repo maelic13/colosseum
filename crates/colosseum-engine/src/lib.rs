@@ -32,7 +32,7 @@ pub mod topology;
 
 pub use affinity::{
     AffinityCapability, AffinityError, AffinityOutcome, AffinitySupportLevel, AppliedAffinity,
-    affinity_capability, apply_process_affinity,
+    affinity_capability, apply_process_affinity, process_affinity_groups,
 };
 pub use allowed_cpus::{AllowedCpuError, AllowedCpuSet, AllowedCpuSource, detect_allowed_cpu_set};
 pub use characteristics::{

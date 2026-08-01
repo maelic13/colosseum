@@ -81,7 +81,7 @@ The OS adapter has an explicit capability contract:
 
 | Platform | Hard-affinity mechanism | Limitation |
 |---|---|---|
-| Windows | `SetProcessAffinityMask`, followed by read-back verification | One engine allocation must fit processor group zero; other group requests fail rather than being applied to the wrong group |
+| Windows | `SetProcessAffinityMask`, followed by group-aware thread inspection and mask read-back verification | One engine allocation must fit one current child-process primary group; mismatched group requests fail rather than applying group-relative CPU numbers to the wrong group |
 | Linux | `sched_setaffinity` for every current process thread, followed by per-thread read-back verification | Newly observed threads are rescanned until the process thread set is stable |
 | macOS | Unavailable | Public affinity tags are scheduler hints, not verifiable logical-CPU pinning |
 

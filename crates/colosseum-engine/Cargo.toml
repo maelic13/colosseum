@@ -9,7 +9,7 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-default = ["tournament"]
+default = ["tournament", "platform"]
 # Lightweight OS adapter surface used by the independent CLI capability probe.
 platform = []
 # Existing GUI/backend implementation. Kept as the default for compatibility.
@@ -46,7 +46,7 @@ tracing = { version = "0.1.44", optional = true }
 uuid = { version = "1.23.2", features = ["v4", "serde"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Kernel", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.180"
@@ -56,6 +56,12 @@ libc = "0.2.180"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[[bin]]
+name = "colosseum-affinity-fixture"
+path = "src/bin/affinity_fixture.rs"
+test = false
+required-features = ["platform"]
 
 [[test]]
 name = "runner_smoke"

@@ -58,9 +58,13 @@ pub enum AffinityError {
         groups: Vec<u16>,
     },
     #[error(
-        "the Windows hard-affinity adapter currently supports processor group zero, not group {0}"
+        "Windows process {process_id} currently has thread primary groups {actual:?}, not requested group {requested}"
     )]
-    WindowsUnsupportedGroup(u16),
+    WindowsProcessGroupMismatch {
+        process_id: u32,
+        requested: u16,
+        actual: Vec<u16>,
+    },
     #[error("Linux logical CPU identities must use group zero, found {0:?}")]
     LinuxNonzeroGroup(LogicalCpuId),
     #[error("{operation} failed: {source}")]
@@ -85,6 +89,14 @@ pub enum AffinityError {
 #[must_use]
 pub fn affinity_capability() -> AffinityCapability {
     platform::capability()
+}
+
+/// Processor groups in which the target's current threads can receive a hard
+/// allocation. Linux has only portable group zero. Windows reports current
+/// thread primary groups, preventing group-relative masks from being
+/// mislabelled as another processor group.
+pub fn process_affinity_groups(process_id: u32) -> Result<Vec<u16>, AffinityError> {
+    platform::process_groups(process_id)
 }
 
 /// Apply a resolved allocation to an already spawned child process.
@@ -142,9 +154,14 @@ fn validate_cpus(cpus: &[LogicalCpuId]) -> Result<Vec<LogicalCpuId>, AffinityErr
 #[cfg(windows)]
 mod platform {
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+    };
+    use windows_sys::Win32::System::SystemInformation::GROUP_AFFINITY;
     use windows_sys::Win32::System::Threading::{
-        GetProcessAffinityMask, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-        PROCESS_SET_INFORMATION, SetProcessAffinityMask,
+        GetProcessAffinityMask, GetThreadGroupAffinity, OpenProcess, OpenThread,
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_INFORMATION, SetProcessAffinityMask,
+        THREAD_QUERY_LIMITED_INFORMATION,
     };
 
     use super::*;
@@ -154,7 +171,7 @@ mod platform {
             level: AffinitySupportLevel::Enforced,
             mechanism: Some("SetProcessAffinityMask".into()),
             constraints: vec![
-                "each engine allocation must fit Windows processor group zero".into(),
+                "each engine allocation must fit one current child-process primary group".into(),
             ],
             reason: None,
         }
@@ -172,8 +189,13 @@ mod platform {
             });
         }
         let group = *groups.first().expect("validated non-empty allocation");
-        if group != 0 {
-            return Err(AffinityError::WindowsUnsupportedGroup(group));
+        let actual_groups = process_groups(process_id)?;
+        if actual_groups != [group] {
+            return Err(AffinityError::WindowsProcessGroupMismatch {
+                process_id,
+                requested: group,
+                actual: actual_groups,
+            });
         }
         let mask = cpus.iter().try_fold(0_usize, |mask, cpu| {
             let bit = usize::try_from(cpu.number)
@@ -215,6 +237,49 @@ mod platform {
             });
         }
         Ok(())
+    }
+
+    pub(super) fn process_groups(process_id: u32) -> Result<Vec<u16>, AffinityError> {
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+        if snapshot == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+            return Err(last_error("CreateToolhelp32Snapshot"));
+        }
+        let snapshot = OwnedHandle(snapshot);
+        let mut entry = THREADENTRY32 {
+            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+            ..Default::default()
+        };
+        if unsafe { Thread32First(snapshot.0, &mut entry) } == 0 {
+            return Err(last_error("Thread32First"));
+        }
+        let mut groups = BTreeSet::new();
+        loop {
+            if entry.th32OwnerProcessID == process_id {
+                let thread =
+                    unsafe { OpenThread(THREAD_QUERY_LIMITED_INFORMATION, 0, entry.th32ThreadID) };
+                if !thread.is_null() {
+                    let thread = OwnedHandle(thread);
+                    let mut affinity = GROUP_AFFINITY::default();
+                    if unsafe { GetThreadGroupAffinity(thread.0, &mut affinity) } == 0 {
+                        return Err(last_error("GetThreadGroupAffinity"));
+                    }
+                    groups.insert(affinity.Group);
+                }
+            }
+            if unsafe { Thread32Next(snapshot.0, &mut entry) } == 0 {
+                break;
+            }
+        }
+        if groups.is_empty() {
+            return Err(AffinityError::Platform {
+                operation: "enumerate target process threads",
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("process {process_id} has no queryable threads"),
+                ),
+            });
+        }
+        Ok(groups.into_iter().collect())
     }
 
     fn mask_cpus(group: u16, mask: usize) -> Vec<LogicalCpuId> {
@@ -261,6 +326,10 @@ mod platform {
             constraints: Vec::new(),
             reason: None,
         }
+    }
+
+    pub(super) fn process_groups(_process_id: u32) -> Result<Vec<u16>, AffinityError> {
+        Ok(vec![0])
     }
 
     pub(super) fn apply_and_verify(
@@ -434,6 +503,12 @@ mod platform {
         }
     }
 
+    pub(super) fn process_groups(_process_id: u32) -> Result<Vec<u16>, AffinityError> {
+        Err(AffinityError::Unavailable {
+            reason: capability().reason.expect("unavailable reason"),
+        })
+    }
+
     pub(super) fn apply_and_verify(
         _process_id: u32,
         _cpus: &[LogicalCpuId],
@@ -453,6 +528,12 @@ mod platform {
             constraints: Vec::new(),
             reason: Some(format!("no affinity adapter for {}", std::env::consts::OS)),
         }
+    }
+
+    pub(super) fn process_groups(_process_id: u32) -> Result<Vec<u16>, AffinityError> {
+        Err(AffinityError::Unavailable {
+            reason: capability().reason.expect("unavailable reason"),
+        })
     }
 
     pub(super) fn apply_and_verify(

@@ -1,0 +1,124 @@
+[
+  {
+    "name": "smt-16c-32t",
+    "source": "linux-thread-siblings-list",
+    "cores": [
+      { "cpus": [[0, 0], [0, 16]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 1], [0, 17]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 2], [0, 18]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 3], [0, 19]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 4], [0, 20]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 5], [0, 21]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 6], [0, 22]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 7], [0, 23]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 8], [0, 24]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 9], [0, 25]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 10], [0, 26]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 11], [0, 27]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 12], [0, 28]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 13], [0, 29]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 14], [0, 30]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 15], [0, 31]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } }
+    ],
+    "allowed": [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [0, 8], [0, 9], [0, 10], [0, 11], [0, 12], [0, 13], [0, 14], [0, 15], [0, 16], [0, 17], [0, 18], [0, 19], [0, 20], [0, 21], [0, 22], [0, 23], [0, 24], [0, 25], [0, 26], [0, 27], [0, 28], [0, 29], [0, 30], [0, 31]],
+    "game_slots": 1,
+    "cores_per_engine": 8,
+    "expected": [
+      {
+        "engine_a": [[0, 0], [0, 16], [0, 1], [0, 17], [0, 2], [0, 18], [0, 3], [0, 19], [0, 4], [0, 20], [0, 5], [0, 21], [0, 6], [0, 22], [0, 7], [0, 23]],
+        "engine_b": [[0, 8], [0, 24], [0, 9], [0, 25], [0, 10], [0, 26], [0, 11], [0, 27], [0, 12], [0, 28], [0, 13], [0, 29], [0, 14], [0, 30], [0, 15], [0, 31]],
+        "asymmetries": []
+      }
+    ]
+  },
+  {
+    "name": "hybrid-performance-efficiency",
+    "source": "windows-logical-processor-information",
+    "cores": [
+      { "cpus": [[0, 0], [0, 8]], "core_class": { "source": "windows-efficiency-class", "value": 1 }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 1], [0, 9]], "core_class": { "source": "windows-efficiency-class", "value": 1 }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 2], [0, 10]], "core_class": { "source": "windows-efficiency-class", "value": 1 }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 3], [0, 11]], "core_class": { "source": "windows-efficiency-class", "value": 1 }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 4]], "core_class": { "source": "windows-efficiency-class", "value": 0 }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 5]], "core_class": { "source": "windows-efficiency-class", "value": 0 }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 6]], "core_class": { "source": "windows-efficiency-class", "value": 0 }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 7]], "core_class": { "source": "windows-efficiency-class", "value": 0 }, "numa_node": { "group": 0, "number": 0 } }
+    ],
+    "allowed": [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [0, 8], [0, 9], [0, 10], [0, 11]],
+    "game_slots": 2,
+    "cores_per_engine": 2,
+    "expected": [
+      { "engine_a": [[0, 4], [0, 5]], "engine_b": [[0, 6], [0, 7]], "asymmetries": [] },
+      { "engine_a": [[0, 0], [0, 8], [0, 1], [0, 9]], "engine_b": [[0, 2], [0, 10], [0, 3], [0, 11]], "asymmetries": [] }
+    ]
+  },
+  {
+    "name": "restricted-cpuset",
+    "source": "linux-thread-siblings-list",
+    "cores": [
+      { "cpus": [[0, 0], [0, 4]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 1], [0, 5]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 2], [0, 6]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 3], [0, 7]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } }
+    ],
+    "allowed": [[0, 0], [0, 1], [0, 4], [0, 5]],
+    "game_slots": 1,
+    "cores_per_engine": 1,
+    "expected": [
+      { "engine_a": [[0, 0], [0, 4]], "engine_b": [[0, 1], [0, 5]], "asymmetries": [] }
+    ]
+  },
+  {
+    "name": "processor-groups",
+    "source": "windows-logical-processor-information",
+    "cores": [
+      { "cpus": [[0, 0]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 1]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[1, 0]], "core_class": { "source": "unknown" }, "numa_node": { "group": 1, "number": 0 } },
+      { "cpus": [[1, 1]], "core_class": { "source": "unknown" }, "numa_node": { "group": 1, "number": 0 } }
+    ],
+    "allowed": [[0, 0], [0, 1], [1, 0], [1, 1]],
+    "game_slots": 2,
+    "cores_per_engine": 1,
+    "expected": [
+      { "engine_a": [[0, 0]], "engine_b": [[0, 1]], "asymmetries": [] },
+      { "engine_a": [[1, 0]], "engine_b": [[1, 1]], "asymmetries": [] }
+    ]
+  },
+  {
+    "name": "no-smt",
+    "source": "linux-thread-siblings-list",
+    "cores": [
+      { "cpus": [[0, 0]], "core_class": { "source": "unknown" }, "numa_node": null },
+      { "cpus": [[0, 1]], "core_class": { "source": "unknown" }, "numa_node": null },
+      { "cpus": [[0, 2]], "core_class": { "source": "unknown" }, "numa_node": null },
+      { "cpus": [[0, 3]], "core_class": { "source": "unknown" }, "numa_node": null }
+    ],
+    "allowed": [[0, 0], [0, 1], [0, 2], [0, 3]],
+    "game_slots": 1,
+    "cores_per_engine": 2,
+    "expected": [
+      { "engine_a": [[0, 0], [0, 1]], "engine_b": [[0, 2], [0, 3]], "asymmetries": [] }
+    ]
+  },
+  {
+    "name": "dual-socket",
+    "source": "linux-thread-siblings-list",
+    "cores": [
+      { "cpus": [[0, 0]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 1]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 2]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 3]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 0 } },
+      { "cpus": [[0, 4]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 1 } },
+      { "cpus": [[0, 5]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 1 } },
+      { "cpus": [[0, 6]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 1 } },
+      { "cpus": [[0, 7]], "core_class": { "source": "unknown" }, "numa_node": { "group": 0, "number": 1 } }
+    ],
+    "allowed": [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7]],
+    "game_slots": 1,
+    "cores_per_engine": 3,
+    "expected": [
+      { "engine_a": [[0, 0], [0, 1], [0, 2]], "engine_b": [[0, 4], [0, 5], [0, 6]], "asymmetries": ["numa-node-mismatch"] }
+    ]
+  }
+]

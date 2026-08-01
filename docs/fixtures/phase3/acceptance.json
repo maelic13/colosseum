@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "phase": 3,
+  "gates": [
+    {
+      "id": "topology-fixture-corpus",
+      "owner": "crates/colosseum-engine/tests/phase3_acceptance.rs",
+      "evidence": "Exact selections for SMT 16c/32t, hybrid P/E, restricted cpuset, processor groups, no-SMT and dual-socket recordings"
+    },
+    {
+      "id": "enforceable-residency",
+      "owner": "crates/colosseum-engine/tests/phase3_acceptance.rs",
+      "evidence": "Two busy children sample only their assigned logical CPU on Windows/Linux; unavailable platforms emit an explicit skip reason"
+    },
+    {
+      "id": "platform-capability-command",
+      "owner": "crates/colosseum-cli/tests/command_line.rs",
+      "evidence": "Strict text/JSON capability reporting and read-only dry-run rejection"
+    },
+    {
+      "id": "independent-cli-platform-surface",
+      "owner": "crates/colosseum-cli/tests/architecture.rs",
+      "evidence": "Capability probing adds no GUI, SQLite, tournament or chess-position dependency to the CLI artifact"
+    },
+    {
+      "id": "platform-contract-documentation",
+      "owner": "docs/cli/cpu-topology.md",
+      "evidence": "Detection, metadata, placement, affinity, limitations and macOS off-mode behavior are documented"
+    },
+    {
+      "id": "workspace-regression",
+      "owner": "AGENTS.md verification baseline",
+      "evidence": "Workspace check, clippy and all-target tests preserve GUI/backend behavior"
+    }
+  ]
+}

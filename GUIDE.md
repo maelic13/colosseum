@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–2 and topology-aware placement through Phase 3.7 are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run state, OS-reported physical-core/SMT identity, current-process CPU restrictions, placement modes, disjoint per-engine/per-slot physical-core allocation, auditable core-class/NUMA symmetry, fail-closed OS affinity application, and read-only platform capability reporting |
-| What is missing | Phase 3 acceptance fixtures/residency proof; full match and pair-atomic SPRT execution; optional calibration; SPSA; benchmarking; Texel/data-generation and the remaining reporting/release work |
+| What exists | Phases 0–3 are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run state, OS-reported physical-core/SMT identity, current-process CPU restrictions, placement modes, disjoint per-engine/per-slot physical-core allocation, auditable core-class/NUMA symmetry, fail-closed OS affinity application, read-only platform capability reporting, recorded topology acceptance corpus, and enforceable child-residency proof |
+| What is missing | Full match and pair-atomic SPRT execution; optional calibration; SPSA; benchmarking; Texel/data-generation and the remaining reporting/release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 3.7 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 3.8 — CPU topology and affinity phase exit** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Platform status | Windows ☑ local through Phase 3 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 4A.1 — fixed-N direct-engine match surface** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -315,9 +315,14 @@ model as well.
   [`crates/colosseum-cli/src/capabilities.rs`](crates/colosseum-cli/src/capabilities.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
-- ☐ **3.8** — **EXIT · Model: Sol High.** SMT, P/E, restricted-cpuset, processor-group, no-SMT and
-  dual-socket fixtures pass; residency tests pass where enforceable;
-  capability reporting documented
+- ☑ **3.8 — DONE · EXIT** — **Model: Sol High.** Recorded SMT 16c/32t, P/E,
+  restricted-cpuset, processor-group, no-SMT and dual-socket fixtures select
+  exact CPU lists; two busy children remain on their enforced processors where
+  supported; capability reporting, limitations and gate ownership are durable —
+  evidence:
+  [`crates/colosseum-engine/tests/phase3_acceptance.rs`](crates/colosseum-engine/tests/phase3_acceptance.rs),
+  [`docs/fixtures/phase3/topologies.json`](docs/fixtures/phase3/topologies.json),
+  [`docs/architecture/phase-3-exit.md`](docs/architecture/phase-3-exit.md)
 
 ### Phase 4A — Fixed-match runner
 

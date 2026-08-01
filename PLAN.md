@@ -1419,8 +1419,9 @@ span flags, so unavoidable asymmetry remains visible to later run records.
 **Implemented affinity application (3.6):** the OS adapter applies and reads
 back Windows process masks or Linux per-thread scheduler masks. Unsupported,
 invalid and unverifiable hard requests are typed failures rather than silent
-fallbacks. Windows currently exposes its single-group-zero constraint as
-capability data and fails other group requests instead of misidentifying them;
+fallbacks. Windows inspects the target's current thread primary groups, exposes
+its single-primary-group constraint as capability data and fails mismatched
+group requests instead of misidentifying group-relative CPU numbers;
 macOS reports hard pinning unavailable because its affinity tags are advisory.
 Explicit `off` is a successful recorded no-op, so lack of hard affinity does
 not prohibit an otherwise valid clock match.
@@ -1432,6 +1433,18 @@ support, mechanisms, limitations and unavailable reasons. The CLI consumes a
 feature-minimal platform surface from `colosseum-engine`; architecture tests
 prove the independent artifact does not pull in SQLite, tournament scheduling
 or chess-position dependencies merely to report host capabilities.
+
+**Accepted (3.8):** a recorded six-shape corpus covers 16c/32t SMT, hybrid
+performance/efficiency cores, restricted cpusets, duplicate group-relative IDs
+in distinct Windows processor groups, no-SMT and dual-socket NUMA. Every fixture
+asserts exact per-engine CPU lists and visible asymmetry. On enforceable hosts,
+two busy child processes are pinned and repeatedly sample only their assigned
+logical processor; unsupported hosts emit the documented unavailable reason.
+The machine-readable acceptance manifest assigns every exit gate, the CLI
+dependency graph remains headless and free of tournament/SQLite payload, and
+the full workspace regression suite remains green. Detailed evidence and the
+current Windows single-primary-group limitation are recorded in
+`docs/architecture/phase-3-exit.md`.
 
 ### Phase 4A — Fixed-match runner
 
