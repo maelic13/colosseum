@@ -1508,6 +1508,14 @@ their UCI traffic separately. Configurable progress is stderr-only, JSON stdout
 remains one document, and exit codes distinguish valid completion, invalid
 experiment, configuration refusal and infrastructure/runtime failure.
 
+**Phase 4A exit evidence (4A.8):** the hermetic suite now kills and resumes a
+live fixture match, replays the same seeded paired-book schedule across
+different concurrency, injects non-scorable infrastructure faults, charges a
+commanded engine sleep, and pins sub/equal/super-margin attribution,
+deduction-before-increment and monotonic wall-clock independence. The reviewed
+matrix and platform-evidence boundary are recorded in
+`docs/architecture/phase-4a-exit.md`.
+
 ### Phase 4A — Fixed-match runner
 
 Implement the non-sequential part of 5.4: fixed matches, per-side controls,

@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–3 plus fixed-N direct-engine matches through durable output are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process containment, recoverable run directories, topology/affinity handling, optional paired books, concurrent resource planning, full logs/PGN/failed-game traffic and same-binary option comparisons |
-| What is missing | Phase-4A exit acceptance; pair-atomic SPRT; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–3 and Phase 4A fixed matches are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process containment, recoverable run directories, topology/affinity handling, per-side clocks, optional paired books, concurrent resource planning, full logs/PGN/failed-game traffic and tested kill/resume |
+| What is missing | Pair-atomic SPRT and external-runner parity; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 4A.7 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4A.8 — fixed-match exit acceptance** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Platform status | Windows ☑ local through Phase 4A · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 4B.1 — explicit capped SPRT contract** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -394,13 +394,16 @@ model as well.
   [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/match.md`](docs/cli/match.md)
-- ☐ **4A.8** — **EXIT · Model: Sol High.** Path-only/no-book and paired-book matches pass; fault
-  injection never scores infrastructure failures; output/resume/schedule
-  tests pass; a stub sleeping a commanded duration is charged it within
-  tolerance on every platform, a sub-margin overrun is not forfeited while a
-  super-margin one is and is attributed correctly, exact equality is
-  accepted, a mid-game system-clock change does not alter the result, and
-  below/at/above increment-margin boundaries have fixtures
+- ☑ **4A.8 — DONE** — **EXIT · Model: Sol High.** Hermetic path-only/no-book
+  and paired-book matches pass; infrastructure injection remains non-scorable;
+  kill/resume and concurrency-independent schedule replay pass; a commanded
+  sleep is charged within the cross-platform tolerance, sub/super-margin
+  outcomes and attribution pass, and monotonic wall-jump plus exact
+  below/equal/above increment-margin fixtures pin the clock contract — evidence:
+  [`crates/colosseum-cli/tests/phase4a_acceptance.rs`](crates/colosseum-cli/tests/phase4a_acceptance.rs),
+  [`crates/colosseum-engine/src/runner.rs`](crates/colosseum-engine/src/runner.rs),
+  [`crates/colosseum-uci/src/process.rs`](crates/colosseum-uci/src/process.rs),
+  [`docs/architecture/phase-4a-exit.md`](docs/architecture/phase-4a-exit.md)
 
 ### Phase 4B — Pair-atomic SPRT and parity
 
@@ -573,10 +576,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4A.8 — fixed-match exit acceptance. Model: GPT-5.6 Sol — High.**
-Close the fixed-match phase with cross-platform deterministic fixtures for
-path-only and paired-book runs, failure classification, durable resume,
-schedule replay and every clock-accounting boundary.
+**Phase 4B.1 — explicit capped SPRT contract. Model: GPT-5.6 Terra — High.**
+Add explicit hypotheses, error rates, statistical model and finite pair cap;
+keep `gainer` and `simplify` as named convenience bundles over that contract.
 
 ```
 git diff --check

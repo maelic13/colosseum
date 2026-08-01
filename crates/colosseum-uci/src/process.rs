@@ -421,7 +421,7 @@ impl EngineProcess {
             let read_finished = Instant::now();
             let line = line.trim();
             if let Some((best_move, ponder)) = parse::parse_bestmove_ponder(line) {
-                let elapsed = read_finished.saturating_duration_since(start);
+                let elapsed = charged_elapsed(start, read_finished);
                 // Some engines report a literal `nps 0` on every info line
                 // (Fruit 2.1 does) — treat that as unreported and derive the
                 // real speed from nodes over wall-clock time instead.
@@ -520,6 +520,32 @@ impl EngineProcess {
             Ok(Ok(None)) => Err(UciError::Terminated),
             Ok(Err(err)) => Err(err),
         }
+    }
+}
+
+fn charged_elapsed(start: Instant, read_finished: Instant) -> Duration {
+    read_finished.saturating_duration_since(start)
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn charged_search_time_is_independent_of_a_mid_search_wall_clock_jump() {
+        let start = Instant::now();
+        let read_finished = start + Duration::from_millis(42);
+        let wall_before = UNIX_EPOCH + Duration::from_secs(2_000_000_000);
+        let wall_after = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+        assert!(
+            wall_after < wall_before,
+            "fixture represents a backward jump"
+        );
+        assert_eq!(
+            charged_elapsed(start, read_finished),
+            Duration::from_millis(42)
+        );
     }
 }
 
