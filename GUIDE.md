@@ -15,10 +15,10 @@ numbers, internal naming or method argumentation.
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
 | What exists | Phases 0–3 plus fixed-N direct-engine matches with independent per-side time controls are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process containment, durable run primitives, topology/affinity handling, and same-binary option comparisons |
-| What is missing | Match book/output durability; pair-atomic SPRT; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
+| What is missing | Match output durability; pair-atomic SPRT; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 4A.5 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4A.6 — optional opening books** |
+| Platform status | Windows ☑ local through Phase 4A.6 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 4A.7 — durable and structured output** |
 | Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
@@ -376,8 +376,14 @@ model as well.
   [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
   [`crates/colosseum-engine/src/runner.rs`](crates/colosseum-engine/src/runner.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs)
-- ☐ **4A.6** — **Model: Terra High.** Optional book with deterministic order/start/plies/reuse reporting;
-  no book starts from startpos with a diversity warning
+- ☑ **4A.6 — DONE** — **Model: Terra High.** Optional EPD/PGN books support
+  deterministic sequential or versioned named-stream random order, validated
+  start and PGN-ply controls, colour-pair assignment and reuse-fraction
+  reporting; no-book stays path-only startpos with a diversity warning —
+  evidence:
+  [`crates/colosseum-engine/src/openings.rs`](crates/colosseum-engine/src/openings.rs),
+  [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs)
 - ☐ **4A.7** — **Model: Terra High.** Live/structured output, full log, PGN and failed-game traffic;
   JSON-only stdout mode and documented exit codes
 - ☐ **4A.8** — **EXIT · Model: Sol High.** Path-only/no-book and paired-book matches pass; fault
@@ -559,9 +565,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4A.6 — optional opening books. Model: GPT-5.6 Terra — High.** Add
-deterministic order/start/ply controls and reuse reporting while keeping the
-path-only no-book workflow valid with a visible diversity warning.
+**Phase 4A.7 — durable and structured output. Model: GPT-5.6 Terra — High.**
+Compose live/structured reporting, append-only logs, PGN, failed-game traffic,
+strict JSON stdout and documented exit codes with the common run directory.
 
 ```
 git diff --check

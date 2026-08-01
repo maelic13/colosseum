@@ -6,6 +6,9 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum EngineError {
     #[error(transparent)]
+    Opening(#[from] crate::openings::OpeningError),
+
+    #[error(transparent)]
     Application(#[from] colosseum_application::ApplicationError),
 
     #[error(transparent)]

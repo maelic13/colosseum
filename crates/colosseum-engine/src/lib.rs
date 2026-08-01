@@ -17,7 +17,7 @@ pub mod error;
 pub mod incidents;
 #[cfg(feature = "runner")]
 pub mod live;
-#[cfg(feature = "tournament")]
+#[cfg(feature = "runner")]
 pub mod openings;
 #[cfg(feature = "runner")]
 pub mod pgn;
@@ -47,8 +47,10 @@ pub use detect::{DetectResult, detect_engine, split_name_version};
 pub use error::EngineError;
 #[cfg(feature = "runner")]
 pub use live::{EvalPoint, LiveGameHandle, LiveGameState, LiveSearch};
-#[cfg(feature = "tournament")]
-pub use openings::{ResolvedOpening, load_openings, summarize};
+#[cfg(feature = "runner")]
+pub use openings::{
+    OpeningError, OpeningSummary, ResolvedOpening, load_openings, load_openings_named, summarize,
+};
 pub use placement::{
     CpuPlacementError, CpuPlacementPlan, CpuPlacementPolicy, DEFAULT_AUTO_HEADROOM_PHYSICAL_CORES,
     EngineCpuPlacement, GameSlotCpuAllocation, PlacementAsymmetry, allocate_game_slots,

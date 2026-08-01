@@ -91,9 +91,20 @@ budget can cause memory refusal. Hash omits engine-private allocations, mapped
 files and other process memory, so the reported value is never labelled total
 memory use.
 
-Matches currently use the standard start position. Books, durable run output
-and statistical commands are added separately. `--a-cores` and `--b-cores`
-are direct hard-placement alternatives to the global placement pool.
+An opening book is optional; Colosseum does not ship one. `--book FILE`
+accepts EPD or PGN (inferred from the extension). `--book-order sequential` is
+the default; `random` uses the versioned `opening-order` named stream from the
+run's `--seed`. If no seed is supplied, a master seed is generated and printed
+in structured output. `--book-start N` selects the zero-based first opening and
+`--book-plies N` controls how many PGN half-moves are pre-played. Each opening
+is assigned to a two-game colour-reversed pair; odd fixed-N matches may end with
+one final half-pair. Output records the assignment for every game and reports
+the fraction of scheduled pairs that reused an opening. Without `--book`, every
+game starts from startpos and output carries an opening-diversity warning.
+
+Durable run output and statistical commands are added separately. `--a-cores`
+and `--b-cores` are direct hard-placement alternatives to the global placement
+pool.
 
 Use `--dry-run` to resolve and print both invocations without launching either
 engine. `--json` emits one match result document on stdout.

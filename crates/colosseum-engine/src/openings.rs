@@ -14,13 +14,21 @@
 //! from the book's seed (a small self-contained PRNG, so no `rand` dependency and
 //! reproducible across resume), then `count` truncates the list.
 
-use colosseum_core::{OpeningBook, OpeningFormat, OpeningOrder};
+use colosseum_core::rng::stream_names;
+use colosseum_core::{NamedRng, OpeningBook, OpeningFormat, OpeningOrder};
 use shakmaty::fen::Fen;
 use shakmaty::san::San;
 use shakmaty::uci::UciMove;
 use shakmaty::{CastlingMode, Chess, EnPassantMode, Position};
+use thiserror::Error;
 
-use crate::error::EngineError;
+#[derive(Debug, Error)]
+pub enum OpeningError {
+    #[error("could not read opening book: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("invalid opening book: {0}")]
+    Invalid(String),
+}
 
 /// A concrete opening: where to start and which moves to pre-play before the
 /// engines take over.
@@ -51,7 +59,34 @@ impl ResolvedOpening {
 /// Returns an error if the file cannot be read, or if it parses to zero usable
 /// openings (so the caller can surface a clear message instead of silently
 /// falling back to the start position).
-pub fn load_openings(book: &OpeningBook) -> Result<Vec<ResolvedOpening>, EngineError> {
+pub fn load_openings(book: &OpeningBook) -> Result<Vec<ResolvedOpening>, OpeningError> {
+    load_openings_with_order(book, |openings| {
+        if book.order == OpeningOrder::Random {
+            shuffle(openings, book.seed);
+        }
+        Ok(())
+    })
+}
+
+/// Load openings using the versioned named RNG contract used by CLI runs.
+pub fn load_openings_named(
+    book: &OpeningBook,
+    master_seed: u64,
+) -> Result<Vec<ResolvedOpening>, OpeningError> {
+    load_openings_with_order(book, |openings| {
+        if book.order == OpeningOrder::Random {
+            NamedRng::new(master_seed, stream_names::OPENING_ORDER)
+                .map_err(|error| OpeningError::Invalid(error.to_string()))?
+                .shuffle(openings);
+        }
+        Ok(())
+    })
+}
+
+fn load_openings_with_order(
+    book: &OpeningBook,
+    order: impl FnOnce(&mut Vec<ResolvedOpening>) -> Result<(), OpeningError>,
+) -> Result<Vec<ResolvedOpening>, OpeningError> {
     let text = std::fs::read_to_string(&book.path)?;
     let mut openings = match book.format {
         OpeningFormat::Epd => parse_epd(&text),
@@ -59,15 +94,13 @@ pub fn load_openings(book: &OpeningBook) -> Result<Vec<ResolvedOpening>, EngineE
     };
 
     if openings.is_empty() {
-        return Err(EngineError::Corrupt(format!(
+        return Err(OpeningError::Invalid(format!(
             "no usable openings found in {}",
             book.path.display()
         )));
     }
 
-    if book.order == OpeningOrder::Random {
-        shuffle(&mut openings, book.seed);
-    }
+    order(&mut openings)?;
 
     if let Some(count) = book.count {
         openings.truncate(count.max(1) as usize);
@@ -293,13 +326,14 @@ fn shuffle<T>(items: &mut [T], seed: u64) {
 }
 
 /// Quick metadata for the GUI preview without retaining every opening.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpeningSummary {
     pub count: usize,
     pub first_label: Option<String>,
 }
 
 /// Load a book only to report how many openings it yields and a sample label.
-pub fn summarize(book: &OpeningBook) -> Result<OpeningSummary, EngineError> {
+pub fn summarize(book: &OpeningBook) -> Result<OpeningSummary, OpeningError> {
     let openings = load_openings(book)?;
     Ok(OpeningSummary {
         count: openings.len(),
@@ -417,6 +451,27 @@ rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -
         let b = load_openings(&book).unwrap();
         assert_eq!(a.len(), 2);
         assert_eq!(a, b, "same seed yields the same order");
+    }
+
+    #[test]
+    fn cli_named_random_order_is_reproducible_from_the_master_seed() {
+        let epd = "\
+8/8/8/8/8/8/8/4K2k w - -
+rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -
+r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq -
+rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -
+";
+        let path = write_temp("named-order.epd", epd);
+        let mut book = OpeningBook::new(path);
+        book.order = OpeningOrder::Random;
+        let first = load_openings_named(&book, 42).unwrap();
+        let repeated = load_openings_named(&book, 42).unwrap();
+        assert_eq!(first, repeated);
+        assert_ne!(
+            first,
+            load_openings_named(&book, 43).unwrap(),
+            "the reviewed fixture exercises the seed"
+        );
     }
 
     #[test]

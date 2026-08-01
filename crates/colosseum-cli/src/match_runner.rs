@@ -4,18 +4,20 @@
 //! statistics or stopping logic. Pair-atomic scheduling, configurable clocks,
 //! openings, persistence and fault policy are later phase responsibilities.
 
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use colosseum_application::{CpuAllocation, EngineLaunchSpec};
 use colosseum_core::{
-    AdjudicationConfig, EngineId, GameId, GameResult, Termination, TimeControl, is_hash_option,
+    AdjudicationConfig, EngineId, GameId, GameResult, OpeningBook, OpeningFormat, OpeningOrder,
+    Termination, TimeControl, is_hash_option,
 };
 use colosseum_engine::{
     ClockAccountingReport, CoreClass, CpuPlacementPolicy, EngineCpuPlacement, EngineFaultKind,
     EngineGameSpec, GameFault, GameSide, GameSlotCpuAllocation, GameSpec, LiveGameState,
-    allocate_game_slots, detect_allowed_cpu_set, detect_cpu_characteristics, detect_cpu_topology,
-    plan_cpu_placement, run_game,
+    ResolvedOpening, allocate_game_slots, detect_allowed_cpu_set, detect_cpu_characteristics,
+    detect_cpu_topology, load_openings_named, plan_cpu_placement, run_game,
 };
 use colosseum_uci::SpawnOptions;
 use serde::Serialize;
@@ -91,6 +93,7 @@ pub struct MatchGame {
     pub scorable: bool,
     pub termination: Termination,
     pub clock_accounting: ClockAccountingReport,
+    pub opening: OpeningAssignment,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fault: Option<GameFault>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -130,7 +133,7 @@ impl MatchFaultCounts {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FixedMatchReport {
     pub status: MatchStatus,
     pub games_requested: u32,
@@ -144,7 +147,122 @@ pub struct FixedMatchReport {
     pub fault_policy: FaultPolicy,
     pub faults: MatchFaultCounts,
     pub execution: MatchExecutionPlan,
+    pub master_seed: u64,
+    pub master_seed_generated: bool,
+    pub openings: OpeningPolicyReport,
     pub games: Vec<MatchGame>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OpeningAssignment {
+    pub book_index: Option<usize>,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "mode", rename_all = "kebab-case")]
+pub enum OpeningPolicyReport {
+    Startpos {
+        warning: String,
+    },
+    Book {
+        path: PathBuf,
+        format: OpeningFormat,
+        order: OpeningOrder,
+        start_index: usize,
+        plies: u32,
+        available_openings: usize,
+        scheduled_pairs: u32,
+        reused_pair_assignments: u32,
+        reuse_fraction: f64,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchOpenings {
+    entries: Vec<ResolvedOpening>,
+    report: OpeningPolicyReport,
+}
+
+impl MatchOpenings {
+    #[must_use]
+    pub fn report(&self) -> &OpeningPolicyReport {
+        &self.report
+    }
+
+    fn assignment(&self, number: u32) -> (ResolvedOpening, OpeningAssignment) {
+        if self.entries.is_empty() {
+            return (
+                ResolvedOpening::startpos(),
+                OpeningAssignment {
+                    book_index: None,
+                    label: "startpos".into(),
+                },
+            );
+        }
+        let start_index = match self.report {
+            OpeningPolicyReport::Book { start_index, .. } => start_index,
+            OpeningPolicyReport::Startpos { .. } => 0,
+        };
+        let pair_index = (number.saturating_sub(1) / 2) as usize;
+        let book_index = (start_index + pair_index) % self.entries.len();
+        let opening = self.entries[book_index].clone();
+        let assignment = OpeningAssignment {
+            book_index: Some(book_index),
+            label: opening.label.clone(),
+        };
+        (opening, assignment)
+    }
+}
+
+pub fn resolve_openings(
+    book: Option<OpeningBook>,
+    start_index: usize,
+    games: u32,
+    master_seed: u64,
+) -> Result<MatchOpenings, MatchError> {
+    let Some(mut book) = book else {
+        return Ok(MatchOpenings {
+            entries: Vec::new(),
+            report: OpeningPolicyReport::Startpos {
+                warning:
+                    "no opening book: every game starts from startpos; opening diversity is absent"
+                        .into(),
+            },
+        });
+    };
+    book.seed = master_seed;
+    let entries = load_openings_named(&book, master_seed)
+        .map_err(|error| MatchError::Opening(error.to_string()))?;
+    if start_index >= entries.len() {
+        return Err(MatchError::BookStartOutOfRange {
+            start_index,
+            openings: entries.len(),
+        });
+    }
+    let scheduled_pairs = games.div_ceil(2);
+    let assigned = (0..scheduled_pairs)
+        .map(|pair| (start_index + pair as usize) % entries.len())
+        .collect::<Vec<_>>();
+    let unique = assigned.iter().copied().collect::<BTreeSet<_>>().len() as u32;
+    let reused_pair_assignments = scheduled_pairs.saturating_sub(unique);
+    let reuse_fraction = if scheduled_pairs == 0 {
+        0.0
+    } else {
+        f64::from(reused_pair_assignments) / f64::from(scheduled_pairs)
+    };
+    let report = OpeningPolicyReport::Book {
+        path: book.path.clone(),
+        format: book.format,
+        order: book.order,
+        start_index,
+        plies: book.plies,
+        available_openings: entries.len(),
+        scheduled_pairs,
+        reused_pair_assignments,
+        reuse_fraction,
+    };
+    Ok(MatchOpenings { entries, report })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -175,6 +293,9 @@ pub struct FixedMatchRequest {
     pub adjudication: AdjudicationConfig,
     pub fault_policy: FaultPolicy,
     pub execution: MatchExecutionPlan,
+    pub master_seed: u64,
+    pub master_seed_generated: bool,
+    pub openings: MatchOpenings,
 }
 
 #[derive(Debug, Error)]
@@ -197,6 +318,10 @@ pub enum MatchError {
     MemoryBudgetExceeded { required_mb: u64, budget_mb: u64 },
     #[error("a match worker failed: {0}")]
     Worker(String),
+    #[error("opening book could not be loaded: {0}")]
+    Opening(String),
+    #[error("opening start index {start_index} is outside a book with {openings} openings")]
+    BookStartOutOfRange { start_index: usize, openings: usize },
 }
 
 pub fn plan_execution(
@@ -316,6 +441,9 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         adjudication,
         fault_policy,
         execution,
+        master_seed,
+        master_seed_generated,
+        openings,
     } = request;
     if games == 0 {
         return Err(MatchError::ZeroGames);
@@ -345,6 +473,9 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         fault_policy,
         faults: MatchFaultCounts::default(),
         execution: execution.clone(),
+        master_seed,
+        master_seed_generated,
+        openings: openings.report().clone(),
         games: Vec::with_capacity(games as usize),
     };
 
@@ -359,14 +490,17 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
             let mut engine_b = engine_b.clone();
             engine_a.allocated_cpus = slot.engine_a.allocation.clone();
             engine_b.allocated_cpus = slot.engine_b.allocation.clone();
-            workers.spawn(play_game(
+            let (opening, opening_assignment) = openings.assignment(number);
+            workers.spawn(play_game(GameRequest {
                 number,
                 engine_a,
                 engine_b,
-                engine_a_time_control,
-                engine_b_time_control,
+                time_control_a: engine_a_time_control,
+                time_control_b: engine_b_time_control,
                 adjudication,
-            ));
+                opening,
+                opening_assignment,
+            }));
         }
         let Some(joined) = workers.join_next().await else {
             break;
@@ -398,14 +532,28 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
     Ok(report)
 }
 
-async fn play_game(
+struct GameRequest {
     number: u32,
     engine_a: EngineGameSpec,
     engine_b: EngineGameSpec,
-    engine_a_time_control: ConfiguredTimeControl,
-    engine_b_time_control: ConfiguredTimeControl,
+    time_control_a: ConfiguredTimeControl,
+    time_control_b: ConfiguredTimeControl,
     adjudication: AdjudicationConfig,
-) -> MatchGame {
+    opening: ResolvedOpening,
+    opening_assignment: OpeningAssignment,
+}
+
+async fn play_game(request: GameRequest) -> MatchGame {
+    let GameRequest {
+        number,
+        engine_a,
+        engine_b,
+        time_control_a: engine_a_time_control,
+        time_control_b: engine_b_time_control,
+        adjudication,
+        opening,
+        opening_assignment,
+    } = request;
     let a_is_white = number % 2 == 1;
     let white_side = if a_is_white {
         MatchSide::A
@@ -436,8 +584,8 @@ async fn play_game(
         round: number,
         white: white.clone(),
         black: black.clone(),
-        start_fen: None,
-        opening_moves: Vec::new(),
+        start_fen: opening.start_fen,
+        opening_moves: opening.moves,
         white_time_control: white_time_control.control,
         black_time_control: black_time_control.control,
         time_control_label: format!(
@@ -456,7 +604,7 @@ async fn play_game(
         number,
         (white.id, white.name.clone()),
         (black.id, black.name.clone()),
-        None,
+        spec.start_fen.clone(),
         white_time_control.control,
     );
     let game = run_game(spec, live).await;
@@ -467,6 +615,7 @@ async fn play_game(
         scorable: game.scorable,
         termination: game.termination,
         clock_accounting: game.clock_accounting,
+        opening: opening_assignment,
         fault: game.fault,
         error: game.error,
     }
@@ -575,6 +724,11 @@ mod tests {
             fault_policy: FaultPolicy::default(),
             faults: MatchFaultCounts::default(),
             execution: off_execution_plan(),
+            master_seed: 1,
+            master_seed_generated: false,
+            openings: OpeningPolicyReport::Startpos {
+                warning: "test".into(),
+            },
             games: Vec::new(),
         };
         record_score(&mut report, MatchSide::A, GameResult::WhiteWin);

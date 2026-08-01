@@ -1493,6 +1493,13 @@ The resolved slot allocations are structured evidence. Explicit numeric Hash
 values produce only `concurrency × (A Hash + B Hash)` as a lower bound, and
 memory is refused only against an explicit trusted budget.
 
+**Implemented opening policy (4A.6):** a book remains optional and no asset is
+shipped. EPD/PGN input supports sequential or RNG-v1 named-stream order, a
+validated start index and PGN ply depth. One opening is assigned to each
+colour-reversed pair; every game records its assignment and the result reports
+reuse fraction. No-book runs remain valid startpos runs with an explicit
+diversity warning, and supplied or generated master seeds are recorded.
+
 ### Phase 4A — Fixed-match runner
 
 Implement the non-sequential part of 5.4: fixed matches, per-side controls,

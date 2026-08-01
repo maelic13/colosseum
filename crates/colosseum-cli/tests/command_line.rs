@@ -312,6 +312,76 @@ fn fixed_match_runs_explicit_concurrency_and_reports_hash_lower_bound() {
 }
 
 #[test]
+fn fixed_match_pairs_optional_book_openings_and_reports_reuse() {
+    let root = tempfile::tempdir().unwrap();
+    let book = root.path().join("openings.epd");
+    std::fs::write(
+        &book,
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -\n\
+rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -\n",
+    )
+    .unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
+    let output = cli()
+        .args(["match", "--games", "5"])
+        .arg(fixture)
+        .arg(fixture)
+        .arg("--book")
+        .arg(&book)
+        .args([
+            "--book-start",
+            "0",
+            "--seed",
+            "42",
+            "--max-engine-faults",
+            "5",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let report = &value["report"];
+    assert_eq!(report["master_seed"], 42);
+    assert_eq!(report["master_seed_generated"], false);
+    assert_eq!(report["openings"]["mode"], "book");
+    assert_eq!(report["openings"]["scheduled_pairs"], 3);
+    assert_eq!(report["openings"]["reused_pair_assignments"], 1);
+    assert_eq!(report["games"][0]["opening"]["book_index"], 0);
+    assert_eq!(report["games"][1]["opening"]["book_index"], 0);
+    assert_eq!(report["games"][2]["opening"]["book_index"], 1);
+    assert_eq!(report["games"][3]["opening"]["book_index"], 1);
+    assert_eq!(report["games"][4]["opening"]["book_index"], 0);
+}
+
+#[test]
+fn fixed_match_no_book_reports_diversity_warning() {
+    let output = cli()
+        .args([
+            "match",
+            "--games",
+            "1",
+            "a",
+            "b",
+            "--seed",
+            "7",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let openings = &value["resolved_configuration"]["openings"];
+    assert_eq!(openings["mode"], "startpos");
+    assert!(openings["warning"].as_str().unwrap().contains("diversity"));
+}
+
+#[test]
 fn fixed_match_refuses_only_against_an_explicit_trusted_memory_budget() {
     let output = cli()
         .args([

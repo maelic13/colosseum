@@ -4,14 +4,15 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use colosseum_application::{
     CheckEngine, ComplianceReport, ComplianceStatus, EngineInspection, EngineLaunchSpec,
     InspectEngine, RuntimeParticipant, UciOptionSchema,
 };
 use colosseum_cli::{EngineArgs, RunRecord, built_in_defaults, parse_cpu_list, resolve_config};
 use colosseum_core::{
-    AdjudicationConfig, DrawAdjudication, ParticipantId, ResignAdjudication, TimeControl,
+    AdjudicationConfig, DrawAdjudication, OpeningBook, OpeningOrder, ParticipantId,
+    ResignAdjudication, TimeControl,
 };
 use colosseum_engine::CpuPlacementPolicy;
 use colosseum_uci::UciSessionFactory;
@@ -173,6 +174,28 @@ struct MatchCommand {
     /// Trusted hard budget for the two engines' configured Hash memory.
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     memory_budget_mb: Option<u64>,
+
+    /// Optional EPD or PGN opening book; format is inferred from the extension.
+    #[arg(long)]
+    book: Option<PathBuf>,
+    /// Opening order within the book.
+    #[arg(long, value_enum, default_value_t = BookOrderArg::Sequential)]
+    book_order: BookOrderArg,
+    /// Zero-based first opening after ordering.
+    #[arg(long, default_value_t = 0)]
+    book_start: usize,
+    /// PGN half-moves to pre-play; EPD positions ignore this value.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    book_plies: Option<u32>,
+    /// Master seed for every random choice; generated and reported when omitted.
+    #[arg(long)]
+    seed: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum BookOrderArg {
+    Sequential,
+    Random,
 }
 
 #[derive(Debug, Args)]
@@ -351,6 +374,21 @@ enum MachineOutput<'a> {
 }
 
 async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitCode {
+    if command.book.is_none()
+        && (command.book_start != 0
+            || command.book_plies.is_some()
+            || command.book_order != BookOrderArg::Sequential)
+    {
+        eprintln!("configuration error: book order/start/plies require --book");
+        return ExitCode::from(2);
+    }
+    let (master_seed, master_seed_generated) = match resolve_master_seed(command.seed) {
+        Ok(seed) => seed,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let adjudication = resolve_adjudication(&command);
     let fault_policy = match_runner::FaultPolicy {
         max_engine_faults: command.max_engine_faults,
@@ -439,6 +477,27 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
             return ExitCode::from(2);
         }
     };
+    let book = command.book.clone().map(|path| {
+        let mut book = OpeningBook::new(path);
+        book.order = match command.book_order {
+            BookOrderArg::Sequential => OpeningOrder::Sequential,
+            BookOrderArg::Random => OpeningOrder::Random,
+        };
+        book.plies = command.book_plies.unwrap_or(8);
+        book
+    });
+    let openings = match match_runner::resolve_openings(
+        book,
+        command.book_start,
+        command.games,
+        master_seed,
+    ) {
+        Ok(openings) => openings,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     if dry_run {
         let current_directory = match std::env::current_dir() {
             Ok(directory) => directory,
@@ -460,10 +519,20 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
                 "adjudication": adjudication,
                 "fault_policy": fault_policy,
                 "execution": execution,
+                "master_seed": master_seed,
+                "master_seed_generated": master_seed_generated,
+                "openings": openings.report(),
             }),
             &[],
             &current_directory,
-            &["/engine_a/executable".into(), "/engine_b/executable".into()],
+            &match command.book {
+                Some(_) => vec![
+                    "/engine_a/executable".into(),
+                    "/engine_b/executable".into(),
+                    "/openings/path".into(),
+                ],
+                None => vec!["/engine_a/executable".into(), "/engine_b/executable".into()],
+            },
         ) {
             Ok(resolved) => resolved,
             Err(error) => {
@@ -489,6 +558,9 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         adjudication,
         fault_policy,
         execution,
+        master_seed,
+        master_seed_generated,
+        openings,
     })
     .await
     {
@@ -510,6 +582,15 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
             ExitCode::FAILURE
         }
     }
+}
+
+fn resolve_master_seed(configured: Option<u64>) -> Result<(u64, bool), String> {
+    if let Some(seed) = configured {
+        return Ok((seed, false));
+    }
+    let mut bytes = [0_u8; 8];
+    getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
+    Ok((u64::from_le_bytes(bytes), true))
 }
 
 fn resolve_placement(value: &str, headroom_cores: usize) -> Result<CpuPlacementPolicy, String> {
