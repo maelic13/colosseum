@@ -163,14 +163,47 @@ pub struct GameReport {
     pub white: EngineId,
     pub black: EngineId,
     pub result: GameResult,
+    pub scorable: bool,
     pub termination: Termination,
     pub stats: GameStats,
     pub san_moves: Vec<String>,
     pub uci_moves: Vec<String>,
     pub pgn: String,
     pub clock_accounting: ClockAccountingReport,
+    pub fault: Option<GameFault>,
     /// Set when the game ended due to an engine problem (crash/illegal/timeout).
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GameSide {
+    White,
+    Black,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EngineFaultKind {
+    Timeout,
+    Crash,
+    Disconnect,
+    Protocol,
+    IllegalMove,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "cause", rename_all = "kebab-case")]
+pub enum GameFault {
+    Engine {
+        side: GameSide,
+        kind: EngineFaultKind,
+        message: String,
+    },
+    Infrastructure {
+        operation: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -461,9 +494,10 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             && !hit
             && let Err(err) = engine.stop_ponder(PONDER_STOP_DEADLINE).await
         {
-            break Outcome::loss(
+            break Outcome::engine_loss(
                 mover,
                 Termination::EngineCrash,
+                fault_kind_for_uci(&err),
                 Some(format!("failed to abort ponder search: {err}")),
             );
         }
@@ -524,10 +558,20 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         let output = match search {
             Ok(output) => output,
             Err(UciError::MoveTimeout) => {
-                break Outcome::loss(mover, Termination::TimeForfeit, None);
+                break Outcome::engine_loss(
+                    mover,
+                    Termination::TimeForfeit,
+                    EngineFaultKind::Timeout,
+                    Some("move deadline exceeded".into()),
+                );
             }
             Err(err) => {
-                break Outcome::loss(mover, Termination::EngineCrash, Some(err.to_string()));
+                break Outcome::engine_loss(
+                    mover,
+                    Termination::EngineCrash,
+                    fault_kind_for_uci(&err),
+                    Some(err.to_string()),
+                );
             }
         };
 
@@ -549,15 +593,21 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             output.elapsed,
             time_margin_for(&spec, mover),
         ) {
-            break Outcome::loss(mover, Termination::TimeForfeit, None);
+            break Outcome::engine_loss(
+                mover,
+                Termination::TimeForfeit,
+                EngineFaultKind::Timeout,
+                Some("charged elapsed time exceeded remaining time plus margin".into()),
+            );
         }
 
         // Parse and validate the move, tolerating two common nonstandard
         // notations from older engines (see `parse_engine_move`).
         let Some((legal_move, leniency)) = parse_engine_move(&output.best_move, &pos) else {
-            break Outcome::loss(
+            break Outcome::engine_loss(
                 mover,
                 Termination::IllegalMove,
+                EngineFaultKind::IllegalMove,
                 Some(format!("illegal move: {}", output.best_move)),
             );
         };
@@ -731,6 +781,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         white: spec.white.id,
         black: spec.black.id,
         result: outcome.result,
+        scorable: outcome.scorable,
         termination: outcome.termination,
         stats,
         san_moves,
@@ -742,6 +793,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             Some(&white_move_time),
             Some(&black_move_time),
         ),
+        fault: outcome.fault,
         error: outcome.error,
     }
 }
@@ -945,16 +997,20 @@ fn move_limits(
 /// Small helper bundling a game's verdict.
 struct Outcome {
     result: GameResult,
+    scorable: bool,
     termination: Termination,
     error: Option<String>,
+    fault: Option<GameFault>,
 }
 
 impl Outcome {
     fn natural(result: GameResult, termination: Termination) -> Self {
         Self {
             result,
+            scorable: true,
             termination,
             error: None,
+            fault: None,
         }
     }
 
@@ -966,22 +1022,65 @@ impl Outcome {
             } else {
                 GameResult::BlackWin
             },
+            scorable: true,
             termination,
             error: None,
+            fault: None,
         }
     }
 
-    /// The side to move loses (timeout/crash/illegal).
-    fn loss(mover: Color, termination: Termination, error: Option<String>) -> Self {
+    /// The side to move loses due to an attributable engine fault.
+    fn engine_loss(
+        mover: Color,
+        termination: Termination,
+        kind: EngineFaultKind,
+        error: Option<String>,
+    ) -> Self {
+        let message = error.clone().unwrap_or_else(|| format!("{kind:?}"));
         Self {
             result: if mover == Color::White {
                 GameResult::BlackWin
             } else {
                 GameResult::WhiteWin
             },
+            scorable: true,
             termination,
             error,
+            fault: Some(GameFault::Engine {
+                side: if mover == Color::White {
+                    GameSide::White
+                } else {
+                    GameSide::Black
+                },
+                kind,
+                message,
+            }),
         }
+    }
+
+    fn infrastructure(operation: impl Into<String>, message: impl Into<String>) -> Self {
+        let message = message.into();
+        Self {
+            // Required for the legacy report/PGN shape, but explicitly not
+            // scorable and therefore never enters match statistics.
+            result: GameResult::Draw,
+            scorable: false,
+            termination: Termination::Aborted,
+            error: Some(message.clone()),
+            fault: Some(GameFault::Infrastructure {
+                operation: operation.into(),
+                message,
+            }),
+        }
+    }
+}
+
+fn fault_kind_for_uci(error: &UciError) -> EngineFaultKind {
+    match error {
+        UciError::MoveTimeout | UciError::HandshakeTimeout => EngineFaultKind::Timeout,
+        UciError::Terminated | UciError::Io(_) => EngineFaultKind::Disconnect,
+        UciError::Protocol(_) => EngineFaultKind::Protocol,
+        UciError::ShutdownTimeout => EngineFaultKind::Crash,
     }
 }
 
@@ -1021,16 +1120,19 @@ async fn handle_setup_failure(
     monotonic_resolution_ns: u64,
 ) -> GameReport {
     // Consume each side: quit survivors, harvest forensics from the failure.
-    async fn consume(prepared: Prepared) -> (Option<UciError>, Option<(Vec<String>, Vec<String>)>) {
+    async fn consume(
+        prepared: Prepared,
+    ) -> (Option<(UciError, bool)>, Option<(Vec<String>, Vec<String>)>) {
         match prepared {
             Prepared::Ready(engine) => {
                 let _ = engine.quit(Duration::from_millis(500)).await;
                 (None, None)
             }
-            Prepared::Failed(err, engine) => {
-                (Some(err), Some((engine.transcript(), engine.stderr_tail())))
-            }
-            Prepared::NoSpawn(err) => (Some(err), None),
+            Prepared::Failed(err, engine) => (
+                Some((err, false)),
+                Some((engine.transcript(), engine.stderr_tail())),
+            ),
+            Prepared::NoSpawn(err) => (Some((err, true)), None),
         }
     }
 
@@ -1038,28 +1140,36 @@ async fn handle_setup_failure(
     let (black_err, black_forensics) = consume(black).await;
 
     // White takes precedence when both failed.
-    let (failed, err, forensics) = if let Some(err) = white_err {
-        (Color::White, err, white_forensics)
+    let (failed, err, spawn_failed, forensics) = if let Some((err, spawn_failed)) = white_err {
+        (Color::White, err, spawn_failed, white_forensics)
     } else {
-        (
-            Color::Black,
-            black_err.expect("a setup failure occurred"),
-            black_forensics,
-        )
+        let (err, spawn_failed) = black_err.expect("a setup failure occurred");
+        (Color::Black, err, spawn_failed, black_forensics)
     };
 
-    let outcome = Outcome::loss(failed, Termination::EngineCrash, Some(err.to_string()));
+    let outcome = if spawn_failed {
+        Outcome::infrastructure("engine-spawn", err.to_string())
+    } else {
+        Outcome::engine_loss(
+            failed,
+            Termination::EngineCrash,
+            fault_kind_for_uci(&err),
+            Some(err.to_string()),
+        )
+    };
     let mut report = GameReport {
         game_id: spec.game_id,
         white: spec.white.id,
         black: spec.black.id,
         result: outcome.result,
+        scorable: outcome.scorable,
         termination: outcome.termination,
         stats: GameStats::default(),
         san_moves: Vec::new(),
         uci_moves: Vec::new(),
         pgn: render_pgn(spec, &[], outcome.result, outcome.termination),
         clock_accounting: clock_accounting_report(spec, monotonic_resolution_ns, None, None),
+        fault: outcome.fault,
         error: outcome.error,
     };
 

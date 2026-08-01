@@ -34,7 +34,15 @@ fn fixed_match_accepts_the_same_ordinary_uci_path_with_different_side_options() 
         .args(["match", "--games", "2"])
         .arg(fixture)
         .arg(fixture)
-        .args(["--a-option", "Hash=16", "--b-option", "Hash=32", "--json"])
+        .args([
+            "--a-option",
+            "Hash=16",
+            "--b-option",
+            "Hash=32",
+            "--max-engine-faults",
+            "2",
+            "--json",
+        ])
         .output()
         .unwrap();
     assert!(
@@ -47,6 +55,7 @@ fn fixed_match_accepts_the_same_ordinary_uci_path_with_different_side_options() 
     assert_eq!(value["type"], "fixed-match");
     assert_eq!(value["report"]["games_requested"], 2);
     assert_eq!(value["report"]["games_completed"], 2);
+    assert_eq!(value["report"]["status"], "completed");
     assert_eq!(value["report"]["games"][0]["white"], "a");
     assert_eq!(value["report"]["games"][1]["white"], "b");
     let clock = &value["report"]["games"][0]["clock_accounting"];
@@ -54,6 +63,51 @@ fn fixed_match_accepts_the_same_ordinary_uci_path_with_different_side_options() 
     assert_eq!(clock["version"], 1);
     assert!(clock["monotonic_resolution_ns"].as_u64().unwrap() > 0);
     assert!(clock["white_charged_elapsed"]["samples"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn fixed_match_strict_default_invalidates_on_the_first_engine_fault() {
+    let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
+    let output = cli()
+        .args(["match", "--games", "2"])
+        .arg(fixture)
+        .arg(fixture)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["report"]["status"], "invalid");
+    assert_eq!(value["report"]["games_attempted"], 1);
+    assert_eq!(value["report"]["games_completed"], 1);
+    assert_eq!(value["report"]["faults"]["engine_b"], 1);
+    assert_eq!(value["report"]["games"][0]["scorable"], true);
+    assert_eq!(value["report"]["games"][0]["fault"]["cause"], "engine");
+}
+
+#[test]
+fn fixed_match_never_scores_an_engine_spawn_failure() {
+    let root = tempfile::tempdir().unwrap();
+    let output = cli()
+        .args(["match", "--games", "2"])
+        .arg(root.path().join("missing-a"))
+        .arg(root.path().join("missing-b"))
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["report"]["status"], "infrastructure-error");
+    assert_eq!(value["report"]["games_attempted"], 1);
+    assert_eq!(value["report"]["games_completed"], 0);
+    assert_eq!(value["report"]["faults"]["infrastructure"], 1);
+    assert_eq!(value["report"]["games"][0]["scorable"], false);
+    assert_eq!(
+        value["report"]["games"][0]["fault"]["cause"],
+        "infrastructure"
+    );
 }
 
 #[test]

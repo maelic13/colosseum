@@ -57,7 +57,7 @@ pub use placement::{
 #[cfg(feature = "runner")]
 pub use runner::{
     CLOCK_MODEL_ID, CLOCK_MODEL_VERSION, ChargedElapsedSummary, ClockAccountingReport,
-    EngineGameSpec, GameReport, GameSpec, run_game,
+    EngineFaultKind, EngineGameSpec, GameFault, GameReport, GameSide, GameSpec, run_game,
 };
 #[cfg(feature = "tournament")]
 pub use scheduler::{

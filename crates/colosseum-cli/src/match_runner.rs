@@ -9,7 +9,10 @@ use std::time::Duration;
 
 use colosseum_application::{CpuAllocation, EngineLaunchSpec};
 use colosseum_core::{AdjudicationConfig, EngineId, GameId, GameResult, Termination, TimeControl};
-use colosseum_engine::{ClockAccountingReport, EngineGameSpec, GameSpec, LiveGameState, run_game};
+use colosseum_engine::{
+    ClockAccountingReport, EngineFaultKind, EngineGameSpec, GameFault, GameSide, GameSpec,
+    LiveGameState, run_game,
+};
 use colosseum_uci::SpawnOptions;
 use serde::Serialize;
 use thiserror::Error;
@@ -81,21 +84,61 @@ pub struct MatchGame {
     pub number: u32,
     pub white: MatchSide,
     pub result: GameResult,
+    pub scorable: bool,
     pub termination: Termination,
     pub clock_accounting: ClockAccountingReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fault: Option<GameFault>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MatchStatus {
+    Completed,
+    Invalid,
+    InfrastructureError,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct FaultPolicy {
+    pub max_engine_faults: u32,
+    pub max_time_losses: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct MatchFaultCounts {
+    pub engine_a: u32,
+    pub engine_b: u32,
+    pub time_losses_a: u32,
+    pub time_losses_b: u32,
+    pub infrastructure: u32,
+}
+
+impl MatchFaultCounts {
+    fn engine_total(self) -> u32 {
+        self.engine_a + self.engine_b
+    }
+
+    fn time_total(self) -> u32 {
+        self.time_losses_a + self.time_losses_b
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FixedMatchReport {
+    pub status: MatchStatus,
     pub games_requested: u32,
+    pub games_attempted: u32,
     pub games_completed: u32,
     pub engine_a: MatchScore,
     pub engine_b: MatchScore,
     pub engine_a_time_control: ConfiguredTimeControl,
     pub engine_b_time_control: ConfiguredTimeControl,
     pub adjudication: AdjudicationConfig,
+    pub fault_policy: FaultPolicy,
+    pub faults: MatchFaultCounts,
     pub games: Vec<MatchGame>,
 }
 
@@ -117,6 +160,7 @@ pub async fn run_fixed_match(
     engine_a_time_control: ConfiguredTimeControl,
     engine_b_time_control: ConfiguredTimeControl,
     adjudication: AdjudicationConfig,
+    fault_policy: FaultPolicy,
 ) -> Result<FixedMatchReport, MatchError> {
     if games == 0 {
         return Err(MatchError::ZeroGames);
@@ -124,7 +168,9 @@ pub async fn run_fixed_match(
     let engine_a = engine_spec(engine_a, MatchSide::A, EngineId::from_u128(1))?;
     let engine_b = engine_spec(engine_b, MatchSide::B, EngineId::from_u128(2))?;
     let mut report = FixedMatchReport {
+        status: MatchStatus::Completed,
         games_requested: games,
+        games_attempted: 0,
         games_completed: 0,
         engine_a: MatchScore {
             name: engine_a.name.clone(),
@@ -141,6 +187,8 @@ pub async fn run_fixed_match(
         engine_a_time_control,
         engine_b_time_control,
         adjudication,
+        fault_policy,
+        faults: MatchFaultCounts::default(),
         games: Vec::with_capacity(games as usize),
     };
 
@@ -199,18 +247,57 @@ pub async fn run_fixed_match(
             white_time_control.control,
         );
         let game = run_game(spec, live).await;
-        record_score(&mut report, white_side, game.result);
+        report.games_attempted += 1;
+        if game.scorable {
+            record_score(&mut report, white_side, game.result);
+            report.games_completed += 1;
+        }
+        record_fault(&mut report.faults, white_side, game.fault.as_ref());
+        let infrastructure_fault = matches!(game.fault, Some(GameFault::Infrastructure { .. }));
+        let engine_threshold_exceeded =
+            report.faults.engine_total() > fault_policy.max_engine_faults;
+        let time_threshold_exceeded = report.faults.time_total() > fault_policy.max_time_losses;
         report.games.push(MatchGame {
             number,
             white: white_side,
             result: game.result,
+            scorable: game.scorable,
             termination: game.termination,
             clock_accounting: game.clock_accounting,
+            fault: game.fault,
             error: game.error,
         });
-        report.games_completed += 1;
+        if infrastructure_fault {
+            report.status = MatchStatus::InfrastructureError;
+            break;
+        }
+        if engine_threshold_exceeded || time_threshold_exceeded {
+            report.status = MatchStatus::Invalid;
+            break;
+        }
     }
     Ok(report)
+}
+
+fn record_fault(counts: &mut MatchFaultCounts, white: MatchSide, fault: Option<&GameFault>) {
+    match fault {
+        Some(GameFault::Engine { side, kind, .. }) => {
+            let named_side = match side {
+                GameSide::White => white,
+                GameSide::Black => white.other(),
+            };
+            let (engine, time) = match named_side {
+                MatchSide::A => (&mut counts.engine_a, &mut counts.time_losses_a),
+                MatchSide::B => (&mut counts.engine_b, &mut counts.time_losses_b),
+            };
+            *engine += 1;
+            if matches!(kind, EngineFaultKind::Timeout) {
+                *time += 1;
+            }
+        }
+        Some(GameFault::Infrastructure { .. }) => counts.infrastructure += 1,
+        None => {}
+    }
 }
 
 fn engine_spec(
@@ -284,7 +371,9 @@ mod tests {
     #[test]
     fn scores_are_from_the_named_side_not_the_current_colour() {
         let mut report = FixedMatchReport {
+            status: MatchStatus::Completed,
             games_requested: 2,
+            games_attempted: 0,
             games_completed: 0,
             engine_a: MatchScore {
                 name: "A".into(),
@@ -301,6 +390,8 @@ mod tests {
             engine_a_time_control: ConfiguredTimeControl::default(),
             engine_b_time_control: ConfiguredTimeControl::default(),
             adjudication: AdjudicationConfig::default(),
+            fault_policy: FaultPolicy::default(),
+            faults: MatchFaultCounts::default(),
             games: Vec::new(),
         };
         record_score(&mut report, MatchSide::A, GameResult::WhiteWin);
@@ -321,5 +412,28 @@ mod tests {
             engine_spec(launch, MatchSide::A, EngineId::from_u128(1)),
             Err(MatchError::CpuPlacementUnavailable { side: "engine A" })
         ));
+    }
+
+    #[test]
+    fn fault_counts_follow_named_engines_across_colour_reversal() {
+        let fault = GameFault::Engine {
+            side: GameSide::White,
+            kind: EngineFaultKind::Timeout,
+            message: "late".into(),
+        };
+        let mut counts = MatchFaultCounts::default();
+        record_fault(&mut counts, MatchSide::B, Some(&fault));
+        assert_eq!(counts.engine_b, 1);
+        assert_eq!(counts.time_losses_b, 1);
+        record_fault(
+            &mut counts,
+            MatchSide::A,
+            Some(&GameFault::Infrastructure {
+                operation: "artifact".into(),
+                message: "disk full".into(),
+            }),
+        );
+        assert_eq!(counts.infrastructure, 1);
+        assert_eq!(counts.engine_a, 0);
     }
 }

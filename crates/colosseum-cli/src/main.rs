@@ -149,6 +149,13 @@ struct MatchCommand {
     /// Draw after this many full moves; omitted means no maximum-move cap.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     max_moves: Option<u32>,
+
+    /// Invalidate after more engine-attributable faults than this value.
+    #[arg(long, default_value_t = 0)]
+    max_engine_faults: u32,
+    /// Invalidate after more time losses than this value.
+    #[arg(long, default_value_t = 0)]
+    max_time_losses: u32,
 }
 
 #[derive(Debug, Args)]
@@ -328,6 +335,10 @@ enum MachineOutput<'a> {
 
 async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitCode {
     let adjudication = resolve_adjudication(&command);
+    let fault_policy = match_runner::FaultPolicy {
+        max_engine_faults: command.max_engine_faults,
+        max_time_losses: command.max_time_losses,
+    };
     let engine_a_time_control = match resolve_time_control(
         "engine A",
         command.a_movetime_ms,
@@ -409,6 +420,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
                 "engine_a_time_control": engine_a_time_control,
                 "engine_b_time_control": engine_b_time_control,
                 "adjudication": adjudication,
+                "fault_policy": fault_policy,
             }),
             &[],
             &current_directory,
@@ -436,16 +448,22 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         engine_a_time_control,
         engine_b_time_control,
         adjudication,
+        fault_policy,
     )
     .await
     {
         Ok(report) => {
+            let success = report.status == match_runner::MatchStatus::Completed;
             if machine {
                 print_json(&MachineOutput::FixedMatch { report });
             } else {
                 print_fixed_match(&report);
             }
-            ExitCode::SUCCESS
+            if success {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
         }
         Err(error) => {
             eprintln!("match failed: {error}");
@@ -536,8 +554,8 @@ fn resolve_match_engine(
 
 fn print_fixed_match(report: &match_runner::FixedMatchReport) {
     println!(
-        "fixed match: {}/{} games completed",
-        report.games_completed, report.games_requested
+        "fixed match {:?}: {}/{} games completed ({} attempted)",
+        report.status, report.games_completed, report.games_requested, report.games_attempted
     );
     for (side, score) in [("A", &report.engine_a), ("B", &report.engine_b)] {
         println!(
@@ -545,6 +563,14 @@ fn print_fixed_match(report: &match_runner::FixedMatchReport) {
             score.name, score.wins, score.losses, score.draws
         );
     }
+    println!(
+        "faults: A {} ({} time), B {} ({} time), infrastructure {}",
+        report.faults.engine_a,
+        report.faults.time_losses_a,
+        report.faults.engine_b,
+        report.faults.time_losses_b,
+        report.faults.infrastructure
+    );
     for game in &report.games {
         let error = game
             .error

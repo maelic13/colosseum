@@ -1477,6 +1477,14 @@ threshold plus an optional maximum-move cap, and allow draw or resignation to
 be disabled independently. Tablebase UCI values remain arbitrary per-engine
 options; no harness-side probing or adjudication dependency was introduced.
 
+**Implemented failure policy (4A.4):** game reports now distinguish typed,
+side-attributed engine faults from non-scorable infrastructure failures.
+Engine timeouts, disconnects, protocol faults and illegal moves remain visible
+forfeits, while spawn/harness failures cannot enter W/L/D. Fixed matches enforce
+separate configurable engine-fault and time-loss thresholds with strict zero
+defaults and stop as invalid or infrastructure-error without a selective
+retry/discard mechanism.
+
 ### Phase 4A — Fixed-match runner
 
 Implement the non-sequential part of 5.4: fixed matches, per-side controls,

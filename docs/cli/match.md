@@ -66,6 +66,14 @@ Natural mate and draw rules always apply. Tablebase-related UCI options can be
 forwarded through `--a-option` and `--b-option`; Colosseum does not inspect the
 tablebase files or perform harness-side tablebase adjudication.
 
+Engine and infrastructure faults are different outcomes. An engine timeout,
+disconnect, protocol failure or illegal move is a scored forfeit with explicit
+side and kind metadata. The match becomes `invalid` after more than
+`--max-engine-faults N` or `--max-time-losses N`; both limits default to zero.
+A pre-play spawn or harness/infrastructure failure is marked non-scorable,
+stops the match as `infrastructure-error`, and never changes W/L/D. Colosseum
+does not offer selective retry or discard of already-started statistical games.
+
 Matches currently use the standard start position and one game at a time. CPU
 placement, concurrency, books, durable run output and
 statistical commands are added separately. `--a-cores` and `--b-cores` are

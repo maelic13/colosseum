@@ -15,10 +15,10 @@ numbers, internal naming or method argumentation.
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
 | What exists | Phases 0–3 plus fixed-N direct-engine matches with independent per-side time controls are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process containment, durable run primitives, topology/affinity handling, and same-binary option comparisons |
-| What is missing | Match fault/concurrency/book/output durability; pair-atomic SPRT; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
+| What is missing | Match concurrency/book/output durability; pair-atomic SPRT; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 4A.3 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4A.4 — failure classification and policy** |
+| Platform status | Windows ☑ local through Phase 4A.4 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 4A.5 — concurrency and placement** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -360,9 +360,14 @@ model as well.
   [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/match.md`](docs/cli/match.md)
-- ☐ **4A.4** — **Model: Sol High.** Separate engine from infrastructure faults. Strict default: engine
-  fault forfeits and invalidates above threshold zero; infrastructure fault
-  is never scored; no selective retry/discard in statistical runs
+- ☑ **4A.4 — DONE** — **Model: Sol High.** Typed engine faults retain their
+  attributable forfeit and side, with zero-default engine/time-loss thresholds
+  invalidating the run; pre-play spawn and infrastructure faults are explicitly
+  non-scorable and terminate without changing W/L/D; there is no selective
+  retry/discard path — evidence:
+  [`crates/colosseum-engine/src/runner.rs`](crates/colosseum-engine/src/runner.rs),
+  [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs)
 - ☐ **4A.5** — **Model: Sol High.** Explicit concurrency and placement; report
   `concurrency × 2 × Hash` only as a memory lower bound; refuse memory only
   with a trusted explicit budget/cap
@@ -549,9 +554,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4A.4 — failure classification and policy. Model: GPT-5.6 Sol — High.**
-Separate engine-attributable forfeits from infrastructure failures, enforce the
-strict default threshold and prohibit selective retry/discard.
+**Phase 4A.5 — concurrency and placement. Model: GPT-5.6 Sol — High.**
+Compose explicit parallel game slots with the Phase-3 allocator and hard
+affinity adapter, and report conservative Hash memory requirements.
 
 ```
 git diff --check
