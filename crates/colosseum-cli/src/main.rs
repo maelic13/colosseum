@@ -14,6 +14,7 @@ use colosseum_uci::UciSessionFactory;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+mod capabilities;
 mod self_test;
 mod uci_stub;
 
@@ -39,6 +40,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Print detected topology, restrictions and affinity support.
+    Capabilities,
     /// Inspect or compliance-check an ordinary UCI executable.
     Engine(EngineCommand),
     /// Verify this exact executable's protocol, process and persistence paths.
@@ -77,6 +80,8 @@ struct EngineInvocation {
 async fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
+        Command::Capabilities if cli.dry_run => unsupported_dry_run("capabilities"),
+        Command::Capabilities => run_capabilities(cli.json),
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
         Command::SelfTest if cli.dry_run => unsupported_dry_run("self-test"),
         Command::SelfTest => run_self_test(cli.json).await,
@@ -198,6 +203,9 @@ fn resolve_invocation(
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 enum MachineOutput<'a> {
+    Capabilities {
+        report: capabilities::CapabilitiesReport,
+    },
     DryRun {
         command: &'a str,
         config_sha256: &'a str,
@@ -217,6 +225,16 @@ enum MachineOutput<'a> {
         run_directory: &'a Path,
         record: RunRecord,
     },
+}
+
+fn run_capabilities(machine: bool) -> ExitCode {
+    let report = capabilities::probe();
+    if machine {
+        print_json(&MachineOutput::Capabilities { report });
+    } else {
+        capabilities::print_text(&report);
+    }
+    ExitCode::SUCCESS
 }
 
 fn run_status(run_directory: &Path, machine: bool) -> ExitCode {

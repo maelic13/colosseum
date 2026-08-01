@@ -13,6 +13,7 @@ required:
 ```text
 colosseum-cli engine inspect ./my-engine
 colosseum-cli engine check ./my-engine
+colosseum-cli capabilities
 colosseum-cli self-test
 colosseum-cli status ./colosseum-runs/my-run
 ```
@@ -26,4 +27,4 @@ Detailed contracts:
 - [Installed-executable self-test](self-test.md)
 - [Run directories and checkpoint recovery](run-directories.md)
 - [Official run records and read-only status](status.md)
-- [CPU topology detection](cpu-topology.md)
+- [CPU topology, restrictions and affinity capabilities](cpu-topology.md)

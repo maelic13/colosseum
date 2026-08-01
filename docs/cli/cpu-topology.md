@@ -1,5 +1,11 @@
 # CPU topology detection
 
+Run `colosseum-cli capabilities` to inspect this machine without launching an
+engine or creating a run directory. Add `--json` for one stable machine-readable
+document containing the topology, current-process restrictions, core/NUMA
+metadata, affinity mechanism, limitations and unavailable reasons. Because this
+is a read-only probe, `--dry-run` is rejected as meaningless.
+
 Colosseum obtains physical-core and simultaneous-multithreading relationships
 from operating-system topology interfaces. Logical CPU numbers are identifiers;
 adjacent or otherwise patterned numbers are never assumed to share a core.

@@ -9,15 +9,24 @@
 pub mod affinity;
 pub mod allowed_cpus;
 pub mod characteristics;
+#[cfg(feature = "tournament")]
 pub mod detect;
+#[cfg(feature = "tournament")]
 pub mod error;
+#[cfg(feature = "tournament")]
 pub mod incidents;
+#[cfg(feature = "tournament")]
 pub mod live;
+#[cfg(feature = "tournament")]
 pub mod openings;
+#[cfg(feature = "tournament")]
 pub mod pgn;
 pub mod placement;
+#[cfg(feature = "tournament")]
 pub mod runner;
+#[cfg(feature = "tournament")]
 pub mod scheduler;
+#[cfg(feature = "tournament")]
 pub mod store;
 pub mod topology;
 
@@ -30,22 +39,30 @@ pub use characteristics::{
     CharacteristicsError, CharacteristicsSource, CoreClass, CpuCharacteristics, NumaNodeId,
     PhysicalCoreCharacteristics, detect_cpu_characteristics,
 };
+#[cfg(feature = "tournament")]
 pub use colosseum_uci::Score;
+#[cfg(feature = "tournament")]
 pub use detect::{DetectResult, detect_engine, split_name_version};
+#[cfg(feature = "tournament")]
 pub use error::EngineError;
+#[cfg(feature = "tournament")]
 pub use live::{EvalPoint, LiveGameHandle, LiveGameState, LiveSearch};
+#[cfg(feature = "tournament")]
 pub use openings::{ResolvedOpening, load_openings, summarize};
 pub use placement::{
     CpuPlacementError, CpuPlacementPlan, CpuPlacementPolicy, DEFAULT_AUTO_HEADROOM_PHYSICAL_CORES,
     EngineCpuPlacement, GameSlotCpuAllocation, PlacementAsymmetry, allocate_game_slots,
     plan_cpu_placement,
 };
+#[cfg(feature = "tournament")]
 pub use runner::{EngineGameSpec, GameReport, GameSpec, run_game};
+#[cfg(feature = "tournament")]
 pub use scheduler::{
     Command, EloEntry, InFlightGame, ResultParticipant, Tournament, TournamentResults,
     TournamentSnapshot, TournamentStatus, create_tournament, load_tournament_results,
     resume_tournament,
 };
+#[cfg(feature = "tournament")]
 pub use store::{GameRow, PendingGame, Store, TournamentEngineRow, TournamentRow};
 pub use topology::{
     CpuTopology, LogicalCpuId, PhysicalCore, SiblingMapping, TopologyError, TopologySource,

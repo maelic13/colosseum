@@ -22,6 +22,7 @@ fn help_is_headless_and_names_the_product() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("ordinary UCI chess-engine executables"));
     assert!(stdout.contains("Usage: colosseum-cli"));
+    assert!(stdout.contains("capabilities"));
     assert!(output.stderr.is_empty());
 }
 
@@ -122,6 +123,7 @@ fn json_failure_keeps_stdout_empty_and_diagnostics_on_stderr() {
 #[test]
 fn dry_run_is_rejected_for_read_only_commands() {
     for arguments in [
+        vec!["capabilities", "--dry-run", "--json"],
         vec!["self-test", "--dry-run", "--json"],
         vec!["status", "--dry-run", "--json", "missing-run"],
     ] {
@@ -134,6 +136,45 @@ fn dry_run_is_rejected_for_read_only_commands() {
                 .contains("not meaningful")
         );
     }
+}
+
+#[test]
+fn capabilities_reports_platform_state_in_strict_json() {
+    let output = cli().args(["capabilities", "--json"]).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["type"], "capabilities");
+    assert_eq!(value["report"]["schema_version"], 1);
+    assert_eq!(value["report"]["platform"], std::env::consts::OS);
+    assert!(matches!(
+        value["report"]["topology"]["status"].as_str(),
+        Some("available" | "unavailable")
+    ));
+    assert!(matches!(
+        value["report"]["hard_affinity"]["level"].as_str(),
+        Some("enforced" | "unavailable")
+    ));
+}
+
+#[test]
+fn capabilities_text_is_human_readable() {
+    let output = cli().arg("capabilities").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    for heading in [
+        "platform:",
+        "topology:",
+        "allowed logical CPUs:",
+        "hard affinity:",
+    ] {
+        assert!(stdout.contains(heading), "missing {heading} in {stdout}");
+    }
+    assert!(output.stderr.is_empty());
 }
 
 #[test]

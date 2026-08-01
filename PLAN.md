@@ -1425,6 +1425,14 @@ macOS reports hard pinning unavailable because its affinity tags are advisory.
 Explicit `off` is a successful recorded no-op, so lack of hard affinity does
 not prohibit an otherwise valid clock match.
 
+**Implemented capability probe (3.7):** `colosseum-cli capabilities` is a
+strictly read-only text/JSON probe of topology, exact sibling identity,
+current-process restrictions, core class/NUMA metadata and hard-affinity
+support, mechanisms, limitations and unavailable reasons. The CLI consumes a
+feature-minimal platform surface from `colosseum-engine`; architecture tests
+prove the independent artifact does not pull in SQLite, tournament scheduling
+or chess-position dependencies merely to report host capabilities.
+
 ### Phase 4A — Fixed-match runner
 
 Implement the non-sequential part of 5.4: fixed matches, per-side controls,

@@ -106,11 +106,28 @@ fn cli_source_has_no_gui_state_or_app_directory_access() {
 }
 
 #[test]
-fn current_cli_has_no_unused_legacy_database_adapter_dependency() {
+fn cli_platform_adapter_does_not_pull_in_legacy_database_or_tournament_code() {
     let manifest =
         fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
-    assert!(!manifest.contains("colosseum-engine"));
+    assert!(manifest.contains(
+        "colosseum-engine = { path = \"../colosseum-engine\", default-features = false, features = [\"platform\"] }"
+    ));
     assert!(!manifest.contains("rusqlite"));
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = Command::new(env!("CARGO"))
+        .args(["tree", "-p", "colosseum-cli", "--no-default-features"])
+        .current_dir(root)
+        .output()
+        .expect("cargo tree");
+    assert!(output.status.success());
+    let tree = String::from_utf8(output.stdout).unwrap();
+    for forbidden in ["rusqlite", "libsqlite3-sys", "shakmaty"] {
+        assert!(
+            !tree.contains(forbidden),
+            "independent CLI platform probe pulled in {forbidden}"
+        );
+    }
 }
 
 fn source_files(directory: &std::path::Path) -> Vec<PathBuf> {
