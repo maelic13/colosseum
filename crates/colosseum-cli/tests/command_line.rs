@@ -29,11 +29,14 @@ fn help_is_headless_and_names_the_product() {
 
 #[test]
 fn fixed_match_accepts_the_same_ordinary_uci_path_with_different_side_options() {
+    let root = tempfile::tempdir().unwrap();
     let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
     let output = cli()
         .args(["match", "--games", "2"])
         .arg(fixture)
         .arg(fixture)
+        .arg("--dir")
+        .arg(root.path().join("run"))
         .args([
             "--a-option",
             "Hash=16",
@@ -53,6 +56,10 @@ fn fixed_match_accepts_the_same_ordinary_uci_path_with_different_side_options() 
     assert!(output.stderr.is_empty());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["type"], "fixed-match");
+    assert_eq!(
+        value["run_directory"],
+        root.path().join("run").to_string_lossy().as_ref()
+    );
     assert_eq!(value["report"]["games_requested"], 2);
     assert_eq!(value["report"]["games_completed"], 2);
     assert_eq!(value["report"]["status"], "completed");
@@ -63,19 +70,45 @@ fn fixed_match_accepts_the_same_ordinary_uci_path_with_different_side_options() 
     assert_eq!(clock["version"], 1);
     assert!(clock["monotonic_resolution_ns"].as_u64().unwrap() > 0);
     assert!(clock["white_charged_elapsed"]["samples"].as_u64().unwrap() > 0);
+    let run = root.path().join("run");
+    for artifact in [
+        "resolved-config.json",
+        "config.sha256",
+        "run-record.json",
+        "checkpoint.json",
+        "run.log",
+        "games.pgn",
+        "result.json",
+    ] {
+        assert!(run.join(artifact).is_file(), "missing {artifact}");
+    }
+    assert!(
+        std::fs::read_to_string(run.join("run.log"))
+            .unwrap()
+            .contains("match-finished")
+    );
+    assert!(
+        std::fs::read_to_string(run.join("games.pgn"))
+            .unwrap()
+            .contains("[Event \"Colosseum CLI fixed match\"]")
+    );
 }
 
 #[test]
 fn fixed_match_strict_default_invalidates_on_the_first_engine_fault() {
+    let root = tempfile::tempdir().unwrap();
     let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
     let output = cli()
         .args(["match", "--games", "2"])
         .arg(fixture)
         .arg(fixture)
+        .arg("--dir")
+        .arg(root.path().join("run"))
         .arg("--json")
         .output()
         .unwrap();
     assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(1));
     assert!(output.stderr.is_empty());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["report"]["status"], "invalid");
@@ -93,10 +126,13 @@ fn fixed_match_never_scores_an_engine_spawn_failure() {
         .args(["match", "--games", "2"])
         .arg(root.path().join("missing-a"))
         .arg(root.path().join("missing-b"))
+        .arg("--dir")
+        .arg(root.path().join("run"))
         .arg("--json")
         .output()
         .unwrap();
     assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(3));
     assert!(output.stderr.is_empty());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["report"]["status"], "infrastructure-error");
@@ -267,11 +303,14 @@ fn fixed_match_resolves_direct_per_side_cpu_controls() {
 
 #[test]
 fn fixed_match_runs_explicit_concurrency_and_reports_hash_lower_bound() {
+    let root = tempfile::tempdir().unwrap();
     let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
     let output = cli()
         .args(["match", "--games", "4"])
         .arg(fixture)
         .arg(fixture)
+        .arg("--dir")
+        .arg(root.path().join("run"))
         .args([
             "--concurrency",
             "2",
@@ -326,6 +365,8 @@ rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -\n",
         .args(["match", "--games", "5"])
         .arg(fixture)
         .arg(fixture)
+        .arg("--dir")
+        .arg(root.path().join("run"))
         .arg("--book")
         .arg(&book)
         .args([

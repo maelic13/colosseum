@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–3 plus fixed-N direct-engine matches with independent per-side time controls are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process containment, durable run primitives, topology/affinity handling, and same-binary option comparisons |
-| What is missing | Match output durability; pair-atomic SPRT; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–3 plus fixed-N direct-engine matches through durable output are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process containment, recoverable run directories, topology/affinity handling, optional paired books, concurrent resource planning, full logs/PGN/failed-game traffic and same-binary option comparisons |
+| What is missing | Phase-4A exit acceptance; pair-atomic SPRT; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 4A.6 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4A.7 — durable and structured output** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Platform status | Windows ☑ local through Phase 4A.7 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 4A.8 — fixed-match exit acceptance** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -384,8 +384,16 @@ model as well.
   [`crates/colosseum-engine/src/openings.rs`](crates/colosseum-engine/src/openings.rs),
   [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs)
-- ☐ **4A.7** — **Model: Terra High.** Live/structured output, full log, PGN and failed-game traffic;
-  JSON-only stdout mode and documented exit codes
+- ☑ **4A.7 — DONE** — **Model: Terra High.** Fixed matches use the common
+  recoverable run directory with per-game checksummed checkpoints, append-only
+  JSON-lines log, rebuilt PGN, final JSON report and retained abnormal-game UCI
+  traffic; interval progress stays on stderr, JSON stdout remains a single
+  document, and valid/invalid/configuration/infrastructure exit codes are
+  documented and tested — evidence:
+  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
+  [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
+  [`docs/cli/match.md`](docs/cli/match.md)
 - ☐ **4A.8** — **EXIT · Model: Sol High.** Path-only/no-book and paired-book matches pass; fault
   injection never scores infrastructure failures; output/resume/schedule
   tests pass; a stub sleeping a commanded duration is charged it within
@@ -565,9 +573,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4A.7 — durable and structured output. Model: GPT-5.6 Terra — High.**
-Compose live/structured reporting, append-only logs, PGN, failed-game traffic,
-strict JSON stdout and documented exit codes with the common run directory.
+**Phase 4A.8 — fixed-match exit acceptance. Model: GPT-5.6 Sol — High.**
+Close the fixed-match phase with cross-platform deterministic fixtures for
+path-only and paired-book runs, failure classification, durable resume,
+schedule replay and every clock-accounting boundary.
 
 ```
 git diff --check

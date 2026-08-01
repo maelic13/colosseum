@@ -17,3 +17,9 @@ current generation and `checkpoint.previous.json` is the last generation. If
 the current file is missing, torn, invalid or fails its checksum, recovery uses
 the previous generation. If neither validates, resume fails rather than
 inventing state.
+
+For fixed matches, `run.log` is an append-only JSON-lines event stream,
+`games.pgn` is rebuilt from the authoritative checkpoint, `result.json` is the
+final structured report, and `failed-games/` retains UCI stdout/stderr traffic
+for abnormal games. A resumed match schedules only game numbers absent from the
+verified checkpoint and retains deterministic report order.

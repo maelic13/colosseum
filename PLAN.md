@@ -1500,6 +1500,14 @@ colour-reversed pair; every game records its assignment and the result reports
 reuse fraction. No-book runs remain valid startpos runs with an explicit
 diversity warning, and supplied or generated master seeds are recorded.
 
+**Implemented match output (4A.7):** every live fixed match now composes the
+common recoverable run directory. Completed games enter checksummed
+two-generation state, an append-only JSON-lines event log, a checkpoint-derived
+PGN, final structured report and versioned run record; abnormal games retain
+their UCI traffic separately. Configurable progress is stderr-only, JSON stdout
+remains one document, and exit codes distinguish valid completion, invalid
+experiment, configuration refusal and infrastructure/runtime failure.
+
 ### Phase 4A — Fixed-match runner
 
 Implement the non-sequential part of 5.4: fixed matches, per-side controls,

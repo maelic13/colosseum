@@ -4,8 +4,10 @@
 //! statistics or stopping logic. Pair-atomic scheduling, configurable clocks,
 //! openings, persistence and fault policy are later phase responsibilities.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use colosseum_application::{CpuAllocation, EngineLaunchSpec};
@@ -20,7 +22,7 @@ use colosseum_engine::{
     detect_cpu_topology, load_openings_named, plan_cpu_placement, run_game,
 };
 use colosseum_uci::SpawnOptions;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -29,7 +31,7 @@ pub const DEFAULT_BASE_MS: u64 = 3_000;
 pub const DEFAULT_INCREMENT_MS: u64 = 30;
 pub const DEFAULT_MARGIN_MS: u64 = 2_000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfiguredTimeControl {
     pub control: TimeControl,
     pub margin_ms: u64,
@@ -61,7 +63,7 @@ impl ConfiguredTimeControl {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MatchSide {
     A,
@@ -85,7 +87,7 @@ pub struct MatchScore {
     pub draws: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MatchGame {
     pub number: u32,
     pub white: MatchSide,
@@ -98,6 +100,7 @@ pub struct MatchGame {
     pub fault: Option<GameFault>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    pub pgn: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -153,7 +156,7 @@ pub struct FixedMatchReport {
     pub games: Vec<MatchGame>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpeningAssignment {
     pub book_index: Option<usize>,
     pub label: String,
@@ -283,7 +286,7 @@ pub struct MatchExecutionPlan {
     pub hash_memory: HashMemoryReport,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FixedMatchRequest {
     pub engine_a: EngineLaunchSpec,
     pub engine_b: EngineLaunchSpec,
@@ -296,6 +299,65 @@ pub struct FixedMatchRequest {
     pub master_seed: u64,
     pub master_seed_generated: bool,
     pub openings: MatchOpenings,
+    pub completed_games: Vec<MatchGame>,
+    pub progress: MatchProgress,
+    pub observer: Option<Arc<dyn MatchObserver>>,
+}
+
+impl std::fmt::Debug for FixedMatchRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("FixedMatchRequest")
+            .field("games", &self.games)
+            .field("completed_games", &self.completed_games.len())
+            .field("progress", &self.progress.snapshot())
+            .field("observer", &self.observer.as_ref().map(|_| "configured"))
+            .finish_non_exhaustive()
+    }
+}
+
+pub trait MatchObserver: Send + Sync {
+    fn game_completed(&self, game: &MatchGame) -> Result<(), String>;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MatchProgress {
+    attempted: Arc<AtomicU32>,
+    scored: Arc<AtomicU32>,
+    faults: Arc<AtomicU32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct MatchProgressSnapshot {
+    pub attempted: u32,
+    pub scored: u32,
+    pub faults: u32,
+}
+
+impl MatchProgress {
+    #[must_use]
+    pub fn snapshot(&self) -> MatchProgressSnapshot {
+        MatchProgressSnapshot {
+            attempted: self.attempted.load(Ordering::Relaxed),
+            scored: self.scored.load(Ordering::Relaxed),
+            faults: self.faults.load(Ordering::Relaxed),
+        }
+    }
+
+    fn record(&self, game: &MatchGame) {
+        self.attempted.fetch_add(1, Ordering::Relaxed);
+        if game.scorable {
+            self.scored.fetch_add(1, Ordering::Relaxed);
+        }
+        if game.fault.is_some() {
+            self.faults.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MatchCheckpoint {
+    pub games: Vec<MatchGame>,
 }
 
 #[derive(Debug, Error)]
@@ -322,6 +384,8 @@ pub enum MatchError {
     Opening(String),
     #[error("opening start index {start_index} is outside a book with {openings} openings")]
     BookStartOutOfRange { start_index: usize, openings: usize },
+    #[error("durable match output failed: {0}")]
+    Output(String),
 }
 
 pub fn plan_execution(
@@ -444,6 +508,9 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         master_seed,
         master_seed_generated,
         openings,
+        completed_games,
+        progress,
+        observer,
     } = request;
     if games == 0 {
         return Err(MatchError::ZeroGames);
@@ -476,15 +543,24 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         master_seed,
         master_seed_generated,
         openings: openings.report().clone(),
-        games: Vec::with_capacity(games as usize),
+        games: completed_games,
     };
 
     let mut workers = tokio::task::JoinSet::new();
-    let mut next_number = 1;
-    while next_number <= games || !workers.is_empty() {
-        while next_number <= games && workers.len() < execution.concurrency {
-            let number = next_number;
-            next_number += 1;
+    let completed_numbers = report
+        .games
+        .iter()
+        .map(|game| game.number)
+        .collect::<BTreeSet<_>>();
+    let mut pending = (1..=games)
+        .filter(|number| !completed_numbers.contains(number))
+        .collect::<VecDeque<_>>();
+    for game in &report.games {
+        progress.record(game);
+    }
+    while !pending.is_empty() || !workers.is_empty() {
+        while !pending.is_empty() && workers.len() < execution.concurrency {
+            let number = pending.pop_front().expect("pending is not empty");
             let slot = &execution.slots[(number as usize - 1) % execution.slots.len()];
             let mut engine_a = engine_a.clone();
             let mut engine_b = engine_b.clone();
@@ -506,6 +582,10 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
             break;
         };
         let game = joined.map_err(|error| MatchError::Worker(error.to_string()))?;
+        if let Some(observer) = &observer {
+            observer.game_completed(&game).map_err(MatchError::Output)?;
+        }
+        progress.record(&game);
         report.games.push(game);
     }
     report.games.sort_by_key(|game| game.number);
@@ -618,6 +698,7 @@ async fn play_game(request: GameRequest) -> MatchGame {
         opening: opening_assignment,
         fault: game.fault,
         error: game.error,
+        pgn: game.pgn,
     }
 }
 

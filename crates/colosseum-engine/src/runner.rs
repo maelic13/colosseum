@@ -14,7 +14,7 @@ use colosseum_core::{
     adjudicate,
 };
 use colosseum_uci::{EngineProcess, GoLimits, SpawnOptions, UciError, UciPosition};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use shakmaty::san::SanPlus;
 use shakmaty::uci::UciMove;
 use shakmaty::zobrist::Zobrist64;
@@ -177,14 +177,14 @@ pub struct GameReport {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum GameSide {
     White,
     Black,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EngineFaultKind {
     Timeout,
@@ -194,7 +194,7 @@ pub enum EngineFaultKind {
     IllegalMove,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "cause", rename_all = "kebab-case")]
 pub enum GameFault {
     Engine {
@@ -208,7 +208,7 @@ pub enum GameFault {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChargedElapsedSummary {
     pub samples: u32,
     pub min_ns: u64,
@@ -216,7 +216,7 @@ pub struct ChargedElapsedSummary {
     pub max_ns: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClockAccountingReport {
     pub model: String,
     pub version: u32,

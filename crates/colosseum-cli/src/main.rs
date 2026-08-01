@@ -1,15 +1,22 @@
 //! Independent headless composition root for Colosseum CLI.
 
 use std::ffi::OsString;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use colosseum_application::{
     CheckEngine, ComplianceReport, ComplianceStatus, EngineInspection, EngineLaunchSpec,
     InspectEngine, RuntimeParticipant, UciOptionSchema,
 };
-use colosseum_cli::{EngineArgs, RunRecord, built_in_defaults, parse_cpu_list, resolve_config};
+use colosseum_cli::{
+    EngineArgs, OfficialSample, RunDirectory, RunRecord, RunRecorder, RunStatus, built_in_defaults,
+    parse_cpu_list, resolve_config,
+};
 use colosseum_core::{
     AdjudicationConfig, DrawAdjudication, OpeningBook, OpeningOrder, ParticipantId,
     ResignAdjudication, TimeControl,
@@ -190,6 +197,16 @@ struct MatchCommand {
     /// Master seed for every random choice; generated and reported when omitted.
     #[arg(long)]
     seed: Option<u64>,
+
+    /// Self-contained run directory; an existing matching directory resumes.
+    #[arg(long = "dir")]
+    run_directory: Option<PathBuf>,
+    /// Archive an existing --dir and start a fresh run there.
+    #[arg(long, requires = "run_directory")]
+    restart: bool,
+    /// Seconds between live progress reports on standard error.
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..))]
+    progress_interval_secs: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -350,6 +367,7 @@ enum MachineOutput<'a> {
         report: capabilities::CapabilitiesReport,
     },
     FixedMatch {
+        run_directory: PathBuf,
         report: match_runner::FixedMatchReport,
     },
     DryRun {
@@ -382,12 +400,20 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         eprintln!("configuration error: book order/start/plies require --book");
         return ExitCode::from(2);
     }
-    let (master_seed, master_seed_generated) = match resolve_master_seed(command.seed) {
-        Ok(seed) => seed,
-        Err(error) => {
-            eprintln!("configuration error: {error}");
-            return ExitCode::from(2);
-        }
+    let resumed_seed = command
+        .run_directory
+        .as_deref()
+        .filter(|path| path.exists() && !command.restart)
+        .and_then(read_stored_seed);
+    let (master_seed, master_seed_generated) = match resumed_seed {
+        Some(seed) if command.seed.is_none() => seed,
+        _ => match resolve_master_seed(command.seed) {
+            Ok(seed) => seed,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        },
     };
     let adjudication = resolve_adjudication(&command);
     let fault_policy = match_runner::FaultPolicy {
@@ -498,48 +524,48 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
             return ExitCode::from(2);
         }
     };
+    let current_directory = match std::env::current_dir() {
+        Ok(directory) => directory,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let resolved = match resolve_config(
+        built_in_defaults(),
+        None,
+        json!({
+            "command": "match",
+            "games": command.games,
+            "engine_a": &engine_a,
+            "engine_b": &engine_b,
+            "engine_a_time_control": engine_a_time_control,
+            "engine_b_time_control": engine_b_time_control,
+            "adjudication": adjudication,
+            "fault_policy": fault_policy,
+            "execution": execution,
+            "master_seed": master_seed,
+            "master_seed_generated": master_seed_generated,
+            "openings": openings.report(),
+        }),
+        &[],
+        &current_directory,
+        &match command.book {
+            Some(_) => vec![
+                "/engine_a/executable".into(),
+                "/engine_b/executable".into(),
+                "/openings/path".into(),
+            ],
+            None => vec!["/engine_a/executable".into(), "/engine_b/executable".into()],
+        },
+    ) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     if dry_run {
-        let current_directory = match std::env::current_dir() {
-            Ok(directory) => directory,
-            Err(error) => {
-                eprintln!("configuration error: {error}");
-                return ExitCode::from(2);
-            }
-        };
-        let resolved = match resolve_config(
-            built_in_defaults(),
-            None,
-            json!({
-                "command": "match",
-                "games": command.games,
-                "engine_a": &engine_a,
-                "engine_b": &engine_b,
-                "engine_a_time_control": engine_a_time_control,
-                "engine_b_time_control": engine_b_time_control,
-                "adjudication": adjudication,
-                "fault_policy": fault_policy,
-                "execution": execution,
-                "master_seed": master_seed,
-                "master_seed_generated": master_seed_generated,
-                "openings": openings.report(),
-            }),
-            &[],
-            &current_directory,
-            &match command.book {
-                Some(_) => vec![
-                    "/engine_a/executable".into(),
-                    "/engine_b/executable".into(),
-                    "/openings/path".into(),
-                ],
-                None => vec!["/engine_a/executable".into(), "/engine_b/executable".into()],
-            },
-        ) {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                eprintln!("configuration error: {error}");
-                return ExitCode::from(2);
-            }
-        };
         let output = MachineOutput::DryRun {
             command: "match",
             config_sha256: resolved.sha256(),
@@ -549,7 +575,56 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         print_output(&output, machine);
         return ExitCode::SUCCESS;
     }
-    match match_runner::run_fixed_match(match_runner::FixedMatchRequest {
+
+    let opened = match &command.run_directory {
+        Some(path) => RunDirectory::open_explicit(path, &resolved, command.restart),
+        None => RunDirectory::create_unique(&current_directory, "match", &resolved),
+    };
+    let opened = match opened {
+        Ok(opened) => opened,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if let Some(archived) = &opened.archived {
+        eprintln!("archived previous run at {}", archived.display());
+    }
+    let directory = Arc::new(opened.directory);
+    let completed_games = if opened.resumed
+        && (directory.paths().checkpoint.exists() || directory.paths().previous_checkpoint.exists())
+    {
+        match directory.read_checkpoint::<match_runner::MatchCheckpoint>() {
+            Ok(checkpoint) => checkpoint.games,
+            Err(error) => {
+                eprintln!("resume failed: {error}");
+                return ExitCode::from(3);
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let observer = match DurableMatchOutput::new(Arc::clone(&directory), completed_games.clone()) {
+        Ok(observer) => Arc::new(observer),
+        Err(error) => {
+            eprintln!("match output failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
+    let mut recorder = match if opened.resumed {
+        RunRecorder::resume(&directory)
+    } else {
+        RunRecorder::begin(&directory, "match")
+    } {
+        Ok(recorder) => recorder,
+        Err(error) => {
+            eprintln!("run record failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let progress = match_runner::MatchProgress::default();
+    let request = match_runner::FixedMatchRequest {
         engine_a,
         engine_b,
         games: command.games,
@@ -561,26 +636,165 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         master_seed,
         master_seed_generated,
         openings,
-    })
-    .await
-    {
+        completed_games,
+        progress: progress.clone(),
+        observer: Some(observer.clone()),
+    };
+    if !machine {
+        eprintln!("match run directory: {}", directory.paths().root.display());
+    }
+    if opened.resumed && !machine {
+        eprintln!(
+            "resuming {} durable game(s) from the stored schedule",
+            progress.snapshot().attempted
+        );
+    }
+    let match_future = match_runner::run_fixed_match(request);
+    tokio::pin!(match_future);
+    let period = Duration::from_secs(command.progress_interval_secs);
+    let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    let outcome = loop {
+        tokio::select! {
+            result = &mut match_future => break result,
+            _ = interval.tick() => {
+                let snapshot = progress.snapshot();
+                eprintln!(
+                    "progress: {}/{} attempted, {} scored, {} faults",
+                    snapshot.attempted, command.games, snapshot.scored, snapshot.faults
+                );
+            }
+        }
+    };
+    match outcome {
         Ok(report) => {
-            let success = report.status == match_runner::MatchStatus::Completed;
+            if let Err(error) = observer.finish(&report) {
+                eprintln!("match output failed: {error}");
+                return ExitCode::from(3);
+            }
+            let sample = OfficialSample {
+                committed_units: u64::from(report.games_attempted),
+                scored_games: u64::from(report.games_completed),
+                completed_pairs: u64::from(report.games_completed / 2),
+                pentanomial: [0; 5],
+                unpaired_games: u64::from(report.games_completed % 2),
+            };
+            if let Err(error) = recorder.update_sample(sample) {
+                eprintln!("run record failed: {error}");
+                return ExitCode::from(3);
+            }
+            let (run_status, exit_code) = match report.status {
+                match_runner::MatchStatus::Completed => (RunStatus::Completed, 0),
+                match_runner::MatchStatus::Invalid => (RunStatus::Invalid, 1),
+                match_runner::MatchStatus::InfrastructureError => (RunStatus::Aborted, 3),
+            };
+            if let Err(error) = recorder.finish(run_status) {
+                eprintln!("run record failed: {error}");
+                return ExitCode::from(3);
+            }
             if machine {
-                print_json(&MachineOutput::FixedMatch { report });
+                print_json(&MachineOutput::FixedMatch {
+                    run_directory: directory.paths().root.clone(),
+                    report,
+                });
             } else {
                 print_fixed_match(&report);
+                println!("artifacts: {}", directory.paths().root.display());
             }
-            if success {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::FAILURE
-            }
+            ExitCode::from(exit_code)
         }
         Err(error) => {
             eprintln!("match failed: {error}");
-            ExitCode::FAILURE
+            ExitCode::from(3)
         }
+    }
+}
+
+fn read_stored_seed(root: &Path) -> Option<(u64, bool)> {
+    let bytes = fs::read(root.join("resolved-config.json")).ok()?;
+    let value: Value = serde_json::from_slice(&bytes).ok()?;
+    Some((
+        value.get("master_seed")?.as_u64()?,
+        value
+            .get("master_seed_generated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    ))
+}
+
+struct DurableMatchOutput {
+    directory: Arc<RunDirectory>,
+    games: Mutex<Vec<match_runner::MatchGame>>,
+}
+
+impl DurableMatchOutput {
+    fn new(
+        directory: Arc<RunDirectory>,
+        mut games: Vec<match_runner::MatchGame>,
+    ) -> Result<Self, String> {
+        games.sort_by_key(|game| game.number);
+        let output = Self {
+            directory,
+            games: Mutex::new(games),
+        };
+        output.rewrite_pgn()?;
+        Ok(output)
+    }
+
+    fn rewrite_pgn(&self) -> Result<(), String> {
+        let games = self.games.lock().map_err(|_| "PGN lock poisoned")?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(self.directory.paths().root.join("games.pgn"))
+            .map_err(|error| error.to_string())?;
+        for game in games.iter() {
+            writeln!(file, "{}", game.pgn.trim_end()).map_err(|error| error.to_string())?;
+            writeln!(file).map_err(|error| error.to_string())?;
+        }
+        file.sync_all().map_err(|error| error.to_string())
+    }
+
+    fn finish(&self, report: &match_runner::FixedMatchReport) -> Result<(), String> {
+        let bytes = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
+        fs::write(self.directory.paths().root.join("result.json"), bytes)
+            .map_err(|error| error.to_string())?;
+        let mut line = serde_json::to_vec(&json!({
+            "event": "match-finished",
+            "status": report.status,
+            "attempted": report.games_attempted,
+            "scored": report.games_completed,
+        }))
+        .map_err(|error| error.to_string())?;
+        line.push(b'\n');
+        self.directory
+            .append_log(&line)
+            .map_err(|error| error.to_string())
+    }
+}
+
+impl match_runner::MatchObserver for DurableMatchOutput {
+    fn game_completed(&self, game: &match_runner::MatchGame) -> Result<(), String> {
+        {
+            let mut games = self.games.lock().map_err(|_| "checkpoint lock poisoned")?;
+            games.push(game.clone());
+            games.sort_by_key(|game| game.number);
+            self.directory
+                .write_checkpoint(&match_runner::MatchCheckpoint {
+                    games: games.clone(),
+                })
+                .map_err(|error| error.to_string())?;
+        }
+        self.rewrite_pgn()?;
+        let mut line = serde_json::to_vec(&json!({
+            "event": "game-completed",
+            "game": game,
+        }))
+        .map_err(|error| error.to_string())?;
+        line.push(b'\n');
+        self.directory
+            .append_log(&line)
+            .map_err(|error| error.to_string())
     }
 }
 

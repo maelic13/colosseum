@@ -150,6 +150,31 @@ impl RunRecorder {
         Ok(recorder)
     }
 
+    /// Resume ownership of an interrupted run without replacing its identity,
+    /// timestamps, sample or anomaly history.
+    pub fn resume(directory: &RunDirectory) -> Result<Self, RunRecordError> {
+        let path = directory.paths().root.join("run-record.json");
+        let mut record = RunRecord::read(&directory.paths().root)?;
+        if record.config_sha256 != directory.config_sha256() {
+            return Err(RunRecordError::ConfigMismatch {
+                stored: record.config_sha256,
+                requested: directory.config_sha256().to_owned(),
+            });
+        }
+        if matches!(record.status, RunStatus::Completed | RunStatus::Invalid) {
+            return Err(RunRecordError::TerminalResume(record.status));
+        }
+        record.status = RunStatus::Running;
+        record.anomalies.push(Anomaly {
+            code: "run-resumed".into(),
+            message: "workflow resumed from its durable run directory".into(),
+        });
+        let mut recorder = Self { path, record };
+        recorder.touch();
+        recorder.persist()?;
+        Ok(recorder)
+    }
+
     #[must_use]
     pub fn record(&self) -> &RunRecord {
         &self.record
@@ -226,6 +251,10 @@ pub enum RunRecordError {
     NonTerminalFinish,
     #[error("run is already terminal: {0:?}")]
     AlreadyTerminal(RunStatus),
+    #[error("completed or invalid run cannot be resumed: {0:?}")]
+    TerminalResume(RunStatus),
+    #[error("run-record configuration mismatch: stored {stored}, requested {requested}")]
+    ConfigMismatch { stored: String, requested: String },
     #[error("could not {operation} at {path}: {source}")]
     Io {
         operation: &'static str,

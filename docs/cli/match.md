@@ -102,9 +102,35 @@ one final half-pair. Output records the assignment for every game and reports
 the fraction of scheduled pairs that reused an opening. Without `--book`, every
 game starts from startpos and output carries an opening-diversity warning.
 
-Durable run output and statistical commands are added separately. `--a-cores`
-and `--b-cores` are direct hard-placement alternatives to the global placement
-pool.
+Every live match writes a self-contained run directory. Without `--dir`, a
+unique path is created beneath `./colosseum-runs/`. `--dir PATH` selects a
+stable directory and resumes matching durable state; `--restart` archives the
+complete old directory before starting fresh. A materially different resolved
+configuration is refused on resume. The directory contains:
+
+| Artifact | Purpose |
+|---|---|
+| `resolved-config.json` and `config.sha256` | Canonical replay identity |
+| `checkpoint.json` and `checkpoint.previous.json` | Checksummed durable game state |
+| `run-record.json` | Versioned lifecycle and official sample |
+| `run.log` | Append-only JSON-lines event log |
+| `games.pgn` | Portable game export, rebuilt from durable state |
+| `result.json` | Final structured match report |
+| `failed-games/` | UCI traffic and stderr for abnormal games |
+
+Progress is written to stderr every `--progress-interval-secs N` seconds. The
+final human report names the artifact directory. In `--json` mode stdout still
+contains exactly one JSON document; it includes `run_directory`, while progress
+and diagnostics remain confined to stderr.
+
+Match exit codes are stable for automation: `0` means completed and valid, `1`
+means completed but invalid under the configured fault policy, `2` means CLI or
+configuration refusal, and `3` means an infrastructure, persistence or runtime
+error. A failed command that cannot produce a final report leaves JSON stdout
+empty.
+
+`--a-cores` and `--b-cores` are direct hard-placement alternatives to the
+global placement pool.
 
 Use `--dry-run` to resolve and print both invocations without launching either
 engine. `--json` emits one match result document on stdout.
