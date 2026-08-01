@@ -43,6 +43,16 @@ With no selection, that side uses `3000 ms + 30 ms` per move. The per-side
 not sent to the engines. This permits odds matches, including one engine at a
 different clock or search limit.
 
+Clocked searches use the recorded `go-write-to-bestmove-read` model version 1.
+The charged interval begins after the complete `go` command has been flushed
+and ends after the complete `bestmove` line has been read, using a monotonic
+clock. Position setup is outside that interval. Increment is credited only
+after an accepted move: an elapsed time greater than remaining time plus margin
+forfeits; exact equality is accepted. Structured results include the model,
+version, both margins, measured monotonic resolution and per-side charged-time
+sample count/minimum/median/maximum. These figures intentionally do not claim
+to separate engine work from scheduler or pipe latency inside the interval.
+
 Matches currently use the standard start position and one game at a time.
 Adjudication, CPU placement, concurrency, books, durable run output and
 statistical commands are added separately. `--a-cores` and `--b-cores` are

@@ -15,11 +15,11 @@ numbers, internal naming or method argumentation.
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
 | What exists | Phases 0–3 plus fixed-N direct-engine matches with independent per-side time controls are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process containment, durable run primitives, topology/affinity handling, and same-binary option comparisons |
-| What is missing | Versioned clock accounting; match adjudication/fault/concurrency/book/output durability; pair-atomic SPRT; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
+| What is missing | Match adjudication/fault/concurrency/book/output durability; pair-atomic SPRT; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 4A.2 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4A.2a — versioned clock accounting** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Platform status | Windows ☑ local through Phase 4A.2a · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 4A.3 — configurable adjudication** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -341,14 +341,17 @@ model as well.
   [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/match.md`](docs/cli/match.md)
-- ☐ **4A.2a** — **Model: Sol High. Clock accounting (PLAN §5.4a), explicit/versioned/recorded:**
+- ☑ **4A.2a — DONE** — **Model: Sol High. Clock accounting (PLAN §5.4a), explicit/versioned/recorded:**
   clock runs from finishing the write of `go` to finishing the read of
   `bestmove`, charging harness read latency and engine search start-up to the
   mover; `position` setup is not charged; monotonic source only; increment
   follows `E > R + M` forfeit, otherwise `max(0, R-E) + I`, with equality
   accepted; the margin is not sent to the engine; record model/version,
   margin, clock resolution and charged-elapsed min/median/max without
-  claiming engine/harness overhead can be separated
+  claiming engine/harness overhead can be separated — evidence:
+  [`crates/colosseum-uci/src/process.rs`](crates/colosseum-uci/src/process.rs),
+  [`crates/colosseum-engine/src/runner.rs`](crates/colosseum-engine/src/runner.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs)
 - ☐ **4A.3** — **Model: Terra High.** Draw/resign/max-moves adjudication independently configurable and
   disableable; forward engine tablebase options but defer harness probing
 - ☐ **4A.4** — **Model: Sol High.** Separate engine from infrastructure faults. Strict default: engine
@@ -540,9 +543,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4A.2a — versioned clock accounting. Model: GPT-5.6 Sol — High.**
-Implement and record PLAN §5.4a's exact monotonic charged interval, margin and
-increment boundary semantics, resolution and elapsed summary.
+**Phase 4A.3 — configurable adjudication. Model: GPT-5.6 Terra — High.**
+Expose independently disableable draw, resignation and maximum-move policies,
+while continuing to forward arbitrary engine tablebase UCI options.
 
 ```
 git diff --check

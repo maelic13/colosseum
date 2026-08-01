@@ -1463,6 +1463,14 @@ per-side forfeit margin. The shared runner now chooses limits and clock state
 from the side to move; the GUI scheduler maps its existing symmetric control
 to both sides, preserving desktop behaviour.
 
+**Implemented clock accounting (4A.2a):** the runner uses clock model
+`go-write-to-bestmove-read` version 1. The monotonic charged interval excludes
+position setup, begins immediately after the flushed `go` write and ends after
+the complete `bestmove` read. The explicit `E > R + M` boundary forfeits before
+increment, equality is accepted, and every structured game result records the
+model/version, margins, probed resolution and per-side charged elapsed
+min/median/max without inventing an engine-versus-harness split.
+
 ### Phase 4A — Fixed-match runner
 
 Implement the non-sequential part of 5.4: fixed matches, per-side controls,

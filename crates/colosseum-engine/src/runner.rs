@@ -13,6 +13,7 @@ use colosseum_core::{
     adjudicate,
 };
 use colosseum_uci::{EngineProcess, GoLimits, SpawnOptions, UciError, UciPosition};
+use serde::Serialize;
 use shakmaty::san::SanPlus;
 use shakmaty::uci::UciMove;
 use shakmaty::zobrist::Zobrist64;
@@ -30,6 +31,9 @@ const MAX_PLIES: usize = 6000;
 const FIXED_SEARCH_DEADLINE: Duration = Duration::from_secs(600);
 /// How long an engine gets to answer `stop` when its ponder prediction missed.
 const PONDER_STOP_DEADLINE: Duration = Duration::from_secs(5);
+
+pub const CLOCK_MODEL_ID: &str = "go-write-to-bestmove-read";
+pub const CLOCK_MODEL_VERSION: u32 = 1;
 
 fn color_idx(color: Color) -> usize {
     if color == Color::White { 0 } else { 1 }
@@ -164,8 +168,28 @@ pub struct GameReport {
     pub san_moves: Vec<String>,
     pub uci_moves: Vec<String>,
     pub pgn: String,
+    pub clock_accounting: ClockAccountingReport,
     /// Set when the game ended due to an engine problem (crash/illegal/timeout).
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChargedElapsedSummary {
+    pub samples: u32,
+    pub min_ns: u64,
+    pub median_ns: u64,
+    pub max_ns: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClockAccountingReport {
+    pub model: String,
+    pub version: u32,
+    pub white_margin_ms: u64,
+    pub black_margin_ms: u64,
+    pub monotonic_resolution_ns: u64,
+    pub white_charged_elapsed: Option<ChargedElapsedSummary>,
+    pub black_charged_elapsed: Option<ChargedElapsedSummary>,
 }
 
 /// Per-side running average of reported nps.
@@ -221,12 +245,15 @@ impl DepthAccumulator {
 struct MoveTimeAccumulator {
     total_ms: u128,
     samples: u64,
+    elapsed_ns: Vec<u64>,
 }
 
 impl MoveTimeAccumulator {
     fn add(&mut self, elapsed: std::time::Duration) {
         self.total_ms += elapsed.as_millis();
         self.samples += 1;
+        self.elapsed_ns
+            .push(elapsed.as_nanos().min(u128::from(u64::MAX)) as u64);
     }
 
     fn average_ms(&self) -> Option<f64> {
@@ -235,6 +262,57 @@ impl MoveTimeAccumulator {
         } else {
             Some(self.total_ms as f64 / self.samples as f64)
         }
+    }
+
+    fn summary(&self) -> Option<ChargedElapsedSummary> {
+        let mut values = self.elapsed_ns.clone();
+        if values.is_empty() {
+            return None;
+        }
+        values.sort_unstable();
+        let middle = values.len() / 2;
+        let median_ns = if values.len().is_multiple_of(2) {
+            ((u128::from(values[middle - 1]) + u128::from(values[middle])) / 2) as u64
+        } else {
+            values[middle]
+        };
+        Some(ChargedElapsedSummary {
+            samples: values.len().min(u32::MAX as usize) as u32,
+            min_ns: values[0],
+            median_ns,
+            max_ns: *values.last().expect("nonempty elapsed sample"),
+        })
+    }
+}
+
+fn monotonic_resolution_ns() -> u64 {
+    let mut previous = std::time::Instant::now();
+    let mut minimum = u64::MAX;
+    for _ in 0..1_024 {
+        let now = std::time::Instant::now();
+        let elapsed = now.saturating_duration_since(previous).as_nanos();
+        if elapsed > 0 {
+            minimum = minimum.min(elapsed.min(u128::from(u64::MAX)) as u64);
+        }
+        previous = now;
+    }
+    if minimum == u64::MAX { 1 } else { minimum }
+}
+
+fn clock_accounting_report(
+    spec: &GameSpec,
+    monotonic_resolution_ns: u64,
+    white: Option<&MoveTimeAccumulator>,
+    black: Option<&MoveTimeAccumulator>,
+) -> ClockAccountingReport {
+    ClockAccountingReport {
+        model: CLOCK_MODEL_ID.to_owned(),
+        version: CLOCK_MODEL_VERSION,
+        white_margin_ms: spec.white_time_margin.as_millis().min(u128::from(u64::MAX)) as u64,
+        black_margin_ms: spec.black_time_margin.as_millis().min(u128::from(u64::MAX)) as u64,
+        monotonic_resolution_ns,
+        white_charged_elapsed: white.and_then(MoveTimeAccumulator::summary),
+        black_charged_elapsed: black.and_then(MoveTimeAccumulator::summary),
     }
 }
 
@@ -288,6 +366,7 @@ async fn prepare(spec: &EngineGameSpec, handshake_timeout: Duration) -> Prepared
 /// `live` is updated throughout for the GUI's live view.
 pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
     let game_start = std::time::Instant::now();
+    let monotonic_resolution_ns = monotonic_resolution_ns();
 
     let white = prepare(&spec.white, spec.handshake_timeout).await;
     let black = prepare(&spec.black, spec.handshake_timeout).await;
@@ -295,7 +374,8 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
     let (mut white, mut black) = match (white, black) {
         (Prepared::Ready(w), Prepared::Ready(b)) => (w, b),
         (white, black) => {
-            let mut report = handle_setup_failure(&spec, white, black).await;
+            let mut report =
+                handle_setup_failure(&spec, white, black, monotonic_resolution_ns).await;
             report.stats.duration_ms = Some(game_start.elapsed().as_millis() as u64);
             if let Ok(mut lg) = live.lock() {
                 lg.finished = Some((report.result, report.termination));
@@ -461,10 +541,16 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             black_move_time.add(output.elapsed);
         }
 
-        // Deduct the time used from the mover's clock (clock-based controls only)
-        // and credit the increment. Flagging is enforced by the search deadline
-        // above: an engine that runs out is cut off and loses on TimeForfeit.
-        clocks.consume(time_control_for(&spec, mover), mover, output.elapsed);
+        // Apply the binding E > R + M rule. The margin only decides whether
+        // the response is accepted; it is never sent in the UCI clock values.
+        if !clocks.accept_and_charge(
+            time_control_for(&spec, mover),
+            mover,
+            output.elapsed,
+            time_margin_for(&spec, mover),
+        ) {
+            break Outcome::loss(mover, Termination::TimeForfeit, None);
+        }
 
         // Parse and validate the move, tolerating two common nonstandard
         // notations from older engines (see `parse_engine_move`).
@@ -650,6 +736,12 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         san_moves,
         uci_moves,
         pgn,
+        clock_accounting: clock_accounting_report(
+            &spec,
+            monotonic_resolution_ns,
+            Some(&white_move_time),
+            Some(&black_move_time),
+        ),
         error: outcome.error,
     }
 }
@@ -791,18 +883,34 @@ impl Clocks {
         }
     }
 
-    /// Subtract the time spent and credit the increment for the side that moved.
-    /// A no-op for non-clock controls.
-    fn consume(&mut self, tc: &TimeControl, side: Color, used: Duration) {
-        if !tc.is_clock() {
-            return;
-        }
-        let inc = tc.increment();
-        let clock = match side {
-            Color::White => &mut self.white,
-            Color::Black => &mut self.black,
+    /// Accept exactly at the budget-plus-margin boundary. For clock controls,
+    /// deduct elapsed before crediting increment: max(0, R-E)+I.
+    fn accept_and_charge(
+        &mut self,
+        tc: &TimeControl,
+        side: Color,
+        used: Duration,
+        margin: Duration,
+    ) -> bool {
+        let budget = match tc {
+            TimeControl::PerMove { ms } => Some(Duration::from_millis(*ms)),
+            TimeControl::SuddenDeath { .. } | TimeControl::Increment { .. } => {
+                Some(self.remaining(side))
+            }
+            TimeControl::Nodes { .. } | TimeControl::Depth { .. } => None,
         };
-        *clock = clock.saturating_sub(used) + inc;
+        if budget.is_some_and(|budget| used > budget.saturating_add(margin)) {
+            return false;
+        }
+        if tc.is_clock() {
+            let increment = tc.increment();
+            let clock = match side {
+                Color::White => &mut self.white,
+                Color::Black => &mut self.black,
+            };
+            *clock = clock.saturating_sub(used).saturating_add(increment);
+        }
+        true
     }
 }
 
@@ -906,7 +1014,12 @@ fn initial_position(start_fen: Option<&str>) -> Chess {
 /// failing side (white takes precedence when both fail), quits any survivor,
 /// writes a forensic incident report from the failed engine's transcript and
 /// stderr, and returns the loss report.
-async fn handle_setup_failure(spec: &GameSpec, white: Prepared, black: Prepared) -> GameReport {
+async fn handle_setup_failure(
+    spec: &GameSpec,
+    white: Prepared,
+    black: Prepared,
+    monotonic_resolution_ns: u64,
+) -> GameReport {
     // Consume each side: quit survivors, harvest forensics from the failure.
     async fn consume(prepared: Prepared) -> (Option<UciError>, Option<(Vec<String>, Vec<String>)>) {
         match prepared {
@@ -946,6 +1059,7 @@ async fn handle_setup_failure(spec: &GameSpec, white: Prepared, black: Prepared)
         san_moves: Vec::new(),
         uci_moves: Vec::new(),
         pgn: render_pgn(spec, &[], outcome.result, outcome.termination),
+        clock_accounting: clock_accounting_report(spec, monotonic_resolution_ns, None, None),
         error: outcome.error,
     };
 
@@ -1142,7 +1256,7 @@ mod tests {
         );
         assert_eq!(deadline, Duration::from_millis(1050));
 
-        clocks.consume(&tc, Color::White, Duration::from_millis(300));
+        assert!(clocks.accept_and_charge(&tc, Color::White, Duration::from_millis(300), TOL));
         assert_eq!(clocks.white, Duration::from_millis(700));
         assert_eq!(clocks.black, Duration::from_millis(1000));
     }
@@ -1154,13 +1268,41 @@ mod tests {
             inc_ms: 100,
         };
         let mut clocks = Clocks::new(&tc, &tc);
-        clocks.consume(&tc, Color::Black, Duration::from_millis(400));
+        assert!(clocks.accept_and_charge(&tc, Color::Black, Duration::from_millis(400), TOL));
         // 1000 - 400 + 100 = 700
         assert_eq!(clocks.black, Duration::from_millis(700));
 
-        // Overrunning the remaining time floors at zero before the increment.
-        clocks.consume(&tc, Color::Black, Duration::from_millis(5000));
-        assert_eq!(clocks.black, Duration::from_millis(100));
+        // An overrun beyond remaining plus margin forfeits before increment.
+        assert!(!clocks.accept_and_charge(&tc, Color::Black, Duration::from_millis(751), TOL));
+        assert_eq!(clocks.black, Duration::from_millis(700));
+    }
+
+    #[test]
+    fn increment_margin_boundaries_deduct_before_credit_and_accept_equality() {
+        let tc = TimeControl::Increment {
+            base_ms: 1000,
+            inc_ms: 100,
+        };
+        for (elapsed_ms, accepted) in [(1049, true), (1050, true), (1051, false)] {
+            let mut clocks = Clocks::new(&tc, &tc);
+            assert_eq!(
+                clocks.accept_and_charge(
+                    &tc,
+                    Color::White,
+                    Duration::from_millis(elapsed_ms),
+                    Duration::from_millis(50),
+                ),
+                accepted
+            );
+            assert_eq!(
+                clocks.white,
+                if accepted {
+                    Duration::from_millis(100)
+                } else {
+                    Duration::from_millis(1000)
+                }
+            );
+        }
     }
 
     #[test]
@@ -1178,11 +1320,29 @@ mod tests {
     }
 
     #[test]
-    fn consume_is_a_noop_for_non_clock_controls() {
+    fn charging_is_a_noop_for_non_clock_controls() {
         let tc = TimeControl::PerMove { ms: 100 };
         let mut clocks = Clocks::new(&tc, &tc);
-        clocks.consume(&tc, Color::White, Duration::from_millis(50));
+        assert!(clocks.accept_and_charge(
+            &tc,
+            Color::White,
+            Duration::from_millis(50),
+            Duration::ZERO
+        ));
         assert_eq!(clocks.white, Duration::ZERO);
         assert_eq!(clocks.black, Duration::ZERO);
+    }
+
+    #[test]
+    fn charged_elapsed_summary_uses_the_ordered_middle() {
+        let mut samples = MoveTimeAccumulator::default();
+        for ms in [9, 1, 5, 3] {
+            samples.add(Duration::from_millis(ms));
+        }
+        let summary = samples.summary().unwrap();
+        assert_eq!(summary.samples, 4);
+        assert_eq!(summary.min_ns, 1_000_000);
+        assert_eq!(summary.median_ns, 4_000_000);
+        assert_eq!(summary.max_ns, 9_000_000);
     }
 }

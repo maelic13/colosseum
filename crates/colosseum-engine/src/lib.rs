@@ -55,7 +55,10 @@ pub use placement::{
     plan_cpu_placement,
 };
 #[cfg(feature = "runner")]
-pub use runner::{EngineGameSpec, GameReport, GameSpec, run_game};
+pub use runner::{
+    CLOCK_MODEL_ID, CLOCK_MODEL_VERSION, ChargedElapsedSummary, ClockAccountingReport,
+    EngineGameSpec, GameReport, GameSpec, run_game,
+};
 #[cfg(feature = "tournament")]
 pub use scheduler::{
     Command, EloEntry, InFlightGame, ResultParticipant, Tournament, TournamentResults,

@@ -284,8 +284,13 @@ impl EngineProcess {
         deadline: Duration,
         on_info: impl FnMut(&parse::InfoLine),
     ) -> Result<SearchOutput, UciError> {
-        self.start_search(position, limits).await?;
-        self.await_bestmove(Instant::now(), deadline, on_info).await
+        self.send(&position.to_command()).await?;
+        self.send(&limits.to_command()).await?;
+        // The binding clock model begins only after the complete `go` command
+        // has been written and flushed. Position setup is deliberately outside
+        // the charged interval.
+        let charged_from = Instant::now();
+        self.await_bestmove(charged_from, deadline, on_info).await
     }
 
     /// Start a normal search and return immediately, leaving `bestmove` to be
@@ -411,9 +416,12 @@ impl EngineProcess {
 
         loop {
             let line = self.read_line_until(until, UciError::MoveTimeout).await?;
+            // Capture the end of the charged interval immediately after the
+            // complete protocol line has been read, before parsing or reporting.
+            let read_finished = Instant::now();
             let line = line.trim();
             if let Some((best_move, ponder)) = parse::parse_bestmove_ponder(line) {
-                let elapsed = start.elapsed();
+                let elapsed = read_finished.saturating_duration_since(start);
                 // Some engines report a literal `nps 0` on every info line
                 // (Fruit 2.1 does) — treat that as unreported and derive the
                 // real speed from nodes over wall-clock time instead.

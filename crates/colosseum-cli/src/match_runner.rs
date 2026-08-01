@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use colosseum_application::{CpuAllocation, EngineLaunchSpec};
 use colosseum_core::{AdjudicationConfig, EngineId, GameId, GameResult, Termination, TimeControl};
-use colosseum_engine::{EngineGameSpec, GameSpec, LiveGameState, run_game};
+use colosseum_engine::{ClockAccountingReport, EngineGameSpec, GameSpec, LiveGameState, run_game};
 use colosseum_uci::SpawnOptions;
 use serde::Serialize;
 use thiserror::Error;
@@ -82,6 +82,7 @@ pub struct MatchGame {
     pub white: MatchSide,
     pub result: GameResult,
     pub termination: Termination,
+    pub clock_accounting: ClockAccountingReport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -201,6 +202,7 @@ pub async fn run_fixed_match(
             white: white_side,
             result: game.result,
             termination: game.termination,
+            clock_accounting: game.clock_accounting,
             error: game.error,
         });
         report.games_completed += 1;

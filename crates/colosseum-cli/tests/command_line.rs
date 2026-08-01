@@ -49,6 +49,11 @@ fn fixed_match_accepts_the_same_ordinary_uci_path_with_different_side_options() 
     assert_eq!(value["report"]["games_completed"], 2);
     assert_eq!(value["report"]["games"][0]["white"], "a");
     assert_eq!(value["report"]["games"][1]["white"], "b");
+    let clock = &value["report"]["games"][0]["clock_accounting"];
+    assert_eq!(clock["model"], "go-write-to-bestmove-read");
+    assert_eq!(clock["version"], 1);
+    assert!(clock["monotonic_resolution_ns"].as_u64().unwrap() > 0);
+    assert!(clock["white_charged_elapsed"]["samples"].as_u64().unwrap() > 0);
 }
 
 #[test]
