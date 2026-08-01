@@ -816,6 +816,7 @@ dependencies = [
  "colosseum-core",
  "colosseum-uci",
  "crossbeam-channel",
+ "libc",
  "rusqlite",
  "serde",
  "serde_json",
@@ -826,6 +827,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

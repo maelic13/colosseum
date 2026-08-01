@@ -15,6 +15,7 @@ pub mod pgn;
 pub mod runner;
 pub mod scheduler;
 pub mod store;
+pub mod topology;
 
 pub use colosseum_uci::Score;
 pub use detect::{DetectResult, detect_engine, split_name_version};
@@ -28,3 +29,7 @@ pub use scheduler::{
     resume_tournament,
 };
 pub use store::{GameRow, PendingGame, Store, TournamentEngineRow, TournamentRow};
+pub use topology::{
+    CpuTopology, LogicalCpuId, PhysicalCore, SiblingMapping, TopologyError, TopologySource,
+    detect_cpu_topology,
+};

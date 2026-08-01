@@ -113,7 +113,7 @@ colosseum/
 │  ├─ colosseum-core/     Pure domain rules, statistics and opaque identity values
 │  ├─ colosseum-application/ Runtime-neutral use cases and ports
 │  ├─ colosseum-uci/      UCI protocol & async engine process management (tokio)
-│  ├─ colosseum-engine/   Orchestration: scheduler, game runner, SQLite store, openings
+│  ├─ colosseum-engine/   Runner/store plus OS topology and affinity adapters
 │  ├─ colosseum-gui/      eframe/egui GUI composition root
 │  └─ colosseum-cli/      independent headless CLI composition root
 ├─ tools/release/         product tag/version/changelog validation

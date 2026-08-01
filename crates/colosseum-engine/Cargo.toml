@@ -28,6 +28,12 @@ tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "process"
 tracing = "0.1.44"
 uuid = { version = "1.23.2", features = ["v4", "serde"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_System_SystemInformation"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2.180"
+
 [dev-dependencies]
 tempfile = "3.27.0"
 

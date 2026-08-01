@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–2 are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run directories/checkpoints and read-only official status |
-| What is missing | CPU topology/affinity; full match and pair-atomic SPRT execution; optional calibration; SPSA; benchmarking; Texel/data-generation and the remaining reporting/release work |
+| What exists | Phases 0–2 and CPU-topology detection are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run state, and OS-reported physical-core/SMT identity |
+| What is missing | Placement policy, allowed-CPU restrictions and affinity enforcement; full match and pair-atomic SPRT execution; optional calibration; SPSA; benchmarking; Texel/data-generation and the remaining reporting/release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local Phase 2 suite · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 3.1 — physical-core and sibling topology detection** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Platform status | Windows ☑ local through Phase 3.1 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 3.2 — placement modes and automatic headroom** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -266,9 +266,14 @@ model as well.
 
 ### Phase 3 — CPU topology and affinity
 
-- ☐ **3.1** — **Model: Sol High.** Physical-core/sibling detection per OS — Windows
-  `GetLogicalProcessorInformationEx`, Linux `thread_siblings_list`, macOS
-  `sysctl`. ⚠ Never infer siblings from logical CPU numbering
+- ☑ **3.1 — DONE** — **Model: Sol High.** OS topology adapters use Windows
+  `GetLogicalProcessorInformationEx` group masks, Linux
+  `thread_siblings_list`, and macOS `sysctl` counts. Logical identities retain
+  Windows processor groups; exact sibling sets are validated for overlap and
+  consistency. macOS explicitly reports the public sibling map unavailable
+  instead of inferring from numbering — evidence:
+  [`crates/colosseum-engine/src/topology.rs`](crates/colosseum-engine/src/topology.rs),
+  [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
 - ☐ **3.2** — **Model: Terra High.** Modes `auto` / `off` / explicit CPU list; configurable headroom
   (default 2 physical cores free)
 - ☐ **3.3** — **Model: Sol High.** Respect Linux cpusets/cgroups, Windows processor groups and the
@@ -489,9 +494,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 2.1 — Clean Architecture boundary migration. Model: GPT-5.6 Sol —
-High.** Implement the Phase-0 target boundary: generic runtime participants,
-application use cases and ports, plus GUI adapters for library/config data.
+**Phase 3.2 — Placement modes and automatic headroom. Model: GPT-5.6 Terra —
+High.** Add `auto`, `off` and explicit CPU-list policy with configurable
+physical-core headroom, defaulting to two cores.
 
 ```
 git diff --check

@@ -26,3 +26,4 @@ Detailed contracts:
 - [Installed-executable self-test](self-test.md)
 - [Run directories and checkpoint recovery](run-directories.md)
 - [Official run records and read-only status](status.md)
+- [CPU topology detection](cpu-topology.md)

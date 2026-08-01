@@ -572,6 +572,12 @@ right" is not a criterion.
 - Detect physical cores and their logical CPUs per OS: Windows
   `GetLogicalProcessorInformationEx`, Linux `thread_siblings_list`, macOS
   `sysctl`. **Never infer SMT siblings from logical CPU numbering.**
+- Implemented topology identity is `(processor group, logical number)`, keeping
+  Windows groups distinct; Linux consumes and cross-validates exact kernel
+  sibling lists. Apple's public `sysctl` surface exposes enabled physical and
+  logical counts but no logical-ID sibling map, so macOS records that mapping
+  as unavailable rather than inferring it. Placement capability remains owned
+  by the later affinity steps.
 - Modes `auto` / `off` / explicit CPU list; configurable headroom (default 2
   physical cores free) in `auto`.
 - Detect and respect the CPUs available to the current process, including Linux

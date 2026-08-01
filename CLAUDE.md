@@ -11,7 +11,7 @@ development machine is Windows.
 | `colosseum-core` | Pure domain logic, no I/O: config types, pairings, standings, rating math (`ml_ratings`, `performance_rating`, `rating_error`), SPRT/LOS stats, adjudication |
 | `colosseum-application` | Runtime-neutral use cases, launch/run models and driven ports |
 | `colosseum-uci` | UCI protocol + engine process management (spawn, handshake, search) |
-| `colosseum-engine` | Tournament scheduler/driver (tokio), game runner, SQLite store, PGN, openings and incident forensics |
+| `colosseum-engine` | Tournament scheduler/driver, game runner, SQLite store, PGN/openings, incident forensics and OS topology/affinity adapters |
 | `colosseum-gui` | eframe GUI composition root plus GUI-owned library/config/path adapters |
 | `colosseum-cli` | Independent headless composition root; ordinary UCI executables only |
 
