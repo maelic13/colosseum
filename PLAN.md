@@ -1539,6 +1539,13 @@ engine launch. `gainer` expands to normalized `[0,5]` and `simplify` to
 normalized `[-5,0]`, both at 5%/5%; every expanded field remains explicitly
 overridable and visible in dry-run output.
 
+**Implemented pair commit contract (4B.2):** a complete colour-reversed pair is
+now a typed application value containing both games. Concurrent worker results
+enter a fail-closed commit queue and become observable/durable only as the
+contiguous pair-ID prefix, so completion timing cannot reorder the official
+sample and no half-pair can reach statistics. The CLI adapter executes both
+colours of the assigned opening before submitting that value.
+
 **Exit:** analytic/oracle verdict parity; concurrency cannot change the terminal
 pair; capped/invalid/H0/H1 exits pass; live disagreements are root-caused before
 SPSA builds on the runner.

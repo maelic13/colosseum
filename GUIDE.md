@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | Pair-atomic SPRT and external-runner parity; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4A · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4B.2 — pair-atomic scheduling and commit** |
+| Next step | **Phase 4B.3 — terminal boundary and post-terminal work** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -416,8 +416,14 @@ model as well.
   [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/sprt.md`](docs/cli/sprt.md)
-- ☐ **4B.2** — **Model: Sol High.** Opening colour-pair is atomic. Commit complete pairs in deterministic
-  schedule order; never evaluate an incomplete pair
+- ☑ **4B.2 — DONE** — **Model: Sol High.** A typed complete-pair value requires
+  both colour-reversed games; concurrent completions enter a fail-closed queue
+  that publishes only the contiguous pair-ID prefix, while the UCI adapter
+  plays both colours of one assigned opening before submission—there is no
+  half-pair input to statistics — evidence:
+  [`crates/colosseum-application/src/pair_commit.rs`](crates/colosseum-application/src/pair_commit.rs),
+  [`crates/colosseum-cli/src/sprt_runner.rs`](crates/colosseum-cli/src/sprt_runner.rs),
+  [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs)
 - ☐ **4B.3** — **Model: Sol High.** At a boundary, schedule no new pairs, complete a half-pair, and
   exclude separately stored post-terminal work from the official sample
 - ☐ **4B.4** — **Model: Terra High.** Exit/reporting distinguishes H1/H0/inconclusive/invalid/error and
@@ -583,10 +589,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4B.2 — pair-atomic scheduling and commit. Model: GPT-5.6 Sol — High.**
-Make each colour-reversed opening pair the scheduling and durable commit unit;
-publish complete pairs in deterministic schedule order and never evaluate a
-half-pair.
+**Phase 4B.3 — terminal boundary and post-terminal work. Model: GPT-5.6 Sol — High.**
+Evaluate only committed pairs, stop scheduling at a Wald boundary, finish any
+pair already in flight and retain later completions as post-terminal evidence
+outside the official sample.
 
 ```
 git diff --check

@@ -30,4 +30,6 @@ bundles rather than hidden modes: `--model`, `--elo0`, `--elo1`, `--alpha` and
 its exact Wald bounds is stored and reported.
 
 In the current development build, `--dry-run --json` validates and prints this
-design without launching engines. Live pair scheduling is not yet exposed.
+design without launching engines. Internally, each opening's two
+colour-reversed games form one commit value, and concurrent completions become
+official only in pair-ID order. Live stopping/reporting is not yet exposed.

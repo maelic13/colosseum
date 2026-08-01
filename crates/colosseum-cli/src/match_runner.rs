@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use colosseum_application::{CpuAllocation, EngineLaunchSpec};
+use colosseum_application::{CompletePair, CpuAllocation, EngineLaunchSpec};
 use colosseum_core::{
     AdjudicationConfig, EngineId, GameId, GameResult, OpeningBook, OpeningFormat, OpeningOrder,
     Termination, TimeControl, is_hash_option,
@@ -185,6 +185,17 @@ pub enum OpeningPolicyReport {
 pub struct MatchOpenings {
     entries: Vec<ResolvedOpening>,
     report: OpeningPolicyReport,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Used by the live SPRT stopping loop composed in 4B.3.
+pub struct PairGameSettings {
+    pub engine_a: EngineLaunchSpec,
+    pub engine_b: EngineLaunchSpec,
+    pub engine_a_time_control: ConfiguredTimeControl,
+    pub engine_b_time_control: ConfiguredTimeControl,
+    pub adjudication: AdjudicationConfig,
+    pub openings: MatchOpenings,
 }
 
 impl MatchOpenings {
@@ -386,6 +397,65 @@ pub enum MatchError {
     BookStartOutOfRange { start_index: usize, openings: usize },
     #[error("durable match output failed: {0}")]
     Output(String),
+    #[allow(dead_code)] // Used by the live SPRT stopping loop composed in 4B.3.
+    #[error("pair identity {0} cannot be represented as two game numbers")]
+    PairIdentityOutOfRange(u32),
+}
+
+/// Execute both colours of one opening as a single scheduler value. The second
+/// game is always attempted after the first returns; only the complete value
+/// can enter the pair commit queue.
+#[allow(dead_code)] // Used by the live SPRT stopping loop composed in 4B.3.
+pub async fn play_pair(
+    pair_id: u32,
+    slot: &GameSlotCpuAllocation,
+    settings: PairGameSettings,
+) -> Result<CompletePair<MatchGame>, MatchError> {
+    let first_number = pair_id
+        .checked_mul(2)
+        .and_then(|value| value.checked_sub(1))
+        .ok_or(MatchError::PairIdentityOutOfRange(pair_id))?;
+    if pair_id == 0 {
+        return Err(MatchError::PairIdentityOutOfRange(pair_id));
+    }
+    let second_number = first_number
+        .checked_add(1)
+        .ok_or(MatchError::PairIdentityOutOfRange(pair_id))?;
+    let mut engine_a = settings.engine_a;
+    let mut engine_b = settings.engine_b;
+    engine_a.allocated_cpus = slot.engine_a.allocation.clone();
+    engine_b.allocated_cpus = slot.engine_b.allocation.clone();
+    let engine_a = engine_spec(engine_a, EngineId::from_u128(1));
+    let engine_b = engine_spec(engine_b, EngineId::from_u128(2));
+    let (first_opening, first_assignment) = settings.openings.assignment(first_number);
+    let first = play_game(GameRequest {
+        number: first_number,
+        engine_a: engine_a.clone(),
+        engine_b: engine_b.clone(),
+        time_control_a: settings.engine_a_time_control,
+        time_control_b: settings.engine_b_time_control,
+        adjudication: settings.adjudication,
+        opening: first_opening,
+        opening_assignment: first_assignment,
+    })
+    .await;
+    let (second_opening, second_assignment) = settings.openings.assignment(second_number);
+    let second = play_game(GameRequest {
+        number: second_number,
+        engine_a,
+        engine_b,
+        time_control_a: settings.engine_a_time_control,
+        time_control_b: settings.engine_b_time_control,
+        adjudication: settings.adjudication,
+        opening: second_opening,
+        opening_assignment: second_assignment,
+    })
+    .await;
+    Ok(CompletePair {
+        pair_id,
+        first,
+        second,
+    })
 }
 
 pub fn plan_execution(

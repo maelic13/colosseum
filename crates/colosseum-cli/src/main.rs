@@ -29,6 +29,7 @@ use serde_json::{Value, json};
 mod capabilities;
 mod match_runner;
 mod self_test;
+mod sprt_runner;
 mod uci_stub;
 
 #[derive(Debug, Parser)]
