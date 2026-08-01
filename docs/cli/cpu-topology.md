@@ -71,4 +71,17 @@ explicit flags for class mismatch, node mismatch, or an engine spanning more
 than one class or node. The run record can therefore expose unavoidable
 asymmetry instead of hiding it.
 
-This policy does not yet apply the resolved affinity to child processes.
+The OS adapter has an explicit capability contract:
+
+| Platform | Hard-affinity mechanism | Limitation |
+|---|---|---|
+| Windows | `SetProcessAffinityMask`, followed by read-back verification | One engine allocation must fit processor group zero; other group requests fail rather than being applied to the wrong group |
+| Linux | `sched_setaffinity` for every current process thread, followed by per-thread read-back verification | Newly observed threads are rescanned until the process thread set is stable |
+| macOS | Unavailable | Public affinity tags are scheduler hints, not verifiable logical-CPU pinning |
+
+Any requested hard placement that cannot be applied or verified is a run
+error. It is never silently changed to advisory placement or normal scheduling.
+The explicit `off` mode is different: it is a successful, recorded no-op and
+leaves scheduling to the operating system. Consequently, a clock match remains
+valid on macOS when placement is `off`; only a hard-placement request is
+rejected there.

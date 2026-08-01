@@ -6,6 +6,7 @@
 //! updater, SQLite persistence with tournament history + resume (Steps 5–6), and
 //! config/engine-library file I/O with `--portable` mode (Step 6).
 
+pub mod affinity;
 pub mod allowed_cpus;
 pub mod characteristics;
 pub mod detect;
@@ -20,6 +21,10 @@ pub mod scheduler;
 pub mod store;
 pub mod topology;
 
+pub use affinity::{
+    AffinityCapability, AffinityError, AffinityOutcome, AffinitySupportLevel, AppliedAffinity,
+    affinity_capability, apply_process_affinity,
+};
 pub use allowed_cpus::{AllowedCpuError, AllowedCpuSet, AllowedCpuSource, detect_allowed_cpu_set};
 pub use characteristics::{
     CharacteristicsError, CharacteristicsSource, CoreClass, CpuCharacteristics, NumaNodeId,

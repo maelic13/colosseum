@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–2 and topology-aware placement through Phase 3.5 are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run state, OS-reported physical-core/SMT identity, current-process CPU restrictions, placement modes, disjoint per-engine/per-slot physical-core allocation, and auditable core-class/NUMA symmetry |
-| What is missing | Affinity enforcement and capability reporting; full match and pair-atomic SPRT execution; optional calibration; SPSA; benchmarking; Texel/data-generation and the remaining reporting/release work |
+| What exists | Phases 0–2 and topology-aware placement through Phase 3.6 are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run state, OS-reported physical-core/SMT identity, current-process CPU restrictions, placement modes, disjoint per-engine/per-slot physical-core allocation, auditable core-class/NUMA symmetry, and fail-closed OS affinity application |
+| What is missing | CLI capability reporting and Phase 3 acceptance fixtures; full match and pair-atomic SPRT execution; optional calibration; SPSA; benchmarking; Texel/data-generation and the remaining reporting/release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 3.5 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 3.6 — affinity application and explicit capability failure** |
+| Platform status | Windows ☑ local through Phase 3.6 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 3.7 — platform capabilities command** |
 | Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
@@ -301,8 +301,12 @@ model as well.
   [`crates/colosseum-engine/src/characteristics.rs`](crates/colosseum-engine/src/characteristics.rs),
   [`crates/colosseum-engine/src/placement.rs`](crates/colosseum-engine/src/placement.rs),
   [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
-- ☐ **3.6** — **Model: Terra High.** Fail when requested placement is unavailable; allow and record `off`;
-  report macOS as advisory or unavailable without prohibiting clock matches
+- ☑ **3.6 — DONE** — **Model: Terra High.** Hard affinity is applied and read
+  back on Windows/Linux or fails as a typed error, never silently degrading;
+  `off` is a recorded successful no-op, and macOS reports hard placement as
+  unavailable while permitting `off` clock matches — evidence:
+  [`crates/colosseum-engine/src/affinity.rs`](crates/colosseum-engine/src/affinity.rs),
+  [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
 - ☐ **3.7** — **Model: Terra High.** `capabilities` command printing what this platform can and cannot do
 - ☐ **3.8** — **EXIT · Model: Sol High.** SMT, P/E, restricted-cpuset, processor-group, no-SMT and
   dual-socket fixtures pass; residency tests pass where enforceable;

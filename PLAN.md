@@ -1416,6 +1416,15 @@ engines, then preserves per-engine node locality and class symmetry where
 possible. Every allocation records its class/node sets and explicit mismatch or
 span flags, so unavoidable asymmetry remains visible to later run records.
 
+**Implemented affinity application (3.6):** the OS adapter applies and reads
+back Windows process masks or Linux per-thread scheduler masks. Unsupported,
+invalid and unverifiable hard requests are typed failures rather than silent
+fallbacks. Windows currently exposes its single-group-zero constraint as
+capability data and fails other group requests instead of misidentifying them;
+macOS reports hard pinning unavailable because its affinity tags are advisory.
+Explicit `off` is a successful recorded no-op, so lack of hard affinity does
+not prohibit an otherwise valid clock match.
+
 ### Phase 4A — Fixed-match runner
 
 Implement the non-sequential part of 5.4: fixed matches, per-side controls,
