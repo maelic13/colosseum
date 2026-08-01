@@ -8,6 +8,7 @@ statistics. It has two deliberately separate sources of truth:
 | `analytic-pentanomial.toml` | Hand-derived inputs and expected values for every Colosseum formula and error boundary | Hermetic regression oracle |
 | `external-observations.toml` | Comparable W/D/L, pair and score fields extracted from the reviewed raw artifacts | Hermetic external-artifact oracle |
 | `phase-1-acceptance.toml` | Exact oracle-matrix cells executed or deliberately excluded, with reasons | Binding Phase 1 acceptance manifest |
+| `phase-4b-parity.toml` | Ordered Fastchess terminal replay plus three-runner live shared-field evidence | Binding Phase 4B parity evidence |
 | `external/` | Raw output from current `fastchess` and `cutechess-cli` runs, plus immutable tool/engine provenance | Compatibility evidence; never required by a test that launches an external program |
 
 The oracle matrix in [oracle-matrix.md](oracle-matrix.md) says exactly which
@@ -15,6 +16,14 @@ fields may be compared. A runner cannot become an oracle for a model it does
 not expose. In particular, external output that prints `NaN` or infinity for a
 clean sweep is retained as forensic evidence, not accepted as Colosseum output:
 Colosseum returns `StatisticsError` for such a sample.
+
+The Phase 4B fixture adds a non-degenerate, opening-diverse normalized-SPRT
+stream. Its required test reconstructs every complete pair from the raw
+Fastchess console, feeds the same ordered prefixes to Colosseum and asserts the
+same H0 terminal pair, displayed LLR and Wald bounds. The 16-position EPD is a
+small test input, not a bundled user opening book. A separate same-binary live
+smoke compares only schedule/outcome/fault fields; its all-draw sample is never
+used as an Elo, LOS or sequential-statistics oracle.
 
 ## Recreating an external observation
 

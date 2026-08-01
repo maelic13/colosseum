@@ -15,10 +15,10 @@ numbers, internal naming or method argumentation.
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
 | What exists | Phases 0–3, Phase 4A fixed matches and live pair-atomic capped SPRT through reporting are complete: shared ordinary-engine controls, clocks/adjudication/resources/books, deterministic commit/stopping, recoverable official/post-terminal state, strict JSON and distinct automation exits |
-| What is missing | SPRT external-statistics/live parity and exit acceptance; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
+| What is missing | SPRT exit acceptance; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4A · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4B.5 — external-statistics replay and controlled live parity** |
+| Next step | **Phase 4B.6 — Phase 4B exit acceptance** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -440,8 +440,13 @@ model as well.
   [`crates/colosseum-cli/src/sprt_runner.rs`](crates/colosseum-cli/src/sprt_runner.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/sprt.md`](docs/cli/sprt.md)
-- ☐ **4B.5** — **Model: Sol High.** Replay identical ordered outcomes through compatible external
-  statistics; controlled live parity compares only shared fields
+- ☑ **4B.5 — DONE** — **Model: Sol High.** A reviewed non-degenerate
+  Fastchess normalized-SPRT stream replays to the same first H0 terminal pair
+  (10) and displayed LLR/bounds; a bounded Fastchess/Cute Chess/Colosseum
+  same-binary live smoke agrees on shared schedule, W/D/L, draw-termination and
+  fault fields while zero-variance Elo/LOS/LLR presentation stays explicitly
+  excluded — evidence: [`tests/fixtures/statistics/phase-4b-parity.toml`](tests/fixtures/statistics/phase-4b-parity.toml),
+  [`crates/colosseum-core/tests/statistics_fixtures.rs`](crates/colosseum-core/tests/statistics_fixtures.rs)
 - ☐ **4B.6** — **EXIT · Model: Sol High.** Analytic/oracle parity; concurrency cannot change the
   terminal pair; every terminal/fault case passes; live differences
   root-caused before Phase 5
@@ -601,10 +606,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4B.5 — external-statistics replay and controlled live parity. Model: GPT-5.6 Sol — High.**
-Replay identical ordered pair outcomes through compatible external statistics,
-then compare a short controlled live run against fastchess and Cute Chess only
-on the fields their versions and models genuinely share.
+**Phase 4B.6 — Phase 4B exit acceptance. Model: GPT-5.6 Sol — High.**
+Demonstrate analytic/external verdict parity, terminal-pair invariance across
+concurrency, every H0/H1/capped/invalid/fault exit, and the root cause of every
+live difference before Phase 5 can build on the runner.
 
 ```
 git diff --check

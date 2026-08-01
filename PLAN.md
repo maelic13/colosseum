@@ -1562,6 +1562,20 @@ invalid pair and separately persisted post-terminal evidence. Process exits
 are H1=0, H0=1, configuration=2, error=3, inconclusive=4 and invalid=5.
 Run-record schema 2 adds required command-specific workflow evidence.
 
+**Implemented parity contract (4B.5):** the hermetic Phase-4B corpus replays a
+reviewed, opening-diverse Fastchess 1.8.0 normalized-SPRT stream pair by pair.
+For the exact `[4, 4, 2, 0, 0]` terminal sample and matched `[-50, 50]`, 5%/5%
+design, both implementations first accept H0 at pair 10 and Colosseum matches
+Fastchess's displayed LLR/bounds precision. Prefixes below Colosseum's minimum
+sample or with zero variance remain typed non-verdicts; they are not coerced
+into external smoothing semantics. A bounded same-binary live smoke against
+Fastchess and Cute Chess agrees on eight games, four reversed-colour pairs,
+0/8/0 W/D/L, draw termination and zero faults; Fastchess and Colosseum also
+agree on `[0, 0, 4, 0, 0]`. The zero-variance smoke deliberately excludes Elo,
+interval, LOS and sequential-statistics presentation. Exact artifacts,
+commands, hashes and exclusions are in
+`tests/fixtures/statistics/phase-4b-parity.toml`.
+
 **Exit:** analytic/oracle verdict parity; concurrency cannot change the terminal
 pair; capped/invalid/H0/H1 exits pass; live disagreements are root-caused before
 SPSA builds on the runner.

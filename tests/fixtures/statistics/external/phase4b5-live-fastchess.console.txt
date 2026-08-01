@@ -1,0 +1,27 @@
+Warning: No opening book specified! Consider using one, otherwise all games will be played from the starting position.
+Warning: Unknown opening format, 2. All games will be played from the starting position.
+Started game 1 of 8 (A vs B)
+Finished game 1 (A vs B): 1/2-1/2 {Draw by adjudication}
+Started game 2 of 8 (B vs A)
+Finished game 2 (B vs A): 1/2-1/2 {Draw by adjudication}
+Started game 3 of 8 (A vs B)
+Finished game 3 (A vs B): 1/2-1/2 {Draw by adjudication}
+Started game 4 of 8 (B vs A)
+Finished game 4 (B vs A): 1/2-1/2 {Draw by adjudication}
+Started game 5 of 8 (A vs B)
+Finished game 5 (A vs B): 1/2-1/2 {Draw by adjudication}
+Started game 6 of 8 (B vs A)
+Finished game 6 (B vs A): 1/2-1/2 {Draw by adjudication}
+Started game 7 of 8 (A vs B)
+Finished game 7 (A vs B): 1/2-1/2 {Draw by adjudication}
+Started game 8 of 8 (B vs A)
+Finished game 8 (B vs A): 1/2-1/2 {Draw by adjudication}
+--------------------------------------------------
+Results of A vs B (1 plies, 1t, 64MB):
+Elo: -0.00 +/- 0.00, nElo: nan +/- nan
+LOS: nan %, DrawRatio: 100.00 %, PairsRatio: -nan
+Games: 8, Wins: 0, Losses: 0, Draws: 8, Points: 4.0 (50.00 %)
+Ptnml(0-2): [0, 0, 4, 0, 0], WL/DD Ratio: 0.00
+--------------------------------------------------
+Finished match
+Total Time: 00:00:01 (hours:minutes:seconds)

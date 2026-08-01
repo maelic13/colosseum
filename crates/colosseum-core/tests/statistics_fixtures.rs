@@ -12,6 +12,7 @@ use colosseum_core::{
     pentanomial_sprt, pentanomial_statistics, sprt,
 };
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 const ANALYTIC_TOML: &str =
     include_str!("../../../tests/fixtures/statistics/analytic-pentanomial.toml");
@@ -28,6 +29,18 @@ const CUTECHESS_CONSOLE: &str =
     include_str!("../../../tests/fixtures/statistics/external/cutechess.console.txt");
 const CUTECHESS_PGN: &str =
     include_str!("../../../tests/fixtures/statistics/external/cutechess.pgn");
+const PHASE_4B_PARITY_TOML: &str =
+    include_str!("../../../tests/fixtures/statistics/phase-4b-parity.toml");
+const PHASE_4B_FASTCHESS_CONSOLE: &str =
+    include_str!("../../../tests/fixtures/statistics/external/phase4b5-fastchess.console.txt");
+const PHASE_4B_OPENINGS: &str =
+    include_str!("../../../tests/fixtures/statistics/external/phase4b5-openings.epd");
+const PHASE_4B_LIVE_FASTCHESS_CONSOLE: &str =
+    include_str!("../../../tests/fixtures/statistics/external/phase4b5-live-fastchess.console.txt");
+const PHASE_4B_LIVE_CUTECHESS_CONSOLE: &str =
+    include_str!("../../../tests/fixtures/statistics/external/phase4b5-live-cutechess.console.txt");
+const PHASE_4B_LIVE_COLOSSEUM: &str =
+    include_str!("../../../tests/fixtures/statistics/external/phase4b5-live-colosseum.json");
 // `normal_quantile` in core inverts the documented A&S CDF approximation.
 // Its probability error translates to less than 2e-5 Elo at this fixture.
 const NORMAL_QUANTILE_ELO_TOLERANCE: f64 = 2e-5;
@@ -198,12 +211,125 @@ struct Exclusion {
     reason: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct Phase4bParity {
+    schema_version: u32,
+    #[serde(rename = "description")]
+    _description: String,
+    terminal_replay: TerminalReplay,
+    live: LiveParity,
+}
+
+#[derive(Debug, Deserialize)]
+struct TerminalReplay {
+    runner: String,
+    runner_version: String,
+    runner_sha256: String,
+    console: String,
+    console_sha256: String,
+    openings: String,
+    openings_sha256: String,
+    engine_a: String,
+    engine_a_sha256: String,
+    engine_b: String,
+    engine_b_sha256: String,
+    command: String,
+    model: String,
+    elo0: f64,
+    elo1: f64,
+    alpha: f64,
+    beta: f64,
+    scheduled_pair_cap: u32,
+    terminal_pair: u32,
+    decision: String,
+    counts: [u32; 5],
+    wins: u32,
+    draws: u32,
+    losses: u32,
+    reported_llr: f64,
+    reported_lower: f64,
+    reported_upper: f64,
+    display_tolerance: f64,
+    elapsed_seconds: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct LiveParity {
+    host: String,
+    date: String,
+    engine: String,
+    engine_sha256: String,
+    conditions: String,
+    shared_fields: Vec<String>,
+    conditionally_shared_fields: Vec<String>,
+    excluded_fields: Vec<String>,
+    exclusion_reason: String,
+    observation: Vec<LiveObservation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LiveObservation {
+    runner: String,
+    runner_version: String,
+    runner_sha256: String,
+    artifact: String,
+    artifact_sha256: String,
+    raw_artifact_sha256: Option<String>,
+    command: String,
+    exit_code: i32,
+    status: String,
+    games: u32,
+    wins: u32,
+    draws: u32,
+    losses: u32,
+    complete_pairs: u32,
+    counts: Option<[u32; 5]>,
+    faults: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct ColosseumLiveProjection {
+    source: String,
+    status: String,
+    exit_code: i32,
+    games: u32,
+    wins: u32,
+    draws: u32,
+    losses: u32,
+    complete_pairs: u32,
+    pentanomial: [u32; 5],
+    colour_split: ColourSplit,
+    faults: ProjectedFaults,
+}
+
+#[derive(Debug, Deserialize)]
+struct ColourSplit {
+    a_as_white: [u32; 3],
+    a_as_black: [u32; 3],
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectedFaults {
+    engine_a: u32,
+    engine_b: u32,
+    time_losses_a: u32,
+    time_losses_b: u32,
+    infrastructure: u32,
+}
+
 #[derive(Debug, Default)]
 struct PgnGame {
     round: String,
     white: String,
     black: String,
     result: String,
+}
+
+#[derive(Debug)]
+struct ConsoleGame<'a> {
+    white: &'a str,
+    black: &'a str,
+    result: &'a str,
 }
 
 fn assert_close(case: &str, field: &str, actual: f64, expected: f64, tolerance: f64) {
@@ -222,6 +348,65 @@ fn parse_result(value: &str) -> PairGameResult {
         "loss" => PairGameResult::Loss,
         other => panic!("unknown pair result {other:?}"),
     }
+}
+
+fn sha256_hex(contents: &str) -> String {
+    format!("{:x}", Sha256::digest(contents.as_bytes()))
+}
+
+fn parse_finished_games(console: &str) -> Vec<ConsoleGame<'_>> {
+    console
+        .lines()
+        .filter_map(|line| {
+            let line = line.strip_prefix("Finished game ")?;
+            let (_, rest) = line.split_once(" (")?;
+            let (pairing, rest) = rest.split_once("): ")?;
+            let (white, black) = pairing.split_once(" vs ")?;
+            let result = rest.split_whitespace().next()?;
+            Some(ConsoleGame {
+                white,
+                black,
+                result,
+            })
+        })
+        .collect()
+}
+
+fn console_result_for(engine: &str, opponent: &str, game: &ConsoleGame<'_>) -> PairGameResult {
+    use PairGameResult::{Draw, Loss, Win};
+
+    match (
+        game.white == engine && game.black == opponent,
+        game.black == engine && game.white == opponent,
+        game.result,
+    ) {
+        (true, false, "1-0") | (false, true, "0-1") => Win,
+        (true, false, "0-1") | (false, true, "1-0") => Loss,
+        (true, false, "1/2-1/2") | (false, true, "1/2-1/2") => Draw,
+        _ => panic!("unexpected console engine names or result in {game:?}"),
+    }
+}
+
+fn console_sample(console: &str, engine: &str, opponent: &str) -> (PentanomialVector, [u32; 3]) {
+    let games = parse_finished_games(console);
+    assert_eq!(games.len() % 2, 0, "console has an incomplete pair");
+    let mut sample = PentanomialVector::default();
+    let mut wdl = [0_u32; 3];
+    for pair in games.chunks_exact(2) {
+        assert_eq!(pair[0].white, pair[1].black, "pair did not swap White");
+        assert_eq!(pair[0].black, pair[1].white, "pair did not swap Black");
+        let first = console_result_for(engine, opponent, &pair[0]);
+        let second = console_result_for(engine, opponent, &pair[1]);
+        for result in [first, second] {
+            match result {
+                PairGameResult::Win => wdl[0] += 1,
+                PairGameResult::Draw => wdl[1] += 1,
+                PairGameResult::Loss => wdl[2] += 1,
+            }
+        }
+        sample.record_pair(first, second);
+    }
+    (sample, wdl)
 }
 
 fn sample_from_counts(
@@ -819,4 +1004,198 @@ fn compatible_external_cells_match_reviewed_console_and_pgn_artifacts() {
         let error = elo_with_error(wins, draws, losses, 1.959_963_984_540_054).unwrap_err();
         assert_eq!(statistics_error_name(error), "InvalidScore");
     }
+}
+
+#[test]
+fn phase_4b_ordered_fastchess_stream_has_the_same_terminal_pair() {
+    let fixtures: Phase4bParity = toml::from_str(PHASE_4B_PARITY_TOML).unwrap();
+    assert_eq!(fixtures.schema_version, 1);
+    let fixture = &fixtures.terminal_replay;
+    assert_eq!(fixture.runner, "fastchess");
+    assert!(fixture.runner_version.starts_with("fastchess alpha 1.8.0"));
+    assert_eq!(fixture.runner_sha256.len(), 64);
+    assert_eq!(fixture.console, "external/phase4b5-fastchess.console.txt");
+    assert_eq!(
+        sha256_hex(PHASE_4B_FASTCHESS_CONSOLE),
+        fixture.console_sha256
+    );
+    assert_eq!(fixture.openings, "external/phase4b5-openings.epd");
+    assert_eq!(sha256_hex(PHASE_4B_OPENINGS), fixture.openings_sha256);
+    assert_eq!(fixture.engine_a, "Rarog 2.3.1");
+    assert_eq!(fixture.engine_b, "Stockfish 18");
+    assert_eq!(fixture.engine_a_sha256.len(), 64);
+    assert_eq!(fixture.engine_b_sha256.len(), 64);
+    assert!(fixture.command.contains("model=normalized"));
+    assert!(fixture.command.contains("-maxmoves 50"));
+    assert!(fixture.scheduled_pair_cap > fixture.terminal_pair);
+    assert!(fixture.elapsed_seconds < 30 * 60);
+    assert_eq!(fixture.model, "normalized");
+
+    let games = parse_finished_games(PHASE_4B_FASTCHESS_CONSOLE);
+    assert_eq!(games.len() as u32, fixture.terminal_pair * 2);
+    let mut sample = PentanomialVector::default();
+    let mut wdl = [0_u32; 3];
+    let mut observed_terminal = None;
+    let mut terminal_result = None;
+    for (index, pair) in games.chunks_exact(2).enumerate() {
+        assert_eq!(pair[0].white, pair[1].black, "pair did not swap White");
+        assert_eq!(pair[0].black, pair[1].white, "pair did not swap Black");
+        let first = console_result_for("Rarog", "Stockfish", &pair[0]);
+        let second = console_result_for("Rarog", "Stockfish", &pair[1]);
+        for result in [first, second] {
+            match result {
+                PairGameResult::Win => wdl[0] += 1,
+                PairGameResult::Draw => wdl[1] += 1,
+                PairGameResult::Loss => wdl[2] += 1,
+            }
+        }
+        sample.record_pair(first, second);
+        let result = pentanomial_sprt(
+            &sample,
+            EloModel::Normalized,
+            fixture.elo0,
+            fixture.elo1,
+            fixture.alpha,
+            fixture.beta,
+        );
+        let result = match result {
+            Ok(result) => result,
+            Err(StatisticsError::InsufficientPairs { .. } | StatisticsError::ZeroVariance) => {
+                assert!(observed_terminal.is_none());
+                continue;
+            }
+            Err(error) => panic!("unexpected ordered-prefix error: {error}"),
+        };
+        if result.decision == SprtDecision::Continue {
+            assert!(observed_terminal.is_none());
+        } else {
+            assert!(observed_terminal.is_none(), "more than one terminal prefix");
+            observed_terminal = Some(index as u32 + 1);
+            terminal_result = Some(result);
+        }
+    }
+
+    assert_eq!(observed_terminal, Some(fixture.terminal_pair));
+    assert_eq!(sample.counts(), fixture.counts);
+    assert_eq!(wdl, [fixture.wins, fixture.draws, fixture.losses]);
+    let result = terminal_result.unwrap();
+    assert_eq!(fixture.decision, "accept-h0");
+    assert_eq!(result.decision, SprtDecision::AcceptH0);
+    assert_close(
+        "phase4b-fastchess",
+        "LLR",
+        result.llr,
+        fixture.reported_llr,
+        fixture.display_tolerance,
+    );
+    assert_close(
+        "phase4b-fastchess",
+        "lower",
+        result.lower,
+        fixture.reported_lower,
+        fixture.display_tolerance,
+    );
+    assert_close(
+        "phase4b-fastchess",
+        "upper",
+        result.upper,
+        fixture.reported_upper,
+        fixture.display_tolerance,
+    );
+    assert!(PHASE_4B_FASTCHESS_CONSOLE.contains("completed - H0 was accepted"));
+}
+
+#[test]
+fn phase_4b_controlled_live_parity_compares_only_shared_fields() {
+    let fixtures: Phase4bParity = toml::from_str(PHASE_4B_PARITY_TOML).unwrap();
+    let live = &fixtures.live;
+    assert!(live.host.contains("Windows 11"));
+    assert_eq!(live.date, "2026-08-01");
+    assert_eq!(live.engine, "Rarog 2.3.1");
+    assert_eq!(live.engine_sha256.len(), 64);
+    assert!(live.conditions.contains("same executable both arms"));
+    assert!(live.shared_fields.contains(&"W/D/L".to_string()));
+    assert_eq!(
+        live.conditionally_shared_fields,
+        ["pentanomial vector (Fastchess and Colosseum only)"]
+    );
+    assert!(live.excluded_fields.contains(&"LLR".to_string()));
+    assert!(live.excluded_fields.contains(&"LOS".to_string()));
+    assert!(live.exclusion_reason.contains("zero variance"));
+    assert_eq!(live.observation.len(), 3);
+
+    let expected_runners = ["fastchess", "cutechess-cli", "colosseum-cli"];
+    for (observation, expected_runner) in live.observation.iter().zip(expected_runners) {
+        assert_eq!(observation.runner, expected_runner);
+        assert!(!observation.runner_version.is_empty());
+        assert_eq!(observation.runner_sha256.len(), 64);
+        assert!(!observation.command.is_empty());
+        assert_eq!(observation.games, 8);
+        assert_eq!(
+            (observation.wins, observation.draws, observation.losses),
+            (0, 8, 0)
+        );
+        assert_eq!(observation.complete_pairs, 4);
+        assert_eq!(observation.faults, 0);
+    }
+
+    for (observation, console) in [
+        (&live.observation[0], PHASE_4B_LIVE_FASTCHESS_CONSOLE),
+        (&live.observation[1], PHASE_4B_LIVE_CUTECHESS_CONSOLE),
+    ] {
+        assert_eq!(sha256_hex(console), observation.artifact_sha256);
+        let (sample, wdl) = console_sample(console, "A", "B");
+        assert_eq!(sample.pairs(), observation.complete_pairs);
+        assert_eq!(
+            wdl,
+            [observation.wins, observation.draws, observation.losses]
+        );
+        assert_eq!(sample.draw_ratio().unwrap(), 1.0);
+        assert_eq!(parse_finished_games(console).len(), 8);
+        assert!(console.contains("Draw by adjudication"));
+    }
+    assert_eq!(live.observation[0].counts, Some([0, 0, 4, 0, 0]));
+    assert_eq!(live.observation[1].counts, None);
+
+    let observation = &live.observation[2];
+    assert_eq!(
+        observation.artifact,
+        "external/phase4b5-live-colosseum.json"
+    );
+    assert_eq!(
+        sha256_hex(PHASE_4B_LIVE_COLOSSEUM),
+        observation.artifact_sha256
+    );
+    assert_eq!(
+        observation.raw_artifact_sha256.as_deref().unwrap().len(),
+        64
+    );
+    let projection: ColosseumLiveProjection =
+        serde_json::from_str(PHASE_4B_LIVE_COLOSSEUM).unwrap();
+    assert!(projection.source.contains("reviewed projection"));
+    assert_eq!(projection.status, observation.status);
+    assert_eq!(projection.exit_code, observation.exit_code);
+    assert_eq!(projection.games, observation.games);
+    assert_eq!(
+        (projection.wins, projection.draws, projection.losses),
+        (observation.wins, observation.draws, observation.losses)
+    );
+    assert_eq!(projection.complete_pairs, observation.complete_pairs);
+    assert_eq!(projection.pentanomial, observation.counts.unwrap());
+    assert_eq!(projection.colour_split.a_as_white, [0, 4, 0]);
+    assert_eq!(projection.colour_split.a_as_black, [0, 4, 0]);
+    assert_eq!(
+        projection.faults.engine_a
+            + projection.faults.engine_b
+            + projection.faults.time_losses_a
+            + projection.faults.time_losses_b
+            + projection.faults.infrastructure,
+        observation.faults
+    );
+    assert_eq!(live.observation[0].status, "completed");
+    assert_eq!(live.observation[0].exit_code, 0);
+    assert_eq!(live.observation[1].status, "completed");
+    assert_eq!(live.observation[1].exit_code, 0);
+    assert_eq!(observation.status, "inconclusive");
+    assert_eq!(observation.exit_code, 4);
 }

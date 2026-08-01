@@ -1,0 +1,95 @@
+schema_version = 1
+description = "Phase 4B ordered SPRT replay and controlled live shared-field evidence."
+
+[terminal_replay]
+runner = "fastchess"
+runner_version = "fastchess alpha 1.8.0 compiled for windows-latest 20260128-072859b (CI)"
+runner_sha256 = "8444e73965ae44e716cde1bb546a7d7c8c9fc7a442a44194a0c71a3bffa7dd0d"
+console = "external/phase4b5-fastchess.console.txt"
+console_sha256 = "6d0f000a1af4786797988aa3dcff542882ff7075f5f504b04c48b2ee7bb8df33"
+openings = "external/phase4b5-openings.epd"
+openings_sha256 = "d97c2b7be07453d638aa200fa0ba9da182d69f0875e027b5d9c375d3ebaf9f9a"
+engine_a = "Rarog 2.3.1"
+engine_a_sha256 = "3be9b4b7e022ec77576d8cf447267a063fbbc9347807c52c744639ab221a441e"
+engine_b = "Stockfish 18"
+engine_b_sha256 = "bf2d8bf60ac6f3ba58df08b1b0c5f4dec759b994d8f4532b07fe62986dc03288"
+command = "<fastchess> -engine cmd=<rarog> name=Rarog depth=1 -engine cmd=<stockfish> name=Stockfish depth=2 -openings file=<phase4b5-openings.epd> format=epd order=sequential -rounds 40 -repeat -concurrency 1 -draw movenumber=20 movecount=2 score=20 -maxmoves 50 -sprt elo0=-50 elo1=50 alpha=0.05 beta=0.05 model=normalized -ratinginterval 2"
+model = "normalized"
+elo0 = -50.0
+elo1 = 50.0
+alpha = 0.05
+beta = 0.05
+scheduled_pair_cap = 40
+terminal_pair = 10
+decision = "accept-h0"
+counts = [4, 4, 2, 0, 0]
+wins = 0
+draws = 8
+losses = 12
+reported_llr = -3.14
+reported_lower = -2.94
+reported_upper = 2.94
+display_tolerance = 0.005
+elapsed_seconds = 3
+
+[live]
+host = "Microsoft Windows 11 Enterprise x86_64"
+date = "2026-08-01"
+engine = "Rarog 2.3.1"
+engine_sha256 = "3be9b4b7e022ec77576d8cf447267a063fbbc9347807c52c744639ab221a441e"
+conditions = "same executable both arms; depth 1; startpos/no book; 4 colour-reversed pairs; concurrency 1; draw after move 5 when 2 consecutive scores are within 10000 cp"
+shared_fields = ["game count", "complete pair count", "colour reversal", "W/D/L", "draw ratio", "termination class", "engine faults"]
+conditionally_shared_fields = ["pentanomial vector (Fastchess and Colosseum only)"]
+excluded_fields = ["Elo", "confidence interval", "LOS", "LLR", "Wald bounds"]
+exclusion_reason = "The all-draw smoke sample has zero variance, and Cute Chess was not given a matched normalized pentanomial SPRT design. Runner NaN/infinity presentation is not a Colosseum oracle."
+
+[[live.observation]]
+runner = "fastchess"
+runner_version = "fastchess alpha 1.8.0 compiled for windows-latest 20260128-072859b (CI)"
+runner_sha256 = "8444e73965ae44e716cde1bb546a7d7c8c9fc7a442a44194a0c71a3bffa7dd0d"
+artifact = "external/phase4b5-live-fastchess.console.txt"
+artifact_sha256 = "4cbd54276e9706d1818f5c29980afba7f7135ae220707d11e7e7dc9a7ca6a5a0"
+command = "<fastchess> -engine cmd=<rarog> name=A -engine cmd=<rarog> name=B -each depth=1 -rounds 4 -repeat -concurrency 1 -draw movenumber=5 movecount=2 score=10000 -ratinginterval 8"
+exit_code = 0
+status = "completed"
+games = 8
+wins = 0
+draws = 8
+losses = 0
+complete_pairs = 4
+counts = [0, 0, 4, 0, 0]
+faults = 0
+
+[[live.observation]]
+runner = "cutechess-cli"
+runner_version = "cutechess-cli 1.5.1 (Qt 6.8.3)"
+runner_sha256 = "8889f9582dc688c567704cf083f6025baf77f791cde903698c70b3420caf5d7e"
+artifact = "external/phase4b5-live-cutechess.console.txt"
+artifact_sha256 = "e1179aee6f2f23bdf6e23002acd4caa489793c2041de0121be694b7158e0d222"
+command = "<cutechess-cli> -engine cmd=<rarog> name=A -engine cmd=<rarog> name=B -each proto=uci tc=inf depth=1 -rounds 4 -games 2 -repeat -concurrency 1 -draw movenumber=5 movecount=2 score=10000 -ratinginterval 8"
+exit_code = 0
+status = "completed"
+games = 8
+wins = 0
+draws = 8
+losses = 0
+complete_pairs = 4
+faults = 0
+
+[[live.observation]]
+runner = "colosseum-cli"
+runner_version = "commit b604e87cb58f579c83c0d58ccf4e4f718ee5018c"
+runner_sha256 = "a236047d1c72a23f6d218cb38ba2bc97d23f095120aaa9e1491c9cec415e3cd0"
+artifact = "external/phase4b5-live-colosseum.json"
+artifact_sha256 = "b1fb8b69082c07df30c52bbf126e7896fa29656ce1fcf32fba52a92e022e1e9e"
+raw_artifact_sha256 = "183330c2ecd5ba855763751a396ed33fc45872558eba65eed3d2d767d961cb4e"
+command = "<colosseum-cli> sprt <rarog> <rarog> --max-pairs 4 --preset gainer --a-depth 1 --b-depth 1 --draw-move 5 --draw-moves 2 --draw-score-cp 10000 --dir <run-dir> --json --seed 123 --placement off"
+exit_code = 4
+status = "inconclusive"
+games = 8
+wins = 0
+draws = 8
+losses = 0
+complete_pairs = 4
+counts = [0, 0, 4, 0, 0]
+faults = 0
