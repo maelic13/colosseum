@@ -513,7 +513,8 @@ pub fn los(wins: u32, losses: u32) -> f64 {
 }
 
 /// SPRT verdict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum SprtDecision {
     /// LLR crossed the lower bound: accept H0 (no improvement).
     AcceptH0,
@@ -814,7 +815,7 @@ pub fn fixed_n_achieved_resolution(
 ///
 /// The model and hypotheses are retained with the LLR so callers cannot report
 /// a result whose Elo parameterization is ambiguous.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PentanomialSprtResult {
     pub model: EloModel,
     /// Complete pairs in the official sequential sample.

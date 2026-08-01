@@ -18,8 +18,8 @@ numbers, internal naming or method argumentation.
 | What is missing | Pair-atomic SPRT and external-runner parity; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4A · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4B.3 — terminal boundary and post-terminal work** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Next step | **Phase 4B.4 — SPRT reporting, durability and exit codes** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -424,8 +424,13 @@ model as well.
   [`crates/colosseum-application/src/pair_commit.rs`](crates/colosseum-application/src/pair_commit.rs),
   [`crates/colosseum-cli/src/sprt_runner.rs`](crates/colosseum-cli/src/sprt_runner.rs),
   [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs)
-- ☐ **4B.3** — **Model: Sol High.** At a boundary, schedule no new pairs, complete a half-pair, and
-  exclude separately stored post-terminal work from the official sample
+- ☑ **4B.3 — DONE** — **Model: Sol High.** Only the deterministic committed
+  prefix is evaluated; the boundary pair is official, no new pair launches
+  afterward, already-running pairs finish both colours and enter a separate
+  post-terminal collection that cannot change LLR/verdict/terminal identity,
+  while cap exhaustion retains the full official prefix — evidence:
+  [`crates/colosseum-cli/src/sprt_runner.rs`](crates/colosseum-cli/src/sprt_runner.rs),
+  [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
 - ☐ **4B.4** — **Model: Terra High.** Exit/reporting distinguishes H1/H0/inconclusive/invalid/error and
   includes model, hypotheses, LLR, bounds, cap and terminal pair
 - ☐ **4B.5** — **Model: Sol High.** Replay identical ordered outcomes through compatible external
@@ -589,10 +594,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4B.3 — terminal boundary and post-terminal work. Model: GPT-5.6 Sol — High.**
-Evaluate only committed pairs, stop scheduling at a Wald boundary, finish any
-pair already in flight and retain later completions as post-terminal evidence
-outside the official sample.
+**Phase 4B.4 — SPRT reporting, durability and exit codes. Model: GPT-5.6 Terra — High.**
+Expose the pair scheduler as the live command, persist official/post-terminal
+state, and report model, hypotheses, error rates, LLR, bounds, cap and terminal
+pair with distinct H1/H0/inconclusive/invalid/error process exits.
 
 ```
 git diff --check

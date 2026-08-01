@@ -32,4 +32,7 @@ its exact Wald bounds is stored and reported.
 In the current development build, `--dry-run --json` validates and prints this
 design without launching engines. Internally, each opening's two
 colour-reversed games form one commit value, and concurrent completions become
-official only in pair-ID order. Live stopping/reporting is not yet exposed.
+official only in pair-ID order. Once that prefix crosses a Wald boundary, no
+new pair is launched. Already-running pairs still finish both colours but are
+retained as post-terminal evidence and cannot alter the official LLR or verdict.
+Live reporting is not yet exposed.

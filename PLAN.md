@@ -1546,6 +1546,13 @@ contiguous pair-ID prefix, so completion timing cannot reorder the official
 sample and no half-pair can reach statistics. The CLI adapter executes both
 colours of the assigned opening before submitting that value.
 
+**Implemented terminal cut (4B.3):** only the deterministic committed prefix is
+fed to pentanomial SPRT. The pair that first crosses H0/H1 remains in the
+official sample; the scheduler immediately stops launching new pairs, lets
+already running complete pairs finish, and records their results in a distinct
+post-terminal collection that cannot change the LLR, decision or terminal pair.
+Cap exhaustion with no boundary retains the complete capped prefix.
+
 **Exit:** analytic/oracle verdict parity; concurrency cannot change the terminal
 pair; capped/invalid/H0/H1 exits pass; live disagreements are root-caused before
 SPSA builds on the runner.
