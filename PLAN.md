@@ -579,7 +579,11 @@ right" is not a criterion.
   as unavailable rather than inferring it. Placement capability remains owned
   by the later affinity steps.
 - Modes `auto` / `off` / explicit CPU list; configurable headroom (default 2
-  physical cores free) in `auto`.
+  physical cores free) in `auto`. The resolved `auto` selection contains full
+  reported physical cores (all SMT siblings), while explicit mode retains the
+  exact group-qualified logical IDs named by the user. Both require an exact
+  sibling map; they fail to resolve rather than guessing where that map is
+  unavailable. `off` makes no placement request.
 - Detect and respect the CPUs available to the current process, including Linux
   cpusets/cgroups and Windows processor groups; never allocate from the machine
   total when the process is restricted.

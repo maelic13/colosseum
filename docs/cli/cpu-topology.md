@@ -15,7 +15,20 @@ number, so equal CPU numbers in different groups remain distinct. Linux CPU
 lists are parsed as reported by the kernel and checked for overlaps or
 inconsistent sibling reports.
 
-Topology discovery alone does not promise that every discovered CPU is
-available to the current process, nor does it apply affinity. Colosseum reports
-allowed-CPU restrictions, placement modes and enforcement capabilities through
-the corresponding placement functionality.
+The placement-policy resolver has three modes:
+
+| Mode | Selection |
+|---|---|
+| `auto` | Complete physical cores, leaving two physical cores free by default; the headroom is configurable |
+| `off` | No CPU selection or affinity request |
+| explicit CPU list | Exactly the named group-qualified logical CPU identities |
+
+`auto` never divides an SMT sibling set. Explicit lists are canonicalized and
+validated against the discovered logical identities, but may intentionally name
+part of a physical core. Both modes require the exact sibling map; on macOS
+they therefore report that the selection cannot yet be resolved rather than
+guessing CPU identities. `off` remains available without a sibling map.
+
+This policy is only a deterministic selection. It does not yet account for the
+CPUs available to the current process and does not apply affinity; those are
+separate platform responsibilities.

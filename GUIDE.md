@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–2 and CPU-topology detection are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run state, and OS-reported physical-core/SMT identity |
-| What is missing | Placement policy, allowed-CPU restrictions and affinity enforcement; full match and pair-atomic SPRT execution; optional calibration; SPSA; benchmarking; Texel/data-generation and the remaining reporting/release work |
+| What exists | Phases 0–2, CPU-topology detection and deterministic placement policy are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run state, OS-reported physical-core/SMT identity, and `auto`/`off`/explicit placement resolution |
+| What is missing | Allowed-CPU restrictions and affinity enforcement; per-slot core allocation; full match and pair-atomic SPRT execution; optional calibration; SPSA; benchmarking; Texel/data-generation and the remaining reporting/release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 3.1 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 3.2 — placement modes and automatic headroom** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 3.3 — allowed CPU restrictions** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -274,8 +274,12 @@ model as well.
   instead of inferring from numbering — evidence:
   [`crates/colosseum-engine/src/topology.rs`](crates/colosseum-engine/src/topology.rs),
   [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
-- ☐ **3.2** — **Model: Terra High.** Modes `auto` / `off` / explicit CPU list; configurable headroom
-  (default 2 physical cores free)
+- ☑ **3.2 — DONE** — **Model: Terra High.** Deterministic placement policy
+  resolves `auto`, `off` and group-qualified explicit logical CPU lists.
+  `auto` selects whole reported physical cores and leaves a configurable two-core
+  default headroom; unresolved sibling maps fail rather than guessing — evidence:
+  [`crates/colosseum-engine/src/placement.rs`](crates/colosseum-engine/src/placement.rs),
+  [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
 - ☐ **3.3** — **Model: Sol High.** Respect Linux cpusets/cgroups, Windows processor groups and the
   current process's allowed CPU set rather than the machine total
 - ☐ **3.4** — **Model: Terra High.** Allocate the configured `cores-per-engine` per game slot, independent
@@ -494,9 +498,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 3.2 — Placement modes and automatic headroom. Model: GPT-5.6 Terra —
-High.** Add `auto`, `off` and explicit CPU-list policy with configurable
-physical-core headroom, defaulting to two cores.
+**Phase 3.3 — Allowed CPU restrictions. Model: GPT-5.6 Sol — High.** Detect
+the current process's allowed CPU set and respect Linux cpusets/cgroups and
+Windows processor groups before any placement is applied.
 
 ```
 git diff --check
