@@ -7,7 +7,7 @@ pub mod run_directory;
 pub mod run_record;
 
 pub use config::{ConfigError, ResolvedConfig, ValueOrigin, built_in_defaults, resolve_config};
-pub use engine_args::{EngineArgs, EngineArgsError};
+pub use engine_args::{EngineArgs, EngineArgsError, parse_cpu_list};
 pub use master_seed::{
     MasterSeedEntropy, MasterSeedError, MasterSeedResolution, OsMasterSeedEntropy,
     ResolvedMasterSeedSource, ensure_master_seed,

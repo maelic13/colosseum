@@ -71,14 +71,29 @@ disconnect, protocol failure or illegal move is a scored forfeit with explicit
 side and kind metadata. The match becomes `invalid` after more than
 `--max-engine-faults N` or `--max-time-losses N`; both limits default to zero.
 A pre-play spawn or harness/infrastructure failure is marked non-scorable,
-stops the match as `infrastructure-error`, and never changes W/L/D. Colosseum
-does not offer selective retry or discard of already-started statistical games.
+makes the match `infrastructure-error`, and never changes W/L/D. Colosseum does
+not offer selective retry or discard of already-started statistical games.
 
-Matches currently use the standard start position and one game at a time. CPU
-placement, concurrency, books, durable run output and
-statistical commands are added separately. `--a-cores` and `--b-cores` are
-parsed for consistency with direct controls but rejected until CPU placement
-is composed into matches.
+`--concurrency N` runs that many game slots while keeping final game records in
+schedule order. CPU placement defaults to `--placement off`, which makes no
+hard request and works on platforms without affinity. Use `--placement auto`
+with `--cores-per-engine N` and optional `--headroom-cores N` to allocate
+disjoint whole physical cores through the detected topology, or provide an
+explicit logical CPU pool such as `--placement 0-7`. Existing per-side
+`--a-cores` / `--b-cores` lists are also enforced, but only for concurrency 1.
+Any requested placement that cannot be applied and read back is an
+infrastructure error, never a silent fallback.
+
+When both sides have an explicit numeric Hash option, output reports the
+conservative lower bound `concurrency × (A Hash + B Hash)`. It is informational
+unless `--memory-budget-mb N` supplies a trusted hard budget; only that explicit
+budget can cause memory refusal. Hash omits engine-private allocations, mapped
+files and other process memory, so the reported value is never labelled total
+memory use.
+
+Matches currently use the standard start position. Books, durable run output
+and statistical commands are added separately. `--a-cores` and `--b-cores`
+are direct hard-placement alternatives to the global placement pool.
 
 Use `--dry-run` to resolve and print both invocations without launching either
 engine. `--json` emits one match result document on stdout.

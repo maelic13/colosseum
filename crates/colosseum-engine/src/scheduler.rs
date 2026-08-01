@@ -1038,6 +1038,7 @@ fn to_game_spec(template: &EngineTemplate) -> EngineGameSpec {
         name: template.name.clone(),
         spawn: template.spawn.clone(),
         options: template.options.clone(),
+        allocated_cpus: colosseum_application::CpuAllocation::Unrestricted,
     }
 }
 

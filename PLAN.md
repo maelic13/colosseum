@@ -1485,6 +1485,14 @@ separate configurable engine-fault and time-loss thresholds with strict zero
 defaults and stop as invalid or infrastructure-error without a selective
 retry/discard mechanism.
 
+**Implemented match resources (4A.5):** fixed matches expose bounded
+concurrency and retain deterministic schedule-order output. Placement `off`,
+`auto` and explicit pools compose the Phase-3 topology, symmetry and hard
+affinity adapters; direct per-side lists remain available for a single slot.
+The resolved slot allocations are structured evidence. Explicit numeric Hash
+values produce only `concurrency × (A Hash + B Hash)` as a lower bound, and
+memory is refused only against an explicit trusted budget.
+
 ### Phase 4A — Fixed-match runner
 
 Implement the non-sequential part of 5.4: fixed matches, per-side controls,

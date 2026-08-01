@@ -79,8 +79,8 @@ fn fixed_match_strict_default_invalidates_on_the_first_engine_fault() {
     assert!(output.stderr.is_empty());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["report"]["status"], "invalid");
-    assert_eq!(value["report"]["games_attempted"], 1);
-    assert_eq!(value["report"]["games_completed"], 1);
+    assert_eq!(value["report"]["games_attempted"], 2);
+    assert_eq!(value["report"]["games_completed"], 2);
     assert_eq!(value["report"]["faults"]["engine_b"], 1);
     assert_eq!(value["report"]["games"][0]["scorable"], true);
     assert_eq!(value["report"]["games"][0]["fault"]["cause"], "engine");
@@ -100,9 +100,9 @@ fn fixed_match_never_scores_an_engine_spawn_failure() {
     assert!(output.stderr.is_empty());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["report"]["status"], "infrastructure-error");
-    assert_eq!(value["report"]["games_attempted"], 1);
+    assert_eq!(value["report"]["games_attempted"], 2);
     assert_eq!(value["report"]["games_completed"], 0);
-    assert_eq!(value["report"]["faults"]["infrastructure"], 1);
+    assert_eq!(value["report"]["faults"]["infrastructure"], 2);
     assert_eq!(value["report"]["games"][0]["scorable"], false);
     assert_eq!(
         value["report"]["games"][0]["fault"]["cause"],
@@ -240,7 +240,7 @@ fn fixed_match_resolves_default_and_disableable_adjudication() {
 }
 
 #[test]
-fn fixed_match_rejects_cpu_controls_until_placement_is_composed() {
+fn fixed_match_resolves_direct_per_side_cpu_controls() {
     let output = cli()
         .args([
             "match",
@@ -250,15 +250,92 @@ fn fixed_match_rejects_cpu_controls_until_placement_is_composed() {
             "missing-b",
             "--a-cores",
             "0",
+            "--b-cores",
+            "1",
+            "--dry-run",
+            "--json",
         ])
         .output()
         .unwrap();
-    assert!(!output.status.success());
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let slots = &value["resolved_configuration"]["execution"]["slots"];
+    assert_eq!(slots[0]["engine_a"]["allocation"]["cpus"][0]["number"], 0);
+    assert_eq!(slots[0]["engine_b"]["allocation"]["cpus"][0]["number"], 1);
+}
+
+#[test]
+fn fixed_match_runs_explicit_concurrency_and_reports_hash_lower_bound() {
+    let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
+    let output = cli()
+        .args(["match", "--games", "4"])
+        .arg(fixture)
+        .arg(fixture)
+        .args([
+            "--concurrency",
+            "2",
+            "--placement",
+            "off",
+            "--a-option",
+            "Hash=16",
+            "--b-option",
+            "Hash=32",
+            "--memory-budget-mb",
+            "96",
+            "--max-engine-faults",
+            "4",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["report"]["execution"]["concurrency"], 2);
+    assert_eq!(
+        value["report"]["execution"]["hash_memory"]["lower_bound_mb"],
+        96
+    );
+    assert_eq!(
+        value["report"]["games"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|game| game["number"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        [1, 2, 3, 4]
+    );
+}
+
+#[test]
+fn fixed_match_refuses_only_against_an_explicit_trusted_memory_budget() {
+    let output = cli()
+        .args([
+            "match",
+            "--games",
+            "1",
+            "a",
+            "b",
+            "--a-option",
+            "Hash=64",
+            "--b-option",
+            "Hash=64",
+            "--memory-budget-mb",
+            "127",
+            "--dry-run",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .contains("CPU placement")
+            .contains("exceeds trusted budget")
     );
 }
 

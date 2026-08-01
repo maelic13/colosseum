@@ -9,10 +9,11 @@ use colosseum_application::{
     CheckEngine, ComplianceReport, ComplianceStatus, EngineInspection, EngineLaunchSpec,
     InspectEngine, RuntimeParticipant, UciOptionSchema,
 };
-use colosseum_cli::{EngineArgs, RunRecord, built_in_defaults, resolve_config};
+use colosseum_cli::{EngineArgs, RunRecord, built_in_defaults, parse_cpu_list, resolve_config};
 use colosseum_core::{
     AdjudicationConfig, DrawAdjudication, ParticipantId, ResignAdjudication, TimeControl,
 };
+use colosseum_engine::CpuPlacementPolicy;
 use colosseum_uci::UciSessionFactory;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -156,6 +157,22 @@ struct MatchCommand {
     /// Invalidate after more time losses than this value.
     #[arg(long, default_value_t = 0)]
     max_time_losses: u32,
+
+    /// Number of games allowed to run at once.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
+    concurrency: u32,
+    /// Physical cores allocated separately to each engine in each game slot.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
+    cores_per_engine: u32,
+    /// CPU placement: off, auto, or an explicit logical CPU list.
+    #[arg(long, default_value = "off")]
+    placement: String,
+    /// Whole physical cores left free when placement is auto.
+    #[arg(long, default_value_t = 2)]
+    headroom_cores: usize,
+    /// Trusted hard budget for the two engines' configured Hash memory.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    memory_budget_mb: Option<u64>,
 }
 
 #[derive(Debug, Args)]
@@ -401,6 +418,27 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
             return ExitCode::from(2);
         }
     };
+    let placement_policy = match resolve_placement(&command.placement, command.headroom_cores) {
+        Ok(policy) => policy,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let execution = match match_runner::plan_execution(
+        &engine_a,
+        &engine_b,
+        command.concurrency as usize,
+        command.cores_per_engine as usize,
+        placement_policy,
+        command.memory_budget_mb,
+    ) {
+        Ok(execution) => execution,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     if dry_run {
         let current_directory = match std::env::current_dir() {
             Ok(directory) => directory,
@@ -421,6 +459,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
                 "engine_b_time_control": engine_b_time_control,
                 "adjudication": adjudication,
                 "fault_policy": fault_policy,
+                "execution": execution,
             }),
             &[],
             &current_directory,
@@ -441,15 +480,16 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         print_output(&output, machine);
         return ExitCode::SUCCESS;
     }
-    match match_runner::run_fixed_match(
+    match match_runner::run_fixed_match(match_runner::FixedMatchRequest {
         engine_a,
         engine_b,
-        command.games,
+        games: command.games,
         engine_a_time_control,
         engine_b_time_control,
         adjudication,
         fault_policy,
-    )
+        execution,
+    })
     .await
     {
         Ok(report) => {
@@ -469,6 +509,18 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
             eprintln!("match failed: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn resolve_placement(value: &str, headroom_cores: usize) -> Result<CpuPlacementPolicy, String> {
+    match value {
+        "off" => Ok(CpuPlacementPolicy::Off),
+        "auto" => Ok(CpuPlacementPolicy::Auto {
+            headroom_physical_cores: headroom_cores,
+        }),
+        explicit => parse_cpu_list(explicit)
+            .map(|cpus| CpuPlacementPolicy::Explicit { cpus })
+            .map_err(|error| error.to_string()),
     }
 }
 

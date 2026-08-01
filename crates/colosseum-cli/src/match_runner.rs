@@ -8,10 +8,14 @@ use std::path::Path;
 use std::time::Duration;
 
 use colosseum_application::{CpuAllocation, EngineLaunchSpec};
-use colosseum_core::{AdjudicationConfig, EngineId, GameId, GameResult, Termination, TimeControl};
+use colosseum_core::{
+    AdjudicationConfig, EngineId, GameId, GameResult, Termination, TimeControl, is_hash_option,
+};
 use colosseum_engine::{
-    ClockAccountingReport, EngineFaultKind, EngineGameSpec, GameFault, GameSide, GameSpec,
-    LiveGameState, run_game,
+    ClockAccountingReport, CoreClass, CpuPlacementPolicy, EngineCpuPlacement, EngineFaultKind,
+    EngineGameSpec, GameFault, GameSide, GameSlotCpuAllocation, GameSpec, LiveGameState,
+    allocate_game_slots, detect_allowed_cpu_set, detect_cpu_characteristics, detect_cpu_topology,
+    plan_cpu_placement, run_game,
 };
 use colosseum_uci::SpawnOptions;
 use serde::Serialize;
@@ -139,34 +143,185 @@ pub struct FixedMatchReport {
     pub adjudication: AdjudicationConfig,
     pub fault_policy: FaultPolicy,
     pub faults: MatchFaultCounts,
+    pub execution: MatchExecutionPlan,
     pub games: Vec<MatchGame>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HashMemoryReport {
+    pub engine_a_hash_mb: Option<u64>,
+    pub engine_b_hash_mb: Option<u64>,
+    pub lower_bound_mb: Option<u64>,
+    pub formula: String,
+    pub trusted_budget_mb: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MatchExecutionPlan {
+    pub concurrency: usize,
+    pub cores_per_engine: usize,
+    pub placement_policy: CpuPlacementPolicy,
+    pub slots: Vec<GameSlotCpuAllocation>,
+    pub hash_memory: HashMemoryReport,
+}
+
+#[derive(Debug, Clone)]
+pub struct FixedMatchRequest {
+    pub engine_a: EngineLaunchSpec,
+    pub engine_b: EngineLaunchSpec,
+    pub games: u32,
+    pub engine_a_time_control: ConfiguredTimeControl,
+    pub engine_b_time_control: ConfiguredTimeControl,
+    pub adjudication: AdjudicationConfig,
+    pub fault_policy: FaultPolicy,
+    pub execution: MatchExecutionPlan,
 }
 
 #[derive(Debug, Error)]
 pub enum MatchError {
     #[error("a fixed match needs at least one game")]
     ZeroGames,
-    #[error("{side} requests CPU placement, which is not available for direct matches yet")]
-    CpuPlacementUnavailable { side: &'static str },
+    #[error("match concurrency must be at least one")]
+    ZeroConcurrency,
+    #[error("cores per engine must be at least one")]
+    ZeroCoresPerEngine,
+    #[error("CPU placement could not be resolved: {0}")]
+    Placement(String),
+    #[error("per-side --a-cores/--b-cores allocations require concurrency 1")]
+    DirectCpuConcurrency,
+    #[error("per-side core lists cannot be combined with a global placement policy")]
+    DirectAndGlobalCpuPlacement,
+    #[error("a trusted memory budget requires explicit numeric Hash options on both engines")]
+    UnknownHashForBudget,
+    #[error("Hash memory lower bound {required_mb} MB exceeds trusted budget {budget_mb} MB")]
+    MemoryBudgetExceeded { required_mb: u64, budget_mb: u64 },
+    #[error("a match worker failed: {0}")]
+    Worker(String),
 }
 
-/// Run exactly `games` sequential games, alternating colours by game number.
+pub fn plan_execution(
+    engine_a: &EngineLaunchSpec,
+    engine_b: &EngineLaunchSpec,
+    concurrency: usize,
+    cores_per_engine: usize,
+    placement_policy: CpuPlacementPolicy,
+    trusted_memory_budget_mb: Option<u64>,
+) -> Result<MatchExecutionPlan, MatchError> {
+    if concurrency == 0 {
+        return Err(MatchError::ZeroConcurrency);
+    }
+    if cores_per_engine == 0 {
+        return Err(MatchError::ZeroCoresPerEngine);
+    }
+    let direct = !matches!(engine_a.allocated_cpus, CpuAllocation::Unrestricted)
+        || !matches!(engine_b.allocated_cpus, CpuAllocation::Unrestricted);
+    let slots = if direct {
+        if !matches!(placement_policy, CpuPlacementPolicy::Off) {
+            return Err(MatchError::DirectAndGlobalCpuPlacement);
+        }
+        if concurrency != 1 {
+            return Err(MatchError::DirectCpuConcurrency);
+        }
+        vec![GameSlotCpuAllocation {
+            slot_index: 0,
+            engine_a: direct_engine_placement(engine_a.allocated_cpus.clone()),
+            engine_b: direct_engine_placement(engine_b.allocated_cpus.clone()),
+            asymmetries: Vec::new(),
+        }]
+    } else if matches!(placement_policy, CpuPlacementPolicy::Off) {
+        (0..concurrency)
+            .map(|slot_index| GameSlotCpuAllocation {
+                slot_index,
+                engine_a: direct_engine_placement(CpuAllocation::Unrestricted),
+                engine_b: direct_engine_placement(CpuAllocation::Unrestricted),
+                asymmetries: Vec::new(),
+            })
+            .collect()
+    } else {
+        let topology =
+            detect_cpu_topology().map_err(|error| MatchError::Placement(error.to_string()))?;
+        let allowed = detect_allowed_cpu_set(&topology)
+            .map_err(|error| MatchError::Placement(error.to_string()))?;
+        let characteristics = detect_cpu_characteristics(&topology)
+            .map_err(|error| MatchError::Placement(error.to_string()))?;
+        let plan = plan_cpu_placement(&topology, &allowed, &placement_policy)
+            .map_err(|error| MatchError::Placement(error.to_string()))?;
+        allocate_game_slots(&plan, &characteristics, concurrency, cores_per_engine)
+            .map_err(|error| MatchError::Placement(error.to_string()))?
+    };
+    let engine_a_hash_mb = configured_hash_mb(engine_a);
+    let engine_b_hash_mb = configured_hash_mb(engine_b);
+    let lower_bound_mb = engine_a_hash_mb
+        .zip(engine_b_hash_mb)
+        .and_then(|(a, b)| a.checked_add(b))
+        .and_then(|per_slot| per_slot.checked_mul(concurrency as u64));
+    if let Some(budget_mb) = trusted_memory_budget_mb {
+        let required_mb = lower_bound_mb.ok_or(MatchError::UnknownHashForBudget)?;
+        if required_mb > budget_mb {
+            return Err(MatchError::MemoryBudgetExceeded {
+                required_mb,
+                budget_mb,
+            });
+        }
+    }
+    Ok(MatchExecutionPlan {
+        concurrency,
+        cores_per_engine,
+        placement_policy,
+        slots,
+        hash_memory: HashMemoryReport {
+            engine_a_hash_mb,
+            engine_b_hash_mb,
+            lower_bound_mb,
+            formula: "concurrency × (engine-a Hash + engine-b Hash)".into(),
+            trusted_budget_mb: trusted_memory_budget_mb,
+        },
+    })
+}
+
+fn direct_engine_placement(allocation: CpuAllocation) -> EngineCpuPlacement {
+    let unrestricted = matches!(allocation, CpuAllocation::Unrestricted);
+    EngineCpuPlacement {
+        allocation,
+        physical_core_count: 0,
+        core_classes: if unrestricted {
+            Vec::new()
+        } else {
+            vec![CoreClass::Unknown]
+        },
+        numa_nodes: Vec::new(),
+    }
+}
+
+fn configured_hash_mb(engine: &EngineLaunchSpec) -> Option<u64> {
+    engine
+        .options
+        .iter()
+        .find(|(name, _)| is_hash_option(name))
+        .and_then(|(_, value)| value.command_value())
+        .and_then(|value| value.parse().ok())
+}
+
+/// Run exactly `games`, alternating colours by game number and retaining
+/// deterministic report order independently of completion order.
 /// The same executable path is valid for both sides because side identity is
 /// the resolved launch specification, not the path.
-pub async fn run_fixed_match(
-    engine_a: EngineLaunchSpec,
-    engine_b: EngineLaunchSpec,
-    games: u32,
-    engine_a_time_control: ConfiguredTimeControl,
-    engine_b_time_control: ConfiguredTimeControl,
-    adjudication: AdjudicationConfig,
-    fault_policy: FaultPolicy,
-) -> Result<FixedMatchReport, MatchError> {
+pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchReport, MatchError> {
+    let FixedMatchRequest {
+        engine_a,
+        engine_b,
+        games,
+        engine_a_time_control,
+        engine_b_time_control,
+        adjudication,
+        fault_policy,
+        execution,
+    } = request;
     if games == 0 {
         return Err(MatchError::ZeroGames);
     }
-    let engine_a = engine_spec(engine_a, MatchSide::A, EngineId::from_u128(1))?;
-    let engine_b = engine_spec(engine_b, MatchSide::B, EngineId::from_u128(2))?;
+    let engine_a = engine_spec(engine_a, EngineId::from_u128(1));
+    let engine_b = engine_spec(engine_b, EngineId::from_u128(2));
     let mut report = FixedMatchReport {
         status: MatchStatus::Completed,
         games_requested: games,
@@ -189,94 +344,132 @@ pub async fn run_fixed_match(
         adjudication,
         fault_policy,
         faults: MatchFaultCounts::default(),
+        execution: execution.clone(),
         games: Vec::with_capacity(games as usize),
     };
 
-    for number in 1..=games {
-        let a_is_white = number % 2 == 1;
-        let white_side = if a_is_white {
-            MatchSide::A
-        } else {
-            MatchSide::B
-        };
-        let (white, black, white_time_control, black_time_control) = if a_is_white {
-            (
-                engine_a.clone(),
-                engine_b.clone(),
+    let mut workers = tokio::task::JoinSet::new();
+    let mut next_number = 1;
+    while next_number <= games || !workers.is_empty() {
+        while next_number <= games && workers.len() < execution.concurrency {
+            let number = next_number;
+            next_number += 1;
+            let slot = &execution.slots[(number as usize - 1) % execution.slots.len()];
+            let mut engine_a = engine_a.clone();
+            let mut engine_b = engine_b.clone();
+            engine_a.allocated_cpus = slot.engine_a.allocation.clone();
+            engine_b.allocated_cpus = slot.engine_b.allocation.clone();
+            workers.spawn(play_game(
+                number,
+                engine_a,
+                engine_b,
                 engine_a_time_control,
                 engine_b_time_control,
-            )
-        } else {
-            (
-                engine_b.clone(),
-                engine_a.clone(),
-                engine_b_time_control,
-                engine_a_time_control,
-            )
+                adjudication,
+            ));
+        }
+        let Some(joined) = workers.join_next().await else {
+            break;
         };
-        let game_id = GameId::from_u128(u128::from(number) + 100);
-        let spec = GameSpec {
-            game_id,
-            event: "Colosseum CLI fixed match".into(),
-            site: "?".into(),
-            date: "????.??.??".into(),
-            round: number,
-            white: white.clone(),
-            black: black.clone(),
-            start_fen: None,
-            opening_moves: Vec::new(),
-            white_time_control: white_time_control.control,
-            black_time_control: black_time_control.control,
-            time_control_label: format!(
-                "white {}; black {}",
-                white_time_control.label(),
-                black_time_control.label()
-            ),
-            adjudication,
-            ponder: false,
-            white_time_margin: Duration::from_millis(white_time_control.margin_ms),
-            black_time_margin: Duration::from_millis(black_time_control.margin_ms),
-            handshake_timeout: HANDSHAKE_TIMEOUT,
-        };
-        let live = LiveGameState::new_handle(
-            game_id,
-            number,
-            (white.id, white.name.clone()),
-            (black.id, black.name.clone()),
-            None,
-            white_time_control.control,
-        );
-        let game = run_game(spec, live).await;
+        let game = joined.map_err(|error| MatchError::Worker(error.to_string()))?;
+        report.games.push(game);
+    }
+    report.games.sort_by_key(|game| game.number);
+    for game in report.games.clone() {
+        let white_side = game.white;
         report.games_attempted += 1;
         if game.scorable {
             record_score(&mut report, white_side, game.result);
             report.games_completed += 1;
         }
         record_fault(&mut report.faults, white_side, game.fault.as_ref());
-        let infrastructure_fault = matches!(game.fault, Some(GameFault::Infrastructure { .. }));
-        let engine_threshold_exceeded =
-            report.faults.engine_total() > fault_policy.max_engine_faults;
-        let time_threshold_exceeded = report.faults.time_total() > fault_policy.max_time_losses;
-        report.games.push(MatchGame {
-            number,
-            white: white_side,
-            result: game.result,
-            scorable: game.scorable,
-            termination: game.termination,
-            clock_accounting: game.clock_accounting,
-            fault: game.fault,
-            error: game.error,
-        });
-        if infrastructure_fault {
-            report.status = MatchStatus::InfrastructureError;
-            break;
-        }
-        if engine_threshold_exceeded || time_threshold_exceeded {
-            report.status = MatchStatus::Invalid;
-            break;
-        }
+    }
+    if report
+        .games
+        .iter()
+        .any(|game| matches!(game.fault, Some(GameFault::Infrastructure { .. })))
+    {
+        report.status = MatchStatus::InfrastructureError;
+    } else if report.faults.engine_total() > fault_policy.max_engine_faults
+        || report.faults.time_total() > fault_policy.max_time_losses
+    {
+        report.status = MatchStatus::Invalid;
     }
     Ok(report)
+}
+
+async fn play_game(
+    number: u32,
+    engine_a: EngineGameSpec,
+    engine_b: EngineGameSpec,
+    engine_a_time_control: ConfiguredTimeControl,
+    engine_b_time_control: ConfiguredTimeControl,
+    adjudication: AdjudicationConfig,
+) -> MatchGame {
+    let a_is_white = number % 2 == 1;
+    let white_side = if a_is_white {
+        MatchSide::A
+    } else {
+        MatchSide::B
+    };
+    let (white, black, white_time_control, black_time_control) = if a_is_white {
+        (
+            engine_a,
+            engine_b,
+            engine_a_time_control,
+            engine_b_time_control,
+        )
+    } else {
+        (
+            engine_b,
+            engine_a,
+            engine_b_time_control,
+            engine_a_time_control,
+        )
+    };
+    let game_id = GameId::from_u128(u128::from(number) + 100);
+    let spec = GameSpec {
+        game_id,
+        event: "Colosseum CLI fixed match".into(),
+        site: "?".into(),
+        date: "????.??.??".into(),
+        round: number,
+        white: white.clone(),
+        black: black.clone(),
+        start_fen: None,
+        opening_moves: Vec::new(),
+        white_time_control: white_time_control.control,
+        black_time_control: black_time_control.control,
+        time_control_label: format!(
+            "white {}; black {}",
+            white_time_control.label(),
+            black_time_control.label()
+        ),
+        adjudication,
+        ponder: false,
+        white_time_margin: Duration::from_millis(white_time_control.margin_ms),
+        black_time_margin: Duration::from_millis(black_time_control.margin_ms),
+        handshake_timeout: HANDSHAKE_TIMEOUT,
+    };
+    let live = LiveGameState::new_handle(
+        game_id,
+        number,
+        (white.id, white.name.clone()),
+        (black.id, black.name.clone()),
+        None,
+        white_time_control.control,
+    );
+    let game = run_game(spec, live).await;
+    MatchGame {
+        number,
+        white: white_side,
+        result: game.result,
+        scorable: game.scorable,
+        termination: game.termination,
+        clock_accounting: game.clock_accounting,
+        fault: game.fault,
+        error: game.error,
+    }
 }
 
 fn record_fault(counts: &mut MatchFaultCounts, white: MatchSide, fault: Option<&GameFault>) {
@@ -300,24 +493,12 @@ fn record_fault(counts: &mut MatchFaultCounts, white: MatchSide, fault: Option<&
     }
 }
 
-fn engine_spec(
-    launch: EngineLaunchSpec,
-    side: MatchSide,
-    id: EngineId,
-) -> Result<EngineGameSpec, MatchError> {
-    if !matches!(launch.allocated_cpus, CpuAllocation::Unrestricted) {
-        return Err(MatchError::CpuPlacementUnavailable {
-            side: match side {
-                MatchSide::A => "engine A",
-                MatchSide::B => "engine B",
-            },
-        });
-    }
+fn engine_spec(launch: EngineLaunchSpec, id: EngineId) -> EngineGameSpec {
     let name = launch
         .label
         .clone()
         .unwrap_or_else(|| display_name(&launch.executable));
-    Ok(EngineGameSpec {
+    EngineGameSpec {
         id,
         name,
         spawn: SpawnOptions {
@@ -331,7 +512,8 @@ fn engine_spec(
             .into_iter()
             .map(|(name, value)| (name, value.command_value()))
             .collect(),
-    })
+        allocated_cpus: launch.allocated_cpus,
+    }
 }
 
 fn display_name(path: &Path) -> String {
@@ -392,6 +574,7 @@ mod tests {
             adjudication: AdjudicationConfig::default(),
             fault_policy: FaultPolicy::default(),
             faults: MatchFaultCounts::default(),
+            execution: off_execution_plan(),
             games: Vec::new(),
         };
         record_score(&mut report, MatchSide::A, GameResult::WhiteWin);
@@ -403,15 +586,19 @@ mod tests {
     }
 
     #[test]
-    fn cpu_requests_are_rejected_before_a_match_is_launched() {
-        let launch = EngineLaunchSpec {
+    fn direct_cpu_requests_are_retained_for_one_game_slot() {
+        let engine_a = EngineLaunchSpec {
             allocated_cpus: CpuAllocation::Enforced(vec![0.into()]),
             ..EngineLaunchSpec::path_only("engine".into())
         };
-        assert!(matches!(
-            engine_spec(launch, MatchSide::A, EngineId::from_u128(1)),
-            Err(MatchError::CpuPlacementUnavailable { side: "engine A" })
-        ));
+        let engine_b = EngineLaunchSpec {
+            allocated_cpus: CpuAllocation::Enforced(vec![1.into()]),
+            ..EngineLaunchSpec::path_only("engine".into())
+        };
+        let plan =
+            plan_execution(&engine_a, &engine_b, 1, 1, CpuPlacementPolicy::Off, None).unwrap();
+        assert_eq!(plan.slots[0].engine_a.allocation, engine_a.allocated_cpus);
+        assert_eq!(plan.slots[0].engine_b.allocation, engine_b.allocated_cpus);
     }
 
     #[test]
@@ -435,5 +622,17 @@ mod tests {
         );
         assert_eq!(counts.infrastructure, 1);
         assert_eq!(counts.engine_a, 0);
+    }
+
+    fn off_execution_plan() -> MatchExecutionPlan {
+        plan_execution(
+            &EngineLaunchSpec::path_only("a".into()),
+            &EngineLaunchSpec::path_only("b".into()),
+            1,
+            1,
+            CpuPlacementPolicy::Off,
+            None,
+        )
+        .unwrap()
     }
 }

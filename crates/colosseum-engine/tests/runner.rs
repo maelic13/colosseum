@@ -39,6 +39,7 @@ fn spec(
             .into_iter()
             .map(|(k, v)| (k.to_string(), Some(v.to_string())))
             .collect(),
+        allocated_cpus: colosseum_application::CpuAllocation::Unrestricted,
     }
 }
 
@@ -259,6 +260,7 @@ async fn setup_failure_writes_incident() {
             env: Default::default(),
         },
         options: vec![("Threads".to_string(), Some("1".to_string()))],
+        allocated_cpus: colosseum_application::CpuAllocation::Unrestricted,
     };
 
     let game = GameSpec {

@@ -80,7 +80,7 @@ impl EngineArgs {
             .collect::<Result<Vec<_>, _>>()?;
         let allocated_cpus = self.cores.as_deref().map_or_else(
             || Ok(CpuAllocation::Unrestricted),
-            |value| parse_cores(value).map(CpuAllocation::Enforced),
+            |value| parse_cpu_list(value).map(CpuAllocation::Enforced),
         )?;
 
         Ok(EngineLaunchSpec {
@@ -145,7 +145,7 @@ fn validate_name(name: &str, kind: &'static str) -> Result<(), EngineArgsError> 
     }
 }
 
-fn parse_cores(value: &str) -> Result<Vec<LogicalCpuId>, EngineArgsError> {
+pub fn parse_cpu_list(value: &str) -> Result<Vec<LogicalCpuId>, EngineArgsError> {
     if value.is_empty() {
         return Err(EngineArgsError::EmptyCoreList);
     }

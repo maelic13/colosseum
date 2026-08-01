@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use colosseum_application::CpuAllocation;
 use colosseum_core::{
     AdjudicationConfig, EngineId, GameId, GameResult, GameStats, Termination, TimeControl,
     adjudicate,
@@ -128,6 +129,7 @@ pub struct EngineGameSpec {
     pub spawn: SpawnOptions,
     /// Resolved `setoption` commands (`value` is `None` for buttons).
     pub options: Vec<(String, Option<String>)>,
+    pub allocated_cpus: CpuAllocation,
 }
 
 /// Everything needed to play one game.
@@ -364,6 +366,9 @@ enum Prepared {
     /// The process never spawned (bad path, missing DLL, etc.); no forensics
     /// beyond the error itself.
     NoSpawn(UciError),
+    /// The process spawned, but the harness could not apply/verify the
+    /// requested resource boundary. This must never become a forfeit.
+    Infrastructure(String, Box<EngineProcess>),
 }
 
 /// Run the handshake / option / ready sequence on an already-spawned engine.
@@ -389,6 +394,19 @@ async fn prepare(spec: &EngineGameSpec, handshake_timeout: Duration) -> Prepared
         Ok(engine) => engine,
         Err(err) => return Prepared::NoSpawn(err),
     };
+    if !matches!(spec.allocated_cpus, CpuAllocation::Unrestricted) {
+        let Some(process_id) = engine.id() else {
+            return Prepared::Infrastructure(
+                "spawned engine has no process identifier".into(),
+                Box::new(engine),
+            );
+        };
+        if let Err(error) =
+            crate::affinity::apply_process_affinity(process_id, &spec.allocated_cpus)
+        {
+            return Prepared::Infrastructure(error.to_string(), Box::new(engine));
+        }
+    }
     match init_engine(&mut engine, spec, handshake_timeout).await {
         Ok(()) => Prepared::Ready(engine),
         Err(err) => Prepared::Failed(err, Box::new(engine)),
@@ -1133,6 +1151,10 @@ async fn handle_setup_failure(
                 Some((engine.transcript(), engine.stderr_tail())),
             ),
             Prepared::NoSpawn(err) => (Some((err, true)), None),
+            Prepared::Infrastructure(message, engine) => (
+                Some((UciError::Protocol(message), true)),
+                Some((engine.transcript(), engine.stderr_tail())),
+            ),
         }
     }
 
