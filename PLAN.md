@@ -591,8 +591,11 @@ right" is not a criterion.
   exclusively reserved CPU Sets; never allocate from the machine total when the
   process is restricted. Validate the OS set against the topology snapshot and
   reject an empty or inconsistent result.
-- Allocate the configured **cores-per-engine** to each game slot — not one core
-  per game. This allocation is independent of whichever UCI option controls the
+- Allocate the configured **cores-per-engine** separately to both engine
+  processes in each concurrent game slot — not one core per game. Allocations
+  are disjoint, retain all available SMT siblings of each physical core and
+  reject `game-slots × 2 × cores-per-engine` requests larger than the selected
+  pool. This allocation is independent of whichever UCI option controls the
   engine's internal worker count.
 - On hybrid systems, keep both A/B slots on the same core class. Record NUMA
   node and core class; avoid cross-node placement by default and make any

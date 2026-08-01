@@ -8,6 +8,8 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use colosseum_application::CpuAllocation;
+
 use crate::allowed_cpus::AllowedCpuSet;
 use crate::topology::{CpuTopology, LogicalCpuId, PhysicalCore};
 
@@ -50,7 +52,10 @@ pub enum CpuPlacementPlan {
         headroom_physical_cores: usize,
     },
     /// An explicit request selects the exact supplied logical CPU identities.
-    ExplicitLogicalCpus { cpus: Vec<LogicalCpuId> },
+    ExplicitLogicalCpus {
+        cpus: Vec<LogicalCpuId>,
+        physical_cores: Vec<PhysicalCore>,
+    },
 }
 
 impl CpuPlacementPlan {
@@ -65,9 +70,81 @@ impl CpuPlacementPlan {
                     .flat_map(|core| core.logical_cpus.iter().copied())
                     .collect(),
             ),
-            Self::ExplicitLogicalCpus { cpus } => Some(cpus.clone()),
+            Self::ExplicitLogicalCpus { cpus, .. } => Some(cpus.clone()),
         }
     }
+
+    fn physical_cores(&self) -> Option<&[PhysicalCore]> {
+        match self {
+            Self::Unrestricted => None,
+            Self::WholePhysicalCores { cores, .. } => Some(cores),
+            Self::ExplicitLogicalCpus { physical_cores, .. } => Some(physical_cores),
+        }
+    }
+}
+
+/// Disjoint CPU allocations for the two engines occupying one concurrent game
+/// slot. These are process allocations, independent of UCI worker options.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameSlotCpuAllocation {
+    pub slot_index: usize,
+    pub engine_a: CpuAllocation,
+    pub engine_b: CpuAllocation,
+}
+
+/// Divide a resolved placement pool between concurrent game slots.
+///
+/// Each engine receives `cores_per_engine` physical cores. A physical core's
+/// available SMT siblings always stay together. Slots never share a logical
+/// CPU. With placement `off`, every engine remains unrestricted.
+pub fn allocate_game_slots(
+    plan: &CpuPlacementPlan,
+    game_slots: usize,
+    cores_per_engine: usize,
+) -> Result<Vec<GameSlotCpuAllocation>, CpuPlacementError> {
+    if game_slots == 0 {
+        return Err(CpuPlacementError::ZeroGameSlots);
+    }
+    if cores_per_engine == 0 {
+        return Err(CpuPlacementError::ZeroCoresPerEngine);
+    }
+    let Some(cores) = plan.physical_cores() else {
+        return Ok((0..game_slots)
+            .map(|slot_index| GameSlotCpuAllocation {
+                slot_index,
+                engine_a: CpuAllocation::Unrestricted,
+                engine_b: CpuAllocation::Unrestricted,
+            })
+            .collect());
+    };
+    let required = game_slots
+        .checked_mul(2)
+        .and_then(|engines| engines.checked_mul(cores_per_engine))
+        .ok_or(CpuPlacementError::AllocationSizeOverflow)?;
+    if required > cores.len() {
+        return Err(CpuPlacementError::InsufficientPhysicalCores {
+            required,
+            available: cores.len(),
+            game_slots,
+            cores_per_engine,
+        });
+    }
+
+    let allocation_for = |engine_index: usize| {
+        let start = engine_index * cores_per_engine;
+        let cpus = cores[start..start + cores_per_engine]
+            .iter()
+            .flat_map(|core| core.logical_cpus.iter().copied())
+            .collect();
+        CpuAllocation::Enforced(cpus)
+    };
+    Ok((0..game_slots)
+        .map(|slot_index| GameSlotCpuAllocation {
+            slot_index,
+            engine_a: allocation_for(slot_index * 2),
+            engine_b: allocation_for(slot_index * 2 + 1),
+        })
+        .collect())
 }
 
 /// Resolve a placement policy against an exact sibling map and the current
@@ -121,8 +198,22 @@ pub fn plan_cpu_placement(
                     return Err(CpuPlacementError::ExplicitCpuNotAllowed(*cpu));
                 }
             }
+            let cpus = selected.into_iter().collect::<Vec<_>>();
+            let physical_cores = known_cores(topology)?
+                .iter()
+                .filter_map(|core| {
+                    let logical_cpus = core
+                        .logical_cpus
+                        .iter()
+                        .filter(|cpu| cpus.binary_search(cpu).is_ok())
+                        .copied()
+                        .collect::<Vec<_>>();
+                    (!logical_cpus.is_empty()).then_some(PhysicalCore { logical_cpus })
+                })
+                .collect();
             Ok(CpuPlacementPlan::ExplicitLogicalCpus {
-                cpus: selected.into_iter().collect(),
+                cpus,
+                physical_cores,
             })
         }
     }
@@ -210,6 +301,21 @@ pub enum CpuPlacementError {
     UnknownExplicitCpu(LogicalCpuId),
     #[error("explicit CPU list contains logical CPU {0:?}, which is not allowed to this process")]
     ExplicitCpuNotAllowed(LogicalCpuId),
+    #[error("game-slot count must be at least one")]
+    ZeroGameSlots,
+    #[error("cores-per-engine must be at least one")]
+    ZeroCoresPerEngine,
+    #[error("CPU allocation size overflow")]
+    AllocationSizeOverflow,
+    #[error(
+        "{game_slots} game slots at {cores_per_engine} physical cores per engine require {required} physical cores, but placement provides {available}"
+    )]
+    InsufficientPhysicalCores {
+        required: usize,
+        available: usize,
+        game_slots: usize,
+        cores_per_engine: usize,
+    },
 }
 
 #[cfg(test)]
@@ -515,6 +621,101 @@ mod tests {
             )
             .unwrap_err(),
             CpuPlacementError::ExplicitCpuNotAllowed(cpu(1))
+        );
+    }
+
+    #[test]
+    fn slot_allocation_assigns_configured_physical_cores_to_each_engine() {
+        let topology = smt_topology();
+        let placement = plan(
+            &topology,
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 0,
+            },
+        )
+        .unwrap();
+        let slots = allocate_game_slots(&placement, 1, 2).unwrap();
+        assert_eq!(slots.len(), 1);
+        assert_eq!(
+            slots[0].engine_a,
+            CpuAllocation::Enforced(vec![cpu(0), cpu(4), cpu(1), cpu(5)])
+        );
+        assert_eq!(
+            slots[0].engine_b,
+            CpuAllocation::Enforced(vec![cpu(2), cpu(6), cpu(3), cpu(7)])
+        );
+    }
+
+    #[test]
+    fn concurrent_slots_are_disjoint_and_capacity_is_physical_core_based() {
+        let topology = smt_topology();
+        let placement = plan(
+            &topology,
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 0,
+            },
+        )
+        .unwrap();
+        let slots = allocate_game_slots(&placement, 2, 1).unwrap();
+        let allocations = slots
+            .iter()
+            .flat_map(|slot| [&slot.engine_a, &slot.engine_b])
+            .map(|allocation| match allocation {
+                CpuAllocation::Enforced(cpus) => cpus.clone(),
+                _ => panic!("placement-on allocation must be enforced"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(allocations.len(), 4);
+        assert_eq!(allocations[0], [cpu(0), cpu(4)]);
+        assert_eq!(allocations[1], [cpu(1), cpu(5)]);
+        assert_eq!(allocations[2], [cpu(2), cpu(6)]);
+        assert_eq!(allocations[3], [cpu(3), cpu(7)]);
+
+        assert_eq!(
+            allocate_game_slots(&placement, 2, 2).unwrap_err(),
+            CpuPlacementError::InsufficientPhysicalCores {
+                required: 8,
+                available: 4,
+                game_slots: 2,
+                cores_per_engine: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn explicit_partial_siblings_still_count_as_one_physical_core() {
+        let topology = smt_topology();
+        let placement = plan(
+            &topology,
+            &CpuPlacementPolicy::Explicit {
+                cpus: vec![cpu(0), cpu(1)],
+            },
+        )
+        .unwrap();
+        let slots = allocate_game_slots(&placement, 1, 1).unwrap();
+        assert_eq!(slots[0].engine_a, CpuAllocation::Enforced(vec![cpu(0)]));
+        assert_eq!(slots[0].engine_b, CpuAllocation::Enforced(vec![cpu(1)]));
+    }
+
+    #[test]
+    fn placement_off_keeps_every_slot_unrestricted() {
+        let slots = allocate_game_slots(&CpuPlacementPlan::Unrestricted, 3, 8).unwrap();
+        assert_eq!(slots.len(), 3);
+        assert!(slots.iter().all(|slot| {
+            slot.engine_a == CpuAllocation::Unrestricted
+                && slot.engine_b == CpuAllocation::Unrestricted
+        }));
+    }
+
+    #[test]
+    fn slot_allocation_rejects_zero_dimensions() {
+        assert_eq!(
+            allocate_game_slots(&CpuPlacementPlan::Unrestricted, 0, 1).unwrap_err(),
+            CpuPlacementError::ZeroGameSlots
+        );
+        assert_eq!(
+            allocate_game_slots(&CpuPlacementPlan::Unrestricted, 1, 0).unwrap_err(),
+            CpuPlacementError::ZeroCoresPerEngine
         );
     }
 }

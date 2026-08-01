@@ -27,7 +27,7 @@ pub use live::{EvalPoint, LiveGameHandle, LiveGameState, LiveSearch};
 pub use openings::{ResolvedOpening, load_openings, summarize};
 pub use placement::{
     CpuPlacementError, CpuPlacementPlan, CpuPlacementPolicy, DEFAULT_AUTO_HEADROOM_PHYSICAL_CORES,
-    plan_cpu_placement,
+    GameSlotCpuAllocation, allocate_game_slots, plan_cpu_placement,
 };
 pub use runner::{EngineGameSpec, GameReport, GameSpec, run_game};
 pub use scheduler::{

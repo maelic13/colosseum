@@ -43,5 +43,11 @@ sibling map; on macOS they therefore report that the selection cannot yet be
 resolved rather than guessing CPU identities. `off` remains available without
 a sibling map or allowed-set identity.
 
-This policy is only a deterministic selection. It does not yet divide CPUs
-between concurrent game slots or apply affinity; those are separate steps.
+The selected pool is divided into disjoint concurrent game slots. Each slot
+gets two engine allocations, and each engine receives the configured number of
+physical cores with every available SMT sibling belonging to those cores. This
+allocation is independent of the engine's UCI worker-thread option: changing
+`Threads` never changes `cores-per-engine`, or vice versa. A request that cannot
+fit `game-slots × 2 × cores-per-engine` physical cores is rejected.
+
+This policy does not yet apply the resolved affinity to child processes.

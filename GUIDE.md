@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–2 and topology-aware placement through Phase 3.3 are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run state, OS-reported physical-core/SMT identity, current-process CPU restrictions, and `auto`/`off`/explicit placement resolution |
-| What is missing | Per-slot core allocation, affinity enforcement and topology-quality policy; full match and pair-atomic SPRT execution; optional calibration; SPSA; benchmarking; Texel/data-generation and the remaining reporting/release work |
+| What exists | Phases 0–2 and topology-aware placement through Phase 3.4 are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run state, OS-reported physical-core/SMT identity, current-process CPU restrictions, placement modes, and disjoint per-engine/per-slot physical-core allocation |
+| What is missing | Affinity enforcement and topology-quality policy; full match and pair-atomic SPRT execution; optional calibration; SPSA; benchmarking; Texel/data-generation and the remaining reporting/release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 3.3 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 3.4 — per-game-slot core allocation** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Platform status | Windows ☑ local through Phase 3.4 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 3.5 — symmetric core-class and NUMA placement** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -288,8 +288,12 @@ model as well.
   [`crates/colosseum-engine/src/allowed_cpus.rs`](crates/colosseum-engine/src/allowed_cpus.rs),
   [`crates/colosseum-engine/src/placement.rs`](crates/colosseum-engine/src/placement.rs),
   [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
-- ☐ **3.4** — **Model: Terra High.** Allocate the configured `cores-per-engine` per game slot, independent
-  of whichever UCI option controls the engine's worker count
+- ☑ **3.4 — DONE** — **Model: Terra High.** Each concurrent game slot receives
+  two disjoint allocations of the configured physical `cores-per-engine`, with
+  available SMT siblings kept together and capacity checked independently of
+  UCI worker-thread options — evidence:
+  [`crates/colosseum-engine/src/placement.rs`](crates/colosseum-engine/src/placement.rs),
+  [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
 - ☐ **3.5** — **Model: Sol High.** Keep A/B slots on the same P/E core class and NUMA locality where
   possible; record class/node and visible asymmetry
 - ☐ **3.6** — **Model: Terra High.** Fail when requested placement is unavailable; allow and record `off`;
@@ -504,9 +508,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 3.4 — Per-game-slot core allocation. Model: GPT-5.6 Terra — High.**
-Allocate the configured `cores-per-engine` to each game slot independently of
-the engine's UCI worker-thread option.
+**Phase 3.5 — Symmetric topology-quality placement. Model: GPT-5.6 Sol —
+High.** Keep A/B allocations on the same performance/efficiency core class and
+NUMA locality where possible, recording any unavoidable asymmetry.
 
 ```
 git diff --check
