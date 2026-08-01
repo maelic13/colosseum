@@ -1471,6 +1471,12 @@ increment, equality is accepted, and every structured game result records the
 model/version, margins, probed resolution and per-side charged elapsed
 min/median/max without inventing an engine-versus-harness split.
 
+**Implemented adjudication controls (4A.3):** fixed matches resolve the Tier-B
+two-sided resignation and draw defaults into every configuration, expose each
+threshold plus an optional maximum-move cap, and allow draw or resignation to
+be disabled independently. Tablebase UCI values remain arbitrary per-engine
+options; no harness-side probing or adjudication dependency was introduced.
+
 ### Phase 4A — Fixed-match runner
 
 Implement the non-sequential part of 5.4: fixed matches, per-side controls,

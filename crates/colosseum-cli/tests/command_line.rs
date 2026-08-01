@@ -146,6 +146,46 @@ fn fixed_match_rejects_ambiguous_or_incomplete_time_controls() {
 }
 
 #[test]
+fn fixed_match_resolves_default_and_disableable_adjudication() {
+    let default_output = cli()
+        .args(["match", "--games", "1", "a", "b", "--dry-run", "--json"])
+        .output()
+        .unwrap();
+    assert!(default_output.status.success());
+    let default: serde_json::Value = serde_json::from_slice(&default_output.stdout).unwrap();
+    let adjudication = &default["resolved_configuration"]["adjudication"];
+    assert_eq!(adjudication["draw"]["min_ply"], 80);
+    assert_eq!(adjudication["draw"]["move_count"], 8);
+    assert_eq!(adjudication["draw"]["score_cp"], 10);
+    assert_eq!(adjudication["resign"]["move_count"], 3);
+    assert_eq!(adjudication["resign"]["score_cp"], 600);
+    assert!(adjudication["max_moves"].is_null());
+
+    let disabled_output = cli()
+        .args([
+            "match",
+            "--games",
+            "1",
+            "a",
+            "b",
+            "--no-draw-adjudication",
+            "--no-resign-adjudication",
+            "--max-moves",
+            "75",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(disabled_output.status.success());
+    let disabled: serde_json::Value = serde_json::from_slice(&disabled_output.stdout).unwrap();
+    let adjudication = &disabled["resolved_configuration"]["adjudication"];
+    assert!(adjudication["draw"].is_null());
+    assert!(adjudication["resign"].is_null());
+    assert_eq!(adjudication["max_moves"], 75);
+}
+
+#[test]
 fn fixed_match_rejects_cpu_controls_until_placement_is_composed() {
     let output = cli()
         .args([

@@ -53,8 +53,21 @@ version, both margins, measured monotonic resolution and per-side charged-time
 sample count/minimum/median/maximum. These figures intentionally do not claim
 to separate engine work from scheduler or pipe latency inside the interval.
 
-Matches currently use the standard start position and one game at a time.
-Adjudication, CPU placement, concurrency, books, durable run output and
+Draw and resignation adjudication are enabled by default with conservative
+settings. All settings are ordinary policy and can be changed or disabled:
+
+| Policy | Default | Controls |
+|---|---|---|
+| Draw | from move 40, 8 moves, ±10 cp | `--draw-move`, `--draw-moves`, `--draw-score-cp`, `--no-draw-adjudication` |
+| Resignation | 3 moves, ±600 cp, both engines agreeing | `--resign-moves`, `--resign-score-cp`, `--no-resign-adjudication` |
+| Maximum moves | disabled | `--max-moves N` |
+
+Natural mate and draw rules always apply. Tablebase-related UCI options can be
+forwarded through `--a-option` and `--b-option`; Colosseum does not inspect the
+tablebase files or perform harness-side tablebase adjudication.
+
+Matches currently use the standard start position and one game at a time. CPU
+placement, concurrency, books, durable run output and
 statistical commands are added separately. `--a-cores` and `--b-cores` are
 parsed for consistency with direct controls but rejected until CPU placement
 is composed into matches.

@@ -95,6 +95,7 @@ pub struct FixedMatchReport {
     pub engine_b: MatchScore,
     pub engine_a_time_control: ConfiguredTimeControl,
     pub engine_b_time_control: ConfiguredTimeControl,
+    pub adjudication: AdjudicationConfig,
     pub games: Vec<MatchGame>,
 }
 
@@ -115,6 +116,7 @@ pub async fn run_fixed_match(
     games: u32,
     engine_a_time_control: ConfiguredTimeControl,
     engine_b_time_control: ConfiguredTimeControl,
+    adjudication: AdjudicationConfig,
 ) -> Result<FixedMatchReport, MatchError> {
     if games == 0 {
         return Err(MatchError::ZeroGames);
@@ -138,6 +140,7 @@ pub async fn run_fixed_match(
         },
         engine_a_time_control,
         engine_b_time_control,
+        adjudication,
         games: Vec::with_capacity(games as usize),
     };
 
@@ -181,7 +184,7 @@ pub async fn run_fixed_match(
                 white_time_control.label(),
                 black_time_control.label()
             ),
-            adjudication: AdjudicationConfig::default(),
+            adjudication,
             ponder: false,
             white_time_margin: Duration::from_millis(white_time_control.margin_ms),
             black_time_margin: Duration::from_millis(black_time_control.margin_ms),
@@ -297,6 +300,7 @@ mod tests {
             },
             engine_a_time_control: ConfiguredTimeControl::default(),
             engine_b_time_control: ConfiguredTimeControl::default(),
+            adjudication: AdjudicationConfig::default(),
             games: Vec::new(),
         };
         record_score(&mut report, MatchSide::A, GameResult::WhiteWin);

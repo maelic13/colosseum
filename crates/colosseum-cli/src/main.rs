@@ -10,7 +10,9 @@ use colosseum_application::{
     InspectEngine, RuntimeParticipant, UciOptionSchema,
 };
 use colosseum_cli::{EngineArgs, RunRecord, built_in_defaults, resolve_config};
-use colosseum_core::{ParticipantId, TimeControl};
+use colosseum_core::{
+    AdjudicationConfig, DrawAdjudication, ParticipantId, ResignAdjudication, TimeControl,
+};
 use colosseum_uci::UciSessionFactory;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -125,6 +127,28 @@ struct MatchCommand {
     b_depth: Option<u32>,
     #[arg(long = "b-margin-ms", default_value_t = match_runner::DEFAULT_MARGIN_MS)]
     b_margin_ms: u64,
+
+    /// Disable the default conservative draw adjudication.
+    #[arg(long)]
+    no_draw_adjudication: bool,
+    #[arg(long, default_value_t = 40, value_parser = clap::value_parser!(u32).range(1..))]
+    draw_move: u32,
+    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..))]
+    draw_moves: u32,
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(i32).range(0..))]
+    draw_score_cp: i32,
+
+    /// Disable the default two-sided resignation adjudication.
+    #[arg(long)]
+    no_resign_adjudication: bool,
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..))]
+    resign_moves: u32,
+    #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(i32).range(1..))]
+    resign_score_cp: i32,
+
+    /// Draw after this many full moves; omitted means no maximum-move cap.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    max_moves: Option<u32>,
 }
 
 #[derive(Debug, Args)]
@@ -303,6 +327,7 @@ enum MachineOutput<'a> {
 }
 
 async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitCode {
+    let adjudication = resolve_adjudication(&command);
     let engine_a_time_control = match resolve_time_control(
         "engine A",
         command.a_movetime_ms,
@@ -383,6 +408,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
                 "engine_b": &engine_b,
                 "engine_a_time_control": engine_a_time_control,
                 "engine_b_time_control": engine_b_time_control,
+                "adjudication": adjudication,
             }),
             &[],
             &current_directory,
@@ -409,6 +435,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         command.games,
         engine_a_time_control,
         engine_b_time_control,
+        adjudication,
     )
     .await
     {
@@ -424,6 +451,21 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
             eprintln!("match failed: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn resolve_adjudication(command: &MatchCommand) -> AdjudicationConfig {
+    AdjudicationConfig {
+        max_moves: command.max_moves,
+        draw: (!command.no_draw_adjudication).then_some(DrawAdjudication {
+            min_ply: command.draw_move.saturating_mul(2),
+            move_count: command.draw_moves,
+            score_cp: command.draw_score_cp,
+        }),
+        resign: (!command.no_resign_adjudication).then_some(ResignAdjudication {
+            move_count: command.resign_moves,
+            score_cp: command.resign_score_cp,
+        }),
     }
 }
 
