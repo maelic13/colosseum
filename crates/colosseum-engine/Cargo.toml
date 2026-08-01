@@ -12,18 +12,24 @@ authors.workspace = true
 default = ["tournament", "platform"]
 # Lightweight OS adapter surface used by the independent CLI capability probe.
 platform = []
-# Existing GUI/backend implementation. Kept as the default for compatibility.
-tournament = [
-    "dep:anyhow",
+# One-game UCI runner, PGN rendering and incident forensics. This remains
+# independent of the GUI scheduler and SQLite storage adapter.
+runner = [
     "dep:colosseum-core",
     "dep:colosseum-uci",
-    "dep:crossbeam-channel",
-    "dep:rusqlite",
-    "dep:serde_json",
     "dep:shakmaty",
     "dep:time",
     "dep:tokio",
     "dep:tracing",
+]
+# Existing GUI/backend scheduler and persistence implementation. Kept as the
+# default for compatibility.
+tournament = [
+    "runner",
+    "dep:anyhow",
+    "dep:crossbeam-channel",
+    "dep:rusqlite",
+    "dep:serde_json",
     "dep:uuid",
 ]
 # Explicit local interoperability coverage only. Required CI never enables it.

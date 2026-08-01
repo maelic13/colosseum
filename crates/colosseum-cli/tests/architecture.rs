@@ -106,11 +106,11 @@ fn cli_source_has_no_gui_state_or_app_directory_access() {
 }
 
 #[test]
-fn cli_platform_adapter_does_not_pull_in_legacy_database_or_tournament_code() {
+fn cli_runner_adapter_does_not_pull_in_legacy_database_or_scheduler_code() {
     let manifest =
         fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
     assert!(manifest.contains(
-        "colosseum-engine = { path = \"../colosseum-engine\", default-features = false, features = [\"platform\"] }"
+        "colosseum-engine = { path = \"../colosseum-engine\", default-features = false, features = [\"platform\", \"runner\"] }"
     ));
     assert!(!manifest.contains("rusqlite"));
 
@@ -122,10 +122,10 @@ fn cli_platform_adapter_does_not_pull_in_legacy_database_or_tournament_code() {
         .expect("cargo tree");
     assert!(output.status.success());
     let tree = String::from_utf8(output.stdout).unwrap();
-    for forbidden in ["rusqlite", "libsqlite3-sys", "shakmaty"] {
+    for forbidden in ["rusqlite", "libsqlite3-sys", "crossbeam-channel"] {
         assert!(
             !tree.contains(forbidden),
-            "independent CLI platform probe pulled in {forbidden}"
+            "independent CLI runner pulled in {forbidden}"
         );
     }
 }

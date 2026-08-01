@@ -23,7 +23,78 @@ fn help_is_headless_and_names_the_product() {
     assert!(stdout.contains("ordinary UCI chess-engine executables"));
     assert!(stdout.contains("Usage: colosseum-cli"));
     assert!(stdout.contains("capabilities"));
+    assert!(stdout.contains("match"));
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn fixed_match_accepts_the_same_ordinary_uci_path_with_different_side_options() {
+    let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
+    let output = cli()
+        .args(["match", "--games", "2"])
+        .arg(fixture)
+        .arg(fixture)
+        .args(["--a-option", "Hash=16", "--b-option", "Hash=32", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["type"], "fixed-match");
+    assert_eq!(value["report"]["games_requested"], 2);
+    assert_eq!(value["report"]["games_completed"], 2);
+    assert_eq!(value["report"]["games"][0]["white"], "a");
+    assert_eq!(value["report"]["games"][1]["white"], "b");
+}
+
+#[test]
+fn fixed_match_dry_run_resolves_two_direct_engine_invocations_without_launching() {
+    let root = tempfile::tempdir().unwrap();
+    let missing_a = root.path().join("missing-a");
+    let missing_b = root.path().join("missing-b");
+    let output = cli()
+        .args(["match", "--games", "3", "--dry-run", "--json"])
+        .arg(&missing_a)
+        .arg(&missing_b)
+        .args(["--a-label", "candidate", "--b-option", "Hash=64"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["type"], "dry-run");
+    assert_eq!(value["command"], "match");
+    assert_eq!(value["invocations"].as_array().unwrap().len(), 2);
+    assert_eq!(value["resolved_configuration"]["games"], 3);
+    assert_eq!(value["invocations"][0]["label"], "candidate");
+    assert_eq!(value["invocations"][1]["options"]["Hash"]["kind"], "string");
+}
+
+#[test]
+fn fixed_match_rejects_cpu_controls_until_placement_is_composed() {
+    let output = cli()
+        .args([
+            "match",
+            "--games",
+            "1",
+            "missing-a",
+            "missing-b",
+            "--a-cores",
+            "0",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("CPU placement")
+    );
 }
 
 #[test]

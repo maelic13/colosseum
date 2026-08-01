@@ -13,16 +13,16 @@ pub mod characteristics;
 pub mod detect;
 #[cfg(feature = "tournament")]
 pub mod error;
-#[cfg(feature = "tournament")]
+#[cfg(feature = "runner")]
 pub mod incidents;
-#[cfg(feature = "tournament")]
+#[cfg(feature = "runner")]
 pub mod live;
 #[cfg(feature = "tournament")]
 pub mod openings;
-#[cfg(feature = "tournament")]
+#[cfg(feature = "runner")]
 pub mod pgn;
 pub mod placement;
-#[cfg(feature = "tournament")]
+#[cfg(feature = "runner")]
 pub mod runner;
 #[cfg(feature = "tournament")]
 pub mod scheduler;
@@ -39,13 +39,13 @@ pub use characteristics::{
     CharacteristicsError, CharacteristicsSource, CoreClass, CpuCharacteristics, NumaNodeId,
     PhysicalCoreCharacteristics, detect_cpu_characteristics,
 };
-#[cfg(feature = "tournament")]
+#[cfg(feature = "runner")]
 pub use colosseum_uci::Score;
 #[cfg(feature = "tournament")]
 pub use detect::{DetectResult, detect_engine, split_name_version};
 #[cfg(feature = "tournament")]
 pub use error::EngineError;
-#[cfg(feature = "tournament")]
+#[cfg(feature = "runner")]
 pub use live::{EvalPoint, LiveGameHandle, LiveGameState, LiveSearch};
 #[cfg(feature = "tournament")]
 pub use openings::{ResolvedOpening, load_openings, summarize};
@@ -54,7 +54,7 @@ pub use placement::{
     EngineCpuPlacement, GameSlotCpuAllocation, PlacementAsymmetry, allocate_game_slots,
     plan_cpu_placement,
 };
-#[cfg(feature = "tournament")]
+#[cfg(feature = "runner")]
 pub use runner::{EngineGameSpec, GameReport, GameSpec, run_game};
 #[cfg(feature = "tournament")]
 pub use scheduler::{

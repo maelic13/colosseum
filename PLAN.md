@@ -1446,6 +1446,16 @@ the full workspace regression suite remains green. Detailed evidence and the
 current Windows single-primary-group limitation are recorded in
 `docs/architecture/phase-3-exit.md`.
 
+**Implemented fixed match surface (4A.1):** `colosseum-cli match --games N`
+plays exactly N sequential direct-UCI games and alternates colours. Its two
+launch specifications are independent, so the same executable path with
+different side-specific options is a supported ordinary-UCI comparison. It
+provides strict JSON and dry-run output, exposes runner-visible engine errors,
+and deliberately leaves time controls, adjudication, fault policy, placement,
+concurrency, books and durable output to their assigned later steps. The CLI
+uses `colosseum-engine`'s runner feature without enabling its scheduler or
+SQLite storage feature; architecture coverage preserves that boundary.
+
 ### Phase 4A — Fixed-match runner
 
 Implement the non-sequential part of 5.4: fixed matches, per-side controls,

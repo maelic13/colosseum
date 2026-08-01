@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–3 are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run state, OS-reported physical-core/SMT identity, current-process CPU restrictions, placement modes, disjoint per-engine/per-slot physical-core allocation, auditable core-class/NUMA symmetry, fail-closed OS affinity application, read-only platform capability reporting, recorded topology acceptance corpus, and enforceable child-residency proof |
-| What is missing | Full match and pair-atomic SPRT execution; optional calibration; SPSA; benchmarking; Texel/data-generation and the remaining reporting/release work |
+| What exists | Phases 0–3 plus the fixed-N direct-engine match surface are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run state, topology/affinity handling, and a headless sequential fixed match that permits same-binary option comparisons |
+| What is missing | Configurable time controls and clock accounting; match adjudication/fault/concurrency/book/output durability; pair-atomic SPRT; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 3 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4A.1 — fixed-N direct-engine match surface** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Platform status | Windows ☑ local through Phase 4A.1 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 4A.2 — per-side time controls** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -326,8 +326,14 @@ model as well.
 
 ### Phase 4A — Fixed-match runner
 
-- ☐ **4A.1** — **Model: Terra High.** `match` is fixed-N; two direct UCI engines; same executable with
-  different options allowed
+- ☑ **4A.1 — DONE** — **Model: Terra High.** `match --games N` runs exactly N
+  direct UCI games with alternating colours and no sequential stopping; each
+  side has independent executable, process and UCI-option controls, including
+  same-path option comparisons; strict JSON and dry-run work for both sides —
+  evidence:
+  [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
+  [`docs/cli/match.md`](docs/cli/match.md)
 - ☐ **4A.2** — **Model: Sol High.** Time controls per side: movetime, sudden death, base+increment,
   fixed nodes/depth and configurable time margin
 - ☐ **4A.2a** — **Model: Sol High. Clock accounting (PLAN §5.4a), explicit/versioned/recorded:**

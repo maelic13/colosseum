@@ -1,6 +1,7 @@
 //! Independent headless composition root for Colosseum CLI.
 
-use std::path::Path;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
@@ -15,6 +16,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 mod capabilities;
+mod match_runner;
 mod self_test;
 mod uci_stub;
 
@@ -42,6 +44,8 @@ struct Cli {
 enum Command {
     /// Print detected topology, restrictions and affinity support.
     Capabilities,
+    /// Run a fixed number of games between two ordinary UCI engines.
+    Match(Box<MatchCommand>),
     /// Inspect or compliance-check an ordinary UCI executable.
     Engine(EngineCommand),
     /// Verify this exact executable's protocol, process and persistence paths.
@@ -54,6 +58,49 @@ enum Command {
     /// Internal deterministic UCI fixture. Not a public engine interface.
     #[command(name = "__uci-stub", hide = true)]
     UciStub(uci_stub::StubArgs),
+}
+
+#[derive(Debug, Args)]
+struct MatchCommand {
+    /// Exact number of games to play; this command never stops early.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    games: u32,
+
+    /// Path to engine A's UCI executable.
+    engine_a: PathBuf,
+
+    /// Path to engine B's UCI executable.
+    engine_b: PathBuf,
+
+    #[arg(long = "a-label")]
+    a_label: Option<String>,
+    #[arg(long = "a-engine-arg", allow_hyphen_values = true)]
+    a_arguments: Vec<OsString>,
+    #[arg(long = "a-cwd")]
+    a_cwd: Option<PathBuf>,
+    #[arg(long = "a-env", value_name = "KEY=VALUE")]
+    a_environment: Vec<String>,
+    #[arg(long = "a-option", value_name = "NAME=VALUE")]
+    a_options: Vec<String>,
+    #[arg(long = "a-button", value_name = "NAME")]
+    a_buttons: Vec<String>,
+    #[arg(long = "a-cores", value_name = "LIST")]
+    a_cores: Option<String>,
+
+    #[arg(long = "b-label")]
+    b_label: Option<String>,
+    #[arg(long = "b-engine-arg", allow_hyphen_values = true)]
+    b_arguments: Vec<OsString>,
+    #[arg(long = "b-cwd")]
+    b_cwd: Option<PathBuf>,
+    #[arg(long = "b-env", value_name = "KEY=VALUE")]
+    b_environment: Vec<String>,
+    #[arg(long = "b-option", value_name = "NAME=VALUE")]
+    b_options: Vec<String>,
+    #[arg(long = "b-button", value_name = "NAME")]
+    b_buttons: Vec<String>,
+    #[arg(long = "b-cores", value_name = "LIST")]
+    b_cores: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -82,6 +129,7 @@ async fn main() -> ExitCode {
     match cli.command {
         Command::Capabilities if cli.dry_run => unsupported_dry_run("capabilities"),
         Command::Capabilities => run_capabilities(cli.json),
+        Command::Match(command) => run_match(*command, cli.json, cli.dry_run).await,
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
         Command::SelfTest if cli.dry_run => unsupported_dry_run("self-test"),
         Command::SelfTest => run_self_test(cli.json).await,
@@ -206,6 +254,9 @@ enum MachineOutput<'a> {
     Capabilities {
         report: capabilities::CapabilitiesReport,
     },
+    FixedMatch {
+        report: match_runner::FixedMatchReport,
+    },
     DryRun {
         command: &'a str,
         config_sha256: &'a str,
@@ -225,6 +276,142 @@ enum MachineOutput<'a> {
         run_directory: &'a Path,
         record: RunRecord,
     },
+}
+
+async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitCode {
+    let engine_a = match resolve_match_engine(
+        command.engine_a,
+        command.a_label,
+        command.a_arguments,
+        command.a_cwd,
+        command.a_environment,
+        command.a_options,
+        command.a_buttons,
+        command.a_cores,
+    ) {
+        Ok(engine) => engine,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let engine_b = match resolve_match_engine(
+        command.engine_b,
+        command.b_label,
+        command.b_arguments,
+        command.b_cwd,
+        command.b_environment,
+        command.b_options,
+        command.b_buttons,
+        command.b_cores,
+    ) {
+        Ok(engine) => engine,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if dry_run {
+        let current_directory = match std::env::current_dir() {
+            Ok(directory) => directory,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        };
+        let resolved = match resolve_config(
+            built_in_defaults(),
+            None,
+            json!({
+                "command": "match",
+                "games": command.games,
+                "engine_a": &engine_a,
+                "engine_b": &engine_b,
+            }),
+            &[],
+            &current_directory,
+            &["/engine_a/executable".into(), "/engine_b/executable".into()],
+        ) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        };
+        let output = MachineOutput::DryRun {
+            command: "match",
+            config_sha256: resolved.sha256(),
+            resolved_configuration: resolved.value(),
+            invocations: vec![&engine_a, &engine_b],
+        };
+        print_output(&output, machine);
+        return ExitCode::SUCCESS;
+    }
+    match match_runner::run_fixed_match(engine_a, engine_b, command.games).await {
+        Ok(report) => {
+            if machine {
+                print_json(&MachineOutput::FixedMatch { report });
+            } else {
+                print_fixed_match(&report);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("match failed: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_match_engine(
+    executable: PathBuf,
+    label: Option<String>,
+    arguments: Vec<OsString>,
+    cwd: Option<PathBuf>,
+    environment: Vec<String>,
+    options: Vec<String>,
+    buttons: Vec<String>,
+    cores: Option<String>,
+) -> Result<EngineLaunchSpec, colosseum_cli::EngineArgsError> {
+    EngineArgs {
+        executable,
+        label,
+        arguments,
+        cwd,
+        environment,
+        options,
+        buttons,
+        cores,
+    }
+    .resolve()
+}
+
+fn print_fixed_match(report: &match_runner::FixedMatchReport) {
+    println!(
+        "fixed match: {}/{} games completed",
+        report.games_completed, report.games_requested
+    );
+    for (side, score) in [("A", &report.engine_a), ("B", &report.engine_b)] {
+        println!(
+            "engine {side} ({}): {} W / {} L / {} D",
+            score.name, score.wins, score.losses, score.draws
+        );
+    }
+    for game in &report.games {
+        let error = game
+            .error
+            .as_deref()
+            .map_or_else(String::new, |error| format!(" — {error}"));
+        println!(
+            "game {}: {:?} white, {} ({:?}){}",
+            game.number,
+            game.white,
+            game.result.pgn(),
+            game.termination,
+            error
+        );
+    }
 }
 
 fn run_capabilities(machine: bool) -> ExitCode {

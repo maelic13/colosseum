@@ -20,6 +20,9 @@ group zero. Duplicate names and duplicate, malformed or descending CPU
 allocations are errors. No engine manifest, compiler metadata,
 build command or custom engine feature is read or required.
 
+For `match`, controls are independent per side and use the corresponding
+`--a-…` or `--b-…` spelling; see [fixed matches](match.md).
+
 ## Inspection and compliance
 
 `colosseum-cli engine inspect <EXECUTABLE>` performs the normal `uci`/`isready`
