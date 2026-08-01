@@ -783,6 +783,7 @@ dependencies = [
  "clap",
  "colosseum-application",
  "colosseum-core",
+ "colosseum-engine",
  "colosseum-uci",
  "dunce",
  "getrandom 0.3.4",
