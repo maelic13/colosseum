@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use clap::Args;
-use colosseum_application::{CpuAllocation, EngineLaunchSpec, UciOptionValue};
+use colosseum_application::{CpuAllocation, EngineLaunchSpec, LogicalCpuId, UciOptionValue};
 use thiserror::Error;
 
 /// Direct controls for one ordinary UCI executable.
@@ -36,7 +36,7 @@ pub struct EngineArgs {
     #[arg(long = "button", value_name = "NAME")]
     pub buttons: Vec<String>,
 
-    /// Allocated logical CPUs, for example 0,2-4,7.
+    /// Allocated logical CPUs, for example 0,2-4 or Windows groups 0:0-3,1:0-3.
     #[arg(long, value_name = "LIST")]
     pub cores: Option<String>,
 }
@@ -111,8 +111,8 @@ pub enum EngineArgsError {
     DescendingCoreRange(String),
     #[error("logical CPU range is unreasonably large: {0}")]
     ExcessiveCoreRange(String),
-    #[error("logical CPU {0} is allocated more than once")]
-    DuplicateCore(u32),
+    #[error("logical CPU {group}:{number} is allocated more than once")]
+    DuplicateCore { group: u16, number: u32 },
     #[error("logical CPU list must not be empty")]
     EmptyCoreList,
 }
@@ -145,7 +145,7 @@ fn validate_name(name: &str, kind: &'static str) -> Result<(), EngineArgsError> 
     }
 }
 
-fn parse_cores(value: &str) -> Result<Vec<u32>, EngineArgsError> {
+fn parse_cores(value: &str) -> Result<Vec<LogicalCpuId>, EngineArgsError> {
     if value.is_empty() {
         return Err(EngineArgsError::EmptyCoreList);
     }
@@ -155,9 +155,20 @@ fn parse_cores(value: &str) -> Result<Vec<u32>, EngineArgsError> {
         if component.is_empty() {
             return Err(EngineArgsError::InvalidCore(component.into()));
         }
-        let (start, end) = if let Some((start, end)) = component.split_once('-') {
-            let start = core_number(start)?;
-            let end = core_number(end)?;
+        let (group, numbers) = if let Some((group, numbers)) = component.split_once(':') {
+            let group = group
+                .parse::<u16>()
+                .map_err(|_| EngineArgsError::InvalidCore(component.into()))?;
+            if numbers.contains(':') {
+                return Err(EngineArgsError::InvalidCore(component.into()));
+            }
+            (group, numbers)
+        } else {
+            (0, component)
+        };
+        let (start, end) = if let Some((start, end)) = numbers.split_once('-') {
+            let start = core_number(start, component)?;
+            let end = core_number(end, component)?;
             if start > end {
                 return Err(EngineArgsError::DescendingCoreRange(component.into()));
             }
@@ -166,23 +177,24 @@ fn parse_cores(value: &str) -> Result<Vec<u32>, EngineArgsError> {
             }
             (start, end)
         } else {
-            let core = core_number(component)?;
+            let core = core_number(numbers, component)?;
             (core, core)
         };
-        for core in start..=end {
-            if !seen.insert(core) {
-                return Err(EngineArgsError::DuplicateCore(core));
+        for number in start..=end {
+            let cpu = LogicalCpuId { group, number };
+            if !seen.insert(cpu) {
+                return Err(EngineArgsError::DuplicateCore { group, number });
             }
-            cores.push(core);
+            cores.push(cpu);
         }
     }
     Ok(cores)
 }
 
-fn core_number(value: &str) -> Result<u32, EngineArgsError> {
+fn core_number(value: &str, component: &str) -> Result<u32, EngineArgsError> {
     value
         .parse()
-        .map_err(|_| EngineArgsError::InvalidCore(value.into()))
+        .map_err(|_| EngineArgsError::InvalidCore(component.into()))
 }
 
 #[cfg(test)]
@@ -218,7 +230,7 @@ mod tests {
             "--button",
             "Clear Hash",
             "--cores",
-            "0,2-4,7",
+            "0,0:2-4,1:7",
         ])
         .unwrap();
         let launch = parsed.engine.resolve().unwrap();
@@ -235,7 +247,25 @@ mod tests {
         assert_eq!(launch.options["Clear Hash"], UciOptionValue::Button);
         assert_eq!(
             launch.allocated_cpus,
-            CpuAllocation::Enforced(vec![0, 2, 3, 4, 7])
+            CpuAllocation::Enforced(vec![
+                LogicalCpuId::from(0),
+                LogicalCpuId {
+                    group: 0,
+                    number: 2
+                },
+                LogicalCpuId {
+                    group: 0,
+                    number: 3
+                },
+                LogicalCpuId {
+                    group: 0,
+                    number: 4
+                },
+                LogicalCpuId {
+                    group: 1,
+                    number: 7
+                },
+            ])
         );
     }
 
@@ -255,6 +285,9 @@ mod tests {
             vec!["test", "engine", "--option", "Hash=1", "--button", "Hash"],
             vec!["test", "engine", "--cores", "4-2"],
             vec!["test", "engine", "--cores", "0,0"],
+            vec!["test", "engine", "--cores", "0:0,0"],
+            vec!["test", "engine", "--cores", "1:0,1:0"],
+            vec!["test", "engine", "--cores", "1:0:2"],
             vec!["test", "engine", "--cores", ""],
         ] {
             let parsed = Harness::try_parse_from(arguments).unwrap();

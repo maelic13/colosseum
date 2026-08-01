@@ -1,14 +1,14 @@
 //! CPU-placement policy resolution over an already discovered topology.
 //!
-//! This module decides *which* logical processors a placement mode names. It
-//! deliberately does not inspect process restrictions or apply affinity; those
-//! are platform-adapter responsibilities added by later steps.
+//! This module decides *which available* logical processors a placement mode
+//! names. Applying affinity remains a separate platform-adapter responsibility.
 
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::allowed_cpus::AllowedCpuSet;
 use crate::topology::{CpuTopology, LogicalCpuId, PhysicalCore};
 
 /// The default number of whole physical cores left for the harness and host.
@@ -43,7 +43,8 @@ impl Default for CpuPlacementPolicy {
 pub enum CpuPlacementPlan {
     /// The caller deliberately requested normal operating-system scheduling.
     Unrestricted,
-    /// `auto` selected complete physical cores, including every SMT sibling.
+    /// `auto` selected complete physical cores, including every available SMT
+    /// sibling reported for each core.
     WholePhysicalCores {
         cores: Vec<PhysicalCore>,
         headroom_physical_cores: usize,
@@ -69,14 +70,16 @@ impl CpuPlacementPlan {
     }
 }
 
-/// Resolve a placement policy against a topology with an exact sibling map.
+/// Resolve a placement policy against an exact sibling map and the current
+/// process's allowed CPU set.
 ///
-/// `auto` always allocates whole physical cores, never a guessed subset of
-/// SMT siblings. An explicit list remains an exact user request and may name a
-/// subset of a physical core. It is nevertheless checked against the reported
-/// logical-CPU identities so a typo cannot silently become a different plan.
+/// `auto` counts physical cores only after applying the allowed set, and keeps
+/// every allowed SMT sibling belonging to each chosen core. An explicit list
+/// remains an exact user request and may name a subset of a physical core, but
+/// every identity must exist in the topology and be allowed to this process.
 pub fn plan_cpu_placement(
     topology: &CpuTopology,
+    allowed: &AllowedCpuSet,
     policy: &CpuPlacementPolicy,
 ) -> Result<CpuPlacementPlan, CpuPlacementError> {
     match policy {
@@ -84,7 +87,7 @@ pub fn plan_cpu_placement(
         CpuPlacementPolicy::Auto {
             headroom_physical_cores,
         } => {
-            let cores = known_cores(topology)?;
+            let cores = available_cores(topology, allowed)?;
             if *headroom_physical_cores >= cores.len() {
                 return Err(CpuPlacementError::HeadroomExhaustsTopology {
                     headroom_physical_cores: *headroom_physical_cores,
@@ -105,6 +108,7 @@ pub fn plan_cpu_placement(
                 .iter()
                 .flat_map(|core| core.logical_cpus.iter().copied())
                 .collect::<BTreeSet<_>>();
+            let allowed = known_allowed_cpus(allowed)?;
             let mut selected = BTreeSet::new();
             for cpu in cpus {
                 if !selected.insert(*cpu) {
@@ -112,6 +116,9 @@ pub fn plan_cpu_placement(
                 }
                 if !known.contains(cpu) {
                     return Err(CpuPlacementError::UnknownExplicitCpu(*cpu));
+                }
+                if !allowed.contains(cpu) {
+                    return Err(CpuPlacementError::ExplicitCpuNotAllowed(*cpu));
                 }
             }
             Ok(CpuPlacementPlan::ExplicitLogicalCpus {
@@ -131,10 +138,63 @@ fn known_cores(topology: &CpuTopology) -> Result<&[PhysicalCore], CpuPlacementEr
         .ok_or(CpuPlacementError::SiblingMappingUnavailable)
 }
 
+fn known_allowed_cpus(
+    allowed: &AllowedCpuSet,
+) -> Result<BTreeSet<LogicalCpuId>, CpuPlacementError> {
+    match allowed {
+        AllowedCpuSet::Known { cpus, .. } => {
+            if cpus.is_empty() {
+                return Err(CpuPlacementError::NoAllowedLogicalCpus);
+            }
+            Ok(cpus.iter().copied().collect())
+        }
+        AllowedCpuSet::Unavailable { reason } => Err(CpuPlacementError::AllowedCpuSetUnavailable {
+            reason: reason.clone(),
+        }),
+    }
+}
+
+fn available_cores(
+    topology: &CpuTopology,
+    allowed: &AllowedCpuSet,
+) -> Result<Vec<PhysicalCore>, CpuPlacementError> {
+    let cores = known_cores(topology)?;
+    let known = cores
+        .iter()
+        .flat_map(|core| core.logical_cpus.iter().copied())
+        .collect::<BTreeSet<_>>();
+    let allowed = known_allowed_cpus(allowed)?;
+    if let Some(cpu) = allowed.iter().find(|cpu| !known.contains(cpu)) {
+        return Err(CpuPlacementError::AllowedCpuMissingFromTopology(*cpu));
+    }
+    let cores = cores
+        .iter()
+        .filter_map(|core| {
+            let logical_cpus = core
+                .logical_cpus
+                .iter()
+                .filter(|cpu| allowed.contains(cpu))
+                .copied()
+                .collect::<Vec<_>>();
+            (!logical_cpus.is_empty()).then_some(PhysicalCore { logical_cpus })
+        })
+        .collect::<Vec<_>>();
+    if cores.is_empty() {
+        return Err(CpuPlacementError::NoAllowedLogicalCpus);
+    }
+    Ok(cores)
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CpuPlacementError {
     #[error("CPU placement requires an exact logical-CPU sibling map, but it is unavailable")]
     SiblingMappingUnavailable,
+    #[error("the allowed CPU set is unavailable: {reason}")]
+    AllowedCpuSetUnavailable { reason: String },
+    #[error("the operating system reports no allowed logical CPUs")]
+    NoAllowedLogicalCpus,
+    #[error("allowed logical CPU {0:?} is absent from the detected topology")]
+    AllowedCpuMissingFromTopology(LogicalCpuId),
     #[error(
         "automatic headroom of {headroom_physical_cores} physical cores leaves no core to allocate from {physical_core_count}"
     )]
@@ -148,11 +208,14 @@ pub enum CpuPlacementError {
     DuplicateExplicitCpu(LogicalCpuId),
     #[error("explicit CPU list contains logical CPU {0:?}, which is not in the detected topology")]
     UnknownExplicitCpu(LogicalCpuId),
+    #[error("explicit CPU list contains logical CPU {0:?}, which is not allowed to this process")]
+    ExplicitCpuNotAllowed(LogicalCpuId),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::allowed_cpus::AllowedCpuSource;
     use crate::topology::{SiblingMapping, TopologySource};
 
     fn cpu(number: u32) -> LogicalCpuId {
@@ -183,9 +246,28 @@ mod tests {
         }
     }
 
+    fn all_allowed(topology: &CpuTopology) -> AllowedCpuSet {
+        AllowedCpuSet::Known {
+            source: AllowedCpuSource::LinuxSchedulerAffinity,
+            cpus: topology
+                .cores()
+                .unwrap()
+                .iter()
+                .flat_map(|core| core.logical_cpus.iter().copied())
+                .collect(),
+        }
+    }
+
+    fn plan(
+        topology: &CpuTopology,
+        policy: &CpuPlacementPolicy,
+    ) -> Result<CpuPlacementPlan, CpuPlacementError> {
+        plan_cpu_placement(topology, &all_allowed(topology), policy)
+    }
+
     #[test]
     fn auto_default_keeps_two_whole_physical_cores_free() {
-        let plan = plan_cpu_placement(&smt_topology(), &CpuPlacementPolicy::default()).unwrap();
+        let plan = plan(&smt_topology(), &CpuPlacementPolicy::default()).unwrap();
         assert_eq!(
             plan,
             CpuPlacementPlan::WholePhysicalCores {
@@ -226,7 +308,7 @@ mod tests {
                 ],
             },
         };
-        let plan = plan_cpu_placement(
+        let plan = plan(
             &topology,
             &CpuPlacementPolicy::Auto {
                 headroom_physical_cores: 1,
@@ -238,7 +320,7 @@ mod tests {
 
     #[test]
     fn auto_rejects_headroom_that_leaves_no_usable_core() {
-        let error = plan_cpu_placement(
+        let error = plan(
             &smt_topology(),
             &CpuPlacementPolicy::Auto {
                 headroom_physical_cores: 4,
@@ -264,7 +346,14 @@ mod tests {
                 reason: "counts only".into(),
             },
         };
-        let plan = plan_cpu_placement(&topology, &CpuPlacementPolicy::Off).unwrap();
+        let plan = plan_cpu_placement(
+            &topology,
+            &AllowedCpuSet::Unavailable {
+                reason: "no logical IDs".into(),
+            },
+            &CpuPlacementPolicy::Off,
+        )
+        .unwrap();
         assert_eq!(plan, CpuPlacementPlan::Unrestricted);
         assert_eq!(plan.logical_cpus(), None);
     }
@@ -304,7 +393,7 @@ mod tests {
                 ],
             },
         };
-        let plan = plan_cpu_placement(
+        let plan = plan(
             &topology,
             &CpuPlacementPolicy::Explicit {
                 cpus: vec![
@@ -337,14 +426,14 @@ mod tests {
 
     #[test]
     fn explicit_list_rejects_empty_duplicate_and_unknown_cpus() {
-        let empty = plan_cpu_placement(
+        let empty = plan(
             &smt_topology(),
             &CpuPlacementPolicy::Explicit { cpus: vec![] },
         )
         .unwrap_err();
         assert_eq!(empty, CpuPlacementError::EmptyExplicitList);
 
-        let duplicate = plan_cpu_placement(
+        let duplicate = plan(
             &smt_topology(),
             &CpuPlacementPolicy::Explicit {
                 cpus: vec![cpu(1), cpu(1)],
@@ -353,7 +442,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(duplicate, CpuPlacementError::DuplicateExplicitCpu(cpu(1)));
 
-        let unknown = plan_cpu_placement(
+        let unknown = plan(
             &smt_topology(),
             &CpuPlacementPolicy::Explicit {
                 cpus: vec![cpu(99)],
@@ -380,9 +469,52 @@ mod tests {
             CpuPlacementPolicy::Explicit { cpus: vec![cpu(0)] },
         ] {
             assert_eq!(
-                plan_cpu_placement(&topology, &policy).unwrap_err(),
+                plan_cpu_placement(
+                    &topology,
+                    &AllowedCpuSet::Unavailable {
+                        reason: "no logical IDs".into(),
+                    },
+                    &policy,
+                )
+                .unwrap_err(),
                 CpuPlacementError::SiblingMappingUnavailable
             );
         }
+    }
+
+    #[test]
+    fn restricted_set_filters_smt_siblings_before_headroom_is_counted() {
+        let topology = smt_topology();
+        let allowed = AllowedCpuSet::Known {
+            source: AllowedCpuSource::LinuxSchedulerAffinity,
+            cpus: vec![cpu(1), cpu(2), cpu(5), cpu(7)],
+        };
+        let plan = plan_cpu_placement(
+            &topology,
+            &allowed,
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(plan.logical_cpus(), Some(vec![cpu(1), cpu(5), cpu(2)]));
+    }
+
+    #[test]
+    fn explicit_cpu_must_be_in_the_process_allowed_set() {
+        let topology = smt_topology();
+        let allowed = AllowedCpuSet::Known {
+            source: AllowedCpuSource::LinuxSchedulerAffinity,
+            cpus: vec![cpu(0), cpu(4)],
+        };
+        assert_eq!(
+            plan_cpu_placement(
+                &topology,
+                &allowed,
+                &CpuPlacementPolicy::Explicit { cpus: vec![cpu(1)] },
+            )
+            .unwrap_err(),
+            CpuPlacementError::ExplicitCpuNotAllowed(cpu(1))
+        );
     }
 }

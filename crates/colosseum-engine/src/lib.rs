@@ -6,6 +6,7 @@
 //! updater, SQLite persistence with tournament history + resume (Steps 5–6), and
 //! config/engine-library file I/O with `--portable` mode (Step 6).
 
+pub mod allowed_cpus;
 pub mod detect;
 pub mod error;
 pub mod incidents;
@@ -18,6 +19,7 @@ pub mod scheduler;
 pub mod store;
 pub mod topology;
 
+pub use allowed_cpus::{AllowedCpuError, AllowedCpuSet, AllowedCpuSource, detect_allowed_cpu_set};
 pub use colosseum_uci::Score;
 pub use detect::{DetectResult, detect_engine, split_name_version};
 pub use error::EngineError;

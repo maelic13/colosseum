@@ -12,11 +12,12 @@ controls:
 | `--env KEY=VALUE` | Environment override; repeat for multiple variables |
 | `--option NAME=VALUE` | Arbitrary UCI option value; repeat for multiple options |
 | `--button NAME` | Trigger a UCI button option |
-| `--cores LIST` | Allocated logical CPUs, such as `0,2-4,7` |
+| `--cores LIST` | Allocated logical CPUs, such as `0,2-4,7`; Windows processor groups use `GROUP:CPU`, such as `0:0-3,1:0-3` |
 
 UCI option names are preserved exactly and validated against the schema the
-engine advertises during its normal handshake. Duplicate names and duplicate or
-descending CPU allocations are errors. No engine manifest, compiler metadata,
+engine advertises during its normal handshake. An unqualified CPU belongs to
+group zero. Duplicate names and duplicate, malformed or descending CPU
+allocations are errors. No engine manifest, compiler metadata,
 build command or custom engine feature is read or required.
 
 ## Inspection and compliance

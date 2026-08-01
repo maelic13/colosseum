@@ -572,7 +572,8 @@ right" is not a criterion.
 - Detect physical cores and their logical CPUs per OS: Windows
   `GetLogicalProcessorInformationEx`, Linux `thread_siblings_list`, macOS
   `sysctl`. **Never infer SMT siblings from logical CPU numbering.**
-- Implemented topology identity is `(processor group, logical number)`, keeping
+- Portable application and implemented topology identity is `(processor group,
+  logical number)`, keeping
   Windows groups distinct; Linux consumes and cross-validates exact kernel
   sibling lists. Apple's public `sysctl` surface exposes enabled physical and
   logical counts but no logical-ID sibling map, so macOS records that mapping
@@ -585,8 +586,11 @@ right" is not a criterion.
   sibling map; they fail to resolve rather than guessing where that map is
   unavailable. `off` makes no placement request.
 - Detect and respect the CPUs available to the current process, including Linux
-  cpusets/cgroups and Windows processor groups; never allocate from the machine
-  total when the process is restricted.
+  `sched_getaffinity` (the effective scheduler/cpuset/cgroup intersection) and
+  Windows process groups, affinity masks, process-default CPU Sets and
+  exclusively reserved CPU Sets; never allocate from the machine total when the
+  process is restricted. Validate the OS set against the topology snapshot and
+  reject an empty or inconsistent result.
 - Allocate the configured **cores-per-engine** to each game slot — not one core
   per game. This allocation is independent of whichever UCI option controls the
   engine's internal worker count.
@@ -1341,7 +1345,9 @@ repeated `--env NAME=VALUE`, repeated `--option NAME=VALUE`, repeated
 spec. Names and arguments are preserved exactly; duplicate names and malformed,
 descending, repeated or excessive CPU ranges are errors. Command-specific
 composition in later steps reuses this parser rather than introducing an engine
-descriptor.
+descriptor. Phase 3.3 extended CPU identity without adding engine metadata:
+unqualified values remain group zero and Windows group-qualified ranges use
+`GROUP:START-END`.
 
 **Implemented configuration resolver (2.4):** generic CLI adapter code applies
 each inherited file's RFC 6901 `unset` to its resolved parent before recursively

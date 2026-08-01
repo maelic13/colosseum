@@ -5,6 +5,22 @@ use colosseum_core::{GameId, ParticipantId, RunId, UnitId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// Portable identity of one operating-system logical processor.
+///
+/// Windows processor numbers are only unique within a processor group. Linux
+/// and macOS use group zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct LogicalCpuId {
+    pub group: u16,
+    pub number: u32,
+}
+
+impl From<u32> for LogicalCpuId {
+    fn from(number: u32) -> Self {
+        Self { group: 0, number }
+    }
+}
+
 /// A configured UCI option value at the application boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "kebab-case")]
@@ -75,8 +91,8 @@ impl UciOptionSchema {
 pub enum CpuAllocation {
     #[default]
     Unrestricted,
-    Advisory(Vec<u32>),
-    Enforced(Vec<u32>),
+    Advisory(Vec<LogicalCpuId>),
+    Enforced(Vec<LogicalCpuId>),
 }
 
 /// Minimal, resolved instructions for launching an ordinary UCI executable.

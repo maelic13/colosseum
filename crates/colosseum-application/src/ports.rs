@@ -5,7 +5,8 @@ use colosseum_core::{GameId, ParticipantId, RunId, UnitId};
 
 use crate::model::{
     ApplicationError, CommittedRunSnapshot, CompletedUnit, EngineInspection, EngineLaunchSpec,
-    ExecutionUnit, ProgressEvent, RuntimeParticipant, SearchObservation, SearchRequest,
+    ExecutionUnit, LogicalCpuId, ProgressEvent, RuntimeParticipant, SearchObservation,
+    SearchRequest,
 };
 
 pub type PortFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -86,7 +87,11 @@ pub trait OpeningSource: Send + Sync {
 }
 
 pub trait CpuPlacement: Send + Sync {
-    fn apply(&self, participant: ParticipantId, cpus: &[u32]) -> Result<(), ApplicationError>;
+    fn apply(
+        &self,
+        participant: ParticipantId,
+        cpus: &[LogicalCpuId],
+    ) -> Result<(), ApplicationError>;
 }
 
 pub trait Clock: Send + Sync {

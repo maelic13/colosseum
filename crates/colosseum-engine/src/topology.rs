@@ -8,16 +8,9 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
 
+pub use colosseum_application::LogicalCpuId;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct LogicalCpuId {
-    /// Windows processor group; zero on Linux and macOS.
-    pub group: u16,
-    /// OS logical processor number within the group.
-    pub number: u32,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PhysicalCore {
