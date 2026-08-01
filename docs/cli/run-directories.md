@@ -23,3 +23,8 @@ For fixed matches, `run.log` is an append-only JSON-lines event stream,
 final structured report, and `failed-games/` retains UCI stdout/stderr traffic
 for abnormal games. A resumed match schedules only game numbers absent from the
 verified checkpoint and retains deterministic report order.
+
+SPRT checkpoints store complete official and post-terminal pairs in separate
+arrays. Only the official prefix enters statistics. Its PGN labels both sample
+classes, while the run record and final result retain the explicit model,
+hypotheses, error rates, cap, terminal pair and fault policy.

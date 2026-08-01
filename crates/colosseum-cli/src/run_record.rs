@@ -8,11 +8,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::RunDirectory;
 
-pub const RUN_RECORD_SCHEMA_VERSION: u64 = 1;
+pub const RUN_RECORD_SCHEMA_VERSION: u64 = 2;
 static RECORD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +95,7 @@ pub struct RunRecord {
     pub updated_unix_ms: u64,
     pub official_sample: OfficialSample,
     pub host: HostSummary,
+    pub workflow: Value,
     pub anomalies: Vec<Anomaly>,
 }
 
@@ -111,6 +113,10 @@ impl RunRecord {
             updated_unix_ms: now,
             official_sample: OfficialSample::default(),
             host: HostSummary::current(),
+            workflow: json!({
+                "applicability": "not-yet-populated",
+                "reason": "the workflow owner has not published its command-specific record"
+            }),
             anomalies: Vec::new(),
         }
     }
@@ -183,6 +189,13 @@ impl RunRecorder {
     pub fn update_sample(&mut self, sample: OfficialSample) -> Result<(), RunRecordError> {
         self.require_running()?;
         self.record.official_sample = sample;
+        self.touch();
+        self.persist()
+    }
+
+    pub fn set_workflow(&mut self, workflow: Value) -> Result<(), RunRecordError> {
+        self.require_running()?;
+        self.record.workflow = workflow;
         self.touch();
         self.persist()
     }

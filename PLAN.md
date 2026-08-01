@@ -1553,6 +1553,15 @@ already running complete pairs finish, and records their results in a distinct
 post-terminal collection that cannot change the LLR, decision or terminal pair.
 Cap exhaustion with no boundary retains the complete capped prefix.
 
+**Implemented live/report contract (4B.4):** `sprt` now composes the same
+ordinary-engine, independent per-side controls, adjudication, resources,
+optional books, seed and recoverable run-directory adapter as `match`. Human,
+JSON, final-result and run-record output retain model, hypotheses, alpha/beta,
+Wald bounds, LLR when defined, cap, official pentanomial sample, terminal or
+invalid pair and separately persisted post-terminal evidence. Process exits
+are H1=0, H0=1, configuration=2, error=3, inconclusive=4 and invalid=5.
+Run-record schema 2 adds required command-specific workflow evidence.
+
 **Exit:** analytic/oracle verdict parity; concurrency cannot change the terminal
 pair; capped/invalid/H0/H1 exits pass; live disagreements are root-caused before
 SPSA builds on the runner.

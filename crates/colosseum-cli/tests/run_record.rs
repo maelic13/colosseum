@@ -47,7 +47,7 @@ fn dropped_owner_records_an_aborted_run_with_zero_official_sample() {
     let record = RunRecord::read(&run.paths().root).unwrap();
     assert_eq!(record.status, RunStatus::Aborted);
     assert_eq!(record.official_sample, OfficialSample::default());
-    assert_eq!(record.schema_version, 1);
+    assert_eq!(record.schema_version, 2);
     assert_eq!(record.stats_version, colosseum_core::rng::RNG_VERSION);
     assert!(
         record
@@ -65,6 +65,9 @@ fn terminal_record_keeps_the_official_committed_sample() {
         .unwrap()
         .directory;
     let mut recorder = RunRecorder::begin(&run, "sprt").unwrap();
+    recorder
+        .set_workflow(json!({"kind": "sprt", "model": "normalized"}))
+        .unwrap();
     let sample = OfficialSample {
         committed_units: 4,
         scored_games: 4,
@@ -80,6 +83,7 @@ fn terminal_record_keeps_the_official_committed_sample() {
     let record = RunRecord::read(&run.paths().root).unwrap();
     assert_eq!(record.status, RunStatus::Completed);
     assert_eq!(record.official_sample, sample);
+    assert_eq!(record.workflow["model"], "normalized");
     assert_eq!(record.anomalies.len(), 1);
 }
 

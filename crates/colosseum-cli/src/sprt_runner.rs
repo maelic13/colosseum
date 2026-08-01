@@ -1,18 +1,18 @@
 //! Pair-atomic SPRT execution adapter.
-#![allow(dead_code)] // Composed into the public command/report in step 4B.4.
 
 use std::sync::Arc;
 
 use colosseum_application::{CompletePair, PairCommitQueue, SprtDesign};
 use colosseum_core::{
-    GameResult, PairGameResult, PentanomialSprtResult, PentanomialVector, SprtDecision,
-    StatisticsError, pentanomial_sprt,
+    AdjudicationConfig, GameResult, PairGameResult, PentanomialSprtResult, PentanomialVector,
+    SprtDecision, StatisticsError, pentanomial_sprt,
 };
 use serde::Serialize;
 use thiserror::Error;
 
 use crate::match_runner::{
-    MatchError, MatchExecutionPlan, MatchGame, MatchSide, PairGameSettings, play_pair,
+    ConfiguredTimeControl, FaultPolicy, MatchError, MatchExecutionPlan, MatchFaultCounts,
+    MatchGame, MatchSide, OpeningPolicyReport, PairGameSettings, play_pair, record_fault,
 };
 
 pub trait PairObserver: Send + Sync {
@@ -25,6 +25,7 @@ pub struct PairScheduleRequest {
     pub settings: PairGameSettings,
     pub execution: MatchExecutionPlan,
     pub design: SprtDesign,
+    pub fault_policy: FaultPolicy,
     /// Durable pairs must be the contiguous official prefix `1..=N`.
     pub completed_pairs: Vec<CompletePair<MatchGame>>,
     pub observer: Option<Arc<dyn PairObserver>>,
@@ -38,6 +39,46 @@ pub struct PairScheduleReport {
     pub pentanomial: [u32; 5],
     pub statistics: Option<PentanomialSprtResult>,
     pub terminal_pair: Option<u32>,
+    pub invalid_pair: Option<u32>,
+    pub faults: MatchFaultCounts,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SprtStatus {
+    H1,
+    H0,
+    Inconclusive,
+    Invalid,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SprtReport {
+    pub status: SprtStatus,
+    pub design: SprtDesign,
+    pub engine_a_time_control: ConfiguredTimeControl,
+    pub engine_b_time_control: ConfiguredTimeControl,
+    pub adjudication: AdjudicationConfig,
+    pub fault_policy: FaultPolicy,
+    pub execution: MatchExecutionPlan,
+    pub master_seed: u64,
+    pub master_seed_generated: bool,
+    pub openings: OpeningPolicyReport,
+    pub schedule: PairScheduleReport,
+}
+
+impl PairScheduleReport {
+    #[must_use]
+    pub fn status(&self) -> SprtStatus {
+        if self.invalid_pair.is_some() {
+            return SprtStatus::Invalid;
+        }
+        match self.statistics.map(|statistics| statistics.decision) {
+            Some(SprtDecision::AcceptH1) => SprtStatus::H1,
+            Some(SprtDecision::AcceptH0) => SprtStatus::H0,
+            Some(SprtDecision::Continue) | None => SprtStatus::Inconclusive,
+        }
+    }
 }
 
 pub async fn run_pair_schedule(
@@ -46,7 +87,7 @@ pub async fn run_pair_schedule(
     validate_completed_prefix(&request.completed_pairs, request.design.max_pairs)?;
     let next_pair_id = request.completed_pairs.len() as u32 + 1;
     let mut commit_queue = PairCommitQueue::new(next_pair_id, request.design.max_pairs)?;
-    let mut accumulator = SprtAccumulator::new(request.design);
+    let mut accumulator = SprtAccumulator::new(request.design, request.fault_policy);
     for pair in &request.completed_pairs {
         if accumulator.admit(pair)? == PairDisposition::PostTerminal {
             return Err(PairScheduleError::InvalidResumePrefix);
@@ -57,10 +98,10 @@ pub async fn run_pair_schedule(
     let mut workers = tokio::task::JoinSet::new();
     let mut next_to_schedule = next_pair_id;
 
-    while (accumulator.terminal_pair.is_none() && next_to_schedule <= request.design.max_pairs)
+    while (!accumulator.stopped() && next_to_schedule <= request.design.max_pairs)
         || !workers.is_empty()
     {
-        while accumulator.terminal_pair.is_none()
+        while !accumulator.stopped()
             && next_to_schedule <= request.design.max_pairs
             && workers.len() < request.execution.concurrency
         {
@@ -104,6 +145,8 @@ pub async fn run_pair_schedule(
         pentanomial: accumulator.sample.counts(),
         statistics: accumulator.statistics,
         terminal_pair: accumulator.terminal_pair,
+        invalid_pair: accumulator.invalid_pair,
+        faults: accumulator.faults,
     })
 }
 
@@ -115,30 +158,58 @@ enum PairDisposition {
 
 struct SprtAccumulator {
     design: SprtDesign,
+    fault_policy: FaultPolicy,
     sample: PentanomialVector,
     statistics: Option<PentanomialSprtResult>,
     terminal_pair: Option<u32>,
+    invalid_pair: Option<u32>,
+    faults: MatchFaultCounts,
 }
 
 impl SprtAccumulator {
-    fn new(design: SprtDesign) -> Self {
+    fn new(design: SprtDesign, fault_policy: FaultPolicy) -> Self {
         Self {
             design,
+            fault_policy,
             sample: PentanomialVector::default(),
             statistics: None,
             terminal_pair: None,
+            invalid_pair: None,
+            faults: MatchFaultCounts::default(),
         }
+    }
+
+    fn stopped(&self) -> bool {
+        self.terminal_pair.is_some() || self.invalid_pair.is_some()
     }
 
     fn admit(
         &mut self,
         pair: &CompletePair<MatchGame>,
     ) -> Result<PairDisposition, PairScheduleError> {
-        if self.terminal_pair.is_some() {
+        if self.stopped() {
             return Ok(PairDisposition::PostTerminal);
         }
         if !pair.first.scorable || !pair.second.scorable {
             return Err(PairScheduleError::UnscorablePair(pair.pair_id));
+        }
+        record_fault(
+            &mut self.faults,
+            pair.first.white,
+            pair.first.fault.as_ref(),
+        );
+        record_fault(
+            &mut self.faults,
+            pair.second.white,
+            pair.second.fault.as_ref(),
+        );
+        if self.faults.engine_total() > self.fault_policy.max_engine_faults
+            || self.faults.time_total() > self.fault_policy.max_time_losses
+        {
+            self.invalid_pair = Some(pair.pair_id);
+            self.sample
+                .record_pair(result_for_a(&pair.first), result_for_a(&pair.second));
+            return Ok(PairDisposition::Official);
         }
         self.admit_results(
             pair.pair_id,
@@ -153,7 +224,7 @@ impl SprtAccumulator {
         first: PairGameResult,
         second: PairGameResult,
     ) -> Result<PairDisposition, PairScheduleError> {
-        if self.terminal_pair.is_some() {
+        if self.stopped() {
             return Ok(PairDisposition::PostTerminal);
         }
         self.sample.record_pair(first, second);
@@ -186,7 +257,7 @@ mod tests {
     #[test]
     fn boundary_pair_is_official_and_every_later_completion_is_separate() {
         let design = SprtDesign::new(SprtBundle::Gainer.defaults(), 1_000, None).unwrap();
-        let mut accumulator = SprtAccumulator::new(design);
+        let mut accumulator = SprtAccumulator::new(design, FaultPolicy::default());
         for pair_id in 1..=1_000 {
             let second = if pair_id % 2 == 0 {
                 PairGameResult::Draw
@@ -217,6 +288,29 @@ mod tests {
         assert_eq!(
             accumulator.statistics.unwrap().decision,
             SprtDecision::AcceptH1
+        );
+    }
+
+    #[test]
+    fn losing_stream_crosses_h0() {
+        let design = SprtDesign::new(SprtBundle::Gainer.defaults(), 1_000, None).unwrap();
+        let mut accumulator = SprtAccumulator::new(design, FaultPolicy::default());
+        for pair_id in 1..=1_000 {
+            let second = if pair_id % 2 == 0 {
+                PairGameResult::Draw
+            } else {
+                PairGameResult::Loss
+            };
+            accumulator
+                .admit_results(pair_id, PairGameResult::Loss, second)
+                .unwrap();
+            if accumulator.terminal_pair.is_some() {
+                break;
+            }
+        }
+        assert_eq!(
+            accumulator.statistics.unwrap().decision,
+            SprtDecision::AcceptH0
         );
     }
 }

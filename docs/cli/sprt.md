@@ -29,10 +29,27 @@ bundles rather than hidden modes: `--model`, `--elo0`, `--elo1`, `--alpha` and
 `--beta` may override any bundled value, and the complete resolved design plus
 its exact Wald bounds is stored and reported.
 
-In the current development build, `--dry-run --json` validates and prints this
-design without launching engines. Internally, each opening's two
-colour-reversed games form one commit value, and concurrent completions become
-official only in pair-ID order. Once that prefix crosses a Wald boundary, no
-new pair is launched. Already-running pairs still finish both colours but are
-retained as post-terminal evidence and cannot alter the official LLR or verdict.
-Live reporting is not yet exposed.
+SPRT uses the same direct engine, per-side clock, adjudication, placement,
+concurrency, memory, optional book, seed, progress and run-directory controls
+as [`match`](match.md). Each opening's two colour-reversed games form one commit
+value, and concurrent completions become official only in pair-ID order. Once
+that prefix crosses a Wald boundary, no new pair is launched. Already-running
+pairs still finish both colours but are retained as post-terminal evidence and
+cannot alter the official LLR or verdict.
+
+The final report always names the model, hypotheses, alpha/beta, exact Wald
+bounds, finite cap, official pentanomial vector, fault counts and terminal or
+invalid pair. LLR and decision are present once the sample is non-degenerate;
+an all-identical early/capped sample reports that LLR is unavailable rather than
+inventing a finite statistic.
+
+Run artifacts use the common layout. The checkpoint stores official and
+post-terminal pairs separately, `games.pgn` labels both classes, `run.log`
+records pair commits, and both `result.json` and `run-record.json` retain the
+resolved statistical design. Resume accepts only the same resolved conditions.
+
+Automation exit codes are: `0` H1, `1` H0, `2` configuration refusal, `3`
+infrastructure/runtime/persistence error, `4` cap-reached inconclusive, and `5`
+invalid due to the engine/time-fault policy. Every terminal report, including
+inconclusive and invalid, emits one JSON document with `--json`; pre-report
+errors leave stdout empty.

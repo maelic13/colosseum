@@ -10,8 +10,9 @@ use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use colosseum_application::{
-    CheckEngine, ComplianceReport, ComplianceStatus, EngineInspection, EngineLaunchSpec,
-    InspectEngine, RuntimeParticipant, SprtBundle, SprtDesign, SprtParameters, UciOptionSchema,
+    CheckEngine, CompletePair, ComplianceReport, ComplianceStatus, EngineInspection,
+    EngineLaunchSpec, InspectEngine, RuntimeParticipant, SprtBundle, SprtDesign, SprtParameters,
+    UciOptionSchema,
 };
 use colosseum_cli::{
     EngineArgs, OfficialSample, RunDirectory, RunRecord, RunRecorder, RunStatus, built_in_defaults,
@@ -23,7 +24,7 @@ use colosseum_core::{
 };
 use colosseum_engine::CpuPlacementPolicy;
 use colosseum_uci::UciSessionFactory;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 mod capabilities;
@@ -80,6 +81,12 @@ struct MatchCommand {
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     games: u32,
 
+    #[command(flatten)]
+    conditions: MatchConditions,
+}
+
+#[derive(Debug, Args)]
+struct MatchConditions {
     /// Path to engine A's UCI executable.
     engine_a: PathBuf,
 
@@ -214,10 +221,6 @@ struct MatchCommand {
 
 #[derive(Debug, Args)]
 struct SprtCommand {
-    /// Path to engine A's UCI executable.
-    engine_a: PathBuf,
-    /// Path to engine B's UCI executable.
-    engine_b: PathBuf,
     /// Required finite cap; reaching it without a boundary is inconclusive.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     max_pairs: u32,
@@ -239,6 +242,9 @@ struct SprtCommand {
     /// Type-II error probability.
     #[arg(long)]
     beta: Option<f64>,
+
+    #[command(flatten)]
+    conditions: MatchConditions,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -304,7 +310,7 @@ async fn main() -> ExitCode {
         Command::Capabilities if cli.dry_run => unsupported_dry_run("capabilities"),
         Command::Capabilities => run_capabilities(cli.json),
         Command::Match(command) => run_match(*command, cli.json, cli.dry_run).await,
-        Command::Sprt(command) => run_sprt(*command, cli.json, cli.dry_run),
+        Command::Sprt(command) => run_sprt(*command, cli.json, cli.dry_run).await,
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
         Command::SelfTest if cli.dry_run => unsupported_dry_run("self-test"),
         Command::SelfTest => run_self_test(cli.json).await,
@@ -320,7 +326,7 @@ async fn main() -> ExitCode {
     }
 }
 
-fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCode {
+async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCode {
     let design = match resolve_sprt_design(&command) {
         Ok(design) => design,
         Err(error) => {
@@ -328,15 +334,74 @@ fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let command = command.conditions;
+    if command.book.is_none()
+        && (command.book_start != 0
+            || command.book_plies.is_some()
+            || command.book_order != BookOrderArg::Sequential)
+    {
+        eprintln!("configuration error: book order/start/plies require --book");
+        return ExitCode::from(2);
+    }
+    let resumed_seed = command
+        .run_directory
+        .as_deref()
+        .filter(|path| path.exists() && !command.restart)
+        .and_then(read_stored_seed);
+    let (master_seed, master_seed_generated) = match resumed_seed {
+        Some(seed) if command.seed.is_none() => seed,
+        _ => match resolve_master_seed(command.seed) {
+            Ok(seed) => seed,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        },
+    };
+    let adjudication = resolve_adjudication(&command);
+    let fault_policy = match_runner::FaultPolicy {
+        max_engine_faults: command.max_engine_faults,
+        max_time_losses: command.max_time_losses,
+    };
+    let engine_a_time_control = match resolve_time_control(
+        "engine A",
+        command.a_movetime_ms,
+        command.a_base_ms,
+        command.a_increment_ms,
+        command.a_nodes,
+        command.a_depth,
+        command.a_margin_ms,
+    ) {
+        Ok(control) => control,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let engine_b_time_control = match resolve_time_control(
+        "engine B",
+        command.b_movetime_ms,
+        command.b_base_ms,
+        command.b_increment_ms,
+        command.b_nodes,
+        command.b_depth,
+        command.b_margin_ms,
+    ) {
+        Ok(control) => control,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let engine_a = match resolve_match_engine(
         command.engine_a,
-        None,
-        Vec::new(),
-        None,
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        None,
+        command.a_label,
+        command.a_arguments,
+        command.a_cwd,
+        command.a_environment,
+        command.a_options,
+        command.a_buttons,
+        command.a_cores,
     ) {
         Ok(engine) => engine,
         Err(error) => {
@@ -346,13 +411,13 @@ fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCode {
     };
     let engine_b = match resolve_match_engine(
         command.engine_b,
-        None,
-        Vec::new(),
-        None,
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        None,
+        command.b_label,
+        command.b_arguments,
+        command.b_cwd,
+        command.b_environment,
+        command.b_options,
+        command.b_buttons,
+        command.b_cores,
     ) {
         Ok(engine) => engine,
         Err(error) => {
@@ -360,6 +425,51 @@ fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let placement_policy = match resolve_placement(&command.placement, command.headroom_cores) {
+        Ok(policy) => policy,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let execution = match match_runner::plan_execution(
+        &engine_a,
+        &engine_b,
+        command.concurrency as usize,
+        command.cores_per_engine as usize,
+        placement_policy,
+        command.memory_budget_mb,
+    ) {
+        Ok(execution) => execution,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let book = command.book.clone().map(|path| {
+        let mut book = OpeningBook::new(path);
+        book.order = match command.book_order {
+            BookOrderArg::Sequential => OpeningOrder::Sequential,
+            BookOrderArg::Random => OpeningOrder::Random,
+        };
+        book.plies = command.book_plies.unwrap_or(8);
+        book
+    });
+    let games = match design.max_pairs.checked_mul(2) {
+        Some(games) => games,
+        None => {
+            eprintln!("configuration error: max-pairs is too large to schedule");
+            return ExitCode::from(2);
+        }
+    };
+    let openings =
+        match match_runner::resolve_openings(book, command.book_start, games, master_seed) {
+            Ok(openings) => openings,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        };
     let current_directory = match std::env::current_dir() {
         Ok(directory) => directory,
         Err(error) => {
@@ -375,10 +485,25 @@ fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCode {
             "design": design,
             "engine_a": &engine_a,
             "engine_b": &engine_b,
+            "engine_a_time_control": engine_a_time_control,
+            "engine_b_time_control": engine_b_time_control,
+            "adjudication": adjudication,
+            "fault_policy": fault_policy,
+            "execution": execution,
+            "master_seed": master_seed,
+            "master_seed_generated": master_seed_generated,
+            "openings": openings.report(),
         }),
         &[],
         &current_directory,
-        &["/engine_a/executable".into(), "/engine_b/executable".into()],
+        &match command.book {
+            Some(_) => vec![
+                "/engine_a/executable".into(),
+                "/engine_b/executable".into(),
+                "/openings/path".into(),
+            ],
+            None => vec!["/engine_a/executable".into(), "/engine_b/executable".into()],
+        },
     ) {
         Ok(resolved) => resolved,
         Err(error) => {
@@ -396,10 +521,174 @@ fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCode {
             },
             machine,
         );
-        ExitCode::SUCCESS
+        return ExitCode::SUCCESS;
+    }
+
+    let opened = match &command.run_directory {
+        Some(path) => RunDirectory::open_explicit(path, &resolved, command.restart),
+        None => RunDirectory::create_unique(&current_directory, "sprt", &resolved),
+    };
+    let opened = match opened {
+        Ok(opened) => opened,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if let Some(archived) = &opened.archived {
+        eprintln!("archived previous run at {}", archived.display());
+    }
+    let directory = Arc::new(opened.directory);
+    let checkpoint = if opened.resumed
+        && (directory.paths().checkpoint.exists() || directory.paths().previous_checkpoint.exists())
+    {
+        match directory.read_checkpoint::<SprtCheckpoint>() {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                eprintln!("resume failed: {error}");
+                return ExitCode::from(3);
+            }
+        }
     } else {
-        eprintln!("SPRT execution is not available until pair-atomic scheduling is composed");
-        ExitCode::from(3)
+        SprtCheckpoint::default()
+    };
+    if !checkpoint.post_terminal_pairs.is_empty() {
+        eprintln!("resume failed: a terminal SPRT run cannot be extended");
+        return ExitCode::from(2);
+    }
+    let observer = match DurableSprtOutput::new(Arc::clone(&directory), checkpoint.clone()) {
+        Ok(observer) => Arc::new(observer),
+        Err(error) => {
+            eprintln!("SPRT output failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
+    let mut recorder = match if opened.resumed {
+        RunRecorder::resume(&directory)
+    } else {
+        RunRecorder::begin(&directory, "sprt")
+    } {
+        Ok(recorder) => recorder,
+        Err(error) => {
+            eprintln!("run record failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    if let Err(error) = recorder.set_workflow(json!({
+        "kind": "sprt",
+        "design": design,
+        "engine_a_time_control": engine_a_time_control,
+        "engine_b_time_control": engine_b_time_control,
+        "adjudication": adjudication,
+        "fault_policy": fault_policy,
+        "execution": execution,
+        "master_seed": master_seed,
+        "master_seed_generated": master_seed_generated,
+        "openings": openings.report(),
+    })) {
+        eprintln!("run record failed: {error}");
+        return ExitCode::from(3);
+    }
+    if !machine {
+        eprintln!("SPRT run directory: {}", directory.paths().root.display());
+    }
+    let openings_report = openings.report().clone();
+    let request = sprt_runner::PairScheduleRequest {
+        settings: match_runner::PairGameSettings {
+            engine_a,
+            engine_b,
+            engine_a_time_control,
+            engine_b_time_control,
+            adjudication,
+            openings,
+        },
+        execution: execution.clone(),
+        design,
+        fault_policy,
+        completed_pairs: checkpoint.official_pairs,
+        observer: Some(observer.clone()),
+    };
+    let schedule_future = sprt_runner::run_pair_schedule(request);
+    tokio::pin!(schedule_future);
+    let period = Duration::from_secs(command.progress_interval_secs);
+    let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    let outcome = loop {
+        tokio::select! {
+            result = &mut schedule_future => break result,
+            _ = interval.tick() => {
+                let (official, post_terminal) = observer.progress();
+                eprintln!(
+                    "SPRT progress: {official}/{} official pairs, {post_terminal} post-terminal",
+                    design.max_pairs
+                );
+            }
+        }
+    };
+    match outcome {
+        Ok(schedule) => {
+            let status = schedule.status();
+            let report = sprt_runner::SprtReport {
+                status,
+                design,
+                engine_a_time_control,
+                engine_b_time_control,
+                adjudication,
+                fault_policy,
+                execution,
+                master_seed,
+                master_seed_generated,
+                openings: openings_report,
+                schedule,
+            };
+            if let Err(error) = observer.finish(&report) {
+                eprintln!("SPRT output failed: {error}");
+                return ExitCode::from(3);
+            }
+            let sample = OfficialSample {
+                committed_units: report.schedule.official_pairs.len() as u64,
+                scored_games: (report.schedule.official_pairs.len() * 2) as u64,
+                completed_pairs: report.schedule.official_pairs.len() as u64,
+                pentanomial: report.schedule.pentanomial.map(u64::from),
+                unpaired_games: 0,
+            };
+            if let Err(error) = recorder.update_sample(sample) {
+                eprintln!("run record failed: {error}");
+                return ExitCode::from(3);
+            }
+            let run_status = match status {
+                sprt_runner::SprtStatus::H1
+                | sprt_runner::SprtStatus::H0
+                | sprt_runner::SprtStatus::Inconclusive => RunStatus::Completed,
+                sprt_runner::SprtStatus::Invalid => RunStatus::Invalid,
+            };
+            if let Err(error) = recorder.finish(run_status) {
+                eprintln!("run record failed: {error}");
+                return ExitCode::from(3);
+            }
+            if machine {
+                print_json(&MachineOutput::Sprt {
+                    run_directory: directory.paths().root.clone(),
+                    report,
+                });
+            } else {
+                print_sprt(&report, &directory.paths().root);
+            }
+            ExitCode::from(sprt_exit_code(status))
+        }
+        Err(error) => {
+            eprintln!("SPRT failed: {error}");
+            ExitCode::from(3)
+        }
+    }
+}
+
+fn sprt_exit_code(status: sprt_runner::SprtStatus) -> u8 {
+    match status {
+        sprt_runner::SprtStatus::H1 => 0,
+        sprt_runner::SprtStatus::H0 => 1,
+        sprt_runner::SprtStatus::Inconclusive => 4,
+        sprt_runner::SprtStatus::Invalid => 5,
     }
 }
 
@@ -547,6 +836,10 @@ enum MachineOutput<'a> {
         run_directory: PathBuf,
         report: match_runner::FixedMatchReport,
     },
+    Sprt {
+        run_directory: PathBuf,
+        report: sprt_runner::SprtReport,
+    },
     DryRun {
         command: &'a str,
         config_sha256: &'a str,
@@ -569,6 +862,10 @@ enum MachineOutput<'a> {
 }
 
 async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitCode {
+    let MatchCommand {
+        games,
+        conditions: command,
+    } = command;
     if command.book.is_none()
         && (command.book_start != 0
             || command.book_plies.is_some()
@@ -689,18 +986,14 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         book.plies = command.book_plies.unwrap_or(8);
         book
     });
-    let openings = match match_runner::resolve_openings(
-        book,
-        command.book_start,
-        command.games,
-        master_seed,
-    ) {
-        Ok(openings) => openings,
-        Err(error) => {
-            eprintln!("configuration error: {error}");
-            return ExitCode::from(2);
-        }
-    };
+    let openings =
+        match match_runner::resolve_openings(book, command.book_start, games, master_seed) {
+            Ok(openings) => openings,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        };
     let current_directory = match std::env::current_dir() {
         Ok(directory) => directory,
         Err(error) => {
@@ -713,7 +1006,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         None,
         json!({
             "command": "match",
-            "games": command.games,
+            "games": games,
             "engine_a": &engine_a,
             "engine_b": &engine_b,
             "engine_a_time_control": engine_a_time_control,
@@ -800,11 +1093,25 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
             return ExitCode::from(3);
         }
     };
+    if let Err(error) = recorder.set_workflow(json!({
+        "kind": "match",
+        "engine_a_time_control": engine_a_time_control,
+        "engine_b_time_control": engine_b_time_control,
+        "adjudication": adjudication,
+        "fault_policy": fault_policy,
+        "execution": execution,
+        "master_seed": master_seed,
+        "master_seed_generated": master_seed_generated,
+        "openings": openings.report(),
+    })) {
+        eprintln!("run record failed: {error}");
+        return ExitCode::from(3);
+    }
     let progress = match_runner::MatchProgress::default();
     let request = match_runner::FixedMatchRequest {
         engine_a,
         engine_b,
-        games: command.games,
+        games,
         engine_a_time_control,
         engine_b_time_control,
         adjudication,
@@ -837,7 +1144,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
                 let snapshot = progress.snapshot();
                 eprintln!(
                     "progress: {}/{} attempted, {} scored, {} faults",
-                    snapshot.attempted, command.games, snapshot.scored, snapshot.faults
+                    snapshot.attempted, games, snapshot.scored, snapshot.faults
                 );
             }
         }
@@ -975,6 +1282,125 @@ impl match_runner::MatchObserver for DurableMatchOutput {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct SprtCheckpoint {
+    official_pairs: Vec<CompletePair<match_runner::MatchGame>>,
+    post_terminal_pairs: Vec<CompletePair<match_runner::MatchGame>>,
+}
+
+struct DurableSprtOutput {
+    directory: Arc<RunDirectory>,
+    checkpoint: Mutex<SprtCheckpoint>,
+}
+
+impl DurableSprtOutput {
+    fn new(directory: Arc<RunDirectory>, checkpoint: SprtCheckpoint) -> Result<Self, String> {
+        let output = Self {
+            directory,
+            checkpoint: Mutex::new(checkpoint),
+        };
+        output.rewrite_pgn()?;
+        Ok(output)
+    }
+
+    fn progress(&self) -> (usize, usize) {
+        self.checkpoint.lock().map_or((0, 0), |checkpoint| {
+            (
+                checkpoint.official_pairs.len(),
+                checkpoint.post_terminal_pairs.len(),
+            )
+        })
+    }
+
+    fn persist_pair(
+        &self,
+        pair: &CompletePair<match_runner::MatchGame>,
+        official: bool,
+    ) -> Result<(), String> {
+        {
+            let mut checkpoint = self
+                .checkpoint
+                .lock()
+                .map_err(|_| "SPRT checkpoint lock poisoned")?;
+            if official {
+                checkpoint.official_pairs.push(pair.clone());
+            } else {
+                checkpoint.post_terminal_pairs.push(pair.clone());
+            }
+            self.directory
+                .write_checkpoint(&*checkpoint)
+                .map_err(|error| error.to_string())?;
+        }
+        self.rewrite_pgn()?;
+        let mut line = serde_json::to_vec(&json!({
+            "event": if official { "official-pair" } else { "post-terminal-pair" },
+            "pair": pair,
+        }))
+        .map_err(|error| error.to_string())?;
+        line.push(b'\n');
+        self.directory
+            .append_log(&line)
+            .map_err(|error| error.to_string())
+    }
+
+    fn rewrite_pgn(&self) -> Result<(), String> {
+        let checkpoint = self
+            .checkpoint
+            .lock()
+            .map_err(|_| "SPRT PGN lock poisoned")?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(self.directory.paths().root.join("games.pgn"))
+            .map_err(|error| error.to_string())?;
+        for (class, pairs) in [
+            ("official", &checkpoint.official_pairs),
+            ("post-terminal", &checkpoint.post_terminal_pairs),
+        ] {
+            for pair in pairs {
+                for game in [&pair.first, &pair.second] {
+                    writeln!(file, "{{Colosseum sample: {class}}}")
+                        .map_err(|error| error.to_string())?;
+                    writeln!(file, "{}\n", game.pgn.trim_end())
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+        }
+        file.sync_all().map_err(|error| error.to_string())
+    }
+
+    fn finish(&self, report: &sprt_runner::SprtReport) -> Result<(), String> {
+        let bytes = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
+        fs::write(self.directory.paths().root.join("result.json"), bytes)
+            .map_err(|error| error.to_string())?;
+        let mut line = serde_json::to_vec(&json!({
+            "event": "sprt-finished",
+            "status": report.status,
+            "official_pairs": report.schedule.official_pairs.len(),
+            "post_terminal_pairs": report.schedule.post_terminal_pairs.len(),
+        }))
+        .map_err(|error| error.to_string())?;
+        line.push(b'\n');
+        self.directory
+            .append_log(&line)
+            .map_err(|error| error.to_string())
+    }
+}
+
+impl sprt_runner::PairObserver for DurableSprtOutput {
+    fn official_pair(&self, pair: &CompletePair<match_runner::MatchGame>) -> Result<(), String> {
+        self.persist_pair(pair, true)
+    }
+
+    fn post_terminal_pair(
+        &self,
+        pair: &CompletePair<match_runner::MatchGame>,
+    ) -> Result<(), String> {
+        self.persist_pair(pair, false)
+    }
+}
+
 fn resolve_master_seed(configured: Option<u64>) -> Result<(u64, bool), String> {
     if let Some(seed) = configured {
         return Ok((seed, false));
@@ -996,7 +1422,7 @@ fn resolve_placement(value: &str, headroom_cores: usize) -> Result<CpuPlacementP
     }
 }
 
-fn resolve_adjudication(command: &MatchCommand) -> AdjudicationConfig {
+fn resolve_adjudication(command: &MatchConditions) -> AdjudicationConfig {
     AdjudicationConfig {
         max_moves: command.max_moves,
         draw: (!command.no_draw_adjudication).then_some(DrawAdjudication {
@@ -1109,6 +1535,44 @@ fn print_fixed_match(report: &match_runner::FixedMatchReport) {
             error
         );
     }
+}
+
+fn print_sprt(report: &sprt_runner::SprtReport, run_directory: &Path) {
+    println!(
+        "SPRT {:?}: {} official pairs, {} post-terminal pairs",
+        report.status,
+        report.schedule.official_pairs.len(),
+        report.schedule.post_terminal_pairs.len()
+    );
+    println!(
+        "model {:?}: H0 {} / H1 {}, alpha {}, beta {}, cap {} pairs",
+        report.design.parameters.model,
+        report.design.parameters.elo0,
+        report.design.parameters.elo1,
+        report.design.parameters.alpha,
+        report.design.parameters.beta,
+        report.design.max_pairs
+    );
+    if let Some(statistics) = report.schedule.statistics {
+        println!(
+            "LLR {:.6}; bounds [{:.6}, {:.6}]; decision {:?}",
+            statistics.llr, statistics.lower, statistics.upper, statistics.decision
+        );
+    } else {
+        println!("LLR unavailable: official sample is still statistically degenerate");
+    }
+    println!(
+        "terminal pair: {}; invalid pair: {}",
+        report
+            .schedule
+            .terminal_pair
+            .map_or_else(|| "none".into(), |value| value.to_string()),
+        report
+            .schedule
+            .invalid_pair
+            .map_or_else(|| "none".into(), |value| value.to_string())
+    );
+    println!("artifacts: {}", run_directory.display());
 }
 
 fn run_capabilities(machine: bool) -> ExitCode {
@@ -1256,5 +1720,13 @@ mod tests {
                 inc_ms: match_runner::DEFAULT_INCREMENT_MS,
             }
         );
+    }
+
+    #[test]
+    fn sprt_terminal_classes_have_distinct_automation_exit_codes() {
+        assert_eq!(sprt_exit_code(sprt_runner::SprtStatus::H1), 0);
+        assert_eq!(sprt_exit_code(sprt_runner::SprtStatus::H0), 1);
+        assert_eq!(sprt_exit_code(sprt_runner::SprtStatus::Inconclusive), 4);
+        assert_eq!(sprt_exit_code(sprt_runner::SprtStatus::Invalid), 5);
     }
 }

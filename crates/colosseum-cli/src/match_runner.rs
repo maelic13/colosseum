@@ -127,11 +127,11 @@ pub struct MatchFaultCounts {
 }
 
 impl MatchFaultCounts {
-    fn engine_total(self) -> u32 {
+    pub(crate) fn engine_total(self) -> u32 {
         self.engine_a + self.engine_b
     }
 
-    fn time_total(self) -> u32 {
+    pub(crate) fn time_total(self) -> u32 {
         self.time_losses_a + self.time_losses_b
     }
 }
@@ -188,7 +188,6 @@ pub struct MatchOpenings {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Used by the live SPRT stopping loop composed in 4B.3.
 pub struct PairGameSettings {
     pub engine_a: EngineLaunchSpec,
     pub engine_b: EngineLaunchSpec,
@@ -397,7 +396,6 @@ pub enum MatchError {
     BookStartOutOfRange { start_index: usize, openings: usize },
     #[error("durable match output failed: {0}")]
     Output(String),
-    #[allow(dead_code)] // Used by the live SPRT stopping loop composed in 4B.3.
     #[error("pair identity {0} cannot be represented as two game numbers")]
     PairIdentityOutOfRange(u32),
 }
@@ -405,7 +403,6 @@ pub enum MatchError {
 /// Execute both colours of one opening as a single scheduler value. The second
 /// game is always attempted after the first returns; only the complete value
 /// can enter the pair commit queue.
-#[allow(dead_code)] // Used by the live SPRT stopping loop composed in 4B.3.
 pub async fn play_pair(
     pair_id: u32,
     slot: &GameSlotCpuAllocation,
@@ -772,7 +769,11 @@ async fn play_game(request: GameRequest) -> MatchGame {
     }
 }
 
-fn record_fault(counts: &mut MatchFaultCounts, white: MatchSide, fault: Option<&GameFault>) {
+pub(crate) fn record_fault(
+    counts: &mut MatchFaultCounts,
+    white: MatchSide,
+    fault: Option<&GameFault>,
+) {
     match fault {
         Some(GameFault::Engine { side, kind, .. }) => {
             let named_side = match side {

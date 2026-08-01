@@ -20,6 +20,7 @@ The currently emitted `type` values are:
 - `engine-inspection`
 - `engine-compliance`
 - `fixed-match`
+- `sprt`
 
 Human-readable mode is the default. Automation should select `--json` and use
 the process exit status as the primary success/failure signal.
@@ -29,3 +30,7 @@ the fault thresholds, `2` means command-line or configuration refusal, and `3`
 means infrastructure, persistence or runtime error. Sequential commands add
 their documented H0/H1/inconclusive distinctions without reusing the error
 codes.
+
+For `sprt`, exit `0` is H1, `1` is H0, `4` is capped inconclusive and `5` is an
+invalid experiment. Configuration refusal remains `2` and infrastructure,
+runtime or persistence error remains `3`.

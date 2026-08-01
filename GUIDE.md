@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–3 and Phase 4A fixed matches are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process containment, recoverable run directories, topology/affinity handling, per-side clocks, optional paired books, concurrent resource planning, full logs/PGN/failed-game traffic and tested kill/resume |
-| What is missing | Pair-atomic SPRT and external-runner parity; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–3, Phase 4A fixed matches and live pair-atomic capped SPRT through reporting are complete: shared ordinary-engine controls, clocks/adjudication/resources/books, deterministic commit/stopping, recoverable official/post-terminal state, strict JSON and distinct automation exits |
+| What is missing | SPRT external-statistics/live parity and exit acceptance; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4A · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4B.4 — SPRT reporting, durability and exit codes** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 4B.5 — external-statistics replay and controlled live parity** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -431,8 +431,15 @@ model as well.
   while cap exhaustion retains the full official prefix — evidence:
   [`crates/colosseum-cli/src/sprt_runner.rs`](crates/colosseum-cli/src/sprt_runner.rs),
   [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
-- ☐ **4B.4** — **Model: Terra High.** Exit/reporting distinguishes H1/H0/inconclusive/invalid/error and
-  includes model, hypotheses, LLR, bounds, cap and terminal pair
+- ☑ **4B.4 — DONE** — **Model: Terra High.** Live `sprt` shares all fixed-match
+  conditions and recoverable artifacts; human/JSON/result/run-record evidence
+  names model, hypotheses, alpha/beta, bounds, LLR when defined, cap,
+  pentanomial sample, terminal/invalid pair and post-terminal work, with
+  distinct H1=0/H0=1/config=2/error=3/inconclusive=4/invalid=5 exits — evidence:
+  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
+  [`crates/colosseum-cli/src/sprt_runner.rs`](crates/colosseum-cli/src/sprt_runner.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
+  [`docs/cli/sprt.md`](docs/cli/sprt.md)
 - ☐ **4B.5** — **Model: Sol High.** Replay identical ordered outcomes through compatible external
   statistics; controlled live parity compares only shared fields
 - ☐ **4B.6** — **EXIT · Model: Sol High.** Analytic/oracle parity; concurrency cannot change the
@@ -594,10 +601,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4B.4 — SPRT reporting, durability and exit codes. Model: GPT-5.6 Terra — High.**
-Expose the pair scheduler as the live command, persist official/post-terminal
-state, and report model, hypotheses, error rates, LLR, bounds, cap and terminal
-pair with distinct H1/H0/inconclusive/invalid/error process exits.
+**Phase 4B.5 — external-statistics replay and controlled live parity. Model: GPT-5.6 Sol — High.**
+Replay identical ordered pair outcomes through compatible external statistics,
+then compare a short controlled live run against fastchess and Cute Chess only
+on the fields their versions and models genuinely share.
 
 ```
 git diff --check

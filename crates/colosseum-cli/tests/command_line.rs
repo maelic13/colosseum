@@ -124,6 +124,107 @@ fn sprt_refuses_missing_or_invalid_design_before_launch() {
 }
 
 #[test]
+fn sprt_live_report_is_pair_atomic_durable_and_inconclusive_at_its_cap() {
+    let root = tempfile::tempdir().unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
+    let run = root.path().join("sprt");
+    let output = cli()
+        .args(["sprt"])
+        .arg(fixture)
+        .arg(fixture)
+        .args([
+            "--max-pairs",
+            "2",
+            "--preset",
+            "gainer",
+            "--max-engine-faults",
+            "4",
+            "--seed",
+            "7",
+            "--dir",
+        ])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(4));
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["type"], "sprt");
+    assert_eq!(value["report"]["status"], "inconclusive");
+    assert_eq!(
+        value["report"]["design"]["parameters"]["model"],
+        "normalized"
+    );
+    assert_eq!(
+        value["report"]["schedule"]["official_pairs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        value["report"]["schedule"]["post_terminal_pairs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    assert!(value["report"]["schedule"]["statistics"].is_null());
+    for artifact in [
+        "checkpoint.json",
+        "run.log",
+        "games.pgn",
+        "result.json",
+        "run-record.json",
+    ] {
+        assert!(run.join(artifact).is_file(), "missing {artifact}");
+    }
+}
+
+#[test]
+fn sprt_live_exit_distinguishes_invalid_and_infrastructure_error() {
+    let root = tempfile::tempdir().unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
+    let invalid = cli()
+        .arg("sprt")
+        .arg(fixture)
+        .arg(fixture)
+        .args(["--max-pairs", "10", "--preset", "gainer", "--dir"])
+        .arg(root.path().join("invalid"))
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(invalid.status.code(), Some(5));
+    let value: serde_json::Value = serde_json::from_slice(&invalid.stdout).unwrap();
+    assert_eq!(value["report"]["status"], "invalid");
+    assert_eq!(value["report"]["schedule"]["invalid_pair"], 1);
+
+    let error = cli()
+        .args([
+            "sprt",
+            "missing-a",
+            "missing-b",
+            "--max-pairs",
+            "2",
+            "--preset",
+            "gainer",
+            "--dir",
+        ])
+        .arg(root.path().join("error"))
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(error.status.code(), Some(3));
+    assert!(error.stdout.is_empty());
+    assert!(
+        String::from_utf8(error.stderr)
+            .unwrap()
+            .contains("SPRT failed")
+    );
+}
+
+#[test]
 fn fixed_match_accepts_the_same_ordinary_uci_path_with_different_side_options() {
     let root = tempfile::tempdir().unwrap();
     let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
