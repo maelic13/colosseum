@@ -1408,6 +1408,14 @@ restricted-cpuset, processor-group, no-SMT and dual-socket fixtures pass;
 residency tests pass where enforceable; platform capability reporting is
 documented.
 
+**Implemented topology-quality placement (3.5):** Windows uses OS CPU Set
+efficiency-class and NUMA data; Linux uses kernel `cpu_capacity` when present
+and sysfs NUMA membership, retaining unknown rather than guessing when no class
+signal exists. Slot allocation first seeks one class/node location for both
+engines, then preserves per-engine node locality and class symmetry where
+possible. Every allocation records its class/node sets and explicit mismatch or
+span flags, so unavoidable asymmetry remains visible to later run records.
+
 ### Phase 4A — Fixed-match runner
 
 Implement the non-sequential part of 5.4: fixed matches, per-side controls,

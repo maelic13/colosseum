@@ -15,6 +15,19 @@ number, so equal CPU numbers in different groups remain distinct. Linux CPU
 lists are parsed as reported by the kernel and checked for overlaps or
 inconsistent sibling reports.
 
+Colosseum also records placement-quality metadata without estimating it from
+clock frequency or CPU numbering:
+
+| Platform | Core-class source | NUMA source |
+|---|---|---|
+| Windows | CPU Set `EfficiencyClass` | CPU Set `NumaNodeIndex`, qualified by processor group |
+| Linux | `cpu_capacity` when the kernel exports it; otherwise unknown | Per-CPU `nodeN` sysfs membership |
+| macOS | Unavailable without a logical sibling map | Unavailable without a logical sibling map |
+
+An unknown class is kept as unknown. This avoids silently treating unlike
+cores as equivalent when the operating system supplies no trustworthy class
+signal.
+
 Colosseum separately detects the set available to the current process:
 
 | Platform | Availability source |
@@ -49,5 +62,13 @@ physical cores with every available SMT sibling belonging to those cores. This
 allocation is independent of the engine's UCI worker-thread option: changing
 `Threads` never changes `cores-per-engine`, or vice versa. A request that cannot
 fit `game-slots × 2 × cores-per-engine` physical cores is rejected.
+
+Allocation first looks for enough cores of one class and NUMA node for both
+engines in a slot. If that is impossible, it keeps each engine within one node
+and prefers matching classes; only then does it fall back to the remaining
+cores. Every engine allocation records its class and node sets, together with
+explicit flags for class mismatch, node mismatch, or an engine spanning more
+than one class or node. The run record can therefore expose unavoidable
+asymmetry instead of hiding it.
 
 This policy does not yet apply the resolved affinity to child processes.

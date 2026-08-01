@@ -3,7 +3,7 @@
 //! This module decides *which available* logical processors a placement mode
 //! names. Applying affinity remains a separate platform-adapter responsibility.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -11,6 +11,7 @@ use thiserror::Error;
 use colosseum_application::CpuAllocation;
 
 use crate::allowed_cpus::AllowedCpuSet;
+use crate::characteristics::{CoreClass, CpuCharacteristics, NumaNodeId};
 use crate::topology::{CpuTopology, LogicalCpuId, PhysicalCore};
 
 /// The default number of whole physical cores left for the harness and host.
@@ -83,14 +84,43 @@ impl CpuPlacementPlan {
     }
 }
 
-/// Disjoint CPU allocations for the two engines occupying one concurrent game
-/// slot. These are process allocations, independent of UCI worker options.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EngineCpuPlacement {
+    pub allocation: CpuAllocation,
+    pub physical_core_count: usize,
+    pub core_classes: Vec<CoreClass>,
+    pub numa_nodes: Vec<NumaNodeId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlacementAsymmetry {
+    EngineASpansCoreClasses,
+    EngineBSpansCoreClasses,
+    EngineASpansNumaNodes,
+    EngineBSpansNumaNodes,
+    CoreClassMismatch,
+    NumaNodeMismatch,
+}
+
+/// Disjoint CPU placements for the two engines occupying one concurrent game
+/// slot, including the topology evidence needed to audit symmetry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameSlotCpuAllocation {
     pub slot_index: usize,
-    pub engine_a: CpuAllocation,
-    pub engine_b: CpuAllocation,
+    pub engine_a: EngineCpuPlacement,
+    pub engine_b: EngineCpuPlacement,
+    pub asymmetries: Vec<PlacementAsymmetry>,
 }
+
+#[derive(Debug, Clone)]
+struct LocatedCore {
+    core: PhysicalCore,
+    core_class: CoreClass,
+    numa_node: Option<NumaNodeId>,
+}
+
+type LocationKey = (CoreClass, Option<NumaNodeId>);
 
 /// Divide a resolved placement pool between concurrent game slots.
 ///
@@ -99,6 +129,7 @@ pub struct GameSlotCpuAllocation {
 /// CPU. With placement `off`, every engine remains unrestricted.
 pub fn allocate_game_slots(
     plan: &CpuPlacementPlan,
+    characteristics: &CpuCharacteristics,
     game_slots: usize,
     cores_per_engine: usize,
 ) -> Result<Vec<GameSlotCpuAllocation>, CpuPlacementError> {
@@ -112,8 +143,9 @@ pub fn allocate_game_slots(
         return Ok((0..game_slots)
             .map(|slot_index| GameSlotCpuAllocation {
                 slot_index,
-                engine_a: CpuAllocation::Unrestricted,
-                engine_b: CpuAllocation::Unrestricted,
+                engine_a: unrestricted_engine_placement(),
+                engine_b: unrestricted_engine_placement(),
+                asymmetries: Vec::new(),
             })
             .collect());
     };
@@ -130,21 +162,189 @@ pub fn allocate_game_slots(
         });
     }
 
-    let allocation_for = |engine_index: usize| {
-        let start = engine_index * cores_per_engine;
-        let cpus = cores[start..start + cores_per_engine]
-            .iter()
-            .flat_map(|core| core.logical_cpus.iter().copied())
-            .collect();
-        CpuAllocation::Enforced(cpus)
-    };
-    Ok((0..game_slots)
-        .map(|slot_index| GameSlotCpuAllocation {
+    let mut remaining = locate_cores(cores, characteristics)?;
+    let mut slots = Vec::with_capacity(game_slots);
+    for slot_index in 0..game_slots {
+        let (engine_a_cores, engine_b_cores) =
+            take_symmetric_slot(&mut remaining, cores_per_engine);
+        let engine_a = engine_placement(&engine_a_cores);
+        let engine_b = engine_placement(&engine_b_cores);
+        let asymmetries = placement_asymmetries(&engine_a, &engine_b);
+        slots.push(GameSlotCpuAllocation {
             slot_index,
-            engine_a: allocation_for(slot_index * 2),
-            engine_b: allocation_for(slot_index * 2 + 1),
+            engine_a,
+            engine_b,
+            asymmetries,
+        });
+    }
+    Ok(slots)
+}
+
+fn unrestricted_engine_placement() -> EngineCpuPlacement {
+    EngineCpuPlacement {
+        allocation: CpuAllocation::Unrestricted,
+        physical_core_count: 0,
+        core_classes: Vec::new(),
+        numa_nodes: Vec::new(),
+    }
+}
+
+fn locate_cores(
+    cores: &[PhysicalCore],
+    characteristics: &CpuCharacteristics,
+) -> Result<Vec<LocatedCore>, CpuPlacementError> {
+    let mut by_cpu = BTreeMap::new();
+    for characteristic in &characteristics.cores {
+        for cpu in &characteristic.logical_cpus {
+            if by_cpu.insert(*cpu, characteristic).is_some() {
+                return Err(CpuPlacementError::DuplicateCoreCharacteristics(*cpu));
+            }
+        }
+    }
+    cores
+        .iter()
+        .map(|core| {
+            let identity = core.logical_cpus[0];
+            let characteristic = core
+                .logical_cpus
+                .first()
+                .and_then(|cpu| by_cpu.get(cpu))
+                .ok_or(CpuPlacementError::MissingCoreCharacteristics(identity))?;
+            if !core
+                .logical_cpus
+                .iter()
+                .all(|cpu| characteristic.logical_cpus.contains(cpu))
+            {
+                return Err(CpuPlacementError::InconsistentCoreCharacteristics);
+            }
+            Ok(LocatedCore {
+                core: core.clone(),
+                core_class: characteristic.core_class,
+                numa_node: characteristic.numa_node,
+            })
         })
-        .collect())
+        .collect()
+}
+
+fn take_symmetric_slot(
+    remaining: &mut Vec<LocatedCore>,
+    cores_per_engine: usize,
+) -> (Vec<LocatedCore>, Vec<LocatedCore>) {
+    let groups = location_groups(remaining);
+    if let Some(indices) = groups
+        .values()
+        .find(|indices| indices.len() >= cores_per_engine * 2)
+    {
+        let selected = take_indices(remaining, &indices[..cores_per_engine * 2]);
+        return (
+            selected[..cores_per_engine].to_vec(),
+            selected[cores_per_engine..].to_vec(),
+        );
+    }
+
+    let keys = groups.keys().copied().collect::<Vec<_>>();
+    for require_same_class in [true, false] {
+        for (left_index, left) in keys.iter().enumerate() {
+            if groups[left].len() < cores_per_engine {
+                continue;
+            }
+            for right in keys.iter().skip(left_index + 1) {
+                if groups[right].len() < cores_per_engine
+                    || (require_same_class && left.0 != right.0)
+                {
+                    continue;
+                }
+                let a = groups[left][..cores_per_engine].to_vec();
+                let b = groups[right][..cores_per_engine].to_vec();
+                let engine_a = take_indices(remaining, &a);
+                let adjusted_b = b
+                    .into_iter()
+                    .map(|index| index - a.iter().filter(|removed| **removed < index).count())
+                    .collect::<Vec<_>>();
+                let engine_b = take_indices(remaining, &adjusted_b);
+                return (engine_a, engine_b);
+            }
+        }
+    }
+
+    let selected = take_indices(remaining, &(0..cores_per_engine * 2).collect::<Vec<_>>());
+    (
+        selected[..cores_per_engine].to_vec(),
+        selected[cores_per_engine..].to_vec(),
+    )
+}
+
+fn location_groups(cores: &[LocatedCore]) -> BTreeMap<LocationKey, Vec<usize>> {
+    let mut groups = BTreeMap::new();
+    for (index, core) in cores.iter().enumerate() {
+        groups
+            .entry((core.core_class, core.numa_node))
+            .or_insert_with(Vec::new)
+            .push(index);
+    }
+    groups
+}
+
+fn take_indices(cores: &mut Vec<LocatedCore>, indices: &[usize]) -> Vec<LocatedCore> {
+    let mut selected = indices
+        .iter()
+        .map(|index| cores[*index].clone())
+        .collect::<Vec<_>>();
+    for index in indices.iter().rev() {
+        cores.remove(*index);
+    }
+    selected.sort_by_key(|core| core.core.logical_cpus[0]);
+    selected
+}
+
+fn engine_placement(cores: &[LocatedCore]) -> EngineCpuPlacement {
+    EngineCpuPlacement {
+        allocation: CpuAllocation::Enforced(
+            cores
+                .iter()
+                .flat_map(|core| core.core.logical_cpus.iter().copied())
+                .collect(),
+        ),
+        physical_core_count: cores.len(),
+        core_classes: cores
+            .iter()
+            .map(|core| core.core_class)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+        numa_nodes: cores
+            .iter()
+            .filter_map(|core| core.numa_node)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn placement_asymmetries(
+    engine_a: &EngineCpuPlacement,
+    engine_b: &EngineCpuPlacement,
+) -> Vec<PlacementAsymmetry> {
+    let mut output = Vec::new();
+    if engine_a.core_classes.len() > 1 {
+        output.push(PlacementAsymmetry::EngineASpansCoreClasses);
+    }
+    if engine_b.core_classes.len() > 1 {
+        output.push(PlacementAsymmetry::EngineBSpansCoreClasses);
+    }
+    if engine_a.numa_nodes.len() > 1 {
+        output.push(PlacementAsymmetry::EngineASpansNumaNodes);
+    }
+    if engine_b.numa_nodes.len() > 1 {
+        output.push(PlacementAsymmetry::EngineBSpansNumaNodes);
+    }
+    if engine_a.core_classes != engine_b.core_classes {
+        output.push(PlacementAsymmetry::CoreClassMismatch);
+    }
+    if engine_a.numa_nodes != engine_b.numa_nodes {
+        output.push(PlacementAsymmetry::NumaNodeMismatch);
+    }
+    output
 }
 
 /// Resolve a placement policy against an exact sibling map and the current
@@ -316,6 +516,12 @@ pub enum CpuPlacementError {
         game_slots: usize,
         cores_per_engine: usize,
     },
+    #[error("core characteristics contain logical CPU {0:?} more than once")]
+    DuplicateCoreCharacteristics(LogicalCpuId),
+    #[error("core characteristics are missing for logical CPU {0:?}")]
+    MissingCoreCharacteristics(LogicalCpuId),
+    #[error("core characteristics do not describe the selected sibling set consistently")]
+    InconsistentCoreCharacteristics,
 }
 
 #[cfg(test)]
@@ -369,6 +575,36 @@ mod tests {
         policy: &CpuPlacementPolicy,
     ) -> Result<CpuPlacementPlan, CpuPlacementError> {
         plan_cpu_placement(topology, &all_allowed(topology), policy)
+    }
+
+    fn characteristics(topology: &CpuTopology) -> CpuCharacteristics {
+        CpuCharacteristics::unknown(topology).unwrap()
+    }
+
+    fn characterized(
+        topology: &CpuTopology,
+        metadata: &[(CoreClass, Option<NumaNodeId>)],
+    ) -> CpuCharacteristics {
+        let cores = topology.cores().unwrap();
+        assert_eq!(cores.len(), metadata.len());
+        CpuCharacteristics {
+            source: crate::characteristics::CharacteristicsSource::WindowsCpuSets,
+            cores: cores
+                .iter()
+                .zip(metadata)
+                .map(|(core, (core_class, numa_node))| {
+                    crate::characteristics::PhysicalCoreCharacteristics {
+                        logical_cpus: core.logical_cpus.clone(),
+                        core_class: *core_class,
+                        numa_node: *numa_node,
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    fn node(number: u32) -> Option<NumaNodeId> {
+        Some(NumaNodeId { group: 0, number })
     }
 
     #[test]
@@ -634,14 +870,14 @@ mod tests {
             },
         )
         .unwrap();
-        let slots = allocate_game_slots(&placement, 1, 2).unwrap();
+        let slots = allocate_game_slots(&placement, &characteristics(&topology), 1, 2).unwrap();
         assert_eq!(slots.len(), 1);
         assert_eq!(
-            slots[0].engine_a,
+            slots[0].engine_a.allocation,
             CpuAllocation::Enforced(vec![cpu(0), cpu(4), cpu(1), cpu(5)])
         );
         assert_eq!(
-            slots[0].engine_b,
+            slots[0].engine_b.allocation,
             CpuAllocation::Enforced(vec![cpu(2), cpu(6), cpu(3), cpu(7)])
         );
     }
@@ -656,10 +892,10 @@ mod tests {
             },
         )
         .unwrap();
-        let slots = allocate_game_slots(&placement, 2, 1).unwrap();
+        let slots = allocate_game_slots(&placement, &characteristics(&topology), 2, 1).unwrap();
         let allocations = slots
             .iter()
-            .flat_map(|slot| [&slot.engine_a, &slot.engine_b])
+            .flat_map(|slot| [&slot.engine_a.allocation, &slot.engine_b.allocation])
             .map(|allocation| match allocation {
                 CpuAllocation::Enforced(cpus) => cpus.clone(),
                 _ => panic!("placement-on allocation must be enforced"),
@@ -672,13 +908,107 @@ mod tests {
         assert_eq!(allocations[3], [cpu(3), cpu(7)]);
 
         assert_eq!(
-            allocate_game_slots(&placement, 2, 2).unwrap_err(),
+            allocate_game_slots(&placement, &characteristics(&topology), 2, 2).unwrap_err(),
             CpuPlacementError::InsufficientPhysicalCores {
                 required: 8,
                 available: 4,
                 game_slots: 2,
                 cores_per_engine: 2,
             }
+        );
+    }
+
+    #[test]
+    fn hybrid_slots_keep_both_engines_on_the_same_core_class() {
+        let topology = smt_topology();
+        let placement = plan(
+            &topology,
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 0,
+            },
+        )
+        .unwrap();
+        let characteristics = characterized(
+            &topology,
+            &[
+                (CoreClass::WindowsEfficiencyClass(1), node(0)),
+                (CoreClass::WindowsEfficiencyClass(1), node(0)),
+                (CoreClass::WindowsEfficiencyClass(0), node(0)),
+                (CoreClass::WindowsEfficiencyClass(0), node(0)),
+            ],
+        );
+
+        let slots = allocate_game_slots(&placement, &characteristics, 2, 1).unwrap();
+
+        assert_eq!(
+            slots[0].engine_a.core_classes,
+            slots[0].engine_b.core_classes
+        );
+        assert_eq!(
+            slots[1].engine_a.core_classes,
+            slots[1].engine_b.core_classes
+        );
+        assert_ne!(
+            slots[0].engine_a.core_classes,
+            slots[1].engine_a.core_classes
+        );
+        assert!(slots.iter().all(|slot| slot.asymmetries.is_empty()));
+    }
+
+    #[test]
+    fn dual_numa_allocation_keeps_each_engine_local_and_records_node_asymmetry() {
+        let topology = smt_topology();
+        let placement = plan(
+            &topology,
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 0,
+            },
+        )
+        .unwrap();
+        let characteristics = characterized(
+            &topology,
+            &[
+                (CoreClass::WindowsEfficiencyClass(0), node(0)),
+                (CoreClass::WindowsEfficiencyClass(0), node(0)),
+                (CoreClass::WindowsEfficiencyClass(0), node(1)),
+                (CoreClass::WindowsEfficiencyClass(0), node(1)),
+            ],
+        );
+
+        let slots = allocate_game_slots(&placement, &characteristics, 1, 2).unwrap();
+        let slot = &slots[0];
+
+        assert_eq!(slot.engine_a.numa_nodes.len(), 1);
+        assert_eq!(slot.engine_b.numa_nodes.len(), 1);
+        assert_ne!(slot.engine_a.numa_nodes, slot.engine_b.numa_nodes);
+        assert_eq!(slot.asymmetries, vec![PlacementAsymmetry::NumaNodeMismatch]);
+    }
+
+    #[test]
+    fn unavoidable_hybrid_asymmetry_is_visible_in_the_allocation_record() {
+        let topology = smt_topology();
+        let placement = plan(
+            &topology,
+            &CpuPlacementPolicy::Explicit {
+                cpus: vec![cpu(0), cpu(1)],
+            },
+        )
+        .unwrap();
+        let characteristics = characterized(
+            &topology,
+            &[
+                (CoreClass::WindowsEfficiencyClass(1), node(0)),
+                (CoreClass::WindowsEfficiencyClass(0), node(0)),
+                (CoreClass::WindowsEfficiencyClass(0), node(0)),
+                (CoreClass::WindowsEfficiencyClass(0), node(0)),
+            ],
+        );
+
+        let slots = allocate_game_slots(&placement, &characteristics, 1, 1).unwrap();
+
+        assert_eq!(
+            slots[0].asymmetries,
+            vec![PlacementAsymmetry::CoreClassMismatch]
         );
     }
 
@@ -692,29 +1022,55 @@ mod tests {
             },
         )
         .unwrap();
-        let slots = allocate_game_slots(&placement, 1, 1).unwrap();
-        assert_eq!(slots[0].engine_a, CpuAllocation::Enforced(vec![cpu(0)]));
-        assert_eq!(slots[0].engine_b, CpuAllocation::Enforced(vec![cpu(1)]));
+        let slots = allocate_game_slots(&placement, &characteristics(&topology), 1, 1).unwrap();
+        assert_eq!(
+            slots[0].engine_a.allocation,
+            CpuAllocation::Enforced(vec![cpu(0)])
+        );
+        assert_eq!(
+            slots[0].engine_b.allocation,
+            CpuAllocation::Enforced(vec![cpu(1)])
+        );
     }
 
     #[test]
     fn placement_off_keeps_every_slot_unrestricted() {
-        let slots = allocate_game_slots(&CpuPlacementPlan::Unrestricted, 3, 8).unwrap();
+        let topology = smt_topology();
+        let slots = allocate_game_slots(
+            &CpuPlacementPlan::Unrestricted,
+            &characteristics(&topology),
+            3,
+            8,
+        )
+        .unwrap();
         assert_eq!(slots.len(), 3);
         assert!(slots.iter().all(|slot| {
-            slot.engine_a == CpuAllocation::Unrestricted
-                && slot.engine_b == CpuAllocation::Unrestricted
+            slot.engine_a.allocation == CpuAllocation::Unrestricted
+                && slot.engine_b.allocation == CpuAllocation::Unrestricted
+                && slot.asymmetries.is_empty()
         }));
     }
 
     #[test]
     fn slot_allocation_rejects_zero_dimensions() {
         assert_eq!(
-            allocate_game_slots(&CpuPlacementPlan::Unrestricted, 0, 1).unwrap_err(),
+            allocate_game_slots(
+                &CpuPlacementPlan::Unrestricted,
+                &characteristics(&smt_topology()),
+                0,
+                1,
+            )
+            .unwrap_err(),
             CpuPlacementError::ZeroGameSlots
         );
         assert_eq!(
-            allocate_game_slots(&CpuPlacementPlan::Unrestricted, 1, 0).unwrap_err(),
+            allocate_game_slots(
+                &CpuPlacementPlan::Unrestricted,
+                &characteristics(&smt_topology()),
+                1,
+                0,
+            )
+            .unwrap_err(),
             CpuPlacementError::ZeroCoresPerEngine
         );
     }

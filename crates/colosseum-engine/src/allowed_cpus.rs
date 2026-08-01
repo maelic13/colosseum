@@ -184,7 +184,7 @@ mod linux {
 }
 
 #[cfg(any(windows, test))]
-mod windows {
+pub(crate) mod windows {
     use std::collections::{BTreeMap, BTreeSet};
     #[cfg(windows)]
     use std::mem::{size_of, size_of_val};
@@ -192,11 +192,13 @@ mod windows {
     use super::*;
 
     #[derive(Debug, Clone, Copy)]
-    struct CpuSetEntry {
-        id: u32,
-        cpu: LogicalCpuId,
-        allocated: bool,
-        allocated_to_process: bool,
+    pub(crate) struct CpuSetEntry {
+        pub(crate) id: u32,
+        pub(crate) cpu: LogicalCpuId,
+        pub(crate) efficiency_class: u8,
+        pub(crate) numa_node_index: u8,
+        pub(crate) allocated: bool,
+        pub(crate) allocated_to_process: bool,
     }
 
     #[cfg(windows)]
@@ -323,7 +325,7 @@ mod windows {
     }
 
     #[cfg(windows)]
-    fn query_cpu_set_entries(
+    pub(crate) fn query_cpu_set_entries(
         process: windows_sys::Win32::Foundation::HANDLE,
     ) -> Result<Vec<CpuSetEntry>, AllowedCpuError> {
         use windows_sys::Win32::System::SystemInformation::{
@@ -385,6 +387,8 @@ mod windows {
                         group: cpu_set.Group,
                         number: u32::from(cpu_set.LogicalProcessorIndex),
                     },
+                    efficiency_class: cpu_set.EfficiencyClass,
+                    numa_node_index: cpu_set.NumaNodeIndex,
                     allocated: flags & SYSTEM_CPU_SET_INFORMATION_ALLOCATED as u8 != 0,
                     allocated_to_process: flags
                         & SYSTEM_CPU_SET_INFORMATION_ALLOCATED_TO_TARGET_PROCESS as u8
@@ -479,6 +483,8 @@ mod windows {
                 .map(|(id, cpu)| CpuSetEntry {
                     id: id as u32,
                     cpu,
+                    efficiency_class: 0,
+                    numa_node_index: 0,
                     allocated: false,
                     allocated_to_process: false,
                 })
