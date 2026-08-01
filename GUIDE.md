@@ -18,8 +18,8 @@ numbers, internal naming or method argumentation.
 | What is missing | Pair-atomic SPRT and external-runner parity; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4A · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4B.1 — explicit capped SPRT contract** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 4B.2 — pair-atomic scheduling and commit** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -407,8 +407,15 @@ model as well.
 
 ### Phase 4B — Pair-atomic SPRT and parity
 
-- ☐ **4B.1** — **Model: Terra High.** Explicit hypotheses/error rates/model and finite `max-pairs`;
-  `gainer`/`simplify` are named bundles
+- ☑ **4B.1 — DONE** — **Model: Terra High.** The runtime-neutral design
+  validates and records an explicit normalized/logistic model, ordered
+  hypotheses, alpha/beta, exact Wald bounds and mandatory finite `max-pairs`;
+  transparent `gainer` `[0,5]` and `simplify` `[-5,0]` normalized 5%/5%
+  bundles remain field-overridable — evidence:
+  [`crates/colosseum-application/src/sprt.rs`](crates/colosseum-application/src/sprt.rs),
+  [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
+  [`docs/cli/sprt.md`](docs/cli/sprt.md)
 - ☐ **4B.2** — **Model: Sol High.** Opening colour-pair is atomic. Commit complete pairs in deterministic
   schedule order; never evaluate an incomplete pair
 - ☐ **4B.3** — **Model: Sol High.** At a boundary, schedule no new pairs, complete a half-pair, and
@@ -576,9 +583,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4B.1 — explicit capped SPRT contract. Model: GPT-5.6 Terra — High.**
-Add explicit hypotheses, error rates, statistical model and finite pair cap;
-keep `gainer` and `simplify` as named convenience bundles over that contract.
+**Phase 4B.2 — pair-atomic scheduling and commit. Model: GPT-5.6 Sol — High.**
+Make each colour-reversed opening pair the scheduling and durable commit unit;
+publish complete pairs in deterministic schedule order and never evaluate a
+half-pair.
 
 ```
 git diff --check

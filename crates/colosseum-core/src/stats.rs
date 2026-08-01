@@ -4,6 +4,7 @@
 //! counts so they are easy to unit-test and reuse across presentation layers.
 
 use crate::standings::PairGameResult;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// A rejected statistical request.
@@ -535,7 +536,8 @@ pub struct SprtResult {
 }
 
 /// Elo parameterization used by paired statistics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum EloModel {
     /// Constrain the expected pair-average score after applying the logistic
     /// Elo-to-score transform.
@@ -854,19 +856,12 @@ pub fn pentanomial_sprt(
     if pairs < 2 {
         return Err(StatisticsError::InsufficientPairs { pairs });
     }
-    if !elo0.is_finite() || !elo1.is_finite() || elo0 >= elo1 {
-        return Err(StatisticsError::InvalidHypotheses { elo0, elo1 });
-    }
-    if !valid_error_rate(alpha) || !valid_error_rate(beta) || alpha + beta >= 1.0 {
-        return Err(StatisticsError::InvalidErrorRates { alpha, beta });
-    }
+    let (lower, upper) = sprt_wald_bounds(elo0, elo1, alpha, beta)?;
     if observed_variance(sample.counts()) <= 0.0 {
         return Err(StatisticsError::ZeroVariance);
     }
 
     let llr = pentanomial_llr(sample.counts(), model, elo0, elo1)?;
-    let lower = (beta / (1.0 - alpha)).ln();
-    let upper = ((1.0 - beta) / alpha).ln();
     if !llr.is_finite() || !lower.is_finite() || !upper.is_finite() {
         return Err(StatisticsError::LikelihoodSolveFailed);
     }
@@ -884,6 +879,26 @@ pub fn pentanomial_sprt(
         upper,
         decision: sprt_decision(llr, lower, upper),
     })
+}
+
+/// Validate an SPRT design and return its exact Wald decision bounds.
+///
+/// This is usable before outcomes exist, allowing an orchestration layer to
+/// refuse ambiguous or invalid sequential experiments before launching an
+/// engine.
+pub fn sprt_wald_bounds(
+    elo0: f64,
+    elo1: f64,
+    alpha: f64,
+    beta: f64,
+) -> Result<(f64, f64), StatisticsError> {
+    if !elo0.is_finite() || !elo1.is_finite() || elo0 >= elo1 {
+        return Err(StatisticsError::InvalidHypotheses { elo0, elo1 });
+    }
+    if !valid_error_rate(alpha) || !valid_error_rate(beta) || alpha + beta >= 1.0 {
+        return Err(StatisticsError::InvalidErrorRates { alpha, beta });
+    }
+    Ok(((beta / (1.0 - alpha)).ln(), ((1.0 - beta) / alpha).ln()))
 }
 
 const PENTANOMIAL_SCORES: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];

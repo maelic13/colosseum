@@ -8,9 +8,11 @@ pub mod commit;
 pub mod inspect;
 pub mod model;
 pub mod ports;
+pub mod sprt;
 
 pub use check::{CheckEngine, ComplianceCheck, ComplianceReport, ComplianceStatus};
 pub use commit::{CommitUnit, CommitUnitDependencies};
 pub use inspect::InspectEngine;
 pub use model::*;
 pub use ports::*;
+pub use sprt::{SprtBundle, SprtDesign, SprtDesignError, SprtParameters};

@@ -11,7 +11,7 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use colosseum_application::{
     CheckEngine, ComplianceReport, ComplianceStatus, EngineInspection, EngineLaunchSpec,
-    InspectEngine, RuntimeParticipant, UciOptionSchema,
+    InspectEngine, RuntimeParticipant, SprtBundle, SprtDesign, SprtParameters, UciOptionSchema,
 };
 use colosseum_cli::{
     EngineArgs, OfficialSample, RunDirectory, RunRecord, RunRecorder, RunStatus, built_in_defaults,
@@ -57,6 +57,8 @@ enum Command {
     Capabilities,
     /// Run a fixed number of games between two ordinary UCI engines.
     Match(Box<MatchCommand>),
+    /// Run a finite pair-atomic sequential probability ratio test.
+    Sprt(Box<SprtCommand>),
     /// Inspect or compliance-check an ordinary UCI executable.
     Engine(EngineCommand),
     /// Verify this exact executable's protocol, process and persistence paths.
@@ -209,6 +211,65 @@ struct MatchCommand {
     progress_interval_secs: u64,
 }
 
+#[derive(Debug, Args)]
+struct SprtCommand {
+    /// Path to engine A's UCI executable.
+    engine_a: PathBuf,
+    /// Path to engine B's UCI executable.
+    engine_b: PathBuf,
+    /// Required finite cap; reaching it without a boundary is inconclusive.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    max_pairs: u32,
+    /// Named starting design; every field remains overridable.
+    #[arg(long, value_enum)]
+    preset: Option<SprtBundleArg>,
+    /// Elo parameterization used by both hypotheses and the LLR.
+    #[arg(long, value_enum)]
+    model: Option<SprtModelArg>,
+    /// Null-hypothesis Elo in the selected model.
+    #[arg(long, allow_hyphen_values = true)]
+    elo0: Option<f64>,
+    /// Alternative-hypothesis Elo in the selected model.
+    #[arg(long, allow_hyphen_values = true)]
+    elo1: Option<f64>,
+    /// Type-I error probability.
+    #[arg(long)]
+    alpha: Option<f64>,
+    /// Type-II error probability.
+    #[arg(long)]
+    beta: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum SprtBundleArg {
+    Gainer,
+    Simplify,
+}
+
+impl From<SprtBundleArg> for SprtBundle {
+    fn from(value: SprtBundleArg) -> Self {
+        match value {
+            SprtBundleArg::Gainer => Self::Gainer,
+            SprtBundleArg::Simplify => Self::Simplify,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum SprtModelArg {
+    Normalized,
+    Logistic,
+}
+
+impl From<SprtModelArg> for colosseum_core::EloModel {
+    fn from(value: SprtModelArg) -> Self {
+        match value {
+            SprtModelArg::Normalized => Self::Normalized,
+            SprtModelArg::Logistic => Self::Logistic,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum BookOrderArg {
     Sequential,
@@ -242,6 +303,7 @@ async fn main() -> ExitCode {
         Command::Capabilities if cli.dry_run => unsupported_dry_run("capabilities"),
         Command::Capabilities => run_capabilities(cli.json),
         Command::Match(command) => run_match(*command, cli.json, cli.dry_run).await,
+        Command::Sprt(command) => run_sprt(*command, cli.json, cli.dry_run),
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
         Command::SelfTest if cli.dry_run => unsupported_dry_run("self-test"),
         Command::SelfTest => run_self_test(cli.json).await,
@@ -255,6 +317,120 @@ async fn main() -> ExitCode {
             }
         },
     }
+}
+
+fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCode {
+    let design = match resolve_sprt_design(&command) {
+        Ok(design) => design,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let engine_a = match resolve_match_engine(
+        command.engine_a,
+        None,
+        Vec::new(),
+        None,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        None,
+    ) {
+        Ok(engine) => engine,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let engine_b = match resolve_match_engine(
+        command.engine_b,
+        None,
+        Vec::new(),
+        None,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        None,
+    ) {
+        Ok(engine) => engine,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let current_directory = match std::env::current_dir() {
+        Ok(directory) => directory,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let resolved = match resolve_config(
+        built_in_defaults(),
+        None,
+        json!({
+            "command": "sprt",
+            "design": design,
+            "engine_a": &engine_a,
+            "engine_b": &engine_b,
+        }),
+        &[],
+        &current_directory,
+        &["/engine_a/executable".into(), "/engine_b/executable".into()],
+    ) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if dry_run {
+        print_output(
+            &MachineOutput::DryRun {
+                command: "sprt",
+                config_sha256: resolved.sha256(),
+                resolved_configuration: resolved.value(),
+                invocations: vec![&engine_a, &engine_b],
+            },
+            machine,
+        );
+        ExitCode::SUCCESS
+    } else {
+        eprintln!("SPRT execution is not available until pair-atomic scheduling is composed");
+        ExitCode::from(3)
+    }
+}
+
+fn resolve_sprt_design(command: &SprtCommand) -> Result<SprtDesign, String> {
+    let bundle = command.preset.map(Into::into);
+    let defaults = bundle.map(SprtBundle::defaults);
+    let required = |value: Option<f64>, name: &str| {
+        value
+            .or_else(|| {
+                defaults.map(|parameters| match name {
+                    "elo0" => parameters.elo0,
+                    "elo1" => parameters.elo1,
+                    "alpha" => parameters.alpha,
+                    "beta" => parameters.beta,
+                    _ => unreachable!("known SPRT scalar"),
+                })
+            })
+            .ok_or_else(|| format!("--{name} is required without --preset"))
+    };
+    let model = command
+        .model
+        .map(Into::into)
+        .or_else(|| defaults.map(|parameters| parameters.model))
+        .ok_or_else(|| "--model is required without --preset".to_owned())?;
+    let parameters = SprtParameters {
+        model,
+        elo0: required(command.elo0, "elo0")?,
+        elo1: required(command.elo1, "elo1")?,
+        alpha: required(command.alpha, "alpha")?,
+        beta: required(command.beta, "beta")?,
+    };
+    SprtDesign::new(parameters, command.max_pairs, bundle).map_err(|error| error.to_string())
 }
 
 fn unsupported_dry_run(command: &str) -> ExitCode {

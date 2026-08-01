@@ -24,6 +24,7 @@ Detailed contracts:
 
 - [Direct engine controls and compliance checks](engine-controls.md)
 - [Fixed direct-engine matches](match.md)
+- [Capped pair-based SPRT designs](sprt.md)
 - [Configuration files, inheritance and path origins](run-files.md)
 - [Master seed and named random streams](randomness.md)
 - [Human, JSON and dry-run output](output.md)

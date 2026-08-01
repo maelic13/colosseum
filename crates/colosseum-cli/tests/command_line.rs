@@ -24,7 +24,103 @@ fn help_is_headless_and_names_the_product() {
     assert!(stdout.contains("Usage: colosseum-cli"));
     assert!(stdout.contains("capabilities"));
     assert!(stdout.contains("match"));
+    assert!(stdout.contains("sprt"));
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn sprt_named_bundles_expand_to_explicit_finite_designs() {
+    for (preset, elo0, elo1) in [("gainer", 0.0, 5.0), ("simplify", -5.0, 0.0)] {
+        let output = cli()
+            .args([
+                "sprt",
+                "a",
+                "b",
+                "--max-pairs",
+                "1000",
+                "--preset",
+                preset,
+                "--dry-run",
+                "--json",
+            ])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let design = &value["resolved_configuration"]["design"];
+        assert_eq!(design["parameters"]["model"], "normalized");
+        assert_eq!(design["parameters"]["elo0"], elo0);
+        assert_eq!(design["parameters"]["elo1"], elo1);
+        assert_eq!(design["parameters"]["alpha"], 0.05);
+        assert_eq!(design["parameters"]["beta"], 0.05);
+        assert_eq!(design["max_pairs"], 1000);
+        assert!(design["lower_bound"].as_f64().unwrap() < 0.0);
+        assert!(design["upper_bound"].as_f64().unwrap() > 0.0);
+    }
+}
+
+#[test]
+fn sprt_custom_design_requires_and_reports_every_statistical_input() {
+    let output = cli()
+        .args([
+            "sprt",
+            "candidate",
+            "baseline",
+            "--max-pairs",
+            "750",
+            "--model",
+            "logistic",
+            "--elo0",
+            "-2",
+            "--elo1",
+            "3",
+            "--alpha",
+            "0.01",
+            "--beta",
+            "0.1",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let design = &value["resolved_configuration"]["design"];
+    assert_eq!(design["parameters"]["model"], "logistic");
+    assert_eq!(design["parameters"]["elo0"], -2.0);
+    assert_eq!(design["parameters"]["elo1"], 3.0);
+    assert_eq!(design["parameters"]["alpha"], 0.01);
+    assert_eq!(design["parameters"]["beta"], 0.1);
+    assert!(design["bundle"].is_null());
+}
+
+#[test]
+fn sprt_refuses_missing_or_invalid_design_before_launch() {
+    for arguments in [
+        vec!["sprt", "a", "b", "--max-pairs", "10", "--dry-run"],
+        vec![
+            "sprt",
+            "a",
+            "b",
+            "--max-pairs",
+            "10",
+            "--preset",
+            "gainer",
+            "--elo1",
+            "0",
+            "--dry-run",
+        ],
+    ] {
+        let output = cli().args(arguments).output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("configuration error")
+        );
+    }
 }
 
 #[test]

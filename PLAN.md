@@ -1531,6 +1531,14 @@ Add 5.1/5.4 SPRT orchestration: finite cap, deterministic pair commit order,
 official terminal sample and post-terminal handling. Replay identical outcome
 streams through compatible external statistics, then run controlled live parity
 against fastchess and Cute Chess on their shared feature surface.
+
+**Implemented design contract (4B.1):** the runtime-neutral application layer
+validates and serializes the selected normalized/logistic model, ordered
+hypotheses, alpha/beta, exact Wald bounds and nonzero finite pair cap before any
+engine launch. `gainer` expands to normalized `[0,5]` and `simplify` to
+normalized `[-5,0]`, both at 5%/5%; every expanded field remains explicitly
+overridable and visible in dry-run output.
+
 **Exit:** analytic/oracle verdict parity; concurrency cannot change the terminal
 pair; capped/invalid/H0/H1 exits pass; live disagreements are root-caused before
 SPSA builds on the runner.

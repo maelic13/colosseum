@@ -41,7 +41,7 @@ pub use stats::{
     NormalizedEloEstimate, PentanomialBin, PentanomialDistribution, PentanomialSprtResult,
     PentanomialStatistics, PentanomialVector, SprtDecision, SprtResult, StatisticsError,
     elo_with_error, fixed_n_achieved_resolution, fixed_n_plan, los, pentanomial_sprt,
-    pentanomial_statistics, sprt,
+    pentanomial_statistics, sprt, sprt_wald_bounds,
 };
 pub use time::{TimeControl, TimeUnit};
 pub use tournament::{
