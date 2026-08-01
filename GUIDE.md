@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–3 plus the fixed-N direct-engine match surface are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process-tree containment, durable run state, topology/affinity handling, and a headless sequential fixed match that permits same-binary option comparisons |
-| What is missing | Configurable time controls and clock accounting; match adjudication/fault/concurrency/book/output durability; pair-atomic SPRT; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–3 plus fixed-N direct-engine matches with independent per-side time controls are complete: Clean Architecture boundaries, independent CLI composition/version lane, deterministic statistics/random streams/configuration, ordinary-UCI inspect/check, strict JSON/dry-run output, exact-executable self-test, process containment, durable run primitives, topology/affinity handling, and same-binary option comparisons |
+| What is missing | Versioned clock accounting; match adjudication/fault/concurrency/book/output durability; pair-atomic SPRT; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 4A.1 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4A.2 — per-side time controls** |
+| Platform status | Windows ☑ local through Phase 4A.2 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 4A.2a — versioned clock accounting** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -334,8 +334,13 @@ model as well.
   [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/match.md`](docs/cli/match.md)
-- ☐ **4A.2** — **Model: Sol High.** Time controls per side: movetime, sudden death, base+increment,
-  fixed nodes/depth and configurable time margin
+- ☑ **4A.2 — DONE** — **Model: Sol High.** Per-side movetime, sudden-death,
+  base-plus-increment, fixed-node and fixed-depth controls resolve independently,
+  including asymmetric odds matches and per-side configurable margins; omitted
+  controls use the documented `3+0.03` default — evidence:
+  [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
+  [`docs/cli/match.md`](docs/cli/match.md)
 - ☐ **4A.2a** — **Model: Sol High. Clock accounting (PLAN §5.4a), explicit/versioned/recorded:**
   clock runs from finishing the write of `go` to finishing the read of
   `bestmove`, charging harness read latency and engine search start-up to the
@@ -535,9 +540,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 3.5 — Symmetric topology-quality placement. Model: GPT-5.6 Sol —
-High.** Keep A/B allocations on the same performance/efficiency core class and
-NUMA locality where possible, recording any unavoidable asymmetry.
+**Phase 4A.2a — versioned clock accounting. Model: GPT-5.6 Sol — High.**
+Implement and record PLAN §5.4a's exact monotonic charged interval, margin and
+increment boundary semantics, resolution and elapsed summary.
 
 ```
 git diff --check

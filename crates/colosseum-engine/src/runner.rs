@@ -140,13 +140,15 @@ pub struct GameSpec {
     pub start_fen: Option<String>,
     /// Opening moves (UCI) to pre-play from `start_fen` before the engines move.
     pub opening_moves: Vec<String>,
-    pub time_control: TimeControl,
+    pub white_time_control: TimeControl,
+    pub black_time_control: TimeControl,
     pub time_control_label: String,
     pub adjudication: AdjudicationConfig,
     /// Drive the UCI ponder protocol: engines think on the opponent's time
     /// (`go ponder` / `ponderhit` / `stop`).
     pub ponder: bool,
-    pub timeout_tolerance: Duration,
+    pub white_time_margin: Duration,
+    pub black_time_margin: Duration,
     pub handshake_timeout: Duration,
 }
 
@@ -303,7 +305,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
     };
 
     let mut pos = initial_position(spec.start_fen.as_deref());
-    let mut clocks = Clocks::new(&spec.time_control);
+    let mut clocks = Clocks::new(&spec.white_time_control, &spec.black_time_control);
 
     let mut san_moves: Vec<String> = Vec::new();
     let mut uci_moves: Vec<String> = Vec::new();
@@ -344,8 +346,8 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         lg.san_moves = san_moves.clone();
         lg.uci_moves = uci_moves.clone();
         lg.opening_plies = san_moves.len() as u32;
-        lg.white_clock_ms = clock_ms(&spec.time_control, &clocks, Color::White);
-        lg.black_clock_ms = clock_ms(&spec.time_control, &clocks, Color::Black);
+        lg.white_clock_ms = clock_ms(&spec, &clocks, Color::White);
+        lg.black_clock_ms = clock_ms(&spec, &clocks, Color::Black);
         lg.white_to_move = pos.turn() == Color::White;
     }
 
@@ -362,8 +364,12 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         };
         let position = build_uci_position(spec.start_fen.as_deref(), &uci_moves);
 
-        let (limits, deadline) =
-            move_limits(&spec.time_control, &clocks, mover, spec.timeout_tolerance);
+        let (limits, deadline) = move_limits(
+            time_control_for(&spec, mover),
+            &clocks,
+            mover,
+            time_margin_for(&spec, mover),
+        );
 
         // Resolve the mover's outstanding ponder: a correct prediction turns
         // it into the real search (`ponderhit`); a miss aborts it first.
@@ -458,7 +464,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         // Deduct the time used from the mover's clock (clock-based controls only)
         // and credit the increment. Flagging is enforced by the search deadline
         // above: an engine that runs out is cut off and loses on TimeForfeit.
-        clocks.consume(&spec.time_control, mover, output.elapsed);
+        clocks.consume(time_control_for(&spec, mover), mover, output.elapsed);
 
         // Parse and validate the move, tolerating two common nonstandard
         // notations from older engines (see `parse_engine_move`).
@@ -502,8 +508,8 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
                 .push(san_moves.last().cloned().unwrap_or_default());
             lg.uci_moves
                 .push(uci_moves.last().cloned().unwrap_or_default());
-            lg.white_clock_ms = clock_ms(&spec.time_control, &clocks, Color::White);
-            lg.black_clock_ms = clock_ms(&spec.time_control, &clocks, Color::Black);
+            lg.white_clock_ms = clock_ms(&spec, &clocks, Color::White);
+            lg.black_clock_ms = clock_ms(&spec, &clocks, Color::Black);
             lg.white_to_move = pos.turn() == Color::White;
             lg.search_started = None;
             if let Some(score) = output.score {
@@ -563,8 +569,12 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             let mut ponder_moves = uci_moves.clone();
             ponder_moves.push(hint_uci.clone());
             let ponder_pos = build_uci_position(spec.start_fen.as_deref(), &ponder_moves);
-            let (ponder_limits, _) =
-                move_limits(&spec.time_control, &clocks, mover, spec.timeout_tolerance);
+            let (ponder_limits, _) = move_limits(
+                time_control_for(&spec, mover),
+                &clocks,
+                mover,
+                time_margin_for(&spec, mover),
+            );
             if engine
                 .start_ponder(&ponder_pos, &ponder_limits)
                 .await
@@ -746,17 +756,31 @@ struct Clocks {
 }
 
 /// Remaining clock in ms for the live view; `None` for non-clock controls.
-fn clock_ms(tc: &TimeControl, clocks: &Clocks, side: Color) -> Option<u64> {
+fn time_control_for(spec: &GameSpec, side: Color) -> &TimeControl {
+    match side {
+        Color::White => &spec.white_time_control,
+        Color::Black => &spec.black_time_control,
+    }
+}
+
+fn time_margin_for(spec: &GameSpec, side: Color) -> Duration {
+    match side {
+        Color::White => spec.white_time_margin,
+        Color::Black => spec.black_time_margin,
+    }
+}
+
+fn clock_ms(spec: &GameSpec, clocks: &Clocks, side: Color) -> Option<u64> {
+    let tc = time_control_for(spec, side);
     tc.is_clock()
         .then(|| clocks.remaining(side).as_millis() as u64)
 }
 
 impl Clocks {
-    fn new(tc: &TimeControl) -> Self {
-        let base = tc.initial_clock().unwrap_or(Duration::ZERO);
+    fn new(white_tc: &TimeControl, black_tc: &TimeControl) -> Self {
         Self {
-            white: base,
-            black: base,
+            white: white_tc.initial_clock().unwrap_or(Duration::ZERO),
+            black: black_tc.initial_clock().unwrap_or(Duration::ZERO),
         }
     }
 
@@ -1094,7 +1118,7 @@ mod tests {
     #[test]
     fn per_move_limits_are_constant_per_move() {
         let tc = TimeControl::PerMove { ms: 200 };
-        let clocks = Clocks::new(&tc);
+        let clocks = Clocks::new(&tc, &tc);
         let (limits, deadline) = move_limits(&tc, &clocks, Color::White, TOL);
         assert_eq!(limits, GoLimits::MoveTime(Duration::from_millis(200)));
         assert_eq!(deadline, Duration::from_millis(250));
@@ -1103,7 +1127,7 @@ mod tests {
     #[test]
     fn sudden_death_clock_decrements_without_increment() {
         let tc = TimeControl::SuddenDeath { base_ms: 1000 };
-        let mut clocks = Clocks::new(&tc);
+        let mut clocks = Clocks::new(&tc, &tc);
         assert_eq!(clocks.white, Duration::from_millis(1000));
 
         let (limits, deadline) = move_limits(&tc, &clocks, Color::White, TOL);
@@ -1129,7 +1153,7 @@ mod tests {
             base_ms: 1000,
             inc_ms: 100,
         };
-        let mut clocks = Clocks::new(&tc);
+        let mut clocks = Clocks::new(&tc, &tc);
         clocks.consume(&tc, Color::Black, Duration::from_millis(400));
         // 1000 - 400 + 100 = 700
         assert_eq!(clocks.black, Duration::from_millis(700));
@@ -1142,7 +1166,7 @@ mod tests {
     #[test]
     fn nodes_and_depth_use_fixed_limits_and_safety_deadline() {
         let nodes = TimeControl::Nodes { nodes: 50_000 };
-        let clocks = Clocks::new(&nodes);
+        let clocks = Clocks::new(&nodes, &nodes);
         let (limits, deadline) = move_limits(&nodes, &clocks, Color::White, TOL);
         assert_eq!(limits, GoLimits::Nodes(50_000));
         assert_eq!(deadline, FIXED_SEARCH_DEADLINE);
@@ -1156,7 +1180,7 @@ mod tests {
     #[test]
     fn consume_is_a_noop_for_non_clock_controls() {
         let tc = TimeControl::PerMove { ms: 100 };
-        let mut clocks = Clocks::new(&tc);
+        let mut clocks = Clocks::new(&tc, &tc);
         clocks.consume(&tc, Color::White, Duration::from_millis(50));
         assert_eq!(clocks.white, Duration::ZERO);
         assert_eq!(clocks.black, Duration::ZERO);

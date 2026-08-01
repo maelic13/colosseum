@@ -14,10 +14,43 @@ use colosseum_uci::SpawnOptions;
 use serde::Serialize;
 use thiserror::Error;
 
-const DEFAULT_TIME_CONTROL: TimeControl = TimeControl::PerMove { ms: 100 };
-const DEFAULT_TIME_CONTROL_LABEL: &str = "100ms/move";
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
-const TIMEOUT_TOLERANCE: Duration = Duration::from_secs(2);
+
+pub const DEFAULT_BASE_MS: u64 = 3_000;
+pub const DEFAULT_INCREMENT_MS: u64 = 30;
+pub const DEFAULT_MARGIN_MS: u64 = 2_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ConfiguredTimeControl {
+    pub control: TimeControl,
+    pub margin_ms: u64,
+}
+
+impl Default for ConfiguredTimeControl {
+    fn default() -> Self {
+        Self {
+            control: TimeControl::Increment {
+                base_ms: DEFAULT_BASE_MS,
+                inc_ms: DEFAULT_INCREMENT_MS,
+            },
+            margin_ms: DEFAULT_MARGIN_MS,
+        }
+    }
+}
+
+impl ConfiguredTimeControl {
+    fn label(self) -> String {
+        match self.control {
+            TimeControl::PerMove { ms } => format!("movetime/{ms}ms"),
+            TimeControl::SuddenDeath { base_ms } => format!("{base_ms}ms"),
+            TimeControl::Increment { base_ms, inc_ms } => {
+                format!("{base_ms}ms+{inc_ms}ms")
+            }
+            TimeControl::Nodes { nodes } => format!("nodes/{nodes}"),
+            TimeControl::Depth { depth } => format!("depth/{depth}"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -59,6 +92,8 @@ pub struct FixedMatchReport {
     pub games_completed: u32,
     pub engine_a: MatchScore,
     pub engine_b: MatchScore,
+    pub engine_a_time_control: ConfiguredTimeControl,
+    pub engine_b_time_control: ConfiguredTimeControl,
     pub games: Vec<MatchGame>,
 }
 
@@ -77,6 +112,8 @@ pub async fn run_fixed_match(
     engine_a: EngineLaunchSpec,
     engine_b: EngineLaunchSpec,
     games: u32,
+    engine_a_time_control: ConfiguredTimeControl,
+    engine_b_time_control: ConfiguredTimeControl,
 ) -> Result<FixedMatchReport, MatchError> {
     if games == 0 {
         return Err(MatchError::ZeroGames);
@@ -98,6 +135,8 @@ pub async fn run_fixed_match(
             losses: 0,
             draws: 0,
         },
+        engine_a_time_control,
+        engine_b_time_control,
         games: Vec::with_capacity(games as usize),
     };
 
@@ -108,10 +147,20 @@ pub async fn run_fixed_match(
         } else {
             MatchSide::B
         };
-        let (white, black) = if a_is_white {
-            (engine_a.clone(), engine_b.clone())
+        let (white, black, white_time_control, black_time_control) = if a_is_white {
+            (
+                engine_a.clone(),
+                engine_b.clone(),
+                engine_a_time_control,
+                engine_b_time_control,
+            )
         } else {
-            (engine_b.clone(), engine_a.clone())
+            (
+                engine_b.clone(),
+                engine_a.clone(),
+                engine_b_time_control,
+                engine_a_time_control,
+            )
         };
         let game_id = GameId::from_u128(u128::from(number) + 100);
         let spec = GameSpec {
@@ -124,11 +173,17 @@ pub async fn run_fixed_match(
             black: black.clone(),
             start_fen: None,
             opening_moves: Vec::new(),
-            time_control: DEFAULT_TIME_CONTROL,
-            time_control_label: DEFAULT_TIME_CONTROL_LABEL.into(),
+            white_time_control: white_time_control.control,
+            black_time_control: black_time_control.control,
+            time_control_label: format!(
+                "white {}; black {}",
+                white_time_control.label(),
+                black_time_control.label()
+            ),
             adjudication: AdjudicationConfig::default(),
             ponder: false,
-            timeout_tolerance: TIMEOUT_TOLERANCE,
+            white_time_margin: Duration::from_millis(white_time_control.margin_ms),
+            black_time_margin: Duration::from_millis(black_time_control.margin_ms),
             handshake_timeout: HANDSHAKE_TIMEOUT,
         };
         let live = LiveGameState::new_handle(
@@ -137,7 +192,7 @@ pub async fn run_fixed_match(
             (white.id, white.name.clone()),
             (black.id, black.name.clone()),
             None,
-            DEFAULT_TIME_CONTROL,
+            white_time_control.control,
         );
         let game = run_game(spec, live).await;
         record_score(&mut report, white_side, game.result);
@@ -238,6 +293,8 @@ mod tests {
                 losses: 0,
                 draws: 0,
             },
+            engine_a_time_control: ConfiguredTimeControl::default(),
+            engine_b_time_control: ConfiguredTimeControl::default(),
             games: Vec::new(),
         };
         record_score(&mut report, MatchSide::A, GameResult::WhiteWin);

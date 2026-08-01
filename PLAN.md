@@ -1456,6 +1456,13 @@ concurrency, books and durable output to their assigned later steps. The CLI
 uses `colosseum-engine`'s runner feature without enabling its scheduler or
 SQLite storage feature; architecture coverage preserves that boundary.
 
+**Implemented per-side controls (4A.2):** fixed matches independently resolve
+movetime, sudden-death, base-plus-increment, fixed-node or fixed-depth limits
+for each arm, with the Tier-B `3+0.03` default and a separately configurable
+per-side forfeit margin. The shared runner now chooses limits and clock state
+from the side to move; the GUI scheduler maps its existing symmetric control
+to both sides, preserving desktop behaviour.
+
 ### Phase 4A — Fixed-match runner
 
 Implement the non-sequential part of 5.4: fixed matches, per-side controls,

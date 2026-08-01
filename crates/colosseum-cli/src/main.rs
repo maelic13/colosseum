@@ -10,7 +10,7 @@ use colosseum_application::{
     InspectEngine, RuntimeParticipant, UciOptionSchema,
 };
 use colosseum_cli::{EngineArgs, RunRecord, built_in_defaults, resolve_config};
-use colosseum_core::ParticipantId;
+use colosseum_core::{ParticipantId, TimeControl};
 use colosseum_uci::UciSessionFactory;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -86,6 +86,18 @@ struct MatchCommand {
     a_buttons: Vec<String>,
     #[arg(long = "a-cores", value_name = "LIST")]
     a_cores: Option<String>,
+    #[arg(long = "a-movetime-ms", value_parser = clap::value_parser!(u64).range(1..))]
+    a_movetime_ms: Option<u64>,
+    #[arg(long = "a-base-ms", value_parser = clap::value_parser!(u64).range(1..))]
+    a_base_ms: Option<u64>,
+    #[arg(long = "a-increment-ms")]
+    a_increment_ms: Option<u64>,
+    #[arg(long = "a-nodes", value_parser = clap::value_parser!(u64).range(1..))]
+    a_nodes: Option<u64>,
+    #[arg(long = "a-depth", value_parser = clap::value_parser!(u32).range(1..))]
+    a_depth: Option<u32>,
+    #[arg(long = "a-margin-ms", default_value_t = match_runner::DEFAULT_MARGIN_MS)]
+    a_margin_ms: u64,
 
     #[arg(long = "b-label")]
     b_label: Option<String>,
@@ -101,6 +113,18 @@ struct MatchCommand {
     b_buttons: Vec<String>,
     #[arg(long = "b-cores", value_name = "LIST")]
     b_cores: Option<String>,
+    #[arg(long = "b-movetime-ms", value_parser = clap::value_parser!(u64).range(1..))]
+    b_movetime_ms: Option<u64>,
+    #[arg(long = "b-base-ms", value_parser = clap::value_parser!(u64).range(1..))]
+    b_base_ms: Option<u64>,
+    #[arg(long = "b-increment-ms")]
+    b_increment_ms: Option<u64>,
+    #[arg(long = "b-nodes", value_parser = clap::value_parser!(u64).range(1..))]
+    b_nodes: Option<u64>,
+    #[arg(long = "b-depth", value_parser = clap::value_parser!(u32).range(1..))]
+    b_depth: Option<u32>,
+    #[arg(long = "b-margin-ms", default_value_t = match_runner::DEFAULT_MARGIN_MS)]
+    b_margin_ms: u64,
 }
 
 #[derive(Debug, Args)]
@@ -279,6 +303,36 @@ enum MachineOutput<'a> {
 }
 
 async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitCode {
+    let engine_a_time_control = match resolve_time_control(
+        "engine A",
+        command.a_movetime_ms,
+        command.a_base_ms,
+        command.a_increment_ms,
+        command.a_nodes,
+        command.a_depth,
+        command.a_margin_ms,
+    ) {
+        Ok(control) => control,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let engine_b_time_control = match resolve_time_control(
+        "engine B",
+        command.b_movetime_ms,
+        command.b_base_ms,
+        command.b_increment_ms,
+        command.b_nodes,
+        command.b_depth,
+        command.b_margin_ms,
+    ) {
+        Ok(control) => control,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let engine_a = match resolve_match_engine(
         command.engine_a,
         command.a_label,
@@ -327,6 +381,8 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
                 "games": command.games,
                 "engine_a": &engine_a,
                 "engine_b": &engine_b,
+                "engine_a_time_control": engine_a_time_control,
+                "engine_b_time_control": engine_b_time_control,
             }),
             &[],
             &current_directory,
@@ -347,7 +403,15 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         print_output(&output, machine);
         return ExitCode::SUCCESS;
     }
-    match match_runner::run_fixed_match(engine_a, engine_b, command.games).await {
+    match match_runner::run_fixed_match(
+        engine_a,
+        engine_b,
+        command.games,
+        engine_a_time_control,
+        engine_b_time_control,
+    )
+    .await
+    {
         Ok(report) => {
             if machine {
                 print_json(&MachineOutput::FixedMatch { report });
@@ -361,6 +425,47 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
             ExitCode::FAILURE
         }
     }
+}
+
+fn resolve_time_control(
+    side: &str,
+    movetime_ms: Option<u64>,
+    base_ms: Option<u64>,
+    increment_ms: Option<u64>,
+    nodes: Option<u64>,
+    depth: Option<u32>,
+    margin_ms: u64,
+) -> Result<match_runner::ConfiguredTimeControl, String> {
+    let selected = usize::from(movetime_ms.is_some())
+        + usize::from(base_ms.is_some())
+        + usize::from(nodes.is_some())
+        + usize::from(depth.is_some());
+    if selected > 1 {
+        return Err(format!(
+            "{side} must select only one of movetime, base/increment, nodes or depth"
+        ));
+    }
+    if increment_ms.is_some() && base_ms.is_none() {
+        return Err(format!("{side} increment requires a base time"));
+    }
+    let control = if let Some(ms) = movetime_ms {
+        TimeControl::PerMove { ms }
+    } else if let Some(base_ms) = base_ms {
+        match increment_ms {
+            Some(inc_ms) => TimeControl::Increment { base_ms, inc_ms },
+            None => TimeControl::SuddenDeath { base_ms },
+        }
+    } else if let Some(nodes) = nodes {
+        TimeControl::Nodes { nodes }
+    } else if let Some(depth) = depth {
+        TimeControl::Depth { depth }
+    } else {
+        TimeControl::Increment {
+            base_ms: match_runner::DEFAULT_BASE_MS,
+            inc_ms: match_runner::DEFAULT_INCREMENT_MS,
+        }
+    };
+    Ok(match_runner::ConfiguredTimeControl { control, margin_ms })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -536,5 +641,28 @@ fn describe_option(option: &UciOptionSchema) -> String {
         UciOptionSchema::String { name, default } => {
             format!("{name}: string (default {default:?})")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn time_control_resolution_covers_every_supported_mode_and_default() {
+        let movetime = resolve_time_control("A", Some(25), None, None, None, None, 5).unwrap();
+        assert_eq!(movetime.control, TimeControl::PerMove { ms: 25 });
+        let sudden = resolve_time_control("A", None, Some(500), None, None, None, 5).unwrap();
+        assert_eq!(sudden.control, TimeControl::SuddenDeath { base_ms: 500 });
+        let depth = resolve_time_control("A", None, None, None, None, Some(12), 5).unwrap();
+        assert_eq!(depth.control, TimeControl::Depth { depth: 12 });
+        let default = resolve_time_control("A", None, None, None, None, None, 5).unwrap();
+        assert_eq!(
+            default.control,
+            TimeControl::Increment {
+                base_ms: match_runner::DEFAULT_BASE_MS,
+                inc_ms: match_runner::DEFAULT_INCREMENT_MS,
+            }
+        );
     }
 }

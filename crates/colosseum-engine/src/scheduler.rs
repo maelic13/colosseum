@@ -1021,11 +1021,13 @@ fn build_game_spec(driver: &Driver, scheduled: &ScheduledGame) -> GameSpec {
         black: to_game_spec(black),
         start_fen: scheduled.start_fen.clone(),
         opening_moves: scheduled.opening_moves.clone(),
-        time_control: driver.config.time_control,
+        white_time_control: driver.config.time_control,
+        black_time_control: driver.config.time_control,
         time_control_label: time_control_label(&driver.config),
         adjudication: driver.config.adjudication,
         ponder: driver.config.common.ponder,
-        timeout_tolerance: TIMEOUT_TOLERANCE,
+        white_time_margin: TIMEOUT_TOLERANCE,
+        black_time_margin: TIMEOUT_TOLERANCE,
         handshake_timeout: HANDSHAKE_TIMEOUT,
     }
 }

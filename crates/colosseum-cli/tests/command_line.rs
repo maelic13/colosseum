@@ -75,6 +75,72 @@ fn fixed_match_dry_run_resolves_two_direct_engine_invocations_without_launching(
 }
 
 #[test]
+fn fixed_match_resolves_independent_time_controls_and_margins() {
+    let output = cli()
+        .args([
+            "match",
+            "--games",
+            "2",
+            "missing-a",
+            "missing-b",
+            "--a-base-ms",
+            "5000",
+            "--a-increment-ms",
+            "50",
+            "--a-margin-ms",
+            "25",
+            "--b-nodes",
+            "10000",
+            "--b-margin-ms",
+            "0",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let config = &value["resolved_configuration"];
+    assert_eq!(
+        config["engine_a_time_control"]["control"]["Increment"]["base_ms"],
+        5000
+    );
+    assert_eq!(config["engine_a_time_control"]["margin_ms"], 25);
+    assert_eq!(
+        config["engine_b_time_control"]["control"]["Nodes"]["nodes"],
+        10000
+    );
+    assert_eq!(config["engine_b_time_control"]["margin_ms"], 0);
+}
+
+#[test]
+fn fixed_match_rejects_ambiguous_or_incomplete_time_controls() {
+    for arguments in [
+        vec![
+            "match",
+            "--games",
+            "1",
+            "a",
+            "b",
+            "--a-movetime-ms",
+            "10",
+            "--a-depth",
+            "2",
+        ],
+        vec!["match", "--games", "1", "a", "b", "--b-increment-ms", "10"],
+    ] {
+        let output = cli().args(arguments).output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("configuration error")
+        );
+    }
+}
+
+#[test]
 fn fixed_match_rejects_cpu_controls_until_placement_is_composed() {
     let output = cli()
         .args([

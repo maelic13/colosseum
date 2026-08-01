@@ -21,7 +21,7 @@ fn live_for(game: &GameSpec) -> colosseum_engine::LiveGameHandle {
         (game.white.id, game.white.name.clone()),
         (game.black.id, game.black.name.clone()),
         game.start_fen.clone(),
-        game.time_control,
+        game.white_time_control,
     )
 }
 
@@ -74,7 +74,8 @@ async fn stockfish_self_play_one_game() {
         black,
         start_fen: None,
         opening_moves: Vec::new(),
-        time_control: TimeControl::PerMove { ms: 30 },
+        white_time_control: TimeControl::PerMove { ms: 30 },
+        black_time_control: TimeControl::PerMove { ms: 30 },
         time_control_label: "movetime/30ms".into(),
         adjudication: AdjudicationConfig {
             max_moves: Some(40),
@@ -89,7 +90,8 @@ async fn stockfish_self_play_one_game() {
             }),
         },
         ponder: false,
-        timeout_tolerance: Duration::from_secs(2),
+        white_time_margin: Duration::from_secs(2),
+        black_time_margin: Duration::from_secs(2),
         handshake_timeout: Duration::from_secs(5),
     };
 
@@ -147,7 +149,8 @@ async fn game_pre_plays_opening_moves() {
         black,
         start_fen: None,
         opening_moves: vec!["e2e4".into(), "e7e5".into(), "g1f3".into()],
-        time_control: TimeControl::PerMove { ms: 20 },
+        white_time_control: TimeControl::PerMove { ms: 20 },
+        black_time_control: TimeControl::PerMove { ms: 20 },
         time_control_label: "movetime/20ms".into(),
         adjudication: AdjudicationConfig {
             max_moves: Some(30),
@@ -158,7 +161,8 @@ async fn game_pre_plays_opening_moves() {
             }),
         },
         ponder: false,
-        timeout_tolerance: Duration::from_secs(2),
+        white_time_margin: Duration::from_secs(2),
+        black_time_margin: Duration::from_secs(2),
         handshake_timeout: Duration::from_secs(5),
     };
 
@@ -209,7 +213,8 @@ async fn game_starts_from_fen() {
         black,
         start_fen: Some(fen.to_string()),
         opening_moves: Vec::new(),
-        time_control: TimeControl::PerMove { ms: 20 },
+        white_time_control: TimeControl::PerMove { ms: 20 },
+        black_time_control: TimeControl::PerMove { ms: 20 },
         time_control_label: "movetime/20ms".into(),
         adjudication: AdjudicationConfig {
             max_moves: Some(20),
@@ -220,7 +225,8 @@ async fn game_starts_from_fen() {
             }),
         },
         ponder: false,
-        timeout_tolerance: Duration::from_secs(2),
+        white_time_margin: Duration::from_secs(2),
+        black_time_margin: Duration::from_secs(2),
         handshake_timeout: Duration::from_secs(5),
     };
 
@@ -265,11 +271,13 @@ async fn setup_failure_writes_incident() {
         black: bogus("BrokenBlack"),
         start_fen: None,
         opening_moves: Vec::new(),
-        time_control: TimeControl::PerMove { ms: 20 },
+        white_time_control: TimeControl::PerMove { ms: 20 },
+        black_time_control: TimeControl::PerMove { ms: 20 },
         time_control_label: "movetime/20ms".into(),
         adjudication: AdjudicationConfig::default(),
         ponder: false,
-        timeout_tolerance: Duration::from_secs(2),
+        white_time_margin: Duration::from_secs(2),
+        black_time_margin: Duration::from_secs(2),
         handshake_timeout: Duration::from_secs(3),
     };
 

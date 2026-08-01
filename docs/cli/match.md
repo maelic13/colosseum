@@ -28,11 +28,26 @@ Side-specific direct controls use an `a-` or `b-` prefix:
 | `--a-option` / `--b-option` | `NAME=VALUE` UCI option |
 | `--a-button` / `--b-button` | UCI button option |
 
-This first match surface uses the current 100 ms-per-move default, standard
-start position, and one game at a time. Time-control selection, adjudication,
-CPU placement, concurrency, books, durable run output and statistical commands
-are added separately. `--a-cores` and `--b-cores` are parsed for consistency
-with direct controls but rejected until CPU placement is composed into matches.
+Each side has an independent time control. Select at most one mode per side:
+
+| Mode | Engine A | Engine B |
+|---|---|---|
+| Time per move | `--a-movetime-ms N` | `--b-movetime-ms N` |
+| Sudden death | `--a-base-ms N` | `--b-base-ms N` |
+| Base plus increment | `--a-base-ms N --a-increment-ms I` | `--b-base-ms N --b-increment-ms I` |
+| Fixed nodes | `--a-nodes N` | `--b-nodes N` |
+| Fixed depth | `--a-depth N` | `--b-depth N` |
+
+With no selection, that side uses `3000 ms + 30 ms` per move. The per-side
+`--a-margin-ms` and `--b-margin-ms` values are forfeit tolerances only; they are
+not sent to the engines. This permits odds matches, including one engine at a
+different clock or search limit.
+
+Matches currently use the standard start position and one game at a time.
+Adjudication, CPU placement, concurrency, books, durable run output and
+statistical commands are added separately. `--a-cores` and `--b-cores` are
+parsed for consistency with direct controls but rejected until CPU placement
+is composed into matches.
 
 Use `--dry-run` to resolve and print both invocations without launching either
 engine. `--json` emits one match result document on stdout.
