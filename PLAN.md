@@ -1576,6 +1576,16 @@ interval, LOS and sequential-statistics presentation. Exact artifacts,
 commands, hashes and exclusions are in
 `tests/fixtures/statistics/phase-4b-parity.toml`.
 
+**Phase 4B exit evidence (4B.6):** analytic and compatible external parity now
+pass together. Synthetic ascending, interleaved and reverse worker completions
+produce identical H1 and H0 terminal pair IDs, samples and post-terminal cuts.
+The strict fault matrix covers timeout, crash, disconnect, protocol and illegal
+move; infrastructure failures remain non-scorable and never enter statistics.
+Finite-cap inconclusive, configuration, invalid and infrastructure exits plus
+the complete H1/H0/inconclusive/invalid exit map are executable gates. All live
+differences are root-caused in `docs/architecture/phase-4b-exit.md`, and the
+binding gate inventory is `docs/fixtures/phase4b/acceptance.json`.
+
 **Exit:** analytic/oracle verdict parity; concurrency cannot change the terminal
 pair; capped/invalid/H0/H1 exits pass; live disagreements are root-caused before
 SPSA builds on the runner.

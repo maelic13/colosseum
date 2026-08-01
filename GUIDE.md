@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–3, Phase 4A fixed matches and live pair-atomic capped SPRT through reporting are complete: shared ordinary-engine controls, clocks/adjudication/resources/books, deterministic commit/stopping, recoverable official/post-terminal state, strict JSON and distinct automation exits |
-| What is missing | SPRT exit acceptance; optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–3 and Phase 4A/4B are complete: fixed matches plus externally checked, pair-atomic capped SPRT over ordinary UCI engines, shared controls, deterministic commit/stopping, recovery, strict JSON and distinct automation exits |
+| What is missing | Optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 4A · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4B.6 — Phase 4B exit acceptance** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Platform status | Windows ☑ local through Phase 4B · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 4C.1 — calibration configuration and fixed-N symmetry run** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -447,9 +447,15 @@ model as well.
   fault fields while zero-variance Elo/LOS/LLR presentation stays explicitly
   excluded — evidence: [`tests/fixtures/statistics/phase-4b-parity.toml`](tests/fixtures/statistics/phase-4b-parity.toml),
   [`crates/colosseum-core/tests/statistics_fixtures.rs`](crates/colosseum-core/tests/statistics_fixtures.rs)
-- ☐ **4B.6** — **EXIT · Model: Sol High.** Analytic/oracle parity; concurrency cannot change the
-  terminal pair; every terminal/fault case passes; live differences
-  root-caused before Phase 5
+- ☑ **4B.6 — EXIT DONE** — **Model: Sol High.** The reviewed external stream
+  and analytic fixtures pass; ascending/interleaved/reverse completion orders
+  preserve both H0 and H1 terminal samples; cap, configuration, every engine
+  fault kind, non-scorable infrastructure failure and all automation exits are
+  covered; every controlled-live difference is documented and excluded by the
+  oracle matrix — evidence:
+  [`docs/architecture/phase-4b-exit.md`](docs/architecture/phase-4b-exit.md),
+  [`docs/fixtures/phase4b/acceptance.json`](docs/fixtures/phase4b/acceptance.json),
+  [`crates/colosseum-cli/tests/phase4b_acceptance.rs`](crates/colosseum-cli/tests/phase4b_acceptance.rs)
 
 ### Phase 4C — Optional calibration
 
@@ -606,10 +612,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4B.6 — Phase 4B exit acceptance. Model: GPT-5.6 Sol — High.**
-Demonstrate analytic/external verdict parity, terminal-pair invariance across
-concurrency, every H0/H1/capped/invalid/fault exit, and the root cause of every
-live difference before Phase 5 can build on the runner.
+**Phase 4C.1 — calibration configuration and fixed-N symmetry run. Model: GPT-5.6 Terra — High.**
+Require byte-identical binaries, resolve the representative match conditions
+plus configurable fixed N/confidence/tolerance, and keep calibration explicitly
+optional rather than a prerequisite for any other command.
 
 ```
 git diff --check
