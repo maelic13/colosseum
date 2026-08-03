@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–7 are complete: independent fixed match/SPRT/calibration/SPSA workflows plus speed/scaling, book, statistics planning/replay/telemetry, durable position suites and accepted live round-robin/gauntlet tournaments with ratings/CSV |
-| What is missing | Release-candidate parity/gap decisions, documentation and release acceptance |
+| What exists | Phases 0–8 are complete: independent fixed match/SPRT/calibration/SPSA workflows plus speed/scaling, book, statistics planning/replay/telemetry, durable position suites, tournaments, external parity and reasoned runner-gap decisions |
+| What is missing | Final naming decision, user documentation, release artifacts and cross-platform/third-party release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 7 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 8.3 — Phase 8 acceptance** |
+| Platform status | Windows ☑ local through Phase 8 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 9.0 — optional final naming review** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -691,7 +691,9 @@ model as well.
   workflows; deferred Chess960 and harness Syzygy probing with correctness
   requirements; declined additional 1.0 formats and dedicated datagen with
   recorded reasons and revisit triggers
-- ☐ **8.3** — **EXIT · Model: Sol High.** Parity demonstrated and every gap has a recorded decision
+- ☑ **8.3 DONE** — **EXIT · Model: Sol High.** Exact-candidate parity, divergences, all gap
+  decisions, adopted ponder behavior and workspace regression have durable
+  evidence and explicit test ownership
 
 ### Phase 9 — Documentation and release
 
@@ -764,9 +766,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 8.3 — Phase 8 acceptance. Model: GPT-5.6 Sol — High.**
-Demonstrate release-candidate parity and ensure every remaining feature gap has
-one durable, tested adopt/decline/defer decision.
+**Phase 9.0 — optional final naming review. Model: GPT-5.6 Sol — High.**
+Judge the complete GUI/CLI product and either retain Colosseum with a dated,
+recorded collision review or select one replacement and perform the complete
+one-time migration before final user documentation and release.
 
 ```
 git diff --check

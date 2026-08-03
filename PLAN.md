@@ -1871,6 +1871,11 @@ normal durable `match` cover the demonstrated general engine-development
 requirements. The rationale and revisit triggers are binding in
 [`docs/architecture/phase-8-gap-decisions.md`](docs/architecture/phase-8-gap-decisions.md).
 
+**Accepted (8.3):** the exact-candidate external parity, reasoned divergences,
+complete six-item gap audit, adopted ponder protocol and workspace regression
+are one owned acceptance gate. The resulting 1.0 boundary is recorded in
+[`docs/architecture/phase-8-exit.md`](docs/architecture/phase-8-exit.md).
+
 ### Phase 9 — Documentation and release
 The deliverable is a tool any engine developer can pick up.
 
