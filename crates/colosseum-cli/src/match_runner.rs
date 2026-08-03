@@ -226,6 +226,37 @@ impl MatchOpenings {
         };
         (opening, assignment)
     }
+
+    pub(crate) fn select_encounter(&self, encounter: u32) -> (Self, OpeningAssignment) {
+        if self.entries.is_empty() {
+            return (
+                self.clone(),
+                OpeningAssignment {
+                    book_index: None,
+                    label: "startpos".into(),
+                },
+            );
+        }
+        let start_index = match self.report {
+            OpeningPolicyReport::Book { start_index, .. } => start_index,
+            OpeningPolicyReport::Startpos { .. } => 0,
+        };
+        let book_index = (start_index + encounter.saturating_sub(1) as usize) % self.entries.len();
+        let opening = self.entries[book_index].clone();
+        let assignment = OpeningAssignment {
+            book_index: Some(book_index),
+            label: opening.label.clone(),
+        };
+        (
+            Self {
+                entries: vec![opening],
+                report: OpeningPolicyReport::Startpos {
+                    warning: "opening preselected by the tournament encounter".into(),
+                },
+            },
+            assignment,
+        )
+    }
 }
 
 pub fn resolve_openings(

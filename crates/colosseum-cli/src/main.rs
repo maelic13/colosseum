@@ -51,6 +51,7 @@ mod self_test;
 mod sprt_runner;
 mod spsa_driver;
 mod suite_driver;
+mod tournament_driver;
 mod uci_stub;
 
 #[derive(Debug, Parser)]
@@ -136,6 +137,8 @@ struct TournamentCommand {
 enum TournamentAction {
     /// Print the exact static schedule without launching engines.
     Plan(TournamentPlanCommand),
+    /// Play the schedule, persist every game, and write ratings and CSV files.
+    Run(Box<TournamentRunCommand>),
 }
 
 #[derive(Debug, Args)]
@@ -164,6 +167,113 @@ struct TournamentPlanCommand {
 enum TournamentFormatArg {
     RoundRobin,
     Gauntlet,
+}
+
+#[derive(Debug, Args)]
+struct TournamentRunCommand {
+    #[command(flatten)]
+    plan: TournamentPlanCommand,
+
+    /// Display labels aligned with --engine; omit all to use file stems.
+    #[arg(long = "label")]
+    labels: Vec<String>,
+    /// Argument passed to every engine process; repeat as needed.
+    #[arg(long = "engine-arg", allow_hyphen_values = true)]
+    arguments: Vec<OsString>,
+    /// Argument for one engine as one-based INDEX:ARG.
+    #[arg(
+        long = "engine-arg-at",
+        allow_hyphen_values = true,
+        value_name = "INDEX:ARG"
+    )]
+    indexed_arguments: Vec<String>,
+    /// Working directory used for every engine process.
+    #[arg(long)]
+    cwd: Option<PathBuf>,
+    /// Working directory override for one engine as one-based INDEX:PATH.
+    #[arg(long = "engine-cwd", value_name = "INDEX:PATH")]
+    indexed_cwds: Vec<String>,
+    /// Environment override applied to every engine as KEY=VALUE.
+    #[arg(long = "env", value_name = "KEY=VALUE")]
+    environment: Vec<String>,
+    /// Environment override for one engine as INDEX:KEY=VALUE.
+    #[arg(long = "engine-env", value_name = "INDEX:KEY=VALUE")]
+    indexed_environment: Vec<String>,
+    /// UCI option applied to every engine as NAME=VALUE.
+    #[arg(long = "option", value_name = "NAME=VALUE")]
+    options: Vec<String>,
+    /// UCI option for one engine as INDEX:NAME=VALUE.
+    #[arg(long = "engine-option", value_name = "INDEX:NAME=VALUE")]
+    indexed_options: Vec<String>,
+    /// Trigger this UCI button on every engine.
+    #[arg(long = "button", value_name = "NAME")]
+    buttons: Vec<String>,
+    /// Trigger a UCI button on one engine as INDEX:NAME.
+    #[arg(long = "engine-button", value_name = "INDEX:NAME")]
+    indexed_buttons: Vec<String>,
+
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    movetime_ms: Option<u64>,
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    base_ms: Option<u64>,
+    #[arg(long)]
+    increment_ms: Option<u64>,
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    nodes: Option<u64>,
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    depth: Option<u32>,
+    #[arg(long, default_value_t = match_runner::DEFAULT_MARGIN_MS)]
+    margin_ms: u64,
+
+    #[arg(long)]
+    no_draw_adjudication: bool,
+    #[arg(long, default_value_t = 40, value_parser = clap::value_parser!(u32).range(1..))]
+    draw_move: u32,
+    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..))]
+    draw_moves: u32,
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(i32).range(0..))]
+    draw_score_cp: i32,
+    #[arg(long)]
+    no_resign_adjudication: bool,
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..))]
+    resign_moves: u32,
+    #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(i32).range(1..))]
+    resign_score_cp: i32,
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    max_moves: Option<u32>,
+
+    /// Number of games allowed to run at once.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
+    concurrency: u32,
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
+    cores_per_engine: u32,
+    #[arg(long, default_value = "off")]
+    placement: String,
+    #[arg(long, default_value_t = 2)]
+    headroom_cores: usize,
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    memory_budget_mb: Option<u64>,
+
+    #[arg(long)]
+    book: Option<PathBuf>,
+    #[arg(long, value_enum, default_value_t = BookOrderArg::Sequential)]
+    book_order: BookOrderArg,
+    #[arg(long, default_value_t = 0)]
+    book_start: usize,
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    book_plies: Option<u32>,
+    #[arg(long)]
+    seed: Option<u64>,
+    /// One-based --engine index whose prior rating fixes the Elo scale.
+    #[arg(long)]
+    anchor: Option<usize>,
+    /// Invalidate only after more engine faults than this; omitted is non-strict.
+    #[arg(long)]
+    max_engine_faults: Option<u32>,
+    #[arg(long = "dir")]
+    run_directory: Option<PathBuf>,
+    #[arg(long, requires = "run_directory")]
+    restart: bool,
 }
 
 #[derive(Debug, Args)]
@@ -888,9 +998,12 @@ async fn main() -> ExitCode {
         Command::Stats(_) if cli.dry_run => unsupported_dry_run("stats"),
         Command::Stats(command) => run_stats(command, cli.json),
         Command::Suite(command) => suite_driver::run(*command, cli.json, cli.dry_run).await,
-        Command::Tournament(_) if cli.dry_run => unsupported_dry_run("tournament plan"),
         Command::Tournament(command) => match command.action {
+            TournamentAction::Plan(_) if cli.dry_run => unsupported_dry_run("tournament plan"),
             TournamentAction::Plan(command) => run_tournament_plan(command, None, cli.json),
+            TournamentAction::Run(command) => {
+                run_tournament_command(*command, cli.json, cli.dry_run).await
+            }
         },
         Command::Gauntlet(_) if cli.dry_run => unsupported_dry_run("gauntlet"),
         Command::Gauntlet(command) => {
@@ -2349,59 +2462,13 @@ fn run_tournament_plan(
     forced_format: Option<TournamentFormatArg>,
     machine: bool,
 ) -> ExitCode {
-    let format = match (forced_format, command.format) {
-        (Some(forced), Some(requested))
-            if std::mem::discriminant(&forced) != std::mem::discriminant(&requested) =>
-        {
-            eprintln!("configuration error: the gauntlet alias cannot select round-robin");
-            return ExitCode::from(2);
-        }
-        (Some(forced), _) => forced,
-        (None, Some(requested)) => requested,
-        (None, None) => TournamentFormatArg::RoundRobin,
-    };
-    if !command.ratings.is_empty() && command.ratings.len() != command.engines.len() {
-        eprintln!(
-            "configuration error: --rating must be omitted or repeated once for every --engine"
-        );
-        return ExitCode::from(2);
-    }
-    let ratings = if command.ratings.is_empty() {
-        vec![1_500.0; command.engines.len()]
-    } else {
-        command.ratings
-    };
-    let participants = command
+    let launches = command
         .engines
-        .into_iter()
-        .zip(ratings)
-        .enumerate()
-        .map(
-            |(index, (executable, initial_rating))| TournamentParticipant {
-                participant: RuntimeParticipant {
-                    id: ParticipantId::from_u128(index as u128 + 1),
-                    launch: EngineLaunchSpec::path_only(executable),
-                },
-                initial_rating,
-            },
-        )
+        .iter()
+        .cloned()
+        .map(EngineLaunchSpec::path_only)
         .collect();
-    let format = match format {
-        TournamentFormatArg::RoundRobin => colosseum_core::Format::RoundRobin {
-            cycles: command.cycles,
-        },
-        TournamentFormatArg::Gauntlet => colosseum_core::Format::Gauntlet {
-            seeds: command.seeds,
-            cycles: command.cycles,
-        },
-    };
-    let report = match PlanTournament::execute(
-        participants,
-        TournamentDesign {
-            format,
-            games_per_pair: command.games_per_pair,
-        },
-    ) {
+    let report = match build_tournament_plan(command, forced_format, launches) {
         Ok(report) => report,
         Err(error) => {
             eprintln!("configuration error: {error}");
@@ -2430,6 +2497,510 @@ fn run_tournament_plan(
         }
     }
     ExitCode::SUCCESS
+}
+
+fn build_tournament_plan(
+    command: TournamentPlanCommand,
+    forced_format: Option<TournamentFormatArg>,
+    launches: Vec<EngineLaunchSpec>,
+) -> Result<TournamentPlan, String> {
+    let format = match (forced_format, command.format) {
+        (Some(forced), Some(requested))
+            if std::mem::discriminant(&forced) != std::mem::discriminant(&requested) =>
+        {
+            return Err("the gauntlet alias cannot select round-robin".into());
+        }
+        (Some(forced), _) => forced,
+        (None, Some(requested)) => requested,
+        (None, None) => TournamentFormatArg::RoundRobin,
+    };
+    if launches.len() != command.engines.len() {
+        return Err("resolved engine controls do not match --engine count".into());
+    }
+    if !command.ratings.is_empty() && command.ratings.len() != command.engines.len() {
+        return Err("--rating must be omitted or repeated once for every --engine".into());
+    }
+    let ratings = if command.ratings.is_empty() {
+        vec![1_500.0; command.engines.len()]
+    } else {
+        command.ratings
+    };
+    let participants = command
+        .engines
+        .into_iter()
+        .zip(launches)
+        .zip(ratings)
+        .enumerate()
+        .map(
+            |(index, ((_executable, launch), initial_rating))| TournamentParticipant {
+                participant: RuntimeParticipant {
+                    id: ParticipantId::from_u128(index as u128 + 1),
+                    launch,
+                },
+                initial_rating,
+            },
+        )
+        .collect();
+    let format = match format {
+        TournamentFormatArg::RoundRobin => colosseum_core::Format::RoundRobin {
+            cycles: command.cycles,
+        },
+        TournamentFormatArg::Gauntlet => colosseum_core::Format::Gauntlet {
+            seeds: command.seeds,
+            cycles: command.cycles,
+        },
+    };
+    PlanTournament::execute(
+        participants,
+        TournamentDesign {
+            format,
+            games_per_pair: command.games_per_pair,
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
+async fn run_tournament_command(
+    command: TournamentRunCommand,
+    machine: bool,
+    dry_run: bool,
+) -> ExitCode {
+    if !command.labels.is_empty() && command.labels.len() != command.plan.engines.len() {
+        eprintln!(
+            "configuration error: --label must be omitted or repeated once for every --engine"
+        );
+        return ExitCode::from(2);
+    }
+    if command.book.is_none()
+        && (command.book_start != 0
+            || command.book_plies.is_some()
+            || command.book_order != BookOrderArg::Sequential)
+    {
+        eprintln!("configuration error: book order/start/plies require --book");
+        return ExitCode::from(2);
+    }
+    let engine_count = command.plan.engines.len();
+    let indexed_arguments =
+        match parse_indexed_values(&command.indexed_arguments, engine_count, "--engine-arg-at") {
+            Ok(values) => values,
+            Err(error) => return tournament_configuration_error(&error),
+        };
+    let indexed_cwds =
+        match parse_indexed_values(&command.indexed_cwds, engine_count, "--engine-cwd") {
+            Ok(values) => values,
+            Err(error) => return tournament_configuration_error(&error),
+        };
+    if indexed_cwds.iter().any(|values| values.len() > 1) {
+        return tournament_configuration_error("--engine-cwd may occur only once per engine");
+    }
+    let indexed_environment =
+        match parse_indexed_values(&command.indexed_environment, engine_count, "--engine-env") {
+            Ok(values) => values,
+            Err(error) => return tournament_configuration_error(&error),
+        };
+    let indexed_options =
+        match parse_indexed_values(&command.indexed_options, engine_count, "--engine-option") {
+            Ok(values) => values,
+            Err(error) => return tournament_configuration_error(&error),
+        };
+    let indexed_buttons =
+        match parse_indexed_values(&command.indexed_buttons, engine_count, "--engine-button") {
+            Ok(values) => values,
+            Err(error) => return tournament_configuration_error(&error),
+        };
+    let launches = command
+        .plan
+        .engines
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(index, executable)| {
+            let mut arguments = command.arguments.clone();
+            arguments.extend(indexed_arguments[index].iter().map(OsString::from));
+            let mut environment = command.environment.clone();
+            environment.extend(indexed_environment[index].iter().cloned());
+            let mut options = command.options.clone();
+            options.extend(indexed_options[index].iter().cloned());
+            let mut buttons = command.buttons.clone();
+            buttons.extend(indexed_buttons[index].iter().cloned());
+            resolve_match_engine(
+                executable,
+                command.labels.get(index).cloned(),
+                arguments,
+                indexed_cwds[index]
+                    .first()
+                    .map(PathBuf::from)
+                    .or_else(|| command.cwd.clone()),
+                environment,
+                options,
+                buttons,
+                None,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>();
+    let launches = match launches {
+        Ok(launches) => launches,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let plan = match build_tournament_plan(command.plan, None, launches) {
+        Ok(plan) => plan,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let anchor = match command.anchor {
+        Some(index) if (1..=plan.participants.len()).contains(&index) => {
+            Some(ParticipantId::from_u128(index as u128))
+        }
+        Some(_) => {
+            eprintln!("configuration error: --anchor is outside the --engine list");
+            return ExitCode::from(2);
+        }
+        None => None,
+    };
+    let time_control = match resolve_time_control(
+        "tournament",
+        command.movetime_ms,
+        command.base_ms,
+        command.increment_ms,
+        command.nodes,
+        command.depth,
+        command.margin_ms,
+    ) {
+        Ok(control) => control,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let adjudication = AdjudicationConfig {
+        max_moves: command.max_moves,
+        draw: (!command.no_draw_adjudication).then_some(DrawAdjudication {
+            min_ply: command.draw_move.saturating_mul(2),
+            move_count: command.draw_moves,
+            score_cp: command.draw_score_cp,
+        }),
+        resign: (!command.no_resign_adjudication).then_some(ResignAdjudication {
+            move_count: command.resign_moves,
+            score_cp: command.resign_score_cp,
+        }),
+    };
+    let placement = match resolve_placement(&command.placement, command.headroom_cores) {
+        Ok(placement) => placement,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let execution = match match_runner::plan_execution(
+        &plan.participants[0].participant.launch,
+        &plan.participants[1].participant.launch,
+        command.concurrency as usize,
+        command.cores_per_engine as usize,
+        placement,
+        command.memory_budget_mb,
+    ) {
+        Ok(execution) => execution,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let resumed_seed = command
+        .run_directory
+        .as_deref()
+        .filter(|path| path.exists() && !command.restart)
+        .and_then(read_stored_seed);
+    let (master_seed, master_seed_generated) = match (command.seed, resumed_seed) {
+        (None, Some(stored)) => stored,
+        (configured, _) => match resolve_master_seed(configured) {
+            Ok(seed) => seed,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        },
+    };
+    let book = command.book.clone().map(|path| {
+        let mut book = OpeningBook::new(path);
+        book.order = match command.book_order {
+            BookOrderArg::Sequential => OpeningOrder::Sequential,
+            BookOrderArg::Random => OpeningOrder::Random,
+        };
+        book.plies = command.book_plies.unwrap_or(8);
+        book
+    });
+    let games = match u32::try_from(plan.schedule.len()) {
+        Ok(games) => games,
+        Err(_) => {
+            eprintln!("configuration error: tournament schedule is too large");
+            return ExitCode::from(2);
+        }
+    };
+    let openings =
+        match match_runner::resolve_openings(book, command.book_start, games, master_seed) {
+            Ok(openings) => openings,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        };
+    let current_directory = match std::env::current_dir() {
+        Ok(directory) => directory,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut path_pointers = plan
+        .participants
+        .iter()
+        .enumerate()
+        .flat_map(|(index, participant)| {
+            let mut paths = vec![format!(
+                "/plan/participants/{index}/participant/launch/executable"
+            )];
+            if participant.participant.launch.working_directory.is_some() {
+                paths.push(format!(
+                    "/plan/participants/{index}/participant/launch/working_directory"
+                ));
+            }
+            paths
+        })
+        .collect::<Vec<_>>();
+    if command.book.is_some() {
+        path_pointers.push("/openings/path".into());
+    }
+    let resolved = match resolve_config(
+        built_in_defaults(),
+        None,
+        json!({
+            "command": "tournament",
+            "plan": &plan,
+            "anchor": anchor,
+            "time_control": time_control,
+            "adjudication": adjudication,
+            "execution": &execution,
+            "max_engine_faults": command.max_engine_faults,
+            "master_seed": master_seed,
+            "master_seed_generated": master_seed_generated,
+            "openings": openings.report(),
+        }),
+        &[],
+        &current_directory,
+        &path_pointers,
+    ) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if dry_run {
+        let invocations = plan
+            .participants
+            .iter()
+            .map(|participant| &participant.participant.launch)
+            .collect();
+        print_output(
+            &MachineOutput::DryRun {
+                command: "tournament",
+                config_sha256: resolved.sha256(),
+                resolved_configuration: resolved.value(),
+                invocations,
+            },
+            machine,
+        );
+        return ExitCode::SUCCESS;
+    }
+    let opened = match &command.run_directory {
+        Some(path) => RunDirectory::open_explicit(path, &resolved, command.restart),
+        None => RunDirectory::create_unique(&current_directory, "tournament", &resolved),
+    };
+    let opened = match opened {
+        Ok(opened) => opened,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if let Some(archived) = &opened.archived {
+        eprintln!("archived previous run at {}", archived.display());
+    }
+    let directory = Arc::new(opened.directory);
+    let checkpoint = if opened.resumed {
+        match directory.read_checkpoint::<tournament_driver::TournamentCheckpoint>() {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                eprintln!("resume failed: {error}");
+                return ExitCode::from(3);
+            }
+        }
+    } else {
+        tournament_driver::TournamentCheckpoint::default()
+    };
+    let observer = match DurableTournamentOutput::new(Arc::clone(&directory), checkpoint.clone()) {
+        Ok(observer) => Arc::new(observer),
+        Err(error) => {
+            eprintln!("tournament output failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
+    let mut recorder = match if opened.resumed {
+        RunRecorder::resume(&directory)
+    } else {
+        RunRecorder::begin(&directory, "tournament")
+    } {
+        Ok(recorder) => recorder,
+        Err(error) => {
+            eprintln!("run record failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    if let Err(error) = recorder.set_workflow(json!({
+        "kind": "tournament",
+        "format": plan.design.format,
+        "games_scheduled": plan.schedule.len(),
+        "anchor": anchor,
+        "fault_policy": {
+            "mode": if command.max_engine_faults.is_some() { "strict-limit" } else { "exploratory-non-strict" },
+            "max_engine_faults": command.max_engine_faults,
+        },
+        "artifacts": ["checkpoint.json", "games.pgn", "standings.csv", "crosstable.csv", "result.json"],
+    })) {
+        eprintln!("run record failed: {error}");
+        return ExitCode::from(3);
+    }
+    let request = tournament_driver::TournamentRunRequest {
+        plan,
+        anchor,
+        time_control,
+        adjudication,
+        execution,
+        master_seed,
+        master_seed_generated,
+        openings,
+        max_engine_faults: command.max_engine_faults,
+        completed_games: checkpoint.games,
+        observer: Some(observer),
+    };
+    match tournament_driver::run_tournament(request).await {
+        Ok(report) => {
+            if let Err(error) = write_tournament_artifacts(&directory, &report) {
+                eprintln!("tournament output failed: {error}");
+                return ExitCode::from(3);
+            }
+            if let Err(error) = recorder.update_sample(OfficialSample {
+                committed_units: report.games.len() as u64,
+                scored_games: report.results.games_scored as u64,
+                completed_pairs: 0,
+                pentanomial: [0; 5],
+                unpaired_games: report.results.games_scored as u64,
+            }) {
+                eprintln!("run record failed: {error}");
+                return ExitCode::from(3);
+            }
+            let (run_status, exit_code) = match report.status {
+                tournament_driver::TournamentRunStatus::Completed => (RunStatus::Completed, 0),
+                tournament_driver::TournamentRunStatus::Invalid => (RunStatus::Invalid, 1),
+                tournament_driver::TournamentRunStatus::InfrastructureError => {
+                    (RunStatus::Aborted, 3)
+                }
+            };
+            if let Err(error) = recorder.finish(run_status) {
+                eprintln!("run record failed: {error}");
+                return ExitCode::from(3);
+            }
+            if machine {
+                print_json(&MachineOutput::Tournament {
+                    run_directory: directory.paths().root.clone(),
+                    report,
+                });
+            } else {
+                print_tournament(&report);
+                println!("artifacts: {}", directory.paths().root.display());
+            }
+            ExitCode::from(exit_code)
+        }
+        Err(error) => {
+            eprintln!("tournament failed: {error}");
+            ExitCode::from(3)
+        }
+    }
+}
+
+fn tournament_configuration_error(error: &str) -> ExitCode {
+    eprintln!("configuration error: {error}");
+    ExitCode::from(2)
+}
+
+fn parse_indexed_values(
+    values: &[String],
+    engine_count: usize,
+    option: &str,
+) -> Result<Vec<Vec<String>>, String> {
+    let mut grouped = vec![Vec::new(); engine_count];
+    for value in values {
+        let Some((index, payload)) = value.split_once(':') else {
+            return Err(format!("{option} must use INDEX:VALUE syntax"));
+        };
+        let index = index
+            .parse::<usize>()
+            .ok()
+            .filter(|index| (1..=engine_count).contains(index))
+            .ok_or_else(|| format!("{option} index is outside the --engine list: {index}"))?;
+        if payload.is_empty() {
+            return Err(format!("{option} value must not be empty"));
+        }
+        grouped[index - 1].push(payload.to_owned());
+    }
+    Ok(grouped)
+}
+
+fn write_tournament_artifacts(
+    directory: &RunDirectory,
+    report: &tournament_driver::TournamentReport,
+) -> Result<(), String> {
+    fs::write(
+        directory.paths().root.join("standings.csv"),
+        &report.results.standings_csv,
+    )
+    .map_err(|error| error.to_string())?;
+    fs::write(
+        directory.paths().root.join("crosstable.csv"),
+        &report.results.crosstable_csv,
+    )
+    .map_err(|error| error.to_string())?;
+    fs::write(
+        directory.paths().root.join("result.json"),
+        serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn print_tournament(report: &tournament_driver::TournamentReport) {
+    println!(
+        "Tournament {:?}: {}/{} games scored ({} attempted)",
+        report.status,
+        report.results.games_scored,
+        report.results.games_scheduled,
+        report.results.games_attempted
+    );
+    for row in &report.results.standings {
+        let error = row
+            .error_95
+            .map_or_else(|| "unavailable".into(), |value| format!("±{value:.1}"));
+        let anchor = if row.anchored { " [anchor]" } else { "" };
+        println!(
+            "{}. {}: {:.1} {error}{anchor}; {:.1}/{} ({}-{}-{})",
+            row.rank, row.name, row.rating, row.points, row.games, row.wins, row.draws, row.losses
+        );
+    }
 }
 
 async fn run_engine(command: EngineAction, machine: bool, dry_run: bool) -> ExitCode {
@@ -3758,6 +4329,10 @@ enum MachineOutput<'a> {
     TournamentPlan {
         report: TournamentPlan,
     },
+    Tournament {
+        run_directory: PathBuf,
+        report: tournament_driver::TournamentReport,
+    },
     SelfTest {
         report: self_test::SelfTestReport,
     },
@@ -4610,6 +5185,77 @@ fn read_stored_spsa_inputs(root: &Path) -> Result<(SpsaRunSettings, f64, u32), S
     let settings =
         SpsaRunSettings::new(iterations, games_per_iteration).map_err(|error| error.to_string())?;
     Ok((settings, r_end, final_window_percent))
+}
+
+struct DurableTournamentOutput {
+    directory: Arc<RunDirectory>,
+    checkpoint: Mutex<tournament_driver::TournamentCheckpoint>,
+}
+
+impl DurableTournamentOutput {
+    fn new(
+        directory: Arc<RunDirectory>,
+        mut checkpoint: tournament_driver::TournamentCheckpoint,
+    ) -> Result<Self, String> {
+        checkpoint.games.sort_by_key(|game| game.number);
+        let output = Self {
+            directory,
+            checkpoint: Mutex::new(checkpoint),
+        };
+        output.persist()?;
+        Ok(output)
+    }
+
+    fn persist(&self) -> Result<(), String> {
+        let checkpoint = self
+            .checkpoint
+            .lock()
+            .map_err(|_| "tournament checkpoint lock poisoned")?;
+        self.directory
+            .write_checkpoint(&*checkpoint)
+            .map_err(|error| error.to_string())?;
+        let mut pgn = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(self.directory.paths().root.join("games.pgn"))
+            .map_err(|error| error.to_string())?;
+        for game in &checkpoint.games {
+            pgn.write_all(game.pgn.as_bytes())
+                .and_then(|()| pgn.write_all(b"\n"))
+                .map_err(|error| error.to_string())?;
+        }
+        pgn.sync_all().map_err(|error| error.to_string())
+    }
+}
+
+impl tournament_driver::TournamentObserver for DurableTournamentOutput {
+    fn game_completed(&self, game: &tournament_driver::TournamentGame) -> Result<(), String> {
+        {
+            let mut checkpoint = self
+                .checkpoint
+                .lock()
+                .map_err(|_| "tournament checkpoint lock poisoned")?;
+            if checkpoint
+                .games
+                .iter()
+                .any(|saved| saved.number == game.number)
+            {
+                return Err(format!("duplicate tournament game {}", game.number));
+            }
+            checkpoint.games.push(game.clone());
+            checkpoint.games.sort_by_key(|saved| saved.number);
+        }
+        self.persist()?;
+        let event = serde_json::to_vec(&json!({
+            "event": "tournament-game-completed",
+            "game": game,
+        }))
+        .map_err(|error| error.to_string())?;
+        self.directory
+            .append_log(&[event, b"\n".to_vec()].concat())
+            .map_err(|error| error.to_string())
+    }
 }
 
 struct DurableMatchOutput {

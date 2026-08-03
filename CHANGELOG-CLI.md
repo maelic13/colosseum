@@ -37,3 +37,6 @@ The first public CLI release is not yet published.
   deterministic malformed/unscored outcomes and compatible baseline compare.
 - Added one deterministic tournament planner for round-robin and multi-seed
   gauntlet schedules, with `gauntlet` as an alias of the same implementation.
+- Added durable round-robin and gauntlet execution with bounded concurrency,
+  optional openings/affinity, joint or anchored ML ratings with error bars,
+  standings/crosstable CSV, direct engine controls and per-game resume.

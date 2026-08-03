@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–6 and tournament scheduling are complete: independent fixed match/SPRT/calibration/SPSA workflows plus speed/scaling, book, statistics planning/replay/telemetry, durable position suites and one shared round-robin/gauntlet planner over ordinary UCI engines |
-| What is missing | Live durable tournament results/ratings, release-candidate parity/gap decisions, documentation and release acceptance |
+| What exists | Phases 0–6 and Phase 7 tournament implementation are complete: independent fixed match/SPRT/calibration/SPSA workflows plus speed/scaling, book, statistics planning/replay/telemetry, durable position suites and live round-robin/gauntlet tournaments with ratings/CSV |
+| What is missing | Tournament exit parity evidence, release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 6 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 7.2 — durable tournaments, ratings and exports** |
+| Next step | **Phase 7.3 — tournament parity and resume acceptance** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -665,8 +665,14 @@ model as well.
   [`crates/colosseum-application/src/tournament.rs`](crates/colosseum-application/src/tournament.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/tournament.md`](docs/cli/tournament.md)
-- ☐ **7.2** — **Model: Sol High.** Joint ML ratings/error bars, optional anchor, standings/crosstable CSV
-  and durable resume for both formats
+- ☑ **7.2 — DONE** — **Model: Sol High.** Shared joint ML ratings and 95% error bars,
+  optional one-participant anchor, standings/crosstable CSV, ordinary-engine
+  controls and checksum-protected per-game resume drive both formats without
+  GUI or SQLite coupling — evidence:
+  [`crates/colosseum-application/src/tournament.rs`](crates/colosseum-application/src/tournament.rs),
+  [`crates/colosseum-cli/src/tournament_driver.rs`](crates/colosseum-cli/src/tournament_driver.rs),
+  [`crates/colosseum-cli/tests/tournament.rs`](crates/colosseum-cli/tests/tournament.rs),
+  [`docs/cli/tournament.md`](docs/cli/tournament.md)
 - ☐ **7.3** — **EXIT · Model: Sol High.** Schedules/ratings match GUI (≤0.01 Elo); deterministic
   kill/resume produces identical standings for both formats
 
@@ -751,10 +757,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 7.2 — durable tournaments, ratings and exports. Model: GPT-5.6 Sol — High.**
-Run both formats through the shared use case, then add joint maximum-likelihood
-ratings with error bars and an optional anchor, standings/crosstable CSV, and
-deterministic checkpoint/resume without replaying completed games.
+**Phase 7.3 — tournament parity and resume acceptance. Model: GPT-5.6 Sol — High.**
+Freeze GUI schedule/rating fixtures for both formats, require ≤0.01 Elo parity,
+and prove deterministic kill/resume produces the same final standings as an
+uninterrupted run for round-robin and multi-seed gauntlet schedules.
 
 ```
 git diff --check

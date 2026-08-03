@@ -1076,6 +1076,14 @@ optional `gauntlet` alias dispatch to that same implementation; participant
 order gives stable identity and the scheduler is the same shared core used by
 the GUI.
 
+Implemented Phase 7.2 drives that plan through the independent UCI runner with
+bounded concurrency, optional opening/affinity controls and checksum-protected
+per-game resume. The application use case validates durable game identity and
+computes the shared joint ML ratings, 95% error bars, optional single-engine
+anchor, standings and crosstable data. The CLI writes both CSV exports plus PGN,
+JSON, log and common run-record artifacts; exploratory non-strict engine-fault
+handling is explicit and a strict limit remains selectable.
+
 **Success criteria:** schedules and ratings match the GUI on stored data
 (ratings ≤0.01 Elo); kill/resume with deterministic stubs produces identical
 standings for both formats.

@@ -68,6 +68,7 @@ pub use suite::{
     compare_suite_baseline,
 };
 pub use tournament::{
-    PlanTournament, TournamentDesign, TournamentParticipant, TournamentPlan, TournamentPlanError,
-    TournamentScheduleGame,
+    PlanTournament, RateTournament, TournamentCompletedGame, TournamentDesign,
+    TournamentParticipant, TournamentPlan, TournamentPlanError, TournamentResultError,
+    TournamentResults, TournamentScheduleGame, TournamentStanding,
 };
