@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–6 are complete: independent fixed match/SPRT/calibration/SPSA workflows plus speed/scaling, book, statistics planning/replay/telemetry and durable position-suite tools over ordinary UCI engines |
-| What is missing | Tournaments, release-candidate parity/gap decisions, documentation and release acceptance |
+| What exists | Phases 0–6 and tournament scheduling are complete: independent fixed match/SPRT/calibration/SPSA workflows plus speed/scaling, book, statistics planning/replay/telemetry, durable position suites and one shared round-robin/gauntlet planner over ordinary UCI engines |
+| What is missing | Live durable tournament results/ratings, release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 6 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 7.1 — tournament use case and schedules** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 7.2 — durable tournaments, ratings and exports** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -658,8 +658,13 @@ model as well.
 
 ### Phase 7 — Tournaments
 
-- ☐ **7.1** — **Model: Terra High.** One `tournament` use case supports round-robin and one/multi-seed
-  gauntlet; optional `gauntlet` alias has no second implementation
+- ☑ **7.1 — DONE** — **Model: Terra High.** One application use case produces deterministic
+  round-robin and one/multi-seed gauntlet schedules through the shared core;
+  `tournament plan` and the optional `gauntlet` alias dispatch to that same
+  implementation — evidence:
+  [`crates/colosseum-application/src/tournament.rs`](crates/colosseum-application/src/tournament.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
+  [`docs/cli/tournament.md`](docs/cli/tournament.md)
 - ☐ **7.2** — **Model: Sol High.** Joint ML ratings/error bars, optional anchor, standings/crosstable CSV
   and durable resume for both formats
 - ☐ **7.3** — **EXIT · Model: Sol High.** Schedules/ratings match GUI (≤0.01 Elo); deterministic
@@ -746,10 +751,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 7.1 — tournament use case and schedules. Model: GPT-5.6 Terra — High.**
-Add one shared `tournament` use case for round-robin and one/multi-seed
-gauntlets. An optional `gauntlet` CLI alias must dispatch to that same
-implementation rather than create a second tournament path.
+**Phase 7.2 — durable tournaments, ratings and exports. Model: GPT-5.6 Sol — High.**
+Run both formats through the shared use case, then add joint maximum-likelihood
+ratings with error bars and an optional anchor, standings/crosstable CSV, and
+deterministic checkpoint/resume without replaying completed games.
 
 ```
 git diff --check

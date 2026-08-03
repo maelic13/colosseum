@@ -35,3 +35,5 @@ The first public CLI release is not yet published.
   coverage, opening exclusion and compatibility-labelled implied NPS.
 - Added resumable fixed-time/node/depth EPD/FEN suites with legal `bm`/`am`,
   deterministic malformed/unscored outcomes and compatible baseline compare.
+- Added one deterministic tournament planner for round-robin and multi-seed
+  gauntlet schedules, with `gauntlet` as an alias of the same implementation.

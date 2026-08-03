@@ -18,6 +18,7 @@ colosseum-cli match --games 100 ./candidate ./baseline
 colosseum-cli sprt ./candidate ./baseline --max-pairs 5000 --preset gainer
 colosseum-cli calibrate ./my-engine ./my-engine --book ./openings.epd
 colosseum-cli nps ./my-engine --nodes 10000000
+colosseum-cli tournament plan --engine ./engine-a --engine ./engine-b --engine ./engine-c
 colosseum-cli capabilities
 colosseum-cli self-test
 colosseum-cli status ./colosseum-runs/my-run
@@ -34,6 +35,7 @@ Detailed contracts:
 - [Opening-book utilities](book.md)
 - [Statistics replay and evidence authority](stats.md)
 - [Fixed-work EPD/FEN position suites](suite.md)
+- [Round-robin and gauntlet tournament planning](tournament.md)
 - [Configuration files, inheritance and path origins](run-files.md)
 - [Master seed and named random streams](randomness.md)
 - [Human, JSON and dry-run output](output.md)

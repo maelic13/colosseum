@@ -18,12 +18,12 @@ use colosseum_application::{
     EngineInspection, EngineLaunchSpec, FixedPlanObjective, FixedPlanReport, FixedPlanRequest,
     InspectEngine, MeasureNps, NpsExperimentDesign, NpsExperimentParticipant, NpsExperimentReport,
     NpsHashPolicy, NpsReport, NpsRequest, NpsScalingInput, NpsScalingReport, NpsStatePolicy,
-    RuntimeParticipant, SprtBundle, SprtDesign, SprtLengthPlanReport, SprtLengthPlanRequest,
-    SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaCommittedUpdate, SpsaGateHashStatus,
-    SpsaPlanReport, SpsaRunSettings, SpsaStatusReport, SpsaTimingInput, SpsaTuneAudit,
-    SpsaTuneResult, SpsaTuneWarning, SpsaTuningState, UciOptionSchema, UciOptionValue,
-    classify_calibration, diagnose_spsa, plan_fixed, plan_sprt_length, plan_spsa, scaling_hash_mb,
-    summarize_nps_scaling,
+    PlanTournament, RuntimeParticipant, SprtBundle, SprtDesign, SprtLengthPlanReport,
+    SprtLengthPlanRequest, SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaCommittedUpdate,
+    SpsaGateHashStatus, SpsaPlanReport, SpsaRunSettings, SpsaStatusReport, SpsaTimingInput,
+    SpsaTuneAudit, SpsaTuneResult, SpsaTuneWarning, SpsaTuningState, TournamentDesign,
+    TournamentParticipant, TournamentPlan, UciOptionSchema, UciOptionValue, classify_calibration,
+    diagnose_spsa, plan_fixed, plan_sprt_length, plan_spsa, scaling_hash_mb, summarize_nps_scaling,
 };
 use colosseum_cli::{
     EngineArgs, OfficialSample, RunDirectory, RunRecord, RunRecorder, RunStatus, built_in_defaults,
@@ -95,6 +95,10 @@ enum Command {
     Stats(StatsCommand),
     /// Run fixed-work searches over an EPD or FEN position set.
     Suite(Box<suite_driver::SuiteCommand>),
+    /// Plan or run a multi-engine round-robin or gauntlet tournament.
+    Tournament(TournamentCommand),
+    /// Convenience alias for the same tournament gauntlet planner.
+    Gauntlet(TournamentPlanCommand),
     /// Verify this exact executable's protocol, process and persistence paths.
     SelfTest,
     /// Read the official state of any CLI run without modifying it.
@@ -120,6 +124,46 @@ struct MatchCommand {
 
     #[command(flatten)]
     conditions: MatchConditions,
+}
+
+#[derive(Debug, Args)]
+struct TournamentCommand {
+    #[command(subcommand)]
+    action: TournamentAction,
+}
+
+#[derive(Debug, Subcommand)]
+enum TournamentAction {
+    /// Print the exact static schedule without launching engines.
+    Plan(TournamentPlanCommand),
+}
+
+#[derive(Debug, Args)]
+struct TournamentPlanCommand {
+    /// UCI executable in selection/seed order; repeat at least twice.
+    #[arg(long = "engine", required = true)]
+    engines: Vec<PathBuf>,
+    /// Round-robin or gauntlet schedule.
+    #[arg(long, value_enum)]
+    format: Option<TournamentFormatArg>,
+    /// Leading engines treated as gauntlet seeds.
+    #[arg(long, default_value_t = 1)]
+    seeds: u32,
+    /// Repetitions of the complete format schedule.
+    #[arg(long, default_value_t = 1)]
+    cycles: u32,
+    /// Games per encounter, alternating colours.
+    #[arg(long, default_value_t = 2)]
+    games_per_pair: u32,
+    /// Initial rating aligned with each --engine; defaults to 1500.
+    #[arg(long = "rating", allow_hyphen_values = true)]
+    ratings: Vec<f64>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum TournamentFormatArg {
+    RoundRobin,
+    Gauntlet,
 }
 
 #[derive(Debug, Args)]
@@ -844,6 +888,14 @@ async fn main() -> ExitCode {
         Command::Stats(_) if cli.dry_run => unsupported_dry_run("stats"),
         Command::Stats(command) => run_stats(command, cli.json),
         Command::Suite(command) => suite_driver::run(*command, cli.json, cli.dry_run).await,
+        Command::Tournament(_) if cli.dry_run => unsupported_dry_run("tournament plan"),
+        Command::Tournament(command) => match command.action {
+            TournamentAction::Plan(command) => run_tournament_plan(command, None, cli.json),
+        },
+        Command::Gauntlet(_) if cli.dry_run => unsupported_dry_run("gauntlet"),
+        Command::Gauntlet(command) => {
+            run_tournament_plan(command, Some(TournamentFormatArg::Gauntlet), cli.json)
+        }
         Command::SelfTest if cli.dry_run => unsupported_dry_run("self-test"),
         Command::SelfTest => run_self_test(cli.json).await,
         Command::Status { .. } if cli.dry_run => unsupported_dry_run("status"),
@@ -2292,6 +2344,94 @@ fn unsupported_dry_run(command: &str) -> ExitCode {
     ExitCode::from(2)
 }
 
+fn run_tournament_plan(
+    command: TournamentPlanCommand,
+    forced_format: Option<TournamentFormatArg>,
+    machine: bool,
+) -> ExitCode {
+    let format = match (forced_format, command.format) {
+        (Some(forced), Some(requested))
+            if std::mem::discriminant(&forced) != std::mem::discriminant(&requested) =>
+        {
+            eprintln!("configuration error: the gauntlet alias cannot select round-robin");
+            return ExitCode::from(2);
+        }
+        (Some(forced), _) => forced,
+        (None, Some(requested)) => requested,
+        (None, None) => TournamentFormatArg::RoundRobin,
+    };
+    if !command.ratings.is_empty() && command.ratings.len() != command.engines.len() {
+        eprintln!(
+            "configuration error: --rating must be omitted or repeated once for every --engine"
+        );
+        return ExitCode::from(2);
+    }
+    let ratings = if command.ratings.is_empty() {
+        vec![1_500.0; command.engines.len()]
+    } else {
+        command.ratings
+    };
+    let participants = command
+        .engines
+        .into_iter()
+        .zip(ratings)
+        .enumerate()
+        .map(
+            |(index, (executable, initial_rating))| TournamentParticipant {
+                participant: RuntimeParticipant {
+                    id: ParticipantId::from_u128(index as u128 + 1),
+                    launch: EngineLaunchSpec::path_only(executable),
+                },
+                initial_rating,
+            },
+        )
+        .collect();
+    let format = match format {
+        TournamentFormatArg::RoundRobin => colosseum_core::Format::RoundRobin {
+            cycles: command.cycles,
+        },
+        TournamentFormatArg::Gauntlet => colosseum_core::Format::Gauntlet {
+            seeds: command.seeds,
+            cycles: command.cycles,
+        },
+    };
+    let report = match PlanTournament::execute(
+        participants,
+        TournamentDesign {
+            format,
+            games_per_pair: command.games_per_pair,
+        },
+    ) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if machine {
+        print_json(&MachineOutput::TournamentPlan { report });
+    } else {
+        println!(
+            "Tournament plan: {:?}; {} participants, {} games",
+            report.design.format,
+            report.participants.len(),
+            report.schedule.len()
+        );
+        for game in &report.schedule {
+            println!(
+                "game {:>4}: round {:>3}, encounter {:>3}.{} — {} vs {}",
+                game.number,
+                game.round,
+                game.encounter,
+                game.game_in_encounter,
+                game.white,
+                game.black
+            );
+        }
+    }
+    ExitCode::SUCCESS
+}
+
 async fn run_engine(command: EngineAction, machine: bool, dry_run: bool) -> ExitCode {
     let invocation = match &command {
         EngineAction::Inspect(invocation) | EngineAction::Check(invocation) => invocation,
@@ -3614,6 +3754,9 @@ enum MachineOutput<'a> {
     },
     NpsScaling {
         report: NpsScalingReport,
+    },
+    TournamentPlan {
+        report: TournamentPlan,
     },
     SelfTest {
         report: self_test::SelfTestReport,

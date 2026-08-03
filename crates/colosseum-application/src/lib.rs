@@ -17,6 +17,7 @@ pub mod spsa_plan;
 pub mod spsa_status;
 pub mod stats_plan;
 pub mod suite;
+pub mod tournament;
 
 pub use calibration::{
     CalibrationBinaries, CalibrationDesign, CalibrationError, CalibrationInterval,
@@ -65,4 +66,8 @@ pub use suite::{
     MalformedSuitePosition, RunSuite, SuiteBaselineComparison, SuiteDesign, SuiteEntry, SuiteError,
     SuiteExpectation, SuiteOutcome, SuitePosition, SuitePositionResult, SuiteProgress, SuiteReport,
     compare_suite_baseline,
+};
+pub use tournament::{
+    PlanTournament, TournamentDesign, TournamentParticipant, TournamentPlan, TournamentPlanError,
+    TournamentScheduleGame,
 };

@@ -33,8 +33,114 @@ fn help_is_headless_and_names_the_product() {
     assert!(stdout.contains("book"));
     assert!(stdout.contains("stats"));
     assert!(stdout.contains("suite"));
+    assert!(stdout.contains("tournament"));
+    assert!(stdout.contains("gauntlet"));
     assert!(stdout.contains("calibrate"));
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn tournament_plans_share_one_round_robin_and_gauntlet_scheduler() {
+    let round_robin = cli()
+        .args([
+            "tournament",
+            "plan",
+            "--engine",
+            "alpha",
+            "--engine",
+            "beta",
+            "--engine",
+            "gamma",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        round_robin.status.success(),
+        "{}",
+        String::from_utf8_lossy(&round_robin.stderr)
+    );
+    let round_robin: serde_json::Value = serde_json::from_slice(&round_robin.stdout).unwrap();
+    assert_eq!(round_robin["type"], "tournament-plan");
+    assert_eq!(
+        round_robin["report"]["schedule"].as_array().unwrap().len(),
+        6
+    );
+    assert_eq!(
+        round_robin["report"]["design"]["format"]["RoundRobin"]["cycles"],
+        1
+    );
+
+    let tournament_gauntlet = cli()
+        .args([
+            "tournament",
+            "plan",
+            "--format",
+            "gauntlet",
+            "--seeds",
+            "2",
+            "--engine",
+            "alpha",
+            "--engine",
+            "beta",
+            "--engine",
+            "gamma",
+            "--engine",
+            "delta",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    let alias = cli()
+        .args([
+            "gauntlet", "--seeds", "2", "--engine", "alpha", "--engine", "beta", "--engine",
+            "gamma", "--engine", "delta", "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(tournament_gauntlet.status.success());
+    assert!(alias.status.success());
+    assert_eq!(tournament_gauntlet.stdout, alias.stdout);
+    let report: serde_json::Value = serde_json::from_slice(&alias.stdout).unwrap();
+    assert_eq!(report["report"]["schedule"].as_array().unwrap().len(), 8);
+    assert!(
+        report["report"]["schedule"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|game| {
+                let white = game["white"].as_str().unwrap();
+                let black = game["black"].as_str().unwrap();
+                let white_seed = white.ends_with("0001") || white.ends_with("0002");
+                let black_seed = black.ends_with("0001") || black.ends_with("0002");
+                white_seed ^ black_seed
+            })
+    );
+}
+
+#[test]
+fn tournament_plan_rejects_incomplete_or_contradictory_inputs() {
+    let one_engine = cli()
+        .args(["tournament", "plan", "--engine", "alpha"])
+        .output()
+        .unwrap();
+    assert_eq!(one_engine.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&one_engine.stderr).contains("at least two"));
+
+    let contradictory_alias = cli()
+        .args([
+            "gauntlet",
+            "--format",
+            "round-robin",
+            "--engine",
+            "alpha",
+            "--engine",
+            "beta",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(contradictory_alias.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&contradictory_alias.stderr).contains("cannot select"));
 }
 
 #[test]

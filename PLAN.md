@@ -1070,6 +1070,12 @@ standings/crosstable CSV and resume per S5.11. A `gauntlet` alias may exist for
 convenience, but it resolves to the same tournament use case rather than a
 second implementation.
 
+Implemented Phase 7.1 places deterministic round-robin and one/multi-seed
+gauntlet planning in one application use case. `tournament plan` and the
+optional `gauntlet` alias dispatch to that same implementation; participant
+order gives stable identity and the scheduler is the same shared core used by
+the GUI.
+
 **Success criteria:** schedules and ratings match the GUI on stored data
 (ratings ≤0.01 Elo); kill/resume with deterministic stubs produces identical
 standings for both formats.
