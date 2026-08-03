@@ -18,3 +18,5 @@ The first public CLI release is not yet published.
   comparison and evidence-based wall-time reporting.
 - Added read-only `spsa status` trajectory, thirds, ETA and explicitly
   non-causal heuristic diagnostics over atomic durable snapshots.
+- Added fixed-node `nps` measurement using harness monotonic wall time, with
+  reported-node verification and engine time/NPS retained only as diagnostics.

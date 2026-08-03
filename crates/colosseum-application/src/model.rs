@@ -145,10 +145,17 @@ pub struct EngineInspection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "kebab-case")]
+pub enum SearchLimit {
+    MoveTimeMs(u64),
+    Nodes(u64),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchRequest {
     pub position: String,
     pub moves: Vec<String>,
-    pub move_time_ms: u64,
+    pub limit: SearchLimit,
     pub deadline_ms: u64,
 }
 
@@ -156,6 +163,10 @@ pub struct SearchRequest {
 pub struct SearchObservation {
     pub best_move: String,
     pub ponder: Option<String>,
+    pub reported_nodes: Option<u64>,
+    pub reported_time_ms: Option<u64>,
+    pub reported_nps: Option<u64>,
+    pub harness_elapsed_ns: u64,
     pub diagnostics: Vec<String>,
 }
 

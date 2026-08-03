@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use colosseum_application::{
     ApplicationError, CpuAllocation, EngineInspection, EngineSession, EngineSessionFactory,
-    PortFuture, RuntimeParticipant, SearchObservation, SearchRequest, UciOptionSchema,
+    PortFuture, RuntimeParticipant, SearchLimit, SearchObservation, SearchRequest, UciOptionSchema,
 };
 use colosseum_core::{ParticipantId, UciOption};
 
@@ -125,10 +125,11 @@ impl EngineSession for UciSession {
         let process = self.process();
         Box::pin(async move {
             let position = position(request.position, request.moves);
+            let limits = search_limits(request.limit);
             let output = process?
                 .search(
                     &position,
-                    &GoLimits::MoveTime(Duration::from_millis(request.move_time_ms)),
+                    &limits,
                     Duration::from_millis(request.deadline_ms),
                     |_| {},
                 )
@@ -146,11 +147,9 @@ impl EngineSession for UciSession {
         let process = self.process();
         Box::pin(async move {
             let position = position(request.position, request.moves);
+            let limits = search_limits(request.limit);
             process?
-                .start_search(
-                    &position,
-                    &GoLimits::MoveTime(Duration::from_millis(request.move_time_ms)),
-                )
+                .start_search(&position, &limits)
                 .await
                 .map_err(|error| engine_error(id, error))
         })
@@ -197,10 +196,23 @@ fn position(position: String, moves: Vec<String>) -> UciPosition {
     }
 }
 
+fn search_limits(limit: SearchLimit) -> GoLimits {
+    match limit {
+        SearchLimit::MoveTimeMs(milliseconds) => {
+            GoLimits::MoveTime(Duration::from_millis(milliseconds))
+        }
+        SearchLimit::Nodes(nodes) => GoLimits::Nodes(nodes),
+    }
+}
+
 fn observation(output: SearchOutput) -> SearchObservation {
     SearchObservation {
         best_move: output.best_move,
         ponder: output.ponder,
+        reported_nodes: output.reported_nodes,
+        reported_time_ms: output.reported_time_ms,
+        reported_nps: output.reported_nps,
+        harness_elapsed_ns: output.elapsed.as_nanos().try_into().unwrap_or(u64::MAX),
         diagnostics: Vec::new(),
     }
 }

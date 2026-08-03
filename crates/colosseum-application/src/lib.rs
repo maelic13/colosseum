@@ -8,6 +8,7 @@ pub mod check;
 pub mod commit;
 pub mod inspect;
 pub mod model;
+pub mod nps;
 pub mod pair_commit;
 pub mod ports;
 pub mod sprt;
@@ -24,6 +25,7 @@ pub use check::{CheckEngine, ComplianceCheck, ComplianceReport, ComplianceStatus
 pub use commit::{CommitUnit, CommitUnitDependencies};
 pub use inspect::InspectEngine;
 pub use model::*;
+pub use nps::{MeasureNps, NpsError, NpsReport, NpsRequest};
 pub use pair_commit::{CompletePair, PairCommitError, PairCommitQueue};
 pub use ports::*;
 pub use sprt::{SprtBundle, SprtDesign, SprtDesignError, SprtParameters};

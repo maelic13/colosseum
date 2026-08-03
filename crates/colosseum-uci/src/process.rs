@@ -59,6 +59,12 @@ pub struct SearchOutput {
     pub score: Option<Score>,
     /// Last reported nps, if any.
     pub nps: Option<u64>,
+    /// Last node count reported by the engine, if any.
+    pub reported_nodes: Option<u64>,
+    /// Last search time reported by the engine, if any.
+    pub reported_time_ms: Option<u64>,
+    /// Last NPS value reported by the engine, excluding harness-derived fallback.
+    pub reported_nps: Option<u64>,
     /// Last reported depth, if any.
     pub depth: Option<u32>,
     /// The engine's predicted reply (`bestmove … ponder <move>`), if any.
@@ -376,6 +382,9 @@ impl EngineProcess {
                 best_move,
                 score: None,
                 nps: None,
+                reported_nodes: None,
+                reported_time_ms: None,
+                reported_nps: None,
                 depth: None,
                 ponder,
                 elapsed: Duration::ZERO,
@@ -410,8 +419,9 @@ impl EngineProcess {
     ) -> Result<SearchOutput, UciError> {
         let until = start + deadline;
         let mut score = None;
-        let mut nps = None;
+        let mut reported_nps = None;
         let mut nodes = None;
+        let mut time_ms = None;
         let mut depth = None;
 
         loop {
@@ -425,13 +435,16 @@ impl EngineProcess {
                 // Some engines report a literal `nps 0` on every info line
                 // (Fruit 2.1 does) — treat that as unreported and derive the
                 // real speed from nodes over wall-clock time instead.
-                let nps = nps.or_else(|| {
+                let nps = reported_nps.or_else(|| {
                     nodes.map(|n: u64| (n as f64 / elapsed.as_secs_f64().max(0.001)).round() as u64)
                 });
                 return Ok(SearchOutput {
                     best_move,
                     score,
                     nps,
+                    reported_nodes: nodes,
+                    reported_time_ms: time_ms,
+                    reported_nps,
                     depth,
                     ponder,
                     elapsed,
@@ -446,10 +459,13 @@ impl EngineProcess {
                 if let Some(n) = info.nps
                     && n > 0
                 {
-                    nps = Some(n);
+                    reported_nps = Some(n);
                 }
                 if info.nodes.is_some() {
                     nodes = info.nodes;
+                }
+                if info.time_ms.is_some() {
+                    time_ms = info.time_ms;
                 }
                 if info.depth.is_some() {
                     depth = info.depth;

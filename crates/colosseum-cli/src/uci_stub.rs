@@ -26,6 +26,9 @@ pub struct StubArgs {
     sleep_ms: u64,
     #[arg(long)]
     pid_file: Option<PathBuf>,
+    /// Deliberately untrusted NPS diagnostic used by harness tests.
+    #[arg(long, default_value_t = 1)]
+    reported_nps: u64,
 }
 
 pub async fn run(args: StubArgs) -> std::io::Result<()> {
@@ -97,7 +100,7 @@ pub async fn run(args: StubArgs) -> std::io::Result<()> {
             "ucinewgame" | "stop" if line == "ucinewgame" => {}
             "stop" => {
                 if searching {
-                    write_bestmove(&mut stdout, &position).await?;
+                    write_bestmove(&mut stdout, &position, 1, args.reported_nps).await?;
                     searching = false;
                 }
             }
@@ -113,7 +116,15 @@ pub async fn run(args: StubArgs) -> std::io::Result<()> {
                     if args.sleep_ms > 0 {
                         tokio::time::sleep(std::time::Duration::from_millis(args.sleep_ms)).await;
                     }
-                    write_bestmove(&mut stdout, &position).await?;
+                    let nodes = line
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .windows(2)
+                        .find_map(|pair| {
+                            (pair[0] == "nodes").then(|| pair[1].parse().ok()).flatten()
+                        })
+                        .unwrap_or(1);
+                    write_bestmove(&mut stdout, &position, nodes, args.reported_nps).await?;
                 }
             }
             _ => {}
@@ -126,7 +137,12 @@ pub async fn run(args: StubArgs) -> std::io::Result<()> {
     Ok(())
 }
 
-async fn write_bestmove(stdout: &mut tokio::io::Stdout, position: &str) -> std::io::Result<()> {
+async fn write_bestmove(
+    stdout: &mut tokio::io::Stdout,
+    position: &str,
+    nodes: u64,
+    reported_nps: u64,
+) -> std::io::Result<()> {
     let moves = position
         .split_once(" moves ")
         .map_or(0, |(_, moves)| moves.split_whitespace().count());
@@ -135,7 +151,12 @@ async fn write_bestmove(stdout: &mut tokio::io::Stdout, position: &str) -> std::
         .copied()
         .unwrap_or("0000");
     stdout
-        .write_all(format!("info depth 1 nodes 1 score cp 0\nbestmove {best}\n").as_bytes())
+        .write_all(
+            format!(
+                "info depth 1 nodes {nodes} time 1 nps {reported_nps} score cp 0\nbestmove {best}\n"
+            )
+            .as_bytes(),
+        )
         .await?;
     stdout.flush().await
 }

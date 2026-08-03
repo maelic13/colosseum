@@ -26,8 +26,48 @@ fn help_is_headless_and_names_the_product() {
     assert!(stdout.contains("match"));
     assert!(stdout.contains("sprt"));
     assert!(stdout.contains("spsa"));
+    assert!(stdout.contains("nps"));
     assert!(stdout.contains("calibrate"));
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn nps_uses_fixed_nodes_and_exposes_engine_claim_as_diagnostic_only() {
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+    let output = cli()
+        .arg("nps")
+        .arg(binary)
+        .args([
+            "--nodes",
+            "1000",
+            "--engine-arg=__uci-stub",
+            "--engine-arg=--reported-nps",
+            "--engine-arg=18446744073709551615",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("startpos alone is a weak workload"));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["type"], "nps");
+    assert_eq!(value["report"]["requested_nodes"], 1000);
+    assert_eq!(value["report"]["reported_nodes"], 1000);
+    assert_eq!(
+        value["report"]["engine_reported_nps"],
+        serde_json::Value::from(u64::MAX)
+    );
+    assert!(value["report"]["harness_elapsed_ns"].as_u64().unwrap() > 0);
+    assert!(
+        value["report"]["authoritative_nps"]
+            .as_f64()
+            .unwrap()
+            .is_finite()
+    );
 }
 
 #[test]

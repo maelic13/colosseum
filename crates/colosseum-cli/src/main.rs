@@ -15,11 +15,11 @@ use colosseum_application::{
     CompletePair, ComplianceReport, ComplianceStatus, DEFAULT_CALIBRATION_CONFIDENCE,
     DEFAULT_CALIBRATION_GAMES, DEFAULT_CALIBRATION_TOLERANCE_NELO,
     DEFAULT_SPSA_FINAL_WINDOW_PERCENT, DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS,
-    EngineInspection, EngineLaunchSpec, InspectEngine, RuntimeParticipant, SprtBundle, SprtDesign,
-    SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaCommittedUpdate, SpsaGateHashStatus,
-    SpsaPlanReport, SpsaRunSettings, SpsaStatusReport, SpsaTimingInput, SpsaTuneAudit,
-    SpsaTuneResult, SpsaTuneWarning, SpsaTuningState, UciOptionSchema, UciOptionValue,
-    classify_calibration, diagnose_spsa, plan_spsa,
+    EngineInspection, EngineLaunchSpec, InspectEngine, MeasureNps, NpsReport, NpsRequest,
+    RuntimeParticipant, SprtBundle, SprtDesign, SprtParameters, SpsaBoundTune, SpsaCenterSample,
+    SpsaCommittedUpdate, SpsaGateHashStatus, SpsaPlanReport, SpsaRunSettings, SpsaStatusReport,
+    SpsaTimingInput, SpsaTuneAudit, SpsaTuneResult, SpsaTuneWarning, SpsaTuningState,
+    UciOptionSchema, UciOptionValue, classify_calibration, diagnose_spsa, plan_spsa,
 };
 use colosseum_cli::{
     EngineArgs, OfficialSample, RunDirectory, RunRecord, RunRecorder, RunStatus, built_in_defaults,
@@ -74,6 +74,8 @@ enum Command {
     Sprt(Box<SprtCommand>),
     /// Tune numeric UCI options with durable pair-atomic SPSA.
     Spsa(Box<SpsaCommand>),
+    /// Measure fixed-node search speed using harness monotonic wall time.
+    Nps(NpsCommand),
     /// Measure identical-binary symmetry under representative match conditions.
     Calibrate(Box<CalibrationCommand>),
     /// Inspect or compliance-check an ordinary UCI executable.
@@ -542,6 +544,24 @@ struct EngineInvocation {
     engine: EngineArgs,
 }
 
+#[derive(Debug, Args)]
+struct NpsCommand {
+    #[command(flatten)]
+    engine: EngineArgs,
+    /// Fixed number of nodes requested from the engine.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    nodes: u64,
+    /// UCI FEN to search; omit to use startpos (a weaker workload).
+    #[arg(long, default_value = "startpos")]
+    position: String,
+    /// Move following the selected position; repeat to provide a move list.
+    #[arg(long = "move")]
+    moves: Vec<String>,
+    /// Maximum wall time allowed for the fixed-node search.
+    #[arg(long, default_value_t = 60_000, value_parser = clap::value_parser!(u64).range(1..))]
+    deadline_ms: u64,
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -564,6 +584,7 @@ async fn main() -> ExitCode {
                 None => run_spsa_command(command, cli.json, cli.dry_run).await,
             }
         }
+        Command::Nps(command) => run_nps(command, cli.json, cli.dry_run).await,
         Command::Calibrate(command) => run_calibration(*command, cli.json, cli.dry_run).await,
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
         Command::SelfTest if cli.dry_run => unsupported_dry_run("self-test"),
@@ -2084,6 +2105,101 @@ async fn run_engine(command: EngineAction, machine: bool, dry_run: bool) -> Exit
     }
 }
 
+async fn run_nps(command: NpsCommand, machine: bool, dry_run: bool) -> ExitCode {
+    let request = NpsRequest {
+        nodes: command.nodes,
+        position: command.position,
+        moves: command.moves,
+        deadline_ms: command.deadline_ms,
+    };
+    let launch = match command.engine.resolve() {
+        Ok(launch) => launch,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut path_pointers = vec!["/engine/executable".to_owned()];
+    if launch.working_directory.is_some() {
+        path_pointers.push("/engine/working_directory".to_owned());
+    }
+    let current_directory = match std::env::current_dir() {
+        Ok(directory) => directory,
+        Err(error) => {
+            eprintln!("configuration error: cannot read current directory: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let resolved = match resolve_config(
+        built_in_defaults(),
+        None,
+        json!({ "command": "nps", "engine": launch, "workload": request }),
+        &[],
+        &current_directory,
+        &path_pointers,
+    ) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let launch: EngineLaunchSpec = serde_json::from_value(resolved.value()["engine"].clone())
+        .expect("resolved NPS engine retains its schema");
+    let request: NpsRequest = serde_json::from_value(resolved.value()["workload"].clone())
+        .expect("resolved NPS workload retains its schema");
+    if dry_run {
+        print_output(
+            &MachineOutput::DryRun {
+                command: "nps",
+                config_sha256: resolved.sha256(),
+                resolved_configuration: resolved.value(),
+                invocations: vec![&launch],
+            },
+            machine,
+        );
+        return ExitCode::SUCCESS;
+    }
+    if request.position == "startpos" && request.moves.is_empty() {
+        eprintln!(
+            "nps warning: startpos alone is a weak workload; use representative positions for decisions"
+        );
+    }
+    let participant = RuntimeParticipant {
+        id: ParticipantId::from_u128(1),
+        launch,
+    };
+    match MeasureNps::execute(&UciSessionFactory, &participant, request).await {
+        Ok(report) => {
+            if machine {
+                print_json(&MachineOutput::Nps { report });
+            } else {
+                println!("authoritative NPS: {:.3}", report.authoritative_nps);
+                println!(
+                    "fixed work: {} requested, {} reported; harness wall time: {:.3} ms",
+                    report.requested_nodes,
+                    report.reported_nodes,
+                    report.harness_elapsed_ns as f64 / 1_000_000.0
+                );
+                println!(
+                    "engine diagnostics: time={} ms, nps={}",
+                    report
+                        .engine_reported_time_ms
+                        .map_or_else(|| "unavailable".into(), |value| value.to_string()),
+                    report
+                        .engine_reported_nps
+                        .map_or_else(|| "unavailable".into(), |value| value.to_string())
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("nps measurement failed: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn resolve_invocation(
     action: &str,
     engine: &EngineArgs,
@@ -2152,6 +2268,9 @@ enum MachineOutput<'a> {
     },
     EngineCompliance {
         report: ComplianceReport,
+    },
+    Nps {
+        report: NpsReport,
     },
     SelfTest {
         report: self_test::SelfTestReport,

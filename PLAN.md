@@ -1023,6 +1023,13 @@ command is non-mutating. Once the frozen final window begins, status reuses the
   and report wall-time speedup and parallel efficiency relative to one thread.
   Store CPU class/NUMA placement and warn when symmetric placement is impossible.
 
+Implemented Phase 6.1 establishes the authoritative boundary: the application
+requests a typed fixed-node search, the UCI adapter returns the monotonic charged
+interval plus separately labelled engine claims, and the use case refuses a
+sample unless `info nodes` proves at least the requested work completed. Speed
+is requested nodes divided by harness wall time; neither `info time` nor
+`info nps` participates. Multi-arm experiment design remains Phase 6.2.
+
 **Success criteria**
 
 - A self-pair result is reported without being a prerequisite.

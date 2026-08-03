@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | Speed/scaling, book/replay/planning/suite tools, tournaments, release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 5 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 6.1 — authoritative fixed-node NPS measurement** |
+| Next step | **Phase 6.2 — reproducible multi-arm NPS comparison** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -587,8 +587,13 @@ model as well.
 
 ### Phase 6 — Speed, planning, replay, books and position suites
 
-- ☐ **6.1** — **Model: Sol High.** `nps` uses harness monotonic wall time over fixed-node searches;
-  reported nodes verify work; engine time/nps is diagnostic only
+- ☑ **6.1 — DONE** — **Model: Sol High.** `nps` uses the UCI process adapter's
+  charged monotonic interval over a typed fixed-node application search;
+  `info nodes` must verify completion, while engine time/nps remains separately
+  labelled diagnostic data that cannot affect authoritative speed — evidence:
+  [`crates/colosseum-application/src/nps.rs`](crates/colosseum-application/src/nps.rs),
+  [`crates/colosseum-uci/src/process.rs`](crates/colosseum-uci/src/process.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs)
 - ☐ **6.2** — **Model: Sol High.** One or more executables per arm with per-executable medians; self pair
   optional; seeded order, warm-up, cold/warm state policy, strict
   alternation, median/best-of, bootstrap CI and per-round SD
@@ -699,10 +704,11 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 6.1 — authoritative fixed-node NPS measurement. Model: GPT-5.6 Sol — High.**
-Add an `nps` application use case and CLI adapter whose authoritative sample is
-harness monotonic wall time over fixed-node UCI searches; engine-reported
-time/NPS remains diagnostic and cannot alter the result.
+**Phase 6.2 — reproducible multi-arm NPS comparison. Model: GPT-5.6 Sol — High.**
+Extend `nps` with multiple executables per arm, seeded positions and warm-up,
+explicit cold/warm state, strict alternation, robust arm/per-executable
+estimators, bootstrap median intervals, optional self-pair checks and
+per-round noise diagnostics.
 
 ```
 git diff --check

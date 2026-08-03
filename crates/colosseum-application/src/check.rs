@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ApplicationError, EngineInspection, EngineSessionFactory, PortFuture, RuntimeParticipant,
-    SearchRequest, UciOptionSchema, UciOptionValue,
+    SearchLimit, SearchRequest, UciOptionSchema, UciOptionValue,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -239,14 +239,14 @@ fn short_search() -> SearchRequest {
     SearchRequest {
         position: "startpos".into(),
         moves: Vec::new(),
-        move_time_ms: 25,
+        limit: SearchLimit::MoveTimeMs(25),
         deadline_ms: 2_000,
     }
 }
 
 fn long_search() -> SearchRequest {
     SearchRequest {
-        move_time_ms: 10_000,
+        limit: SearchLimit::MoveTimeMs(10_000),
         ..short_search()
     }
 }
@@ -395,6 +395,10 @@ mod tests {
                 Ok(SearchObservation {
                     best_move: "e2e4".into(),
                     ponder: None,
+                    reported_nodes: None,
+                    reported_time_ms: None,
+                    reported_nps: None,
+                    harness_elapsed_ns: 1,
                     diagnostics: Vec::new(),
                 })
             })
@@ -417,6 +421,10 @@ mod tests {
                 Ok(SearchObservation {
                     best_move: "g1f3".into(),
                     ponder: None,
+                    reported_nodes: None,
+                    reported_time_ms: None,
+                    reported_nps: None,
+                    harness_elapsed_ns: 1,
                     diagnostics: Vec::new(),
                 })
             })
