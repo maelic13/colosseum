@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | Release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 7 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 8.1 — release-candidate external-runner parity** |
+| Next step | **Phase 8.2 — remaining feature-gap decisions** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -684,8 +684,9 @@ model as well.
 
 ### Phase 8 — Parity against external runners, and remaining gaps
 
-- ☐ **8.1** — **Model: Sol High.** Repeat Phase-4B parity with current supported external versions and
-  the exact release candidate, comparing only oracle-matrix shared fields
+- ☑ **8.1 DONE** — **Model: Sol High.** Release-candidate parity repeated with current FastChess and
+  Cute Chess; exact executable/artifact hashes and every shared-field result or
+  reasoned exclusion are frozen and hermetically tested
 - ☐ **8.2** — **Model: Sol High.** Remaining feature gaps: adopt / decline with a reason / defer.
   Candidates: Chess960, ponder, harness Syzygy adjudication, additional
   formats and whether datagen now has generic needs beyond a match recipe.
@@ -763,11 +764,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 8.1 — release-candidate external-runner parity. Model: GPT-5.6 Sol — High.**
-Repeat the Phase-4B oracle matrix against the current supported external-runner
-versions and the exact CLI release candidate. Compare only shared fields and
-record every divergence; do not turn runner-specific behavior into a false
-equivalence requirement.
+**Phase 8.2 — remaining feature-gap decisions. Model: GPT-5.6 Sol — High.**
+Audit Chess960, ponder, harness-side Syzygy adjudication, additional formats
+and generic datagen requirements. Adopt, decline with a reason, or defer each;
+use a general engine developer's need as the tie-breaker.
 
 ```
 git diff --check

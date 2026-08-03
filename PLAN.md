@@ -1850,6 +1850,16 @@ boundary are recorded in
   whether a general engine developer needs it**, not whether the validation
   engines do.
 
+**Accepted (8.1):** the 0.1.0 release candidate at commit
+`86fc42b442d0f2a354a1fcc1ec5c09cad47a0f43` was compared on Windows with
+FastChess 1.8.0-alpha and Cute Chess 1.5.1 using the same hashed Rarog binary.
+All three runners agreed on the oracle matrix's shared game count, complete
+pairs, colour reversal, W/D/L, draw ratio, termination and fault fields;
+FastChess and Colosseum also agreed on the pentanomial vector. The capped-SPRT
+exit and zero-variance presentation differences are classified and excluded,
+with executable, artifact and raw-result hashes frozen in
+[`docs/architecture/phase-8-parity.md`](docs/architecture/phase-8-parity.md).
+
 ### Phase 9 — Documentation and release
 The deliverable is a tool any engine developer can pick up.
 

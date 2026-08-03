@@ -1,0 +1,25 @@
+{
+  "source": "reviewed projection of exact release-mode candidate result.json",
+  "candidate_commit": "86fc42b442d0f2a354a1fcc1ec5c09cad47a0f43",
+  "candidate_sha256": "652e1c41cb16261c15a07cdcd1f18cfbf855957b0b7e57794006eee80e97a16f",
+  "raw_result_sha256": "572a5cbb38d3c2ded8f767b47f2f4d528a83e458183d45a8f9f7dd9e4af0e7e6",
+  "status": "inconclusive",
+  "exit_code": 4,
+  "games": 8,
+  "wins": 0,
+  "draws": 8,
+  "losses": 0,
+  "complete_pairs": 4,
+  "pentanomial": [0, 0, 4, 0, 0],
+  "colour_split": {
+    "a_as_white": [0, 4, 0],
+    "a_as_black": [0, 4, 0]
+  },
+  "faults": {
+    "engine_a": 0,
+    "engine_b": 0,
+    "time_losses_a": 0,
+    "time_losses_b": 0,
+    "infrastructure": 0
+  }
+}

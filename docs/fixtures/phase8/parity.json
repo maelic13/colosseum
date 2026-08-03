@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "checked_on": "2026-08-03",
+  "host": "Microsoft Windows 11 Enterprise x86_64",
+  "oracle_matrix": "tests/fixtures/statistics/oracle-matrix.md",
+  "conditions": "same Rarog 2.3.1 executable (SHA-256 2a95390ddff846ffcc132494d1a28dcde8b703d1d9ec57aa7199a3b856ab916b) on both arms; depth 1; startpos/no book; 4 colour-reversed pairs; concurrency 1; draw after move 5 when 2 consecutive scores are within 10000 cp",
+  "shared_fields": [
+    "game count",
+    "complete pair count",
+    "colour reversal",
+    "W/D/L",
+    "draw ratio",
+    "termination class",
+    "engine faults"
+  ],
+  "conditionally_shared_fields": [
+    "pentanomial vector (FastChess and Colosseum only)"
+  ],
+  "excluded_fields": [
+    "Elo",
+    "confidence interval",
+    "LOS",
+    "LLR",
+    "Wald bounds"
+  ],
+  "exclusion_reason": "The all-draw smoke sample has zero variance, and Cute Chess was not given a matched normalized pentanomial SPRT design. NaN/infinity presentation is not an oracle.",
+  "version_sources": [
+    {
+      "runner": "fastchess",
+      "version": "fastchess alpha 1.8.0 compiled for windows-latest 20260128-072859b (CI)",
+      "source": "https://github.com/Disservin/fastchess/releases/tag/v1.8.0-alpha",
+      "latest_confirmed": true
+    },
+    {
+      "runner": "cutechess-cli",
+      "version": "cutechess-cli 1.5.1 (Qt 6.8.3)",
+      "source": "https://github.com/cutechess/cutechess/releases/tag/v1.5.1",
+      "latest_confirmed": true
+    }
+  ],
+  "observations": [
+    {
+      "runner": "fastchess",
+      "runner_version": "fastchess alpha 1.8.0 compiled for windows-latest 20260128-072859b (CI)",
+      "runner_sha256": "8444e73965ae44e716cde1bb546a7d7c8c9fc7a442a44194a0c71a3bffa7dd0d",
+      "artifact": "tests/fixtures/statistics/external/phase4b5-live-fastchess.console.txt",
+      "artifact_sha256": "4cbd54276e9706d1818f5c29980afba7f7135ae220707d11e7e7dc9a7ca6a5a0",
+      "rerun_byte_identical": true,
+      "command": "<fastchess> -engine cmd=<rarog> name=A -engine cmd=<rarog> name=B -each depth=1 -rounds 4 -repeat -concurrency 1 -draw movenumber=5 movecount=2 score=10000 -ratinginterval 8",
+      "exit_code": 0,
+      "status": "completed",
+      "games": 8,
+      "wins": 0,
+      "draws": 8,
+      "losses": 0,
+      "complete_pairs": 4,
+      "pentanomial": [0, 0, 4, 0, 0],
+      "faults": 0
+    },
+    {
+      "runner": "cutechess-cli",
+      "runner_version": "cutechess-cli 1.5.1 (Qt 6.8.3)",
+      "runner_sha256": "8889f9582dc688c567704cf083f6025baf77f791cde903698c70b3420caf5d7e",
+      "artifact": "tests/fixtures/statistics/external/phase4b5-live-cutechess.console.txt",
+      "artifact_sha256": "e1179aee6f2f23bdf6e23002acd4caa489793c2041de0121be694b7158e0d222",
+      "rerun_byte_identical": true,
+      "command": "<cutechess-cli> -engine cmd=<rarog> name=A -engine cmd=<rarog> name=B -each proto=uci tc=inf depth=1 -rounds 4 -games 2 -repeat -concurrency 1 -draw movenumber=5 movecount=2 score=10000 -ratinginterval 8",
+      "exit_code": 0,
+      "status": "completed",
+      "games": 8,
+      "wins": 0,
+      "draws": 8,
+      "losses": 0,
+      "complete_pairs": 4,
+      "pentanomial": null,
+      "faults": 0
+    },
+    {
+      "runner": "colosseum-cli",
+      "runner_version": "0.1.0 release candidate at 86fc42b442d0f2a354a1fcc1ec5c09cad47a0f43",
+      "runner_sha256": "652e1c41cb16261c15a07cdcd1f18cfbf855957b0b7e57794006eee80e97a16f",
+      "artifact": "tests/fixtures/statistics/external/phase8-colosseum.json",
+      "artifact_sha256": "45a44b6bd05fb46aa8a9a518d1c57102492b8da9cdbc7f3bad18c12350e41b87",
+      "raw_result_sha256": "572a5cbb38d3c2ded8f767b47f2f4d528a83e458183d45a8f9f7dd9e4af0e7e6",
+      "rerun_byte_identical": false,
+      "command": "<colosseum-cli> sprt <rarog> <rarog> --max-pairs 4 --preset gainer --a-depth 1 --b-depth 1 --draw-move 5 --draw-moves 2 --draw-score-cp 10000 --dir <run-dir> --json --seed 123 --placement off",
+      "exit_code": 4,
+      "status": "inconclusive",
+      "games": 8,
+      "wins": 0,
+      "draws": 8,
+      "losses": 0,
+      "complete_pairs": 4,
+      "pentanomial": [0, 0, 4, 0, 0],
+      "faults": 0
+    }
+  ],
+  "divergences": [
+    {
+      "field": "terminal status and process exit",
+      "classification": "expected interface difference",
+      "reason": "The external fixed runs complete normally; the capped Colosseum SPRT correctly reports INCONCLUSIVE with exit 4 at four zero-variance pairs."
+    },
+    {
+      "field": "zero-variance statistical presentation",
+      "classification": "excluded by oracle matrix",
+      "reason": "FastChess/Cute Chess display NaN or infinity while Colosseum retains typed unavailability; no finite statistic exists to compare."
+    }
+  ]
+}
