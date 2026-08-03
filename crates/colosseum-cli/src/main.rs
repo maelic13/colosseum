@@ -88,6 +88,8 @@ enum Command {
     Engine(EngineCommand),
     /// Inspect, verify, hash or deterministically slice an opening book.
     Book(BookCommand),
+    /// Replay match statistics from the strongest available evidence source.
+    Stats(StatsCommand),
     /// Verify this exact executable's protocol, process and persistence paths.
     SelfTest,
     /// Read the official state of any CLI run without modifying it.
@@ -558,6 +560,15 @@ struct BookCommand {
     action: BookAction,
 }
 
+#[derive(Debug, Args)]
+struct StatsCommand {
+    /// Run directory or structured JSON, PGN, log, or console-text file.
+    input: PathBuf,
+    /// Engine name used as the perspective for PGN replay.
+    #[arg(long)]
+    subject: Option<String>,
+}
+
 #[derive(Debug, Subcommand)]
 enum BookAction {
     /// Write a deterministic canonical EPD subset.
@@ -744,6 +755,8 @@ async fn main() -> ExitCode {
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
         Command::Book(_) if cli.dry_run => unsupported_dry_run("book"),
         Command::Book(command) => run_book(command.action, cli.json),
+        Command::Stats(_) if cli.dry_run => unsupported_dry_run("stats"),
+        Command::Stats(command) => run_stats(command, cli.json),
         Command::SelfTest if cli.dry_run => unsupported_dry_run("self-test"),
         Command::SelfTest => run_self_test(cli.json).await,
         Command::Status { .. } if cli.dry_run => unsupported_dry_run("status"),
@@ -2405,6 +2418,45 @@ fn run_book(action: BookAction, machine: bool) -> ExitCode {
     }
 }
 
+fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
+    match colosseum_cli::stats_replay::replay(&command.input, command.subject.as_deref()) {
+        Ok(report) => {
+            for warning in &report.warnings {
+                eprintln!("stats warning: {warning}");
+            }
+            if machine {
+                print_json(&MachineOutput::StatsReplay { report });
+            } else {
+                println!(
+                    "authority: {} ({})",
+                    report.authority,
+                    report.source.display()
+                );
+                println!("perspective: {}", report.perspective);
+                println!(
+                    "{} games: {} wins, {} draws, {} losses; score {:.6}",
+                    report.games, report.wins, report.draws, report.losses, report.score
+                );
+                println!(
+                    "pairing: {}; {} complete pairs, {} unpaired games",
+                    report.pairing, report.complete_pairs, report.unpaired_games
+                );
+                if let Some(vector) = report.pentanomial {
+                    println!("pentanomial: {vector:?}");
+                }
+                if let Some(reason) = &report.paired_statistics_unavailable {
+                    println!("paired statistics unavailable: {reason}");
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("statistics replay failed: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn opening_book(input: &BookInput) -> Result<OpeningBook, String> {
     let format = input.format.map(Into::into).unwrap_or_else(|| {
         OpeningFormat::from_extension(
@@ -3297,6 +3349,9 @@ enum MachineOutput<'a> {
     },
     BookSlice {
         report: BookSliceReport,
+    },
+    StatsReplay {
+        report: colosseum_cli::stats_replay::StatsReplayReport,
     },
     Nps {
         report: NpsReport,

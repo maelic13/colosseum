@@ -28,8 +28,71 @@ fn help_is_headless_and_names_the_product() {
     assert!(stdout.contains("spsa"));
     assert!(stdout.contains("nps"));
     assert!(stdout.contains("book"));
+    assert!(stdout.contains("stats"));
     assert!(stdout.contains("calibrate"));
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn stats_replay_obeys_source_authority_and_never_pairs_pgn_by_guessing() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("match");
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+    let played = cli()
+        .args(["match", "--games", "4"])
+        .arg(binary)
+        .arg(binary)
+        .args([
+            "--a-engine-arg=__uci-stub",
+            "--b-engine-arg=__uci-stub",
+            "--max-moves",
+            "2",
+            "--placement",
+            "off",
+            "--dir",
+        ])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(
+        played.status.success(),
+        "{}",
+        String::from_utf8_lossy(&played.stderr)
+    );
+
+    let structured = cli().arg("stats").arg(&run).arg("--json").output().unwrap();
+    assert!(structured.status.success());
+    let structured: serde_json::Value = serde_json::from_slice(&structured.stdout).unwrap();
+    assert_eq!(structured["report"]["authority"], "structured-run-store");
+    assert_eq!(structured["report"]["pairing"], "paired");
+    assert_eq!(structured["report"]["complete_pairs"], 2);
+    assert_eq!(structured["report"]["unpaired_games"], 0);
+    assert_eq!(
+        structured["report"]["pentanomial"],
+        serde_json::json!([0, 0, 2, 0, 0])
+    );
+
+    std::fs::write(run.join("result.json"), "not json").unwrap();
+    let checkpoint = cli().arg("stats").arg(&run).arg("--json").output().unwrap();
+    assert!(checkpoint.status.success());
+    let checkpoint: serde_json::Value = serde_json::from_slice(&checkpoint.stdout).unwrap();
+    assert_eq!(checkpoint["report"]["attempts"][0]["accepted"], false);
+    assert_eq!(checkpoint["report"]["attempts"][1]["accepted"], true);
+    assert_eq!(checkpoint["report"]["complete_pairs"], 2);
+
+    std::fs::remove_file(run.join("result.json")).unwrap();
+    std::fs::remove_file(run.join("checkpoint.json")).unwrap();
+    if run.join("checkpoint.previous.json").exists() {
+        std::fs::remove_file(run.join("checkpoint.previous.json")).unwrap();
+    }
+    let pgn = cli().arg("stats").arg(&run).arg("--json").output().unwrap();
+    assert!(pgn.status.success());
+    let pgn: serde_json::Value = serde_json::from_slice(&pgn.stdout).unwrap();
+    assert_eq!(pgn["report"]["authority"], "pgn-export");
+    assert_eq!(pgn["report"]["pairing"], "unpaired");
+    assert_eq!(pgn["report"]["complete_pairs"], 0);
+    assert_eq!(pgn["report"]["unpaired_games"], 4);
 }
 
 #[test]

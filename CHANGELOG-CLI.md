@@ -27,3 +27,5 @@ The first public CLI release is not yet published.
   fixed-total/per-thread Hash, topology evidence, speedup and efficiency.
 - Added engine-free EPD/PGN `book hash`, `verify`, `stats` and deterministic
   canonical-EPD `slice` utilities.
+- Added statistics replay with explicit structured/checkpoint/PGN/log/console
+  authority and fail-closed unpaired fallback when pair identity is absent.

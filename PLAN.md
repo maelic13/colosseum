@@ -1124,6 +1124,12 @@ is the portable game export; logs are forensic evidence; console output is
 observational only. Every live number must be reproducible from the structured
 run directory. PGN replay reproduces only information the PGN actually carries.
 
+Implemented Phase 6.5 walks that order explicitly and retains an attempt audit.
+Checkpoint generations are checksum-verified. Exact structured schedule number,
+colour reversal and opening equality are required before two games enter a
+pentanomial bin; PGN/console replay is always labelled unpaired, while complete
+JSON-lines `game-completed` evidence may retain pair identity.
+
 **Search telemetry from a PGN.** Where move annotations are present, report per
 engine the coverage fraction and mean/median depth, elapsed time and implied
 nodes per second. List the supported annotation syntaxes; preserve unknown

@@ -18,8 +18,8 @@ numbers, internal naming or method argumentation.
 | What is missing | Speed/scaling, book/replay/planning/suite tools, tournaments, release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 5 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 6.5 — statistics replay authority** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 6.6 — fixed/SPRT experiment planning** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -617,8 +617,13 @@ model as well.
   [`crates/colosseum-engine/src/openings.rs`](crates/colosseum-engine/src/openings.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/book.md`](docs/cli/book.md)
-- ☐ **6.5** — **Model: Terra High.** `stats` authority: structured run store > PGN export > forensic log >
-  console; missing pair identity falls back to labelled unpaired statistics
+- ☑ **6.5 — DONE** — **Model: Terra High.** `stats` records and follows
+  structured result/checksummed checkpoint/current-previous > PGN > forensic
+  JSON-lines log > console authority; only exact structured schedule/opening
+  companions form pairs, while missing identity stays visibly unpaired —
+  evidence: [`crates/colosseum-cli/src/stats_replay.rs`](crates/colosseum-cli/src/stats_replay.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
+  [`docs/cli/stats.md`](docs/cli/stats.md)
 - ☐ **6.6** — **Model: Sol High.** `stats plan fixed|sprt` with explicit assumptions; fixed-N required
   pairs/achieved resolution and seeded SPRT expected-length simulation
 - ☐ **6.7** — **Model: Terra High.** PGN telemetry lists supported annotations and coverage; excludes
@@ -720,10 +725,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 6.5 — statistics replay authority. Model: GPT-5.6 Terra — High.**
-Add `stats` replay with explicit source precedence: structured run store, PGN
-export, forensic log, then console; retain paired statistics only when pair
-identity is provable and label unpaired fallback honestly.
+**Phase 6.6 — fixed/SPRT experiment planning. Model: GPT-5.6 Sol — High.**
+Add `stats plan fixed` with explicit effect/power/distribution assumptions and
+achieved resolution, plus seeded `stats plan sprt` expected-length simulation
+that is clearly not a stopping guarantee.
 
 ```
 git diff --check

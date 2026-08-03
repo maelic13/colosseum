@@ -7,6 +7,7 @@ pub mod run_directory;
 pub mod run_record;
 pub mod spsa_schedule;
 pub mod spsa_tune;
+pub mod stats_replay;
 
 pub use config::{ConfigError, ResolvedConfig, ValueOrigin, built_in_defaults, resolve_config};
 pub use engine_args::{EngineArgs, EngineArgsError, parse_cpu_list};
