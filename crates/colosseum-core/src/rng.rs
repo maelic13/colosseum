@@ -13,6 +13,7 @@ pub mod stream_names {
     pub const OPENING_ORDER: &str = "opening-order";
     pub const SPSA_PERTURBATIONS: &str = "spsa-perturbations";
     pub const BOOTSTRAP_RESAMPLING: &str = "bootstrap-resampling";
+    pub const SPRT_LENGTH_SIMULATION: &str = "sprt-length-simulation";
     pub const POSITION_ORDER: &str = "position-order";
     pub const WARMUP_SCHEDULING: &str = "warmup-scheduling";
 }

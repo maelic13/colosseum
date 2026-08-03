@@ -15,13 +15,15 @@ use colosseum_application::{
     CompareNps, CompletePair, ComplianceReport, ComplianceStatus, DEFAULT_CALIBRATION_CONFIDENCE,
     DEFAULT_CALIBRATION_GAMES, DEFAULT_CALIBRATION_TOLERANCE_NELO,
     DEFAULT_SPSA_FINAL_WINDOW_PERCENT, DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS,
-    EngineInspection, EngineLaunchSpec, InspectEngine, MeasureNps, NpsExperimentDesign,
-    NpsExperimentParticipant, NpsExperimentReport, NpsHashPolicy, NpsReport, NpsRequest,
-    NpsScalingInput, NpsScalingReport, NpsStatePolicy, RuntimeParticipant, SprtBundle, SprtDesign,
+    EngineInspection, EngineLaunchSpec, FixedPlanObjective, FixedPlanReport, FixedPlanRequest,
+    InspectEngine, MeasureNps, NpsExperimentDesign, NpsExperimentParticipant, NpsExperimentReport,
+    NpsHashPolicy, NpsReport, NpsRequest, NpsScalingInput, NpsScalingReport, NpsStatePolicy,
+    RuntimeParticipant, SprtBundle, SprtDesign, SprtLengthPlanReport, SprtLengthPlanRequest,
     SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaCommittedUpdate, SpsaGateHashStatus,
     SpsaPlanReport, SpsaRunSettings, SpsaStatusReport, SpsaTimingInput, SpsaTuneAudit,
     SpsaTuneResult, SpsaTuneWarning, SpsaTuningState, UciOptionSchema, UciOptionValue,
-    classify_calibration, diagnose_spsa, plan_spsa, summarize_nps_scaling,
+    classify_calibration, diagnose_spsa, plan_fixed, plan_sprt_length, plan_spsa,
+    summarize_nps_scaling,
 };
 use colosseum_cli::{
     EngineArgs, OfficialSample, RunDirectory, RunRecord, RunRecorder, RunStatus, built_in_defaults,
@@ -563,10 +565,91 @@ struct BookCommand {
 #[derive(Debug, Args)]
 struct StatsCommand {
     /// Run directory or structured JSON, PGN, log, or console-text file.
-    input: PathBuf,
+    input: Option<PathBuf>,
     /// Engine name used as the perspective for PGN replay.
     #[arg(long)]
     subject: Option<String>,
+    #[command(subcommand)]
+    action: Option<StatsAction>,
+}
+
+#[derive(Debug, Subcommand)]
+enum StatsAction {
+    /// Plan prospective fixed-N or expected SPRT length.
+    Plan(StatsPlanCommand),
+}
+
+#[derive(Debug, Args)]
+struct StatsPlanCommand {
+    #[command(subcommand)]
+    action: StatsPlanAction,
+}
+
+#[derive(Debug, Subcommand)]
+enum StatsPlanAction {
+    /// Estimate fixed-N pairs under explicit distribution assumptions.
+    Fixed(StatsFixedPlanCommand),
+    /// Simulate a capped SPRT length distribution under explicit assumptions.
+    Sprt(StatsSprtPlanCommand),
+}
+
+#[derive(Debug, Args)]
+struct StatsFixedPlanCommand {
+    #[arg(long, value_enum)]
+    objective: FixedPlanObjectiveArg,
+    #[arg(long, value_enum)]
+    model: SprtModelArg,
+    /// Positive effect (difference) or symmetric margin (equivalence), in selected Elo model.
+    #[arg(long)]
+    effect_or_margin: f64,
+    #[arg(long, default_value_t = 0.05)]
+    significance: f64,
+    #[arg(long, default_value_t = 0.8)]
+    power: f64,
+    /// Five comma-separated pentanomial probabilities summing to one.
+    #[arg(long)]
+    distribution: String,
+    /// Optional five comma-separated observed bin counts for achieved resolution.
+    #[arg(long)]
+    observed_pentanomial: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct StatsSprtPlanCommand {
+    #[arg(long, value_enum)]
+    model: SprtModelArg,
+    #[arg(long)]
+    elo0: f64,
+    #[arg(long)]
+    elo1: f64,
+    #[arg(long, default_value_t = 0.05)]
+    alpha: f64,
+    #[arg(long, default_value_t = 0.05)]
+    beta: f64,
+    /// Five comma-separated assumed true pentanomial probabilities.
+    #[arg(long)]
+    distribution: String,
+    #[arg(long, default_value_t = 1_000, value_parser = clap::value_parser!(u32).range(1..))]
+    simulations: u32,
+    #[arg(long, value_parser = clap::value_parser!(u32).range(2..))]
+    max_pairs: u32,
+    #[arg(long, default_value_t = 0)]
+    seed: u64,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum FixedPlanObjectiveArg {
+    Difference,
+    Equivalence,
+}
+
+impl From<FixedPlanObjectiveArg> for FixedPlanObjective {
+    fn from(value: FixedPlanObjectiveArg) -> Self {
+        match value {
+            FixedPlanObjectiveArg::Difference => Self::Difference,
+            FixedPlanObjectiveArg::Equivalence => Self::Equivalence,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -2419,7 +2502,18 @@ fn run_book(action: BookAction, machine: bool) -> ExitCode {
 }
 
 fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
-    match colosseum_cli::stats_replay::replay(&command.input, command.subject.as_deref()) {
+    if let Some(StatsAction::Plan(plan)) = command.action {
+        if command.input.is_some() || command.subject.is_some() {
+            eprintln!("configuration error: stats plan does not accept replay input or --subject");
+            return ExitCode::from(2);
+        }
+        return run_stats_plan(plan.action, machine);
+    }
+    let Some(input) = command.input else {
+        eprintln!("configuration error: stats requires an input path or the plan subcommand");
+        return ExitCode::from(2);
+    };
+    match colosseum_cli::stats_replay::replay(&input, command.subject.as_deref()) {
         Ok(report) => {
             for warning in &report.warnings {
                 eprintln!("stats warning: {warning}");
@@ -2455,6 +2549,137 @@ fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn run_stats_plan(action: StatsPlanAction, machine: bool) -> ExitCode {
+    match action {
+        StatsPlanAction::Fixed(command) => {
+            let request = match parse_fixed_plan_request(command) {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!("configuration error: {error}");
+                    return ExitCode::from(2);
+                }
+            };
+            match plan_fixed(request) {
+                Ok(report) => {
+                    if machine {
+                        print_json(&MachineOutput::StatsFixedPlan { report });
+                    } else {
+                        println!(
+                            "required: {} complete pairs ({} games)",
+                            report.required_pairs, report.required_games
+                        );
+                        println!(
+                            "planned score half-width: {:.8}",
+                            report.planned_score_half_width
+                        );
+                        if let Some(achieved) = &report.achieved_resolution {
+                            println!(
+                                "observed {} pairs: estimate {:.4}, interval {:.4}..{:.4}, conservative resolution {:.4}",
+                                achieved.pairs,
+                                achieved.estimate,
+                                achieved.lower,
+                                achieved.upper,
+                                achieved.conservative_resolution
+                            );
+                        }
+                        println!("interpretation: {}", report.interpretation);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("statistics plan failed: {error}");
+                    ExitCode::from(2)
+                }
+            }
+        }
+        StatsPlanAction::Sprt(command) => {
+            let distribution = match parse_f64_five(&command.distribution) {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!("configuration error: {error}");
+                    return ExitCode::from(2);
+                }
+            };
+            let request = SprtLengthPlanRequest {
+                model: command.model.into(),
+                elo0: command.elo0,
+                elo1: command.elo1,
+                alpha: command.alpha,
+                beta: command.beta,
+                assumed_true_distribution: distribution,
+                simulations: command.simulations,
+                max_pairs: command.max_pairs,
+                seed: command.seed,
+            };
+            match plan_sprt_length(request) {
+                Ok(report) => {
+                    if machine {
+                        print_json(&MachineOutput::StatsSprtPlan { report });
+                    } else {
+                        println!(
+                            "expected pairs: mean {:.2}, median {}, 5%..95% {}..{}; capped {} of {}",
+                            report.mean_pairs,
+                            report.median_pairs,
+                            report.p05_pairs,
+                            report.p95_pairs,
+                            report.capped,
+                            report.request.simulations
+                        );
+                        println!("interpretation: {}", report.interpretation);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("statistics plan failed: {error}");
+                    ExitCode::from(2)
+                }
+            }
+        }
+    }
+}
+
+fn parse_fixed_plan_request(command: StatsFixedPlanCommand) -> Result<FixedPlanRequest, String> {
+    Ok(FixedPlanRequest {
+        objective: command.objective.into(),
+        model: command.model.into(),
+        effect_or_margin: command.effect_or_margin,
+        significance: command.significance,
+        power: command.power,
+        assumed_distribution: parse_f64_five(&command.distribution)?,
+        observed_pentanomial: command
+            .observed_pentanomial
+            .as_deref()
+            .map(parse_u32_five)
+            .transpose()?,
+    })
+}
+
+fn parse_f64_five(value: &str) -> Result<[f64; 5], String> {
+    let parsed = value
+        .split(',')
+        .map(|item| {
+            item.parse::<f64>()
+                .map_err(|_| format!("invalid number {item:?}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    parsed
+        .try_into()
+        .map_err(|values: Vec<f64>| format!("expected five values, got {}", values.len()))
+}
+
+fn parse_u32_five(value: &str) -> Result<[u32; 5], String> {
+    let parsed = value
+        .split(',')
+        .map(|item| {
+            item.parse::<u32>()
+                .map_err(|_| format!("invalid count {item:?}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    parsed
+        .try_into()
+        .map_err(|values: Vec<u32>| format!("expected five counts, got {}", values.len()))
 }
 
 fn opening_book(input: &BookInput) -> Result<OpeningBook, String> {
@@ -3352,6 +3577,12 @@ enum MachineOutput<'a> {
     },
     StatsReplay {
         report: colosseum_cli::stats_replay::StatsReplayReport,
+    },
+    StatsFixedPlan {
+        report: FixedPlanReport,
+    },
+    StatsSprtPlan {
+        report: SprtLengthPlanReport,
     },
     Nps {
         report: NpsReport,

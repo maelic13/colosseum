@@ -29,3 +29,5 @@ The first public CLI release is not yet published.
   canonical-EPD `slice` utilities.
 - Added statistics replay with explicit structured/checkpoint/PGN/log/console
   authority and fail-closed unpaired fallback when pair identity is absent.
+- Added explicit fixed-sample difference/equivalence planning, descriptive
+  achieved resolution and seeded capped SPRT expected-length simulation.

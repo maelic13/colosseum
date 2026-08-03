@@ -15,6 +15,7 @@ pub mod sprt;
 pub mod spsa;
 pub mod spsa_plan;
 pub mod spsa_status;
+pub mod stats_plan;
 
 pub use calibration::{
     CalibrationBinaries, CalibrationDesign, CalibrationError, CalibrationInterval,
@@ -54,4 +55,8 @@ pub use spsa_status::{
     SPSA_STATUS_SCHEMA_VERSION, SpsaEta, SpsaHeuristic, SpsaHeuristicState, SpsaKnobDiagnostics,
     SpsaStatusError, SpsaStatusReport, SpsaThirdSummary, SpsaThirdsComparison, SpsaTrajectoryPoint,
     diagnose_spsa,
+};
+pub use stats_plan::{
+    AchievedResolutionReport, FixedPlanObjective, FixedPlanReport, FixedPlanRequest,
+    SprtLengthPlanReport, SprtLengthPlanRequest, StatsPlanError, plan_fixed, plan_sprt_length,
 };

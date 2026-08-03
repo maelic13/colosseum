@@ -28,3 +28,40 @@ reports labelled unpaired W/D/L and never guesses pairs from file order. Pass
 `--subject "Engine name"` to select an engine perspective for PGN; without it,
 PGN/console results use White's perspective. JSON-lines `game-completed` events
 retain structured match identity and can reconstruct pairs when complete.
+
+## Prospective experiment planning
+
+Planning is engine-free and requires the statistical assumptions on the
+command line. A fixed-sample difference design can also describe the interval
+resolution already achieved by an observed pentanomial sample:
+
+```text
+colosseum-cli stats plan fixed --objective difference --model normalized \
+  --effect-or-margin 5 --significance 0.05 --power 0.8 \
+  --distribution 0.05,0.20,0.50,0.20,0.05 \
+  --observed-pentanomial 5,20,50,20,5
+```
+
+Use `--objective equivalence` for a symmetric two-one-sided-test (TOST)
+approximation. Here `--effect-or-margin` is the positive equivalence margin,
+the assumed true effect is zero, and both one-sided tests must pass during the
+actual fixed-sample analysis. Difference planning uses a two-sided test around
+zero. Both calculations use a normal approximation and the supplied
+pentanomial distribution for pair-score variance; output is in complete pairs
+and twice as many games.
+
+Expected SPRT length is a seeded Monte Carlo planning aid:
+
+```text
+colosseum-cli stats plan sprt --model normalized --elo0 0 --elo1 5 \
+  --alpha 0.05 --beta 0.05 \
+  --distribution 0.05,0.20,0.50,0.20,0.05 \
+  --simulations 1000 --max-pairs 100000 --seed 42
+```
+
+The distribution is the assumed true pentanomial distribution. The report
+retains it together with the hypotheses, error rates, seed, simulation cap,
+stable named RNG stream and sampling algorithm. Capped trials are reported,
+not discarded. The resulting length distribution is neither an SPRT stopping
+rule nor a guarantee for the eventual engines or workload. Use `--json` for
+the complete machine-readable reports.

@@ -96,6 +96,89 @@ fn stats_replay_obeys_source_authority_and_never_pairs_pgn_by_guessing() {
 }
 
 #[test]
+fn statistics_plans_are_explicit_and_seed_reproducible() {
+    let fixed = cli()
+        .args([
+            "stats",
+            "plan",
+            "fixed",
+            "--objective",
+            "difference",
+            "--model",
+            "normalized",
+            "--effect-or-margin",
+            "5",
+            "--distribution",
+            "0.05,0.2,0.5,0.2,0.05",
+            "--observed-pentanomial",
+            "5,20,50,20,5",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        fixed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fixed.stderr)
+    );
+    let fixed: serde_json::Value = serde_json::from_slice(&fixed.stdout).unwrap();
+    assert_eq!(fixed["type"], "stats-fixed-plan");
+    assert_eq!(
+        fixed["report"]["required_games"].as_u64().unwrap(),
+        fixed["report"]["required_pairs"].as_u64().unwrap() * 2
+    );
+    assert_eq!(fixed["report"]["achieved_resolution"]["pairs"], 100);
+
+    let run = || {
+        cli()
+            .args([
+                "stats",
+                "plan",
+                "sprt",
+                "--model",
+                "normalized",
+                "--elo0",
+                "0",
+                "--elo1",
+                "5",
+                "--distribution",
+                "0.05,0.2,0.5,0.2,0.05",
+                "--simulations",
+                "20",
+                "--max-pairs",
+                "20",
+                "--seed",
+                "42",
+                "--json",
+            ])
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    let second = run();
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert_eq!(first.stdout, second.stdout);
+    let sprt: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert_eq!(sprt["type"], "stats-sprt-plan");
+    assert_eq!(
+        sprt["report"]["accepted_h0"].as_u64().unwrap()
+            + sprt["report"]["accepted_h1"].as_u64().unwrap()
+            + sprt["report"]["capped"].as_u64().unwrap(),
+        20
+    );
+    assert!(
+        sprt["report"]["interpretation"]
+            .as_str()
+            .unwrap()
+            .contains("not a stopping guarantee")
+    );
+}
+
+#[test]
 fn book_tools_hash_verify_stats_and_slice_without_an_engine() {
     let root = tempfile::tempdir().unwrap();
     let input = root.path().join("openings.epd");

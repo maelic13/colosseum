@@ -1148,6 +1148,13 @@ accounting has compatible semantics—normally the same engine lineage.
 - Post-run output reports achieved intervals/resolution; it never back-fits a
   planning MDE and presents it as a fact.
 
+Implemented Phase 6.6 keeps this workflow engine-free. Fixed difference and
+symmetric TOST-equivalence designs state their normal-approximation,
+distribution and zero-effect assumptions and may report descriptive achieved
+resolution from supplied counts. SPRT planning uses a dedicated versioned
+named RNG stream, retains the seed/cap/algorithm, counts capped simulations and
+labels its output as an expected-length model rather than a stopping guarantee.
+
 **Success criteria:** every golden fixture replays through the command with the
 same result as the library API; telemetry aggregates match hand-computed values
 on fixture PGNs in every supported syntax; missing pair/telemetry information
