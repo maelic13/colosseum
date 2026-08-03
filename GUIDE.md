@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–5 are complete: fixed matches, externally checked pair-atomic capped SPRT, optional identical-binary calibration and exact durable SPSA with planning, diagnostics, final artifacts and hash-verified gate loop over ordinary UCI engines |
-| What is missing | Phase-6 acceptance, tournaments, release-candidate parity/gap decisions, documentation and release acceptance |
+| What exists | Phases 0–6 are complete: independent fixed match/SPRT/calibration/SPSA workflows plus speed/scaling, book, statistics planning/replay/telemetry and durable position-suite tools over ordinary UCI engines |
+| What is missing | Tournaments, release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 5 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 6.9 — Phase 6 acceptance** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Platform status | Windows ☑ local through Phase 6 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 7.1 — tournament use case and schedules** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -648,9 +648,13 @@ model as well.
   [`crates/colosseum-engine/src/suite_input.rs`](crates/colosseum-engine/src/suite_input.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/suite.md`](docs/cli/suite.md)
-- ☐ **6.9** — **EXIT · Model: Sol High.** Fake engine-reported nps cannot affect authoritative speed;
-  skew/scaling/state-policy tests pass; slicing/replay/planning/telemetry and
-  EPD suite match fixtures
+- ☑ **6.9 — DONE** — **EXIT · Model: Sol High.** One hermetic manifest binds
+  fake-NPS resistance, left-skew robustness, cold/warm process behavior,
+  scaling/Hash arithmetic, book reproducibility, replay/planning/telemetry and
+  durable suite fixtures; the complete workspace baseline is green — evidence:
+  [`docs/architecture/phase-6-exit.md`](docs/architecture/phase-6-exit.md),
+  [`docs/fixtures/phase6/acceptance.json`](docs/fixtures/phase6/acceptance.json),
+  [`crates/colosseum-cli/tests/phase6_acceptance.rs`](crates/colosseum-cli/tests/phase6_acceptance.rs)
 
 ### Phase 7 — Tournaments
 
@@ -742,10 +746,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 6.9 — Phase 6 acceptance. Model: GPT-5.6 Sol — High.**
-Bind the speed, scaling, state-policy, book, replay, planning, telemetry and
-suite fixture evidence into the Phase 6 exit gate, including proof that fake
-engine-reported NPS cannot affect authoritative speed.
+**Phase 7.1 — tournament use case and schedules. Model: GPT-5.6 Terra — High.**
+Add one shared `tournament` use case for round-robin and one/multi-seed
+gauntlets. An optional `gauntlet` CLI alias must dispatch to that same
+implementation rather than create a second tournament path.
 
 ```
 git diff --check

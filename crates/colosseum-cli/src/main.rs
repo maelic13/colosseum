@@ -22,7 +22,7 @@ use colosseum_application::{
     SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaCommittedUpdate, SpsaGateHashStatus,
     SpsaPlanReport, SpsaRunSettings, SpsaStatusReport, SpsaTimingInput, SpsaTuneAudit,
     SpsaTuneResult, SpsaTuneWarning, SpsaTuningState, UciOptionSchema, UciOptionValue,
-    classify_calibration, diagnose_spsa, plan_fixed, plan_sprt_length, plan_spsa,
+    classify_calibration, diagnose_spsa, plan_fixed, plan_sprt_length, plan_spsa, scaling_hash_mb,
     summarize_nps_scaling,
 };
 use colosseum_cli::{
@@ -3220,16 +3220,11 @@ async fn run_nps_scaling(
             .iter()
             .flat_map(|core| core.logical_cpus.iter().copied())
             .collect::<Vec<_>>();
-        let point_hash = match hash_policy {
-            NpsHashPolicy::FixedTotal => command.hash_mb,
-            NpsHashPolicy::PerThread => {
-                match command.hash_mb.checked_mul(u64::from(thread_count)) {
-                    Some(value) => value,
-                    None => {
-                        eprintln!("configuration error: per-thread Hash size overflows u64");
-                        return ExitCode::from(2);
-                    }
-                }
+        let point_hash = match scaling_hash_mb(hash_policy, command.hash_mb, thread_count) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
             }
         };
         let mut launch = base_launch.clone();

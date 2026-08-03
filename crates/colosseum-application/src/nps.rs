@@ -153,6 +153,20 @@ pub enum NpsError {
     ScalingCoreMismatch { threads: u32 },
     #[error("scaling NPS values must be finite and positive")]
     InvalidScalingNps,
+    #[error("scaling Hash requires positive base MiB and thread count without overflow")]
+    InvalidScalingHash,
+}
+
+pub fn scaling_hash_mb(policy: NpsHashPolicy, base_mb: u64, threads: u32) -> Result<u64, NpsError> {
+    if base_mb == 0 || threads == 0 {
+        return Err(NpsError::InvalidScalingHash);
+    }
+    match policy {
+        NpsHashPolicy::FixedTotal => Ok(base_mb),
+        NpsHashPolicy::PerThread => base_mb
+            .checked_mul(u64::from(threads))
+            .ok_or(NpsError::InvalidScalingHash),
+    }
 }
 
 pub fn summarize_nps_scaling(
@@ -767,6 +781,47 @@ mod tests {
     }
 
     #[test]
+    fn arm_medians_avoid_the_naive_ratio_bias_on_a_left_skewed_sample() {
+        let mut experiment = design();
+        experiment.positions.truncate(1);
+        experiment.repetitions = 3;
+        experiment.warmup_repetitions = 0;
+        let participants = vec![
+            experiment_participant("A", "a", 1),
+            experiment_participant("B", "b", 2),
+        ];
+        let schedule = build_schedule(&participants, &experiment).unwrap();
+        let a = [1.0, 10.0, 10.0];
+        let b = [10.0, 10.0, 1.0];
+        let samples = schedule
+            .iter()
+            .cloned()
+            .map(|schedule| NpsMeasuredSample {
+                measurement: NpsReport {
+                    requested_nodes: 1,
+                    reported_nodes: 1,
+                    harness_elapsed_ns: 1,
+                    authoritative_nps: if schedule.arm == "A" {
+                        a[schedule.repetition as usize]
+                    } else {
+                        b[schedule.repetition as usize]
+                    },
+                    engine_reported_time_ms: None,
+                    engine_reported_nps: None,
+                    best_move: "e2e4".into(),
+                },
+                schedule,
+            })
+            .collect();
+        let naive_mean_of_paired_ratios = (10.0 / 1.0 + 10.0 / 10.0 + 1.0 / 10.0) / 3.0;
+        assert!(naive_mean_of_paired_ratios > 3.0);
+        let report = summarize(experiment, schedule, samples).unwrap();
+        assert_eq!(report.arms[0].median_nps, 10.0);
+        assert_eq!(report.arms[1].median_nps, 10.0);
+        assert_eq!(report.arms[1].median_nps / report.arms[0].median_nps, 1.0);
+    }
+
+    #[test]
     fn scaling_speedup_and_efficiency_match_hand_arithmetic() {
         let input = |threads, median_nps| NpsScalingInput {
             threads,
@@ -786,5 +841,11 @@ mod tests {
         assert_eq!(report.points[1].parallel_efficiency, 0.9);
         assert_eq!(report.points[2].speedup, 3.0);
         assert_eq!(report.points[2].parallel_efficiency, 0.75);
+        assert_eq!(scaling_hash_mb(NpsHashPolicy::FixedTotal, 128, 4), Ok(128));
+        assert_eq!(scaling_hash_mb(NpsHashPolicy::PerThread, 128, 4), Ok(512));
+        assert_eq!(
+            scaling_hash_mb(NpsHashPolicy::PerThread, u64::MAX, 2),
+            Err(NpsError::InvalidScalingHash)
+        );
     }
 }

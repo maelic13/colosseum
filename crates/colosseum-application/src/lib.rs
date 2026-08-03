@@ -31,7 +31,7 @@ pub use nps::{
     CompareNps, MeasureNps, NpsArmSummary, NpsBuildSummary, NpsError, NpsExperimentDesign,
     NpsExperimentParticipant, NpsExperimentReport, NpsHashPolicy, NpsMeasuredSample, NpsReport,
     NpsRequest, NpsScalingInput, NpsScalingPoint, NpsScalingReport, NpsScheduleEntry,
-    NpsStatePolicy, summarize_nps_scaling,
+    NpsStatePolicy, scaling_hash_mb, summarize_nps_scaling,
 };
 pub use pair_commit::{CompletePair, PairCommitError, PairCommitQueue};
 pub use ports::*;

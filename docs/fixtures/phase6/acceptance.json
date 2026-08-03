@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "phase": "6",
+  "gates": [
+    {
+      "id": "authoritative-wall-clock-and-lie-resistance",
+      "evidence": "colosseum_application::nps::tests::{authoritative_speed_uses_requested_work_and_harness_time_only,reported_nodes_must_prove_the_fixed_work_completed}; command_line::nps_uses_fixed_nodes_and_exposes_engine_claim_as_diagnostic_only"
+    },
+    {
+      "id": "skew-robust-arm-estimator",
+      "evidence": "colosseum_application::nps::tests::arm_medians_avoid_the_naive_ratio_bias_on_a_left_skewed_sample"
+    },
+    {
+      "id": "cold-warm-state-policy",
+      "evidence": "phase6_acceptance::cold_restarts_each_sample_while_warm_reuses_one_session_per_arm; command_line::nps_comparison_records_seeded_warm_schedule_and_robust_summaries"
+    },
+    {
+      "id": "scaling-and-hash-policy",
+      "evidence": "colosseum_application::nps::tests::scaling_speedup_and_efficiency_match_hand_arithmetic; phase3_acceptance::{recorded_topology_corpus_selects_exact_expected_cpu_lists,busy_children_reside_only_on_their_enforced_cpu}"
+    },
+    {
+      "id": "book-reproducibility",
+      "evidence": "command_line::book_tools_hash_verify_stats_and_slice_without_an_engine"
+    },
+    {
+      "id": "replay-authority",
+      "evidence": "command_line::stats_replay_obeys_source_authority_and_never_pairs_pgn_by_guessing; stats_replay::tests::pgn_without_pair_identity_is_never_guessed_into_pairs"
+    },
+    {
+      "id": "experiment-planning",
+      "evidence": "command_line::statistics_plans_are_explicit_and_seed_reproducible; colosseum_application::stats_plan::tests"
+    },
+    {
+      "id": "pgn-telemetry",
+      "evidence": "command_line::pgn_statistics_report_search_telemetry_without_counting_opening_moves; pgn_telemetry::tests"
+    },
+    {
+      "id": "position-suite-and-recovery",
+      "evidence": "command_line::{position_suite_scores_bm_am_unscored_and_malformed_entries,killed_position_suite_resumes_without_duplicate_search_results}; suite::tests::comparison_refuses_incompatible_work_and_finds_changes; suite_input::tests"
+    },
+    {
+      "id": "workspace-regression",
+      "evidence": "cargo check --workspace --tests; cargo clippy --workspace; cargo test --workspace --all-targets"
+    }
+  ]
+}

@@ -1802,6 +1802,14 @@ regressions pass; scaling sweep fixtures pass; book slicing is reproducible;
 every golden fixture replays; fixed/SPRT planning matches fixtures; EPD suite
 and baseline compatibility tests pass.
 
+**Accepted (6.9):** fixed-node authority and fake-NPS resistance, left-skew
+robust summaries, cold/warm process behavior, scaling/Hash arithmetic, seeded
+book tools, replay authority, fixed/SPRT planning, PGN telemetry and durable
+position suites pass as one hermetic gate. Criterion owners and the real-engine
+evidence boundary are recorded in
+[`docs/architecture/phase-6-exit.md`](docs/architecture/phase-6-exit.md) and
+[`docs/fixtures/phase6/acceptance.json`](docs/fixtures/phase6/acceptance.json).
+
 ### Phase 7 — Tournaments
 
 Spec 5.7. **Exit:** round-robin and gauntlet schedules/ratings match the GUI;
