@@ -28,6 +28,8 @@ pub mod runner;
 pub mod scheduler;
 #[cfg(feature = "tournament")]
 pub mod store;
+#[cfg(feature = "runner")]
+pub mod suite_input;
 pub mod topology;
 
 pub use affinity::{
@@ -70,6 +72,8 @@ pub use scheduler::{
 };
 #[cfg(feature = "tournament")]
 pub use store::{GameRow, PendingGame, Store, TournamentEngineRow, TournamentRow};
+#[cfg(feature = "runner")]
+pub use suite_input::{SuiteInputFormat, parse_suite_input};
 pub use topology::{
     CpuTopology, LogicalCpuId, PhysicalCore, SiblingMapping, TopologyError, TopologySource,
     detect_cpu_topology,

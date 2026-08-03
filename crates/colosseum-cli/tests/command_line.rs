@@ -1,4 +1,7 @@
-use std::process::Command;
+use std::collections::BTreeSet;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_colosseum-cli"))
@@ -29,6 +32,7 @@ fn help_is_headless_and_names_the_product() {
     assert!(stdout.contains("nps"));
     assert!(stdout.contains("book"));
     assert!(stdout.contains("stats"));
+    assert!(stdout.contains("suite"));
     assert!(stdout.contains("calibrate"));
     assert!(output.stderr.is_empty());
 }
@@ -217,6 +221,159 @@ fn pgn_statistics_report_search_telemetry_without_counting_opening_moves() {
             .iter()
             .any(|warning| warning.as_str().unwrap().contains("node accounting"))
     );
+}
+
+#[test]
+fn position_suite_scores_bm_am_unscored_and_malformed_entries() {
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("positions.epd");
+    let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
+    std::fs::write(
+        &input,
+        format!(
+            "{start} bm e4 d4; id \"accepted\"; ce 10;\n{start} am e4; id \"avoided\";\n{start}; id \"unscored\";\n{start} bm Ke9;\n"
+        ),
+    )
+    .unwrap();
+    let run = root.path().join("run");
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+    let output = cli()
+        .arg("suite")
+        .arg(binary)
+        .arg(&input)
+        .args([
+            "--engine-arg=__uci-stub",
+            "--depth",
+            "1",
+            "--deadline-ms",
+            "1000",
+            "--dir",
+        ])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(output["type"], "suite");
+    assert_eq!(output["report"]["total_entries"], 4);
+    assert_eq!(output["report"]["searched"], 3);
+    assert_eq!(output["report"]["assessed"], 2);
+    assert_eq!(output["report"]["passed"], 1);
+    assert_eq!(output["report"]["failed"], 1);
+    assert_eq!(output["report"]["unscored"], 1);
+    assert_eq!(output["report"]["malformed"], 1);
+    assert_eq!(
+        output["report"]["results"][0]["unknown_operations"],
+        serde_json::json!(["ce 10"])
+    );
+    assert!(run.join("result.json").is_file());
+    assert!(run.join("checkpoint.json").is_file());
+    let record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
+    assert_eq!(record["status"], "invalid");
+    assert_eq!(record["official_sample"]["committed_units"], 4);
+
+    let compared_run = root.path().join("compared");
+    let compared = cli()
+        .arg("suite")
+        .arg(binary)
+        .arg(&input)
+        .args([
+            "--engine-arg=__uci-stub",
+            "--depth",
+            "1",
+            "--deadline-ms",
+            "1000",
+            "--baseline",
+        ])
+        .arg(run.join("result.json"))
+        .arg("--dir")
+        .arg(&compared_run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(compared.status.code(), Some(1));
+    let compared: serde_json::Value = serde_json::from_slice(&compared.stdout).unwrap();
+    assert_eq!(compared["comparison"]["passed_delta"], 0);
+    assert_eq!(
+        compared["comparison"]["changed_positions"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn killed_position_suite_resumes_without_duplicate_search_results() {
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("resume.epd");
+    let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
+    std::fs::write(&input, format!("{start} bm e4;\n").repeat(6)).unwrap();
+    let run = root.path().join("run");
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+    let command = || {
+        let mut command = cli();
+        command
+            .arg("suite")
+            .arg(binary)
+            .arg(&input)
+            .args([
+                "--engine-arg=__uci-stub",
+                "--engine-arg=--sleep-ms=200",
+                "--depth",
+                "1",
+                "--deadline-ms",
+                "2000",
+                "--dir",
+            ])
+            .arg(&run)
+            .arg("--json");
+        command
+    };
+    let mut first = command();
+    first.stdout(Stdio::null());
+    let mut child = first.spawn().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "suite ended before kill"
+        );
+        if let Ok(bytes) = std::fs::read(run.join("checkpoint.json"))
+            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
+            && value["payload"]["results"]
+                .as_array()
+                .is_some_and(|results| !results.is_empty())
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "suite did not checkpoint within ten seconds"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    child.kill().unwrap();
+    child.wait().unwrap();
+
+    let resumed = command().output().unwrap();
+    assert!(
+        resumed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    let resumed: serde_json::Value = serde_json::from_slice(&resumed.stdout).unwrap();
+    let results = resumed["report"]["results"].as_array().unwrap();
+    assert_eq!(results.len(), 6);
+    assert_eq!(
+        results
+            .iter()
+            .map(|result| result["index"].as_u64().unwrap())
+            .collect::<BTreeSet<_>>()
+            .len(),
+        6
+    );
+    assert_eq!(resumed["report"]["passed"], 6);
+    assert!(run.join("checkpoint.previous.json").is_file());
 }
 
 #[test]

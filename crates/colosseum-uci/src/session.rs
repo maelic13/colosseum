@@ -245,6 +245,7 @@ fn search_limits(limit: SearchLimit) -> GoLimits {
             GoLimits::MoveTime(Duration::from_millis(milliseconds))
         }
         SearchLimit::Nodes(nodes) => GoLimits::Nodes(nodes),
+        SearchLimit::Depth(depth) => GoLimits::Depth(depth),
     }
 }
 

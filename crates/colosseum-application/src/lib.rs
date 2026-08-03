@@ -16,6 +16,7 @@ pub mod spsa;
 pub mod spsa_plan;
 pub mod spsa_status;
 pub mod stats_plan;
+pub mod suite;
 
 pub use calibration::{
     CalibrationBinaries, CalibrationDesign, CalibrationError, CalibrationInterval,
@@ -59,4 +60,9 @@ pub use spsa_status::{
 pub use stats_plan::{
     AchievedResolutionReport, FixedPlanObjective, FixedPlanReport, FixedPlanRequest,
     SprtLengthPlanReport, SprtLengthPlanRequest, StatsPlanError, plan_fixed, plan_sprt_length,
+};
+pub use suite::{
+    MalformedSuitePosition, RunSuite, SuiteBaselineComparison, SuiteDesign, SuiteEntry, SuiteError,
+    SuiteExpectation, SuiteOutcome, SuitePosition, SuitePositionResult, SuiteProgress, SuiteReport,
+    compare_suite_baseline,
 };

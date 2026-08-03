@@ -50,6 +50,7 @@ mod match_runner;
 mod self_test;
 mod sprt_runner;
 mod spsa_driver;
+mod suite_driver;
 mod uci_stub;
 
 #[derive(Debug, Parser)]
@@ -92,6 +93,8 @@ enum Command {
     Book(BookCommand),
     /// Replay match statistics from the strongest available evidence source.
     Stats(StatsCommand),
+    /// Run fixed-work searches over an EPD or FEN position set.
+    Suite(Box<suite_driver::SuiteCommand>),
     /// Verify this exact executable's protocol, process and persistence paths.
     SelfTest,
     /// Read the official state of any CLI run without modifying it.
@@ -840,6 +843,7 @@ async fn main() -> ExitCode {
         Command::Book(command) => run_book(command.action, cli.json),
         Command::Stats(_) if cli.dry_run => unsupported_dry_run("stats"),
         Command::Stats(command) => run_stats(command, cli.json),
+        Command::Suite(command) => suite_driver::run(*command, cli.json, cli.dry_run).await,
         Command::SelfTest if cli.dry_run => unsupported_dry_run("self-test"),
         Command::SelfTest => run_self_test(cli.json).await,
         Command::Status { .. } if cli.dry_run => unsupported_dry_run("status"),

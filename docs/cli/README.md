@@ -33,6 +33,7 @@ Detailed contracts:
 - [Fixed-node NPS measurement](nps.md)
 - [Opening-book utilities](book.md)
 - [Statistics replay and evidence authority](stats.md)
+- [Fixed-work EPD/FEN position suites](suite.md)
 - [Configuration files, inheritance and path origins](run-files.md)
 - [Master seed and named random streams](randomness.md)
 - [Human, JSON and dry-run output](output.md)

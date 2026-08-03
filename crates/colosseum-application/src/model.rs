@@ -149,6 +149,7 @@ pub struct EngineInspection {
 pub enum SearchLimit {
     MoveTimeMs(u64),
     Nodes(u64),
+    Depth(u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

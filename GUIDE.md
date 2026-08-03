@@ -15,11 +15,11 @@ numbers, internal naming or method argumentation.
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
 | What exists | Phases 0–5 are complete: fixed matches, externally checked pair-atomic capped SPRT, optional identical-binary calibration and exact durable SPSA with planning, diagnostics, final artifacts and hash-verified gate loop over ordinary UCI engines |
-| What is missing | Position-suite tools, tournaments, release-candidate parity/gap decisions, documentation and release acceptance |
+| What is missing | Phase-6 acceptance, tournaments, release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 5 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 6.8 — fixed-work position suites** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 6.9 — Phase 6 acceptance** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -639,8 +639,15 @@ model as well.
   [`crates/colosseum-cli/src/pgn_telemetry.rs`](crates/colosseum-cli/src/pgn_telemetry.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/stats.md`](docs/cli/stats.md)
-- ☐ **6.8** — **Model: Terra High.** `suite` runs EPD/FEN at fixed time/nodes/depth with `bm`/`am`,
-  per-position results, aggregate pass rate and compatible-baseline compare
+- ☑ **6.8 — DONE** — **Model: Terra High.** Durable `suite` drives ordinary UCI
+  EPD/FEN searches at fixed time/nodes/depth; legal multi-move `bm`/`am`,
+  unscored/malformed entries, unknown-operation evidence, per-position latency,
+  aggregate pass rate, compatible baseline comparison and kill/resume are
+  covered by hermetic fixtures — evidence:
+  [`crates/colosseum-application/src/suite.rs`](crates/colosseum-application/src/suite.rs),
+  [`crates/colosseum-engine/src/suite_input.rs`](crates/colosseum-engine/src/suite_input.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
+  [`docs/cli/suite.md`](docs/cli/suite.md)
 - ☐ **6.9** — **EXIT · Model: Sol High.** Fake engine-reported nps cannot affect authoritative speed;
   skew/scaling/state-policy tests pass; slicing/replay/planning/telemetry and
   EPD suite match fixtures
@@ -735,10 +742,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 6.8 — fixed-work position suites. Model: GPT-5.6 Terra — High.**
-Add `suite` over EPD/FEN inputs at fixed time, nodes or depth, with `bm`/`am`
-expectations, per-position evidence, aggregate pass rate and compatible
-baseline comparison.
+**Phase 6.9 — Phase 6 acceptance. Model: GPT-5.6 Sol — High.**
+Bind the speed, scaling, state-policy, book, replay, planning, telemetry and
+suite fixture evidence into the Phase 6 exit gate, including proof that fake
+engine-reported NPS cannot affect authoritative speed.
 
 ```
 git diff --check

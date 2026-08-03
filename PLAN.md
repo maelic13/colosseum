@@ -1222,6 +1222,14 @@ malformed fixtures have deterministic outcomes; a baseline comparison refuses
 incompatible position-set/search hashes; long suites resume without duplicating
 positions.
 
+Implemented Phase 6.8 parses EPD/FEN through a chess-legal adapter and sends
+only ordinary UCI `position`/bounded `go` commands through the shared engine
+session port. It preserves unknown EPD operations as ignored evidence,
+distinguishes unscored and malformed input from pass/fail, commits every input
+index before publishing progress, and resumes without duplication. Versioned
+parsed-position and fixed-work hashes guard baseline comparison while allowing
+the engine build itself to differ.
+
 ### 5.13 Data generation — deferred as a separate command
 
 Fixed-node/depth self-play written as PGN is already expressible as a normal
