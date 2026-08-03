@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–6 and Phase 7 tournament implementation are complete: independent fixed match/SPRT/calibration/SPSA workflows plus speed/scaling, book, statistics planning/replay/telemetry, durable position suites and live round-robin/gauntlet tournaments with ratings/CSV |
-| What is missing | Tournament exit parity evidence, release-candidate parity/gap decisions, documentation and release acceptance |
+| What exists | Phases 0–7 are complete: independent fixed match/SPRT/calibration/SPSA workflows plus speed/scaling, book, statistics planning/replay/telemetry, durable position suites and accepted live round-robin/gauntlet tournaments with ratings/CSV |
+| What is missing | Release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 6 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 7.3 — tournament parity and resume acceptance** |
+| Platform status | Windows ☑ local through Phase 7 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 8.1 — release-candidate external-runner parity** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -673,8 +673,14 @@ model as well.
   [`crates/colosseum-cli/src/tournament_driver.rs`](crates/colosseum-cli/src/tournament_driver.rs),
   [`crates/colosseum-cli/tests/tournament.rs`](crates/colosseum-cli/tests/tournament.rs),
   [`docs/cli/tournament.md`](docs/cli/tournament.md)
-- ☐ **7.3** — **EXIT · Model: Sol High.** Schedules/ratings match GUI (≤0.01 Elo); deterministic
-  kill/resume produces identical standings for both formats
+- ☑ **7.3 — DONE · EXIT** — **Model: Sol High.** Frozen GUI-origin round-robin and
+  two-seed-gauntlet schedules match exactly and joint ratings agree within
+  0.01 Elo; deterministic kill/resume produces the uninterrupted schedule,
+  standings, error bars and crosstable with each game committed once in both
+  formats — evidence:
+  [`docs/architecture/phase-7-exit.md`](docs/architecture/phase-7-exit.md),
+  [`docs/fixtures/phase7/acceptance.json`](docs/fixtures/phase7/acceptance.json),
+  [`crates/colosseum-cli/tests/phase7_acceptance.rs`](crates/colosseum-cli/tests/phase7_acceptance.rs)
 
 ### Phase 8 — Parity against external runners, and remaining gaps
 
@@ -757,10 +763,11 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 7.3 — tournament parity and resume acceptance. Model: GPT-5.6 Sol — High.**
-Freeze GUI schedule/rating fixtures for both formats, require ≤0.01 Elo parity,
-and prove deterministic kill/resume produces the same final standings as an
-uninterrupted run for round-robin and multi-seed gauntlet schedules.
+**Phase 8.1 — release-candidate external-runner parity. Model: GPT-5.6 Sol — High.**
+Repeat the Phase-4B oracle matrix against the current supported external-runner
+versions and the exact CLI release candidate. Compare only shared fields and
+record every divergence; do not turn runner-specific behavior into a false
+equivalence requirement.
 
 ```
 git diff --check

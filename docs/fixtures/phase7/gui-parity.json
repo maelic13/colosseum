@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "source": "Colosseum GUI shared-core schedule and stored-result rating oracle",
+  "participants": [
+    { "name": "Alpha", "prior": 1500.0 },
+    { "name": "Beta", "prior": 1550.0 },
+    { "name": "Gamma", "prior": 1450.0 },
+    { "name": "Delta", "prior": 1600.0 }
+  ],
+  "round_robin": {
+    "schedule": [
+      "1:1:1:4", "2:1:4:1", "3:1:2:3", "4:1:3:2",
+      "5:2:1:3", "6:2:3:1", "7:2:4:2", "8:2:2:4",
+      "9:3:1:2", "10:3:2:1", "11:3:3:4", "12:3:4:3"
+    ],
+    "results": [
+      "white-win", "black-win", "white-win", "draw",
+      "black-win", "black-win", "draw", "white-win",
+      "white-win", "white-win", "black-win", "draw"
+    ],
+    "ratings": [1565.17, 1586.89, 1441.41, 1506.54]
+  },
+  "multi_seed_gauntlet": {
+    "seeds": 2,
+    "schedule": [
+      "1:1:1:3", "2:1:3:1", "3:1:1:4", "4:1:4:1",
+      "5:1:2:3", "6:1:3:2", "7:1:2:4", "8:1:4:2"
+    ]
+  }
+}

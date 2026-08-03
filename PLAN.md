@@ -1829,6 +1829,14 @@ evidence boundary are recorded in
 Spec 5.7. **Exit:** round-robin and gauntlet schedules/ratings match the GUI;
 kill/resume is identical with deterministic stubs.
 
+**Accepted (7.3):** a frozen GUI-origin fixture matches every round-robin and
+two-seed-gauntlet pairing and reproduces joint ratings within 0.01 Elo.
+Deterministic interrupted and uninterrupted runs produce identical schedules,
+standings, error bars and crosstables for both formats, with every scheduled
+game committed exactly once. Criterion ownership and the real-engine evidence
+boundary are recorded in
+[`docs/architecture/phase-7-exit.md`](docs/architecture/phase-7-exit.md).
+
 ### Phase 8 — Parity against external runners, and remaining gaps
 
 - **(a) Repeat the Phase-4 parity gate** against current supported external
