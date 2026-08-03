@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–4C are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls, recovery, strict JSON and distinct automation exits |
-| What is missing | SPSA; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–4C plus the Phase-5.1 SPSA mathematical kernel are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
+| What is missing | SPSA schedule derivation/configuration/driver; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4C · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 5.1 — exact seeded SPSA perturbation and update** |
+| Next step | **Phase 5.2 — end-state SPSA schedule derivation and assertion** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -486,9 +486,14 @@ model as well.
 
 ### Phase 5 — SPSA
 
-- ☐ **5.1** — **Model: Sol High.** Implement PLAN §5.5's exact seeded Rademacher perturbation, arm
-  construction, Fishtest-compatible `c/a/r` schedule, update, clipping and
-  send-time rounding; decay per iteration
+- ☑ **5.1 — DONE** — **Model: Sol High.** The pure core kernel uses the
+  versioned `spsa-perturbations` stream in iteration-major knob order, computes
+  the exact `alpha=.601` / `gamma=.102` / `A=.1N` `c/a/r` schedule, constructs
+  clamped integer arms with half-away-from-zero ties, and applies unclipped
+  floating-centre updates before rail clipping; golden schedules, seed replay,
+  arm/score symmetry, rounding and typed invalid input tests pass — evidence:
+  [`crates/colosseum-core/src/spsa.rs`](crates/colosseum-core/src/spsa.rs),
+  [`crates/colosseum-core/src/rng.rs`](crates/colosseum-core/src/rng.rs)
 - ☐ **5.2** — **Model: Sol High.** Back-solve from each `c_end`, run `r_end` and horizon; persist exact RNG
   algorithm/seed/draw order; assert written schedule before play
 - ☐ **5.3** — **Model: Terra High.** Tune TOML selects numeric UCI options with initial value, bounds and
@@ -629,10 +634,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 5.1 — exact SPSA perturbation and update. Model: GPT-5.6 Sol — High.**
-Implement PLAN §5.5's seeded Rademacher perturbation, arm construction,
-Fishtest-compatible schedules, update, clipping and send-time rounding, with
-decay applied once per completed iteration.
+**Phase 5.2 — end-state schedule derivation and assertion. Model: GPT-5.6 Sol — High.**
+Back-solve every knob's `c0/a0` from `c_end`, the run's `r_end` and horizon;
+persist the exact RNG/seed/draw-order schedule and verify the written artifact
+before any game can start.
 
 ```
 git diff --check

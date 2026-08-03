@@ -83,6 +83,19 @@ impl NamedRng {
         }
     }
 
+    /// Position this stream at an absolute byte offset without consuming the
+    /// preceding output. This preserves the exact ChaCha12 byte stream and is
+    /// used to reconstruct durable iteration-major draw ranges efficiently.
+    pub fn seek_bytes(&mut self, byte_offset: u64) {
+        self.block_counter = byte_offset / self.block.len() as u64;
+        let within_block = (byte_offset % self.block.len() as u64) as usize;
+        self.offset = self.block.len();
+        if within_block > 0 {
+            self.refill();
+            self.offset = within_block;
+        }
+    }
+
     #[must_use]
     pub fn next_u64(&mut self) -> u64 {
         let mut bytes = [0; 8];
@@ -288,6 +301,21 @@ mod tests {
             bootstrap.bootstrap_indices(7, 12).unwrap(),
             [3, 4, 2, 5, 0, 6, 5, 0, 5, 0, 2, 3]
         );
+    }
+
+    #[test]
+    fn absolute_seek_reconstructs_the_same_version_one_byte_stream() {
+        const MASTER: u64 = 0x0123_4567_89ab_cdef;
+        let mut sequential = NamedRng::new(MASTER, stream_names::SPSA_PERTURBATIONS).unwrap();
+        let mut expected = [0_u8; 400];
+        sequential.fill_bytes(&mut expected);
+        for offset in [0_u64, 8, 56, 64, 72, 257] {
+            let mut sought = NamedRng::new(MASTER, stream_names::SPSA_PERTURBATIONS).unwrap();
+            sought.seek_bytes(offset);
+            let mut actual = [0_u8; 32];
+            sought.fill_bytes(&mut actual);
+            assert_eq!(actual, expected[offset as usize..offset as usize + 32]);
+        }
     }
 
     fn hex(bytes: &[u8]) -> String {

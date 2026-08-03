@@ -803,6 +803,14 @@ report an unattributable divergence.
   Rounding is applied when values are sent or emitted, not to the stored centre
   after every update. The exact RNG algorithm, seed and draw order are part of
   `stats_version` and persisted state.
+
+  **Implementation evidence (5.1):** [`colosseum-core::spsa`](crates/colosseum-core/src/spsa.rs)
+  implements this kernel without runtime or UCI dependencies. Perturbation
+  draws are random-access but byte-identical to the versioned named stream in
+  iteration-major, tune-file-knob order; golden coefficients, vectors,
+  half-away-from-zero ties, floating centres, score-sign symmetry and clipping
+  are pinned by tests. End-state back-solving and persisted schedule assertion
+  remain 5.2 responsibilities.
 - The tune file selects numeric UCI options and supplies initial value, tuning
   bounds and `c_end` per knob, validated against the live UCI option schema.
 - Defaults `N=5,000` and 32 games/iteration; configurable, not enforced minima.
