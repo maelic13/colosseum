@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–4C plus the Phase-5.1–5.3 SPSA kernel, verified schedule and live-schema-bound tune vector are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
-| What is missing | SPSA defaults, configuration audit and driver; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–4C plus the Phase-5.1–5.4 SPSA kernel, verified schedule, live-schema-bound tune vector and configurable run settings are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
+| What is missing | SPSA configuration audit and driver; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4C · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 5.4 — configurable SPSA run defaults** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 5.5 — durable pair-atomic SPSA driver** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -514,8 +514,12 @@ model as well.
   [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs),
   [`crates/colosseum-cli/src/spsa_tune.rs`](crates/colosseum-cli/src/spsa_tune.rs),
   [`crates/colosseum-cli/tests/spsa_tune.rs`](crates/colosseum-cli/tests/spsa_tune.rs)
-- ☐ **5.4** — **Model: Terra High.** Defaults 5,000 iterations and 32 games/iteration — configurable,
-  neither enforced as a minimum
+- ☑ **5.4 — DONE** — **Model: Terra High.** Runtime-neutral, serializable SPSA
+  run settings default to 5,000 iterations and 32 games (16 pairs) per
+  mini-match, while one iteration/two games is accepted for short runs; only
+  zero counts or an odd game count that cannot form colour-reversed pairs are
+  rejected — evidence:
+  [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs)
 - ☐ **5.5** — **Model: Sol High.** Persistent driver, book loaded once, complete paired mini-match as the
   commit unit; engine fault invalidates rather than becoming a gradient;
   multi-session per the durable contract
@@ -650,9 +654,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 5.4 — configurable SPSA run defaults. Model: GPT-5.6 Terra — High.**
-Introduce the `N=5,000` iteration and 32-game mini-match defaults, while
-allowing either value to be configured without treating them as minimums.
+**Phase 5.5 — durable pair-atomic SPSA driver. Model: GPT-5.6 Sol — High.**
+Implement the persistent driver: load an optional book once, execute and commit
+only complete paired mini-matches, invalidate on an engine fault rather than
+producing a gradient, and integrate the common durable-run contract.
 
 ```
 git diff --check

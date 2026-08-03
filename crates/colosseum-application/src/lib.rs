@@ -26,6 +26,7 @@ pub use pair_commit::{CompletePair, PairCommitError, PairCommitQueue};
 pub use ports::*;
 pub use sprt::{SprtBundle, SprtDesign, SprtDesignError, SprtParameters};
 pub use spsa::{
-    SpsaBoundParameter, SpsaBoundTune, SpsaLiveSpin, SpsaPreflightError, SpsaTune, SpsaTuneError,
-    SpsaTuneParameter, VerifiedSpsaSchedule,
+    DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS, SpsaBoundParameter, SpsaBoundTune,
+    SpsaLiveSpin, SpsaPreflightError, SpsaRunSettings, SpsaRunSettingsError, SpsaTune,
+    SpsaTuneError, SpsaTuneParameter, VerifiedSpsaSchedule,
 };

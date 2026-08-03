@@ -6,6 +6,70 @@ use thiserror::Error;
 
 use crate::{EngineInspection, UciOptionSchema};
 
+pub const DEFAULT_SPSA_ITERATIONS: u32 = 5_000;
+pub const DEFAULT_SPSA_GAMES_PER_ITERATION: u32 = 32;
+
+/// Resolved run-wide SPSA sizing. The defaults are useful production values,
+/// not minimums: short development or synthetic runs may use one iteration
+/// and one complete colour-reversed pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpsaRunSettings {
+    pub iterations: u32,
+    pub games_per_iteration: u32,
+}
+
+impl Default for SpsaRunSettings {
+    fn default() -> Self {
+        Self {
+            iterations: DEFAULT_SPSA_ITERATIONS,
+            games_per_iteration: DEFAULT_SPSA_GAMES_PER_ITERATION,
+        }
+    }
+}
+
+impl SpsaRunSettings {
+    pub fn new(iterations: u32, games_per_iteration: u32) -> Result<Self, SpsaRunSettingsError> {
+        let settings = Self {
+            iterations,
+            games_per_iteration,
+        };
+        settings.validate()?;
+        Ok(settings)
+    }
+
+    pub fn validate(self) -> Result<(), SpsaRunSettingsError> {
+        if self.iterations == 0 {
+            return Err(SpsaRunSettingsError::ZeroIterations);
+        }
+        if self.games_per_iteration == 0 {
+            return Err(SpsaRunSettingsError::ZeroGamesPerIteration);
+        }
+        if !self.games_per_iteration.is_multiple_of(2) {
+            return Err(SpsaRunSettingsError::IncompleteColourPair {
+                games_per_iteration: self.games_per_iteration,
+            });
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub const fn pairs_per_iteration(self) -> u32 {
+        self.games_per_iteration / 2
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum SpsaRunSettingsError {
+    #[error("SPSA iterations must be greater than zero")]
+    ZeroIterations,
+    #[error("SPSA games per iteration must be greater than zero")]
+    ZeroGamesPerIteration,
+    #[error(
+        "SPSA games per iteration must be even so each mini-match contains complete colour pairs; got {games_per_iteration}"
+    )]
+    IncompleteColourPair { games_per_iteration: u32 },
+}
+
 /// Required contents of one ordered SPSA tune-file entry. This is deliberately
 /// a numeric UCI-spin vector; source, compiler and engine-specific metadata do
 /// not belong in it.
@@ -193,6 +257,40 @@ mod tests {
             options,
             diagnostics: Vec::new(),
         }
+    }
+
+    #[test]
+    fn run_settings_default_to_useful_production_values_without_becoming_minima() {
+        let defaults = SpsaRunSettings::default();
+        assert_eq!(defaults.iterations, DEFAULT_SPSA_ITERATIONS);
+        assert_eq!(
+            defaults.games_per_iteration,
+            DEFAULT_SPSA_GAMES_PER_ITERATION
+        );
+        assert_eq!(defaults.pairs_per_iteration(), 16);
+
+        let short = SpsaRunSettings::new(1, 2).unwrap();
+        assert_eq!(short.iterations, 1);
+        assert_eq!(short.games_per_iteration, 2);
+        assert_eq!(short.pairs_per_iteration(), 1);
+    }
+
+    #[test]
+    fn run_settings_reject_only_non_executable_iteration_or_pair_counts() {
+        assert_eq!(
+            SpsaRunSettings::new(0, 2),
+            Err(SpsaRunSettingsError::ZeroIterations)
+        );
+        assert_eq!(
+            SpsaRunSettings::new(1, 0),
+            Err(SpsaRunSettingsError::ZeroGamesPerIteration)
+        );
+        assert_eq!(
+            SpsaRunSettings::new(1, 3),
+            Err(SpsaRunSettingsError::IncompleteColourPair {
+                games_per_iteration: 3
+            })
+        );
     }
 
     fn schedule(seed: u64) -> SpsaScheduleArtifact {

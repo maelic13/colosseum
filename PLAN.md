@@ -841,6 +841,14 @@ report an unattributable divergence.
   executable's live `Hash` spin declaration, rather than any engine descriptor,
   supplies the binding range.
 - Defaults `N=5,000` and 32 games/iteration; configurable, not enforced minima.
+  The only structural restriction is that a mini-match has a positive even game
+  count, because it commits complete colour-reversed pairs; one iteration and
+  two games are valid short-run settings.
+
+  **Implementation evidence (5.4):** the application-owned, serializable
+  `SpsaRunSettings` supplies the two defaults and a typed constructor for any
+  positive iteration count and complete-pair game count. It exposes the derived
+  pair count for the future driver while avoiding an artificial tuning minimum.
 - Persistent driver: no per-iteration relaunch; a supplied book is loaded once.
 - Multi-session per S5.11.
 - A mini-match is committed only when all of its scheduled colour pairs
