@@ -29,6 +29,9 @@ pub struct StubArgs {
     /// Deliberately untrusted NPS diagnostic used by harness tests.
     #[arg(long, default_value_t = 1)]
     reported_nps: u64,
+    /// Emit legal predicted replies and wait for ponderhit/stop during go ponder.
+    #[arg(long)]
+    ponder_hints: bool,
 }
 
 pub async fn run(args: StubArgs) -> std::io::Result<()> {
@@ -95,7 +98,7 @@ pub async fn run(args: StubArgs) -> std::io::Result<()> {
                 stdout.write_all(b"id author Colosseum\n").await?;
                 stdout
                     .write_all(
-                        b"option name Hash type spin default 16 min 1 max 1048576\noption name Threads type spin default 1 min 1 max 1024\nuciok\n",
+                        b"option name Hash type spin default 16 min 1 max 1048576\noption name Threads type spin default 1 min 1 max 1024\noption name Ponder type check default false\nuciok\n",
                     )
                     .await?;
                 stdout.flush().await?;
@@ -108,7 +111,27 @@ pub async fn run(args: StubArgs) -> std::io::Result<()> {
             "ucinewgame" | "stop" if line == "ucinewgame" => {}
             "stop" => {
                 if searching {
-                    write_bestmove(&mut stdout, &position, 1, args.reported_nps).await?;
+                    write_bestmove(
+                        &mut stdout,
+                        &position,
+                        1,
+                        args.reported_nps,
+                        args.ponder_hints,
+                    )
+                    .await?;
+                    searching = false;
+                }
+            }
+            "ponderhit" => {
+                if searching {
+                    write_bestmove(
+                        &mut stdout,
+                        &position,
+                        1,
+                        args.reported_nps,
+                        args.ponder_hints,
+                    )
+                    .await?;
                     searching = false;
                 }
             }
@@ -118,7 +141,7 @@ pub async fn run(args: StubArgs) -> std::io::Result<()> {
             "quit" => break,
             _ if line.starts_with("position ") => position = line.to_owned(),
             _ if line.starts_with("go ") => {
-                if line.contains("movetime 10000") {
+                if line.starts_with("go ponder ") || line.contains("movetime 10000") {
                     searching = true;
                 } else {
                     if args.sleep_ms > 0 {
@@ -132,7 +155,14 @@ pub async fn run(args: StubArgs) -> std::io::Result<()> {
                             (pair[0] == "nodes").then(|| pair[1].parse().ok()).flatten()
                         })
                         .unwrap_or(1);
-                    write_bestmove(&mut stdout, &position, nodes, args.reported_nps).await?;
+                    write_bestmove(
+                        &mut stdout,
+                        &position,
+                        nodes,
+                        args.reported_nps,
+                        args.ponder_hints,
+                    )
+                    .await?;
                 }
             }
             _ => {}
@@ -150,6 +180,7 @@ async fn write_bestmove(
     position: &str,
     nodes: u64,
     reported_nps: u64,
+    ponder_hints: bool,
 ) -> std::io::Result<()> {
     let moves = position
         .split_once(" moves ")
@@ -158,10 +189,15 @@ async fn write_bestmove(
         .get(moves)
         .copied()
         .unwrap_or("0000");
+    let ponder = ponder_hints
+        .then(|| ["e7e5", "g1f3", "b8c6", "f1b5", "a7a6"].get(moves))
+        .flatten()
+        .copied()
+        .map_or_else(String::new, |ponder| format!(" ponder {ponder}"));
     stdout
         .write_all(
             format!(
-                "info depth 1 nodes {nodes} time 1 nps {reported_nps} score cp 0\nbestmove {best}\n"
+                "info depth 1 nodes {nodes} time 1 nps {reported_nps} score cp 0\nbestmove {best}{ponder}\n"
             )
             .as_bytes(),
         )

@@ -224,6 +224,9 @@ struct TournamentRunCommand {
     depth: Option<u32>,
     #[arg(long, default_value_t = match_runner::DEFAULT_MARGIN_MS)]
     margin_ms: u64,
+    /// Let engines think on the opponent's clock through the UCI ponder protocol.
+    #[arg(long)]
+    ponder: bool,
 
     #[arg(long)]
     no_draw_adjudication: bool,
@@ -331,6 +334,10 @@ struct MatchConditions {
     b_depth: Option<u32>,
     #[arg(long = "b-margin-ms", default_value_t = match_runner::DEFAULT_MARGIN_MS)]
     b_margin_ms: u64,
+
+    /// Let engines think on the opponent's clock through the UCI ponder protocol.
+    #[arg(long)]
+    ponder: bool,
 
     /// Disable the default conservative draw adjudication.
     #[arg(long)]
@@ -605,6 +612,9 @@ struct SpsaConditions {
     depth: Option<u32>,
     #[arg(long, default_value_t = match_runner::DEFAULT_MARGIN_MS)]
     margin_ms: u64,
+    /// Let both perturbation arms think on the opponent's clock.
+    #[arg(long)]
+    ponder: bool,
 
     /// Disable the default conservative draw adjudication.
     #[arg(long)]
@@ -1200,7 +1210,14 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCod
             return ExitCode::from(2);
         }
     };
-    let (engine_a, engine_b, apply_record) = if let Some(apply_path) = apply_path {
+    if let Err(error) = validate_ponder(
+        command.ponder,
+        &[engine_a_time_control, engine_b_time_control],
+    ) {
+        eprintln!("configuration error: {error}");
+        return ExitCode::from(2);
+    }
+    let (mut engine_a, mut engine_b, apply_record) = if let Some(apply_path) = apply_path {
         if engine_a_path.is_some() || engine_b_path.is_some() {
             eprintln!(
                 "configuration error: positional engine paths must be omitted with --apply; use --apply-executable to relocate the recorded executable"
@@ -1265,6 +1282,12 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCod
         };
         (engine_a, engine_b, None)
     };
+    if let Err(error) = configure_ponder(&mut engine_a, command.ponder)
+        .and_then(|()| configure_ponder(&mut engine_b, command.ponder))
+    {
+        eprintln!("configuration error: {error}");
+        return ExitCode::from(2);
+    }
     if apply_record
         .as_ref()
         .is_some_and(|record| record.identity.status == SpsaGateHashStatus::MismatchOverridden)
@@ -1339,6 +1362,7 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCod
             "engine_a_time_control": engine_a_time_control,
             "engine_b_time_control": engine_b_time_control,
             "adjudication": adjudication,
+            "ponder": command.ponder,
             "fault_policy": fault_policy,
             "execution": execution,
             "master_seed": master_seed,
@@ -1433,6 +1457,7 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCod
         "engine_a_time_control": engine_a_time_control,
         "engine_b_time_control": engine_b_time_control,
         "adjudication": adjudication,
+        "ponder": command.ponder,
         "fault_policy": fault_policy,
         "execution": execution,
         "master_seed": master_seed,
@@ -1453,6 +1478,7 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCod
             engine_a_time_control,
             engine_b_time_control,
             adjudication,
+            ponder: command.ponder,
             openings,
         },
         execution: execution.clone(),
@@ -2003,6 +2029,15 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
             return ExitCode::from(2);
         }
     };
+    if let Err(error) = validate_ponder(conditions.ponder, &[engine_time_control]) {
+        eprintln!("configuration error: {error}");
+        return ExitCode::from(2);
+    }
+    let mut engine = engine;
+    if let Err(error) = configure_ponder(&mut engine, conditions.ponder) {
+        eprintln!("configuration error: {error}");
+        return ExitCode::from(2);
+    }
     let adjudication = AdjudicationConfig {
         max_moves: conditions.max_moves,
         draw: (!conditions.no_draw_adjudication).then_some(DrawAdjudication {
@@ -2125,6 +2160,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
             "schedule": &expected_schedule,
             "engine_time_control": engine_time_control,
             "adjudication": adjudication,
+            "ponder": conditions.ponder,
             "execution": execution,
             "master_seed": master_seed,
             "master_seed_generated": master_seed_generated,
@@ -2287,6 +2323,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
         "schedule": verified_schedule.artifact(),
         "engine_time_control": engine_time_control,
         "adjudication": adjudication,
+        "ponder": conditions.ponder,
         "execution": execution,
         "master_seed": master_seed,
         "master_seed_generated": master_seed_generated,
@@ -2330,6 +2367,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
             engine_a_time_control: engine_time_control,
             engine_b_time_control: engine_time_control,
             adjudication,
+            ponder: conditions.ponder,
             openings: openings.clone(),
         },
         execution: execution.clone(),
@@ -2397,6 +2435,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
         engine_sha256,
         engine_time_control,
         adjudication,
+        ponder: conditions.ponder,
         execution,
         master_seed,
         master_seed_generated,
@@ -2638,13 +2677,20 @@ async fn run_tournament_command(
             )
         })
         .collect::<Result<Vec<_>, _>>();
-    let launches = match launches {
+    let mut launches = match launches {
         Ok(launches) => launches,
         Err(error) => {
             eprintln!("configuration error: {error}");
             return ExitCode::from(2);
         }
     };
+    if let Err(error) = launches
+        .iter_mut()
+        .try_for_each(|launch| configure_ponder(launch, command.ponder))
+    {
+        eprintln!("configuration error: {error}");
+        return ExitCode::from(2);
+    }
     let plan = match build_tournament_plan(command.plan, None, launches) {
         Ok(plan) => plan,
         Err(error) => {
@@ -2677,6 +2723,10 @@ async fn run_tournament_command(
             return ExitCode::from(2);
         }
     };
+    if let Err(error) = validate_ponder(command.ponder, &[time_control]) {
+        eprintln!("configuration error: {error}");
+        return ExitCode::from(2);
+    }
     let adjudication = AdjudicationConfig {
         max_moves: command.max_moves,
         draw: (!command.no_draw_adjudication).then_some(DrawAdjudication {
@@ -2784,6 +2834,7 @@ async fn run_tournament_command(
             "anchor": anchor,
             "time_control": time_control,
             "adjudication": adjudication,
+            "ponder": command.ponder,
             "execution": &execution,
             "max_engine_faults": command.max_engine_faults,
             "master_seed": master_seed,
@@ -2867,6 +2918,7 @@ async fn run_tournament_command(
         "format": plan.design.format,
         "games_scheduled": plan.schedule.len(),
         "anchor": anchor,
+        "ponder": command.ponder,
         "fault_policy": {
             "mode": if command.max_engine_faults.is_some() { "strict-limit" } else { "exploratory-non-strict" },
             "max_engine_faults": command.max_engine_faults,
@@ -2881,6 +2933,7 @@ async fn run_tournament_command(
         anchor,
         time_control,
         adjudication,
+        ponder: command.ponder,
         execution,
         master_seed,
         master_seed_generated,
@@ -4365,6 +4418,7 @@ struct SpsaReport {
     engine_sha256: String,
     engine_time_control: match_runner::ConfiguredTimeControl,
     adjudication: AdjudicationConfig,
+    ponder: bool,
     execution: match_runner::MatchExecutionPlan,
     master_seed: u64,
     master_seed_generated: bool,
@@ -4380,6 +4434,7 @@ struct PreparedCalibration {
     engine_a_time_control: match_runner::ConfiguredTimeControl,
     engine_b_time_control: match_runner::ConfiguredTimeControl,
     adjudication: AdjudicationConfig,
+    ponder: bool,
     fault_policy: match_runner::FaultPolicy,
     execution: match_runner::MatchExecutionPlan,
     master_seed: u64,
@@ -4470,6 +4525,7 @@ async fn run_calibration(command: CalibrationCommand, machine: bool, dry_run: bo
         "engine_a_time_control": prepared.engine_a_time_control,
         "engine_b_time_control": prepared.engine_b_time_control,
         "adjudication": prepared.adjudication,
+        "ponder": prepared.ponder,
         "fault_policy": prepared.fault_policy,
         "execution": prepared.execution,
         "master_seed": prepared.master_seed,
@@ -4487,6 +4543,7 @@ async fn run_calibration(command: CalibrationCommand, machine: bool, dry_run: bo
         engine_a_time_control: prepared.engine_a_time_control,
         engine_b_time_control: prepared.engine_b_time_control,
         adjudication: prepared.adjudication,
+        ponder: prepared.ponder,
         fault_policy: prepared.fault_policy,
         execution: prepared.execution,
         master_seed: prepared.master_seed,
@@ -4632,7 +4689,11 @@ fn prepare_calibration(command: &CalibrationCommand) -> Result<PreparedCalibrati
         conditions.b_depth,
         conditions.b_margin_ms,
     )?;
-    let engine_a = resolve_match_engine(
+    validate_ponder(
+        conditions.ponder,
+        &[engine_a_time_control, engine_b_time_control],
+    )?;
+    let mut engine_a = resolve_match_engine(
         command.engine_a.clone(),
         conditions.a_label.clone(),
         conditions.a_arguments.clone(),
@@ -4643,7 +4704,7 @@ fn prepare_calibration(command: &CalibrationCommand) -> Result<PreparedCalibrati
         conditions.a_cores.clone(),
     )
     .map_err(|error| error.to_string())?;
-    let engine_b = resolve_match_engine(
+    let mut engine_b = resolve_match_engine(
         command.engine_b.clone(),
         conditions.b_label.clone(),
         conditions.b_arguments.clone(),
@@ -4654,6 +4715,8 @@ fn prepare_calibration(command: &CalibrationCommand) -> Result<PreparedCalibrati
         conditions.b_cores.clone(),
     )
     .map_err(|error| error.to_string())?;
+    configure_ponder(&mut engine_a, conditions.ponder)?;
+    configure_ponder(&mut engine_b, conditions.ponder)?;
     let binaries = CalibrationBinaries::new(
         executable_sha256(&engine_a.executable)?,
         executable_sha256(&engine_b.executable)?,
@@ -4694,6 +4757,7 @@ fn prepare_calibration(command: &CalibrationCommand) -> Result<PreparedCalibrati
             "engine_a_time_control": engine_a_time_control,
             "engine_b_time_control": engine_b_time_control,
             "adjudication": adjudication,
+            "ponder": conditions.ponder,
             "fault_policy": fault_policy,
             "execution": execution,
             "master_seed": master_seed,
@@ -4720,6 +4784,7 @@ fn prepare_calibration(command: &CalibrationCommand) -> Result<PreparedCalibrati
         engine_a_time_control,
         engine_b_time_control,
         adjudication,
+        ponder: conditions.ponder,
         fault_policy,
         execution,
         master_seed,
@@ -4861,7 +4926,14 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
             return ExitCode::from(2);
         }
     };
-    let engine_a = match resolve_match_engine(
+    if let Err(error) = validate_ponder(
+        command.ponder,
+        &[engine_a_time_control, engine_b_time_control],
+    ) {
+        eprintln!("configuration error: {error}");
+        return ExitCode::from(2);
+    }
+    let mut engine_a = match resolve_match_engine(
         engine_a_path,
         command.a_label,
         command.a_arguments,
@@ -4877,7 +4949,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
             return ExitCode::from(2);
         }
     };
-    let engine_b = match resolve_match_engine(
+    let mut engine_b = match resolve_match_engine(
         engine_b_path,
         command.b_label,
         command.b_arguments,
@@ -4893,6 +4965,12 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
             return ExitCode::from(2);
         }
     };
+    if let Err(error) = configure_ponder(&mut engine_a, command.ponder)
+        .and_then(|()| configure_ponder(&mut engine_b, command.ponder))
+    {
+        eprintln!("configuration error: {error}");
+        return ExitCode::from(2);
+    }
     let placement_policy = match resolve_placement(&command.placement, command.headroom_cores) {
         Ok(policy) => policy,
         Err(error) => {
@@ -4949,6 +5027,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
             "engine_a_time_control": engine_a_time_control,
             "engine_b_time_control": engine_b_time_control,
             "adjudication": adjudication,
+            "ponder": command.ponder,
             "fault_policy": fault_policy,
             "execution": execution,
             "master_seed": master_seed,
@@ -5035,6 +5114,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         "engine_a_time_control": engine_a_time_control,
         "engine_b_time_control": engine_b_time_control,
         "adjudication": adjudication,
+        "ponder": command.ponder,
         "fault_policy": fault_policy,
         "execution": execution,
         "master_seed": master_seed,
@@ -5052,6 +5132,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         engine_a_time_control,
         engine_b_time_control,
         adjudication,
+        ponder: command.ponder,
         fault_policy,
         execution,
         master_seed,
@@ -5756,6 +5837,38 @@ fn resolve_time_control(
         }
     };
     Ok(match_runner::ConfiguredTimeControl { control, margin_ms })
+}
+
+fn validate_ponder(
+    ponder: bool,
+    controls: &[match_runner::ConfiguredTimeControl],
+) -> Result<(), String> {
+    if ponder && controls.iter().any(|control| !control.control.is_clock()) {
+        return Err(
+            "--ponder requires a base/increment clock on every arm; fixed movetime, nodes and depth have no opponent-clock budget"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn configure_ponder(engine: &mut EngineLaunchSpec, ponder: bool) -> Result<(), String> {
+    if engine
+        .options
+        .keys()
+        .any(|name| name.eq_ignore_ascii_case("Ponder"))
+    {
+        return Err(
+            "the Ponder UCI option is controlled by --ponder; remove the generic Ponder option"
+                .into(),
+        );
+    }
+    if ponder {
+        engine
+            .options
+            .insert("Ponder".into(), UciOptionValue::Check(true));
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

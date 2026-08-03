@@ -43,6 +43,14 @@ With no selection, that side uses `3000 ms + 30 ms` per move. The per-side
 not sent to the engines. This permits odds matches, including one engine at a
 different clock or search limit.
 
+`--ponder` enables the ordinary UCI pondering protocol for both engines and
+sets their `Ponder` option. It is off by default and requires base/increment
+game clocks on both sides. Pondering is rejected with fixed movetime, nodes or
+depth because those modes have no opponent-clock budget and a ponder hit would
+change the requested fixed work. The flag, resolved engine options and final
+report all record the condition; use the flag rather than forwarding `Ponder`
+as a generic per-engine option.
+
 Clocked searches use the recorded `go-write-to-bestmove-read` model version 1.
 The charged interval begins after the complete `go` command has been flushed
 and ends after the complete `bestmove` line has been read, using a monotonic

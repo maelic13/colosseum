@@ -1167,6 +1167,153 @@ fn fixed_match_resolves_independent_time_controls_and_margins() {
 }
 
 #[test]
+fn ponder_is_explicit_recorded_and_limited_to_clock_controls() {
+    let enabled = cli()
+        .args([
+            "match",
+            "--games",
+            "2",
+            "missing-a",
+            "missing-b",
+            "--ponder",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(enabled.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&enabled.stdout).unwrap();
+    assert_eq!(value["resolved_configuration"]["ponder"], true);
+    assert_eq!(value["invocations"][0]["options"]["Ponder"]["value"], true);
+    assert_eq!(value["invocations"][1]["options"]["Ponder"]["value"], true);
+
+    let sprt = cli()
+        .args([
+            "sprt",
+            "missing-a",
+            "missing-b",
+            "--max-pairs",
+            "1",
+            "--preset",
+            "gainer",
+            "--ponder",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(sprt.status.success());
+    let sprt: serde_json::Value = serde_json::from_slice(&sprt.stdout).unwrap();
+    assert_eq!(sprt["resolved_configuration"]["ponder"], true);
+
+    let binary = env!("CARGO_BIN_EXE_colosseum-cli");
+    let calibration = cli()
+        .args(["calibrate", binary, binary, "--games", "2", "--ponder"])
+        .args(["--dry-run", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        calibration.status.success(),
+        "{}",
+        String::from_utf8_lossy(&calibration.stderr)
+    );
+    let calibration: serde_json::Value = serde_json::from_slice(&calibration.stdout).unwrap();
+    assert_eq!(calibration["resolved_configuration"]["ponder"], true);
+
+    let tournament = cli()
+        .args([
+            "tournament",
+            "run",
+            "--engine",
+            "missing-a",
+            "--engine",
+            "missing-b",
+            "--ponder",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(tournament.status.success());
+    let tournament: serde_json::Value = serde_json::from_slice(&tournament.stdout).unwrap();
+    assert_eq!(tournament["resolved_configuration"]["ponder"], true);
+
+    let fixed_work = cli()
+        .args([
+            "match",
+            "--games",
+            "2",
+            "missing-a",
+            "missing-b",
+            "--a-nodes",
+            "100",
+            "--b-nodes",
+            "100",
+            "--ponder",
+            "--dry-run",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(fixed_work.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&fixed_work.stderr)
+            .contains("--ponder requires a base/increment clock")
+    );
+
+    let generic_option = cli()
+        .args([
+            "match",
+            "--games",
+            "2",
+            "missing-a",
+            "missing-b",
+            "--a-option",
+            "Ponder=true",
+            "--dry-run",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(generic_option.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&generic_option.stderr).contains("controlled by --ponder"));
+}
+
+#[test]
+fn fixed_match_drives_the_uci_ponder_protocol() {
+    let root = tempfile::tempdir().unwrap();
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+    let output = cli()
+        .args(["match", "--games", "1"])
+        .arg(binary)
+        .arg(binary)
+        .args([
+            "--a-engine-arg=__uci-stub",
+            "--a-engine-arg=--ponder-hints",
+            "--b-engine-arg=__uci-stub",
+            "--b-engine-arg=--ponder-hints",
+            "--ponder",
+            "--max-moves",
+            "2",
+            "--placement",
+            "off",
+            "--dir",
+        ])
+        .arg(root.path().join("ponder"))
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["report"]["ponder"], true);
+    assert_eq!(value["report"]["games_completed"], 1);
+    assert_eq!(value["report"]["faults"]["engine_a"], 0);
+    assert_eq!(value["report"]["faults"]["engine_b"], 0);
+}
+
+#[test]
 fn fixed_match_rejects_ambiguous_or_incomplete_time_controls() {
     for arguments in [
         vec![

@@ -20,7 +20,8 @@ Elo tolerance. The game count must be even so both colours of every opening
 pair are retained. The same time-control, book, adjudication, concurrency and
 CPU-placement controls as `match` are available; choose values representative
 of the experiments whose symmetry you want to observe. A book is optional and
-Colosseum does not ship one.
+Colosseum does not ship one. This includes explicit `--ponder` for a
+base/increment-clock calibration; it remains off by default.
 
 `--dry-run` resolves the complete configuration and hashes the supplied
 executables without launching them. Unlike a regular match dry run, the paths

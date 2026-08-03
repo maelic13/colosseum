@@ -69,7 +69,15 @@ fn spsa_dry_run_resolves_defaults_and_schedule_without_launching_an_engine() {
     let output = cli()
         .args(["spsa", "definitely-missing-engine", "--tune"])
         .arg(&tune)
-        .args(["--r-end", "0.002", "--dry-run", "--json", "--seed", "7"])
+        .args([
+            "--r-end",
+            "0.002",
+            "--ponder",
+            "--dry-run",
+            "--json",
+            "--seed",
+            "7",
+        ])
         .output()
         .unwrap();
     assert!(
@@ -86,6 +94,8 @@ fn spsa_dry_run_resolves_defaults_and_schedule_without_launching_an_engine() {
     assert_eq!(config["settings"]["games_per_iteration"], 32);
     assert_eq!(config["schedule"]["perturbations"]["master_seed"], 7);
     assert_eq!(config["tune"]["live_schema"], "verified-before-game-launch");
+    assert_eq!(config["ponder"], true);
+    assert_eq!(value["invocations"][0]["options"]["Ponder"]["value"], true);
 }
 
 #[test]

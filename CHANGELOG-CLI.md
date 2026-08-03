@@ -40,3 +40,5 @@ The first public CLI release is not yet published.
 - Added durable round-robin and gauntlet execution with bounded concurrency,
   optional openings/affinity, joint or anchored ML ratings with error bars,
   standings/crosstable CSV, direct engine controls and per-game resume.
+- Added explicit, recorded UCI pondering for clock-based match, SPRT,
+  calibration, SPSA and tournament workflows.

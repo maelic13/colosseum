@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | Release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 7 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 8.2 — remaining feature-gap decisions** |
+| Next step | **Phase 8.3 — Phase 8 acceptance** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -687,10 +687,10 @@ model as well.
 - ☑ **8.1 DONE** — **Model: Sol High.** Release-candidate parity repeated with current FastChess and
   Cute Chess; exact executable/artifact hashes and every shared-field result or
   reasoned exclusion are frozen and hermetically tested
-- ☐ **8.2** — **Model: Sol High.** Remaining feature gaps: adopt / decline with a reason / defer.
-  Candidates: Chess960, ponder, harness Syzygy adjudication, additional
-  formats and whether datagen now has generic needs beyond a match recipe.
-  Tie-breaker: does a general engine developer need it?
+- ☑ **8.2 DONE** — **Model: Sol High.** Adopted explicit clock-based UCI ponder across gameplay
+  workflows; deferred Chess960 and harness Syzygy probing with correctness
+  requirements; declined additional 1.0 formats and dedicated datagen with
+  recorded reasons and revisit triggers
 - ☐ **8.3** — **EXIT · Model: Sol High.** Parity demonstrated and every gap has a recorded decision
 
 ### Phase 9 — Documentation and release
@@ -764,10 +764,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 8.2 — remaining feature-gap decisions. Model: GPT-5.6 Sol — High.**
-Audit Chess960, ponder, harness-side Syzygy adjudication, additional formats
-and generic datagen requirements. Adopt, decline with a reason, or defer each;
-use a general engine developer's need as the tie-breaker.
+**Phase 8.3 — Phase 8 acceptance. Model: GPT-5.6 Sol — High.**
+Demonstrate release-candidate parity and ensure every remaining feature gap has
+one durable, tested adopt/decline/defer decision.
 
 ```
 git diff --check

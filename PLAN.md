@@ -1860,6 +1860,17 @@ exit and zero-variance presentation differences are classified and excluded,
 with executable, artifact and raw-result hashes frozen in
 [`docs/architecture/phase-8-parity.md`](docs/architecture/phase-8-parity.md).
 
+**Decided (8.2):** UCI pondering is adopted for 1.0 as an explicit, recorded,
+default-off clock-test condition across every game-playing CLI workflow. It is
+rejected for fixed movetime/nodes/depth because those controls have no
+opponent-clock budget. Chess960 and harness-side Syzygy adjudication are useful
+but deferred until their full correctness boundaries can be implemented.
+Additional tournament formats, output formats and a dedicated datagen command
+are declined for 1.0 because the current static formats and JSON/PGN/CSV plus a
+normal durable `match` cover the demonstrated general engine-development
+requirements. The rationale and revisit triggers are binding in
+[`docs/architecture/phase-8-gap-decisions.md`](docs/architecture/phase-8-gap-decisions.md).
+
 ### Phase 9 — Documentation and release
 The deliverable is a tool any engine developer can pick up.
 

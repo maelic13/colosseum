@@ -53,6 +53,9 @@ that prefix crosses a Wald boundary, no new pair is launched. Already-running
 pairs still finish both colours but are retained as post-terminal evidence and
 cannot alter the official LLR or verdict.
 
+This includes the explicit `--ponder` condition for clock-based tests. It is
+off by default and becomes part of the resolved SPRT identity and run record.
+
 The final report always names the model, hypotheses, alpha/beta, exact Wald
 bounds, finite cap, official pentanomial vector, fault counts and terminal or
 invalid pair. LLR and decision are present once the sample is non-degenerate;

@@ -123,6 +123,11 @@ disjoint arm allocations; use `--placement` with `--cores-per-engine` instead.
 If Hash itself is tuned, trusted memory-budget checks use its declared upper
 rail for both concurrent arms rather than the initial value.
 
+`--ponder` is available when the tune uses a base/increment clock. It controls
+both perturbation arms, is off by default and is frozen into the resolved run
+identity. It is rejected with movetime, fixed nodes or fixed depth so
+opportunistic opponent-time search cannot change the nominal fixed work.
+
 Before any game, `spsa-schedule.json` is written, read back and checked against
 the schedule derived from the resolved configuration. It records the exact RNG
 algorithm, seed, draw order and gain constants. `--dry-run` resolves this

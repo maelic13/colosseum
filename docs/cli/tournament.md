@@ -52,6 +52,10 @@ same controls and conservative defaults as fixed matches. The opening book is
 optional. Its order, start, PGN ply count and seed have the same meaning as in
 the match runner.
 
+`--ponder` enables and records UCI pondering for every participant. It is off
+by default and requires a base/increment clock; it is not accepted with
+movetime, fixed nodes or fixed depth.
+
 Common process and UCI controls apply to every participant: `--engine-arg`,
 `--cwd`, `--env`, `--option`, and `--button`. A one-based indexed form overrides
 or extends one participant where engines differ:

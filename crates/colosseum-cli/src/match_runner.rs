@@ -147,6 +147,7 @@ pub struct FixedMatchReport {
     pub engine_a_time_control: ConfiguredTimeControl,
     pub engine_b_time_control: ConfiguredTimeControl,
     pub adjudication: AdjudicationConfig,
+    pub ponder: bool,
     pub fault_policy: FaultPolicy,
     pub faults: MatchFaultCounts,
     pub execution: MatchExecutionPlan,
@@ -194,6 +195,7 @@ pub struct PairGameSettings {
     pub engine_a_time_control: ConfiguredTimeControl,
     pub engine_b_time_control: ConfiguredTimeControl,
     pub adjudication: AdjudicationConfig,
+    pub ponder: bool,
     pub openings: MatchOpenings,
 }
 
@@ -335,6 +337,7 @@ pub struct FixedMatchRequest {
     pub engine_a_time_control: ConfiguredTimeControl,
     pub engine_b_time_control: ConfiguredTimeControl,
     pub adjudication: AdjudicationConfig,
+    pub ponder: bool,
     pub fault_policy: FaultPolicy,
     pub execution: MatchExecutionPlan,
     pub master_seed: u64,
@@ -463,6 +466,7 @@ pub async fn play_pair(
         time_control_a: settings.engine_a_time_control,
         time_control_b: settings.engine_b_time_control,
         adjudication: settings.adjudication,
+        ponder: settings.ponder,
         opening: first_opening,
         opening_assignment: first_assignment,
     })
@@ -475,6 +479,7 @@ pub async fn play_pair(
         time_control_a: settings.engine_a_time_control,
         time_control_b: settings.engine_b_time_control,
         adjudication: settings.adjudication,
+        ponder: settings.ponder,
         opening: second_opening,
         opening_assignment: second_assignment,
     })
@@ -601,6 +606,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         engine_a_time_control,
         engine_b_time_control,
         adjudication,
+        ponder,
         fault_policy,
         execution,
         master_seed,
@@ -635,6 +641,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         engine_a_time_control,
         engine_b_time_control,
         adjudication,
+        ponder,
         fault_policy,
         faults: MatchFaultCounts::default(),
         execution: execution.clone(),
@@ -672,6 +679,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
                 time_control_a: engine_a_time_control,
                 time_control_b: engine_b_time_control,
                 adjudication,
+                ponder,
                 opening,
                 opening_assignment,
             }));
@@ -717,6 +725,7 @@ struct GameRequest {
     time_control_a: ConfiguredTimeControl,
     time_control_b: ConfiguredTimeControl,
     adjudication: AdjudicationConfig,
+    ponder: bool,
     opening: ResolvedOpening,
     opening_assignment: OpeningAssignment,
 }
@@ -729,6 +738,7 @@ async fn play_game(request: GameRequest) -> MatchGame {
         time_control_a: engine_a_time_control,
         time_control_b: engine_b_time_control,
         adjudication,
+        ponder,
         opening,
         opening_assignment,
     } = request;
@@ -772,7 +782,7 @@ async fn play_game(request: GameRequest) -> MatchGame {
             black_time_control.label()
         ),
         adjudication,
-        ponder: false,
+        ponder,
         white_time_margin: Duration::from_millis(white_time_control.margin_ms),
         black_time_margin: Duration::from_millis(black_time_control.margin_ms),
         handshake_timeout: HANDSHAKE_TIMEOUT,
@@ -904,6 +914,7 @@ mod tests {
             engine_a_time_control: ConfiguredTimeControl::default(),
             engine_b_time_control: ConfiguredTimeControl::default(),
             adjudication: AdjudicationConfig::default(),
+            ponder: false,
             fault_policy: FaultPolicy::default(),
             faults: MatchFaultCounts::default(),
             execution: off_execution_plan(),
