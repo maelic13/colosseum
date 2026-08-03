@@ -28,3 +28,9 @@ SPRT checkpoints store complete official and post-terminal pairs in separate
 arrays. Only the official prefix enters statistics. Its PGN labels both sample
 classes, while the run record and final result retain the explicit model,
 hypotheses, error rates, cap, terminal pair and fault policy.
+
+Completed SPSA runs additionally write the verified schedule and three views of
+the frozen final-window vector: `tuned-options.txt`, `tuned-options.json` and
+`tuned-options.toml`. The main `result.json` retains the source launch, tune
+conditions, schedule/version metadata, original values, floating means and
+rounded tuned values so it can feed `sprt --apply` without editing.

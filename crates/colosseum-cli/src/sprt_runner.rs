@@ -1,8 +1,11 @@
 //! Pair-atomic SPRT execution adapter.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use colosseum_application::{CompletePair, PairCommitQueue, SprtDesign};
+use colosseum_application::{
+    CompletePair, PairCommitQueue, SprtDesign, SpsaGateIdentity, SpsaResultParameter,
+};
 use colosseum_core::{
     AdjudicationConfig, GameResult, PairGameResult, PentanomialSprtResult, PentanomialVector,
     SprtDecision, StatisticsError, pentanomial_sprt,
@@ -64,7 +67,19 @@ pub struct SprtReport {
     pub master_seed: u64,
     pub master_seed_generated: bool,
     pub openings: OpeningPolicyReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apply: Option<SprtApplyRecord>,
     pub schedule: PairScheduleReport,
+}
+
+/// Provenance of an SPSA-result gate. A hash override is intentionally part of
+/// every machine and human report rather than a transient console warning.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SprtApplyRecord {
+    pub source_result: PathBuf,
+    pub executable: PathBuf,
+    pub identity: SpsaGateIdentity,
+    pub parameters: Vec<SpsaResultParameter>,
 }
 
 impl PairScheduleReport {

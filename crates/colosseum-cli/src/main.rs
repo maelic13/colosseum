@@ -1,5 +1,6 @@
 //! Independent headless composition root for Colosseum CLI.
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -13,9 +14,11 @@ use colosseum_application::{
     CalibrationBinaries, CalibrationDesign, CalibrationInterval, CalibrationStatus, CheckEngine,
     CompletePair, ComplianceReport, ComplianceStatus, DEFAULT_CALIBRATION_CONFIDENCE,
     DEFAULT_CALIBRATION_GAMES, DEFAULT_CALIBRATION_TOLERANCE_NELO,
-    DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS, EngineInspection, EngineLaunchSpec,
-    InspectEngine, RuntimeParticipant, SprtBundle, SprtDesign, SprtParameters, SpsaBoundTune,
-    SpsaRunSettings, SpsaTuneAudit, SpsaTuneWarning, UciOptionSchema, classify_calibration,
+    DEFAULT_SPSA_FINAL_WINDOW_PERCENT, DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS,
+    EngineInspection, EngineLaunchSpec, InspectEngine, RuntimeParticipant, SprtBundle, SprtDesign,
+    SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaGateHashStatus, SpsaRunSettings,
+    SpsaTuneAudit, SpsaTuneResult, SpsaTuneWarning, UciOptionSchema, UciOptionValue,
+    classify_calibration,
 };
 use colosseum_cli::{
     EngineArgs, OfficialSample, RunDirectory, RunRecord, RunRecorder, RunStatus, built_in_defaults,
@@ -87,6 +90,11 @@ enum Command {
 
 #[derive(Debug, Args)]
 struct MatchCommand {
+    /// Path to engine A's UCI executable.
+    engine_a: PathBuf,
+    /// Path to engine B's UCI executable.
+    engine_b: PathBuf,
+
     /// Exact number of games to play; this command never stops early.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     games: u32,
@@ -97,12 +105,6 @@ struct MatchCommand {
 
 #[derive(Debug, Args)]
 struct MatchConditions {
-    /// Path to engine A's UCI executable.
-    engine_a: PathBuf,
-
-    /// Path to engine B's UCI executable.
-    engine_b: PathBuf,
-
     #[arg(long = "a-label")]
     a_label: Option<String>,
     #[arg(long = "a-engine-arg", allow_hyphen_values = true)]
@@ -231,6 +233,20 @@ struct MatchConditions {
 
 #[derive(Debug, Args)]
 struct SprtCommand {
+    /// Path to engine A; omit both engine paths when using --apply.
+    engine_a: Option<PathBuf>,
+    /// Path to engine B; omit both engine paths when using --apply.
+    engine_b: Option<PathBuf>,
+    /// Completed SPSA result.json whose original/tuned vectors form the gate.
+    #[arg(long, value_name = "RESULT_JSON")]
+    apply: Option<PathBuf>,
+    /// Use this executable instead of the path recorded by the SPSA result.
+    #[arg(long, requires = "apply", value_name = "EXECUTABLE")]
+    apply_executable: Option<PathBuf>,
+    /// Proceed with --apply despite an executable SHA-256 mismatch.
+    #[arg(long, requires = "apply")]
+    allow_executable_mismatch: bool,
+
     /// Required finite cap; reaching it without a boundary is inconclusive.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     max_pairs: u32,
@@ -259,6 +275,11 @@ struct SprtCommand {
 
 #[derive(Debug, Args)]
 struct CalibrationCommand {
+    /// Path to the first copy of the representative executable.
+    engine_a: PathBuf,
+    /// Path to the second copy of the representative executable.
+    engine_b: PathBuf,
+
     /// Complete games to measure; it must be even so every sample is colour-paired.
     #[arg(long, default_value_t = DEFAULT_CALIBRATION_GAMES)]
     games: u32,
@@ -290,6 +311,9 @@ struct SpsaCommand {
     /// Complete games in each pair-atomic mini-match.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     games_per_iteration: Option<u32>,
+    /// Percent of the fixed horizon averaged into the tuned result.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=100))]
+    final_window_percent: Option<u32>,
 
     #[command(flatten)]
     conditions: SpsaConditions,
@@ -442,6 +466,111 @@ async fn main() -> ExitCode {
     }
 }
 
+#[derive(Deserialize)]
+struct SpsaApplySource {
+    engine: EngineLaunchSpec,
+    engine_sha256: String,
+    tuned_result: SpsaTuneResult,
+}
+
+fn match_engine_overrides_requested(conditions: &MatchConditions) -> bool {
+    conditions.a_label.is_some()
+        || !conditions.a_arguments.is_empty()
+        || conditions.a_cwd.is_some()
+        || !conditions.a_environment.is_empty()
+        || !conditions.a_options.is_empty()
+        || !conditions.a_buttons.is_empty()
+        || conditions.a_cores.is_some()
+        || conditions.b_label.is_some()
+        || !conditions.b_arguments.is_empty()
+        || conditions.b_cwd.is_some()
+        || !conditions.b_environment.is_empty()
+        || !conditions.b_options.is_empty()
+        || !conditions.b_buttons.is_empty()
+        || conditions.b_cores.is_some()
+}
+
+fn load_spsa_apply(
+    requested_result: &Path,
+    executable_override: Option<&Path>,
+    allow_executable_mismatch: bool,
+) -> Result<
+    (
+        EngineLaunchSpec,
+        EngineLaunchSpec,
+        Option<sprt_runner::SprtApplyRecord>,
+    ),
+    String,
+> {
+    let source_result = dunce::canonicalize(requested_result).map_err(|error| {
+        format!(
+            "cannot resolve SPSA result {}: {error}",
+            requested_result.display()
+        )
+    })?;
+    let bytes = fs::read(&source_result).map_err(|error| {
+        format!(
+            "cannot read SPSA result {}: {error}",
+            source_result.display()
+        )
+    })?;
+    let mut source: SpsaApplySource = serde_json::from_slice(&bytes).map_err(|error| {
+        format!(
+            "cannot parse SPSA result {}: {error}",
+            source_result.display()
+        )
+    })?;
+    source
+        .tuned_result
+        .validate()
+        .map_err(|error| format!("invalid SPSA tuned result: {error}"))?;
+    if source.engine_sha256 != source.tuned_result.engine_sha256 {
+        return Err("SPSA result carries inconsistent executable SHA-256 values".into());
+    }
+    let executable = executable_override.unwrap_or(&source.engine.executable);
+    let executable = dunce::canonicalize(executable).map_err(|error| {
+        format!(
+            "cannot resolve SPSA gate executable {}: {error}",
+            executable.display()
+        )
+    })?;
+    let actual_sha256 = executable_sha256(&executable)?;
+    let identity = source
+        .tuned_result
+        .verify_gate_identity(actual_sha256, allow_executable_mismatch)
+        .map_err(|error| error.to_string())?;
+    source.engine.executable = executable.clone();
+    source.engine.allocated_cpus = colosseum_application::CpuAllocation::Unrestricted;
+    let base_label = source.engine.label.clone().unwrap_or_else(|| {
+        executable
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("engine")
+            .to_owned()
+    });
+    let mut tuned = source.engine.clone();
+    let mut original = source.engine;
+    tuned.label = Some(format!("{base_label} [SPSA tuned]"));
+    original.label = Some(format!("{base_label} [SPSA original]"));
+    for parameter in &source.tuned_result.parameters {
+        tuned.options.insert(
+            parameter.name.clone(),
+            UciOptionValue::Spin(parameter.tuned),
+        );
+        original.options.insert(
+            parameter.name.clone(),
+            UciOptionValue::Spin(parameter.original),
+        );
+    }
+    let record = sprt_runner::SprtApplyRecord {
+        source_result,
+        executable,
+        identity,
+        parameters: source.tuned_result.parameters,
+    };
+    Ok((tuned, original, Some(record)))
+}
+
 async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCode {
     let design = match resolve_sprt_design(&command) {
         Ok(design) => design,
@@ -450,6 +579,11 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCod
             return ExitCode::from(2);
         }
     };
+    let engine_a_path = command.engine_a.clone();
+    let engine_b_path = command.engine_b.clone();
+    let apply_path = command.apply.clone();
+    let apply_executable = command.apply_executable.clone();
+    let allow_executable_mismatch = command.allow_executable_mismatch;
     let command = command.conditions;
     if command.book.is_none()
         && (command.book_start != 0
@@ -509,38 +643,81 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCod
             return ExitCode::from(2);
         }
     };
-    let engine_a = match resolve_match_engine(
-        command.engine_a,
-        command.a_label,
-        command.a_arguments,
-        command.a_cwd,
-        command.a_environment,
-        command.a_options,
-        command.a_buttons,
-        command.a_cores,
-    ) {
-        Ok(engine) => engine,
-        Err(error) => {
-            eprintln!("configuration error: {error}");
+    let (engine_a, engine_b, apply_record) = if let Some(apply_path) = apply_path {
+        if engine_a_path.is_some() || engine_b_path.is_some() {
+            eprintln!(
+                "configuration error: positional engine paths must be omitted with --apply; use --apply-executable to relocate the recorded executable"
+            );
             return ExitCode::from(2);
         }
-    };
-    let engine_b = match resolve_match_engine(
-        command.engine_b,
-        command.b_label,
-        command.b_arguments,
-        command.b_cwd,
-        command.b_environment,
-        command.b_options,
-        command.b_buttons,
-        command.b_cores,
-    ) {
-        Ok(engine) => engine,
-        Err(error) => {
-            eprintln!("configuration error: {error}");
+        if match_engine_overrides_requested(&command) {
+            eprintln!(
+                "configuration error: per-side labels, process controls, UCI options and cores are not allowed with --apply; the gate arms come from the SPSA artifact"
+            );
             return ExitCode::from(2);
         }
+        match load_spsa_apply(
+            &apply_path,
+            apply_executable.as_deref(),
+            allow_executable_mismatch,
+        ) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        }
+    } else {
+        let (Some(engine_a_path), Some(engine_b_path)) = (engine_a_path, engine_b_path) else {
+            eprintln!(
+                "configuration error: SPRT requires two engine paths or --apply <SPSA result.json>"
+            );
+            return ExitCode::from(2);
+        };
+        let engine_a = match resolve_match_engine(
+            engine_a_path,
+            command.a_label.clone(),
+            command.a_arguments.clone(),
+            command.a_cwd.clone(),
+            command.a_environment.clone(),
+            command.a_options.clone(),
+            command.a_buttons.clone(),
+            command.a_cores.clone(),
+        ) {
+            Ok(engine) => engine,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        };
+        let engine_b = match resolve_match_engine(
+            engine_b_path,
+            command.b_label.clone(),
+            command.b_arguments.clone(),
+            command.b_cwd.clone(),
+            command.b_environment.clone(),
+            command.b_options.clone(),
+            command.b_buttons.clone(),
+            command.b_cores.clone(),
+        ) {
+            Ok(engine) => engine,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        };
+        (engine_a, engine_b, None)
     };
+    if apply_record
+        .as_ref()
+        .is_some_and(|record| record.identity.status == SpsaGateHashStatus::MismatchOverridden)
+    {
+        let record = apply_record.as_ref().expect("record was just matched");
+        eprintln!(
+            "WARNING: SPSA apply executable SHA-256 mismatch explicitly overridden (expected {}, actual {})",
+            record.identity.expected_sha256, record.identity.actual_sha256
+        );
+    }
     let placement_policy = match resolve_placement(&command.placement, command.headroom_cores) {
         Ok(policy) => policy,
         Err(error) => {
@@ -601,6 +778,7 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCod
             "design": design,
             "engine_a": &engine_a,
             "engine_b": &engine_b,
+            "apply": &apply_record,
             "engine_a_time_control": engine_a_time_control,
             "engine_b_time_control": engine_b_time_control,
             "adjudication": adjudication,
@@ -694,6 +872,7 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCod
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "sprt",
         "design": design,
+        "apply": &apply_record,
         "engine_a_time_control": engine_a_time_control,
         "engine_b_time_control": engine_b_time_control,
         "adjudication": adjudication,
@@ -755,6 +934,7 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCod
                 master_seed,
                 master_seed_generated,
                 openings: openings_report,
+                apply: apply_record,
                 schedule,
             };
             if let Err(error) = observer.finish(&report) {
@@ -823,26 +1003,39 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
             return ExitCode::from(2);
         }
     };
-    let (iterations, games_per_iteration, r_end) =
-        if let Some((stored, stored_r_end)) = stored_schedule_inputs {
-            eprintln!(
-                "resuming the stored SPSA horizon: {} iterations, {} games per iteration, r_end {}",
-                stored.iterations, stored.games_per_iteration, stored_r_end
-            );
-            (stored.iterations, stored.games_per_iteration, stored_r_end)
-        } else {
-            let Some(r_end) = command.r_end else {
-                eprintln!("configuration error: --r-end is required for a new SPSA run");
-                return ExitCode::from(2);
-            };
-            (
-                command.iterations.unwrap_or(DEFAULT_SPSA_ITERATIONS),
-                command
-                    .games_per_iteration
-                    .unwrap_or(DEFAULT_SPSA_GAMES_PER_ITERATION),
-                r_end,
-            )
+    let (iterations, games_per_iteration, r_end, final_window_percent) = if let Some((
+        stored,
+        stored_r_end,
+        stored_window,
+    )) =
+        stored_schedule_inputs
+    {
+        eprintln!(
+            "resuming the stored SPSA horizon: {} iterations, {} games per iteration, r_end {}, final window {}%",
+            stored.iterations, stored.games_per_iteration, stored_r_end, stored_window
+        );
+        (
+            stored.iterations,
+            stored.games_per_iteration,
+            stored_r_end,
+            stored_window,
+        )
+    } else {
+        let Some(r_end) = command.r_end else {
+            eprintln!("configuration error: --r-end is required for a new SPSA run");
+            return ExitCode::from(2);
         };
+        (
+            command.iterations.unwrap_or(DEFAULT_SPSA_ITERATIONS),
+            command
+                .games_per_iteration
+                .unwrap_or(DEFAULT_SPSA_GAMES_PER_ITERATION),
+            r_end,
+            command
+                .final_window_percent
+                .unwrap_or(DEFAULT_SPSA_FINAL_WINDOW_PERCENT),
+        )
+    };
     let settings = match SpsaRunSettings::new(iterations, games_per_iteration) {
         Ok(settings) => settings,
         Err(error) => {
@@ -1033,6 +1226,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
             },
             "settings": settings,
             "r_end": r_end,
+            "final_window_percent": final_window_percent,
             "schedule": &expected_schedule,
             "engine_time_control": engine_time_control,
             "adjudication": adjudication,
@@ -1084,6 +1278,19 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
         Ok(hash) => hash,
         Err(error) => {
             eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let recorded_engine = match serde_json::from_value::<EngineLaunchSpec>(
+        resolved
+            .value()
+            .get("engine")
+            .cloned()
+            .unwrap_or(Value::Null),
+    ) {
+        Ok(engine) => engine,
+        Err(error) => {
+            eprintln!("configuration error: could not retain resolved SPSA engine: {error}");
             return ExitCode::from(2);
         }
     };
@@ -1178,6 +1385,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
         "kind": "spsa",
         "settings": settings,
         "r_end": r_end,
+        "final_window_percent": final_window_percent,
         "bound_tune": &bound_tune,
         "tune_audit": &tune_audit,
         "engine_sha256": &engine_sha256,
@@ -1260,9 +1468,37 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
         }
     };
     let status = driver.status;
+    let tuned_result = if status == spsa_driver::SpsaStatus::Completed {
+        let history = driver
+            .completed_iterations
+            .iter()
+            .map(|iteration| SpsaCenterSample {
+                iteration: iteration.iteration,
+                centers: iteration.centers_after.clone(),
+            })
+            .collect::<Vec<_>>();
+        match bound_tune.result_from_centers(
+            engine_sha256.clone(),
+            &expected_schedule,
+            settings,
+            final_window_percent,
+            &history,
+        ) {
+            Ok(result) => Some(result),
+            Err(error) => {
+                eprintln!("SPSA result failed: {error}");
+                return ExitCode::from(3);
+            }
+        }
+    } else {
+        None
+    };
     let report = SpsaReport {
+        engine: recorded_engine,
+        schedule: expected_schedule,
         bound_tune,
         tune_audit,
+        tuned_result,
         engine_sha256,
         engine_time_control,
         adjudication,
@@ -1279,7 +1515,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
     if machine {
         print_json(&MachineOutput::Spsa {
             run_directory: directory.paths().root.clone(),
-            report,
+            report: Box::new(report),
         });
     } else {
         print_spsa(&report, &directory.paths().root);
@@ -1440,7 +1676,7 @@ enum MachineOutput<'a> {
     },
     Spsa {
         run_directory: PathBuf,
-        report: SpsaReport,
+        report: Box<SpsaReport>,
     },
     Calibration {
         run_directory: PathBuf,
@@ -1481,8 +1717,12 @@ struct CalibrationReport {
 
 #[derive(Debug, Clone, Serialize)]
 struct SpsaReport {
+    engine: EngineLaunchSpec,
+    schedule: SpsaScheduleArtifact,
     bound_tune: SpsaBoundTune,
     tune_audit: SpsaTuneAudit,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tuned_result: Option<SpsaTuneResult>,
     engine_sha256: String,
     engine_time_control: match_runner::ConfiguredTimeControl,
     adjudication: AdjudicationConfig,
@@ -1754,7 +1994,7 @@ fn prepare_calibration(command: &CalibrationCommand) -> Result<PreparedCalibrati
         conditions.b_margin_ms,
     )?;
     let engine_a = resolve_match_engine(
-        conditions.engine_a.clone(),
+        command.engine_a.clone(),
         conditions.a_label.clone(),
         conditions.a_arguments.clone(),
         conditions.a_cwd.clone(),
@@ -1765,7 +2005,7 @@ fn prepare_calibration(command: &CalibrationCommand) -> Result<PreparedCalibrati
     )
     .map_err(|error| error.to_string())?;
     let engine_b = resolve_match_engine(
-        conditions.engine_b.clone(),
+        command.engine_b.clone(),
         conditions.b_label.clone(),
         conditions.b_arguments.clone(),
         conditions.b_cwd.clone(),
@@ -1920,6 +2160,8 @@ fn calibration_exit_code(status: CalibrationStatus) -> u8 {
 async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitCode {
     let MatchCommand {
         games,
+        engine_a: engine_a_path,
+        engine_b: engine_b_path,
         conditions: command,
     } = command;
     if command.book.is_none()
@@ -1981,7 +2223,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         }
     };
     let engine_a = match resolve_match_engine(
-        command.engine_a,
+        engine_a_path,
         command.a_label,
         command.a_arguments,
         command.a_cwd,
@@ -1997,7 +2239,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         }
     };
     let engine_b = match resolve_match_engine(
-        command.engine_b,
+        engine_b_path,
         command.b_label,
         command.b_arguments,
         command.b_cwd,
@@ -2261,7 +2503,7 @@ fn read_stored_seed(root: &Path) -> Option<(u64, bool)> {
     ))
 }
 
-fn read_stored_spsa_inputs(root: &Path) -> Result<(SpsaRunSettings, f64), String> {
+fn read_stored_spsa_inputs(root: &Path) -> Result<(SpsaRunSettings, f64, u32), String> {
     let path = root.join("resolved-config.json");
     let bytes = fs::read(&path).map_err(|error| {
         format!(
@@ -2295,9 +2537,15 @@ fn read_stored_spsa_inputs(root: &Path) -> Result<(SpsaRunSettings, f64), String
         .get("r_end")
         .and_then(Value::as_f64)
         .ok_or_else(|| "stored SPSA r_end is missing or invalid".to_owned())?;
+    let final_window_percent = value
+        .get("final_window_percent")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .filter(|value| (1..=100).contains(value))
+        .ok_or_else(|| "stored SPSA final-window percent is missing or invalid".to_owned())?;
     let settings =
         SpsaRunSettings::new(iterations, games_per_iteration).map_err(|error| error.to_string())?;
-    Ok((settings, r_end))
+    Ok((settings, r_end, final_window_percent))
 }
 
 struct DurableMatchOutput {
@@ -2520,6 +2768,16 @@ struct DurableSpsaOutput {
     settings: SpsaRunSettings,
 }
 
+#[derive(Serialize)]
+struct SpsaRunFileFragment {
+    engine: SpsaRunFileEngine,
+}
+
+#[derive(Serialize)]
+struct SpsaRunFileEngine {
+    options: BTreeMap<String, i64>,
+}
+
 impl DurableSpsaOutput {
     fn new(
         directory: Arc<RunDirectory>,
@@ -2612,6 +2870,34 @@ impl DurableSpsaOutput {
     }
 
     fn finish(&self, report: &SpsaReport) -> Result<(), String> {
+        if let Some(result) = &report.tuned_result {
+            let json = serde_json::to_vec_pretty(result).map_err(|error| error.to_string())?;
+            fs::write(self.directory.paths().root.join("tuned-options.json"), json)
+                .map_err(|error| error.to_string())?;
+            let mut setoptions = String::new();
+            let mut options = BTreeMap::new();
+            for parameter in &result.parameters {
+                setoptions.push_str(&format!(
+                    "setoption name {} value {}\n",
+                    parameter.name, parameter.tuned
+                ));
+                options.insert(parameter.name.clone(), parameter.tuned);
+            }
+            fs::write(
+                self.directory.paths().root.join("tuned-options.txt"),
+                setoptions,
+            )
+            .map_err(|error| error.to_string())?;
+            let fragment = toml::to_string_pretty(&SpsaRunFileFragment {
+                engine: SpsaRunFileEngine { options },
+            })
+            .map_err(|error| error.to_string())?;
+            fs::write(
+                self.directory.paths().root.join("tuned-options.toml"),
+                fragment,
+            )
+            .map_err(|error| error.to_string())?;
+        }
         let bytes = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
         fs::write(self.directory.paths().root.join("result.json"), bytes)
             .map_err(|error| error.to_string())?;
@@ -2822,6 +3108,13 @@ fn print_fixed_match(report: &match_runner::FixedMatchReport) {
 }
 
 fn print_sprt(report: &sprt_runner::SprtReport, run_directory: &Path) {
+    if let Some(apply) = &report.apply {
+        println!(
+            "SPSA apply: {} ({:?})",
+            apply.source_result.display(),
+            apply.identity.status
+        );
+    }
     println!(
         "SPRT {:?}: {} official pairs, {} post-terminal pairs",
         report.status,
@@ -2874,6 +3167,18 @@ fn print_spsa(report: &SpsaReport, run_directory: &Path) {
         .zip(&report.driver.final_centers)
     {
         println!("{}: {:.6}", parameter.parameter.name, center);
+    }
+    if let Some(result) = &report.tuned_result {
+        println!(
+            "tuned vector: rounded mean of {} sample(s) from final {}% window",
+            result.window.samples_used, result.window.percent
+        );
+        for parameter in &result.parameters {
+            println!(
+                "setoption name {} value {}  (mean {:.6})",
+                parameter.name, parameter.tuned, parameter.mean
+            );
+        }
     }
     if let Some(invalid) = &report.driver.invalid_iteration {
         println!(

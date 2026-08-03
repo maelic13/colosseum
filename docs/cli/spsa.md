@@ -46,6 +46,15 @@ starting values, not minimums. `--iterations 1 --games-per-iteration 2` is a
 valid smoke run; games per iteration must be positive and even so every opening
 has both colour assignments.
 
+On successful completion, the tuned vector is the half-away-from-zero rounded
+mean of the final 10% of completed centre vectors. `--final-window-percent`
+changes that percentage from 1 through 100. The sample count is rounded up, so
+every valid horizon contributes at least one centre; the percentage and exact
+zero-based window are frozen in the configuration and result. Completion writes
+the same vector as `tuned-options.txt` (ready-to-paste UCI `setoption` lines),
+`tuned-options.json` (the versioned machine artifact), and
+`tuned-options.toml` (an `[engine.options]` run-file fragment).
+
 One floating-point centre vector is retained throughout the run. For each
 iteration Colosseum derives deterministic plus/minus integer option vectors,
 plays the same openings with colours reversed, and applies an update only after
@@ -78,8 +87,25 @@ mini-match on resume and cannot advance the gain schedule. Resume requires the
 same resolved configuration, tune contents, engine path, schedule, book and
 conditions. The stored iterations, games-per-iteration and `r_end` are
 authoritative on resume, so repeating different values cannot silently change
-the gain schedule. Logs append, PGN is rebuilt from committed evidence, and
+the gain schedule. The stored final-window percentage is authoritative as well.
+Logs append, PGN is rebuilt from committed evidence, and
 `run-record.json` publishes each durable iteration after its checkpoint.
+
+Gate the completed vector against its original values without editing the
+result file:
+
+```text
+colosseum-cli sprt --apply path/to/spsa-run/result.json \
+  --max-pairs 10000 --preset gainer
+```
+
+The tuned vector is engine A and the original vector is engine B. Both arms use
+the exact recorded executable, arguments, environment, working directory and
+non-tuned UCI options. The executable content must match the recorded SHA-256.
+`--apply-executable PATH` can relocate it; identical content remains verified.
+`--allow-executable-mismatch` is available for an intentional changed binary,
+but the mismatch is printed prominently and retained in the SPRT result,
+resolved configuration and run record.
 
 Exit code `0` means the requested horizon completed, `2` is a configuration
 refusal, `3` is an infrastructure/runtime/persistence failure, and `5` means an

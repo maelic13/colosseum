@@ -29,6 +29,22 @@ bundles rather than hidden modes: `--model`, `--elo0`, `--elo1`, `--alpha` and
 `--beta` may override any bundled value, and the complete resolved design plus
 its exact Wald bounds is stored and reported.
 
+A completed SPSA result can supply both gate arms directly:
+
+```text
+colosseum-cli sprt --apply path/to/spsa-run/result.json \
+  --max-pairs 10000 --preset gainer
+```
+
+No positional engines or per-side launch/UCI overrides are accepted in this
+mode. Engine A receives the tuned vector and engine B the original vector, over
+the otherwise identical recorded launch specification. Colosseum verifies the
+current executable against the artifact's SHA-256 before dry-run or launch.
+Use `--apply-executable` for a relocated copy. A content mismatch is refused
+unless `--allow-executable-mismatch` is explicitly present; that override is a
+warning and a structured field in every gate record. Statistical design and
+ordinary match conditions remain explicit SPRT arguments.
+
 SPRT uses the same direct engine, per-side clock, adjudication, placement,
 concurrency, memory, optional book, seed, progress and run-directory controls
 as [`match`](match.md). Each opening's two colour-reversed games form one commit

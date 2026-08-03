@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–4C plus the Phase-5.1–5.6 SPSA kernel, verified schedule, live-schema-bound and audited tune vector, configurable settings and durable pair-atomic driver are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
-| What is missing | SPSA loop closure, planning/status and exit; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–4C plus the Phase-5.1–5.7 SPSA kernel, verified schedule, audited tune vector, durable driver, final-window artifacts and hash-verified SPRT loop closure are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
+| What is missing | SPSA planning/status and exit; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4C · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 5.7 — SPSA loop closure and verified SPRT apply** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Next step | **Phase 5.8 — SPSA schedule and cost planning** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -541,9 +541,18 @@ model as well.
   [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs),
   [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
   [`docs/cli/spsa.md`](docs/cli/spsa.md)
-- ☐ **5.7** — **Model: Sol High. Close the loop:** rounded mean over frozen final-10% window as
-  setoptions/JSON/run fragment; `sprt --apply` gates original versus tuned
-  vector with the same executable hash unless explicitly overridden
+- ☑ **5.7 — DONE** — **Model: Sol High. Close the loop:** application policy
+  freezes the configurable final horizon window and produces the rounded mean
+  with original/tuned vectors and version/hash provenance. Completed tunes write
+  ready `setoption`, JSON and TOML views; `sprt --apply` consumes `result.json`
+  unedited, makes tuned A/original B the only UCI difference, verifies the
+  executable before dry-run or launch, and records any explicit mismatch
+  override prominently — evidence:
+  [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs),
+  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
+  [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
+  [`docs/cli/spsa.md`](docs/cli/spsa.md),
+  [`docs/cli/sprt.md`](docs/cli/sprt.md)
 - ☐ **5.8** — **Model: Terra High.** `spsa plan` reports factual schedule/game/cost/resolution information.
   Optional convergence simulation requires an explicit synthetic model and
   is never presented as a chess-convergence forecast
@@ -669,10 +678,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 5.7 — SPSA loop closure and verified SPRT apply. Model: GPT-5.6 Sol — High.**
-Emit the frozen final-window parameter result in setoption, JSON and run-file
-forms, then let `sprt --apply` gate the original and tuned vectors only when the
-executable hash remains verified (or a prominent override is chosen).
+**Phase 5.8 — SPSA schedule and cost planning. Model: GPT-5.6 Terra — High.**
+Add factual offline `spsa plan` output for schedule trajectories, game/pair and
+checkpoint counts, rounding hazards and user-supplied or pilot-derived wall-time
+ranges; keep any optional synthetic convergence model explicitly separate.
 
 ```
 git diff --check

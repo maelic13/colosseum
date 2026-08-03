@@ -243,9 +243,27 @@ fn complete_mini_match_is_one_durable_gradient_commit() {
         "games.pgn",
         "result.json",
         "run-record.json",
+        "tuned-options.json",
+        "tuned-options.txt",
+        "tuned-options.toml",
     ] {
         assert!(run.join(artifact).is_file(), "missing {artifact}");
     }
+    assert_eq!(value["report"]["tuned_result"]["window"]["percent"], 10);
+    assert_eq!(
+        value["report"]["tuned_result"]["parameters"][0]["tuned"],
+        16
+    );
+    assert!(
+        std::fs::read_to_string(run.join("tuned-options.txt"))
+            .unwrap()
+            .contains("setoption name Hash value 16")
+    );
+    assert!(
+        std::fs::read_to_string(run.join("tuned-options.toml"))
+            .unwrap()
+            .contains("[engine.options]")
+    );
     let checkpoint = checkpoint_payload(&run);
     assert_eq!(
         checkpoint["completed_iterations"].as_array().unwrap().len(),
@@ -258,6 +276,122 @@ fn complete_mini_match_is_one_durable_gradient_commit() {
     assert_eq!(record["official_sample"]["committed_units"], 1);
     assert_eq!(record["official_sample"]["completed_pairs"], 1);
     assert_eq!(record["official_sample"]["scored_games"], 2);
+}
+
+#[test]
+fn sprt_apply_consumes_the_unedited_spsa_result_and_verifies_executable_content() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = write_tune(root.path());
+    let tune_run = root.path().join("tune");
+    let tune_output = stub_command(&tune, &tune_run).output().unwrap();
+    assert!(
+        tune_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tune_output.stderr)
+    );
+    let result = tune_run.join("result.json");
+    let gate_run = root.path().join("gate");
+    let gate = cli()
+        .arg("sprt")
+        .arg("--apply")
+        .arg(&result)
+        .args([
+            "--max-pairs",
+            "1",
+            "--preset",
+            "gainer",
+            "--a-depth",
+            "1",
+            "--b-depth",
+            "1",
+            "--max-moves",
+            "2",
+            "--seed",
+            "7",
+            "--dir",
+        ])
+        .arg(&gate_run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(
+        gate.status.code(),
+        Some(4),
+        "{}",
+        String::from_utf8_lossy(&gate.stderr)
+    );
+    assert!(gate.stderr.is_empty());
+    let gate: Value = serde_json::from_slice(&gate.stdout).unwrap();
+    assert_eq!(gate["report"]["apply"]["identity"]["status"], "verified");
+    assert_eq!(gate["report"]["apply"]["parameters"][0]["name"], "Hash");
+    let resolved: Value =
+        serde_json::from_slice(&std::fs::read(gate_run.join("resolved-config.json")).unwrap())
+            .unwrap();
+    assert_eq!(resolved["engine_a"]["options"]["Hash"]["value"], 16);
+    assert_eq!(resolved["engine_b"]["options"]["Hash"]["value"], 16);
+    let record: Value =
+        serde_json::from_slice(&std::fs::read(gate_run.join("run-record.json")).unwrap()).unwrap();
+    assert_eq!(
+        record["workflow"]["apply"]["identity"]["status"],
+        "verified"
+    );
+}
+
+#[test]
+fn sprt_apply_refuses_hash_mismatch_unless_the_override_is_prominent() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = write_tune(root.path());
+    let tune_run = root.path().join("tune");
+    assert!(
+        stub_command(&tune, &tune_run)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let result = tune_run.join("result.json");
+    let different = env!("CARGO_BIN_EXE_colosseum-uci-fixture");
+
+    let refused = cli()
+        .arg("sprt")
+        .arg("--apply")
+        .arg(&result)
+        .arg("--apply-executable")
+        .arg(different)
+        .args(["--max-pairs", "1", "--preset", "gainer", "--dry-run"])
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(
+        String::from_utf8(refused.stderr)
+            .unwrap()
+            .contains("executable SHA-256 mismatch")
+    );
+
+    let overridden = cli()
+        .arg("sprt")
+        .arg("--apply")
+        .arg(&result)
+        .arg("--apply-executable")
+        .arg(different)
+        .arg("--allow-executable-mismatch")
+        .args([
+            "--max-pairs",
+            "1",
+            "--preset",
+            "gainer",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(overridden.status.success());
+    assert!(String::from_utf8_lossy(&overridden.stderr).contains("WARNING"));
+    let overridden: Value = serde_json::from_slice(&overridden.stdout).unwrap();
+    assert_eq!(
+        overridden["resolved_configuration"]["apply"]["identity"]["status"],
+        "mismatch-overridden"
+    );
 }
 
 #[test]

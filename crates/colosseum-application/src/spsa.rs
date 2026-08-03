@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 
 use colosseum_core::{
-    SpsaEndSpec, SpsaError, SpsaIteration, SpsaKnob, SpsaScheduleArtifact, prepare_iteration,
-    update_centers,
+    SPSA_SCHEDULE_SCHEMA_VERSION, SpsaEndSpec, SpsaError, SpsaIteration, SpsaKnob,
+    SpsaScheduleArtifact, prepare_iteration, round_half_away_from_zero, update_centers,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -13,6 +13,8 @@ use crate::{EngineInspection, UciOptionSchema};
 
 pub const DEFAULT_SPSA_ITERATIONS: u32 = 5_000;
 pub const DEFAULT_SPSA_GAMES_PER_ITERATION: u32 = 32;
+pub const DEFAULT_SPSA_FINAL_WINDOW_PERCENT: u32 = 10;
+pub const SPSA_TUNE_RESULT_SCHEMA_VERSION: u32 = 1;
 
 /// Resolved run-wide SPSA sizing. The defaults are useful production values,
 /// not minimums: short development or synthetic runs may use one iteration
@@ -404,6 +406,67 @@ pub struct SpsaTuneAudit {
     pub warnings: Vec<SpsaTuneWarning>,
 }
 
+/// One completed centre vector made available to final-result policy. The
+/// iteration number is explicit so adapters cannot silently reorder history.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpsaCenterSample {
+    pub iteration: u32,
+    pub centers: Vec<f64>,
+}
+
+/// Frozen horizon-based window used to turn a noisy SPSA trajectory into the
+/// vector offered for a subsequent gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpsaFinalWindow {
+    pub percent: u32,
+    pub planned_iterations: u32,
+    /// Zero-based first schedule iteration admitted to the mean.
+    pub start_iteration: u32,
+    /// Planned exclusive end; always the configured tune horizon.
+    pub end_iteration_exclusive: u32,
+    pub planned_samples: u32,
+    /// Samples currently present. This equals `planned_samples` on completion.
+    pub samples_used: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpsaResultParameter {
+    pub name: String,
+    pub original: i64,
+    pub mean: f64,
+    pub tuned: i64,
+    pub min: i64,
+    pub max: i64,
+}
+
+/// Stable machine-readable result consumed directly by `sprt --apply`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpsaTuneResult {
+    pub schema_version: u32,
+    pub schedule_schema_version: u32,
+    pub stats_version: u32,
+    pub engine_sha256: String,
+    pub settings: SpsaRunSettings,
+    pub window: SpsaFinalWindow,
+    pub parameters: Vec<SpsaResultParameter>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SpsaGateHashStatus {
+    Verified,
+    MismatchOverridden,
+}
+
+/// Executable-identity decision retained by a gate report and run record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpsaGateIdentity {
+    pub expected_sha256: String,
+    pub actual_sha256: String,
+    pub status: SpsaGateHashStatus,
+}
+
 impl SpsaTune {
     /// Validate tune-file invariants that do not require launching the engine.
     /// This runs before schedule derivation so a dry run has the same hard
@@ -527,6 +590,120 @@ impl SpsaBoundTune {
         Ok(SpsaTuneAudit { warnings })
     }
 
+    /// Produce the gate vector from the configured final portion of the fixed
+    /// tune horizon. Partial history is accepted only after that frozen window
+    /// has begun, allowing a later read-only mid-run command to reuse policy.
+    pub fn result_from_centers(
+        &self,
+        engine_sha256: String,
+        schedule: &SpsaScheduleArtifact,
+        settings: SpsaRunSettings,
+        final_window_percent: u32,
+        history: &[SpsaCenterSample],
+    ) -> Result<SpsaTuneResult, SpsaTuneResultError> {
+        settings.validate()?;
+        if !(1..=100).contains(&final_window_percent) {
+            return Err(SpsaTuneResultError::InvalidWindowPercent {
+                percent: final_window_percent,
+            });
+        }
+        if schedule.schedule.iterations() != settings.iterations {
+            return Err(SpsaTuneResultError::ScheduleHorizonMismatch {
+                schedule: schedule.schedule.iterations(),
+                settings: settings.iterations,
+            });
+        }
+        if history.len() > settings.iterations as usize {
+            return Err(SpsaTuneResultError::HistoryBeyondHorizon);
+        }
+        let planned_samples = u32::try_from(
+            (u64::from(settings.iterations) * u64::from(final_window_percent)).div_ceil(100),
+        )
+        .expect("a percentage of a u32 horizon fits in u32");
+        let start_iteration = settings.iterations - planned_samples;
+        for (index, sample) in history.iter().enumerate() {
+            let expected_iteration =
+                u32::try_from(index).map_err(|_| SpsaTuneResultError::HistoryBeyondHorizon)?;
+            if sample.iteration != expected_iteration {
+                return Err(SpsaTuneResultError::HistoryOrder {
+                    expected: expected_iteration,
+                    actual: sample.iteration,
+                });
+            }
+            if sample.centers.len() != self.parameters.len() {
+                return Err(SpsaTuneResultError::CenterDimension {
+                    iteration: sample.iteration,
+                    expected: self.parameters.len(),
+                    actual: sample.centers.len(),
+                });
+            }
+        }
+        let selected = history
+            .iter()
+            .filter(|sample| sample.iteration >= start_iteration)
+            .collect::<Vec<_>>();
+        if selected.is_empty() {
+            return Err(SpsaTuneResultError::FinalWindowNotReached {
+                start_iteration,
+                completed_iterations: history.len() as u32,
+            });
+        }
+        let parameters = self
+            .parameters
+            .iter()
+            .enumerate()
+            .map(|(parameter_index, bound)| {
+                let mut sum = 0.0;
+                for sample in &selected {
+                    let value = sample.centers[parameter_index];
+                    if !value.is_finite()
+                        || value < bound.parameter.min as f64
+                        || value > bound.parameter.max as f64
+                    {
+                        return Err(SpsaTuneResultError::InvalidCenter {
+                            iteration: sample.iteration,
+                            name: bound.parameter.name.clone(),
+                            value,
+                        });
+                    }
+                    sum += value;
+                }
+                let mean = sum / selected.len() as f64;
+                if !mean.is_finite() {
+                    return Err(SpsaTuneResultError::NonFiniteMean {
+                        name: bound.parameter.name.clone(),
+                    });
+                }
+                Ok(SpsaResultParameter {
+                    name: bound.parameter.name.clone(),
+                    original: bound.parameter.initial,
+                    mean,
+                    tuned: round_half_away_from_zero(mean)?,
+                    min: bound.parameter.min,
+                    max: bound.parameter.max,
+                })
+            })
+            .collect::<Result<Vec<_>, SpsaTuneResultError>>()?;
+        let result = SpsaTuneResult {
+            schema_version: SPSA_TUNE_RESULT_SCHEMA_VERSION,
+            schedule_schema_version: schedule.schema_version,
+            stats_version: schedule.stats_version,
+            engine_sha256,
+            settings,
+            window: SpsaFinalWindow {
+                percent: final_window_percent,
+                planned_iterations: settings.iterations,
+                start_iteration,
+                end_iteration_exclusive: settings.iterations,
+                planned_samples,
+                samples_used: selected.len() as u32,
+            },
+            parameters,
+        };
+        result.validate()?;
+        Ok(result)
+    }
+
     #[must_use]
     pub fn end_specs(&self) -> Vec<SpsaEndSpec> {
         self.parameters
@@ -546,6 +723,102 @@ impl SpsaBoundTune {
             .iter()
             .map(|bound| bound.parameter.initial as f64)
             .collect()
+    }
+}
+
+impl SpsaTuneResult {
+    pub fn validate(&self) -> Result<(), SpsaTuneResultError> {
+        if self.schema_version != SPSA_TUNE_RESULT_SCHEMA_VERSION {
+            return Err(SpsaTuneResultError::UnsupportedResultSchema {
+                version: self.schema_version,
+            });
+        }
+        if self.schedule_schema_version != SPSA_SCHEDULE_SCHEMA_VERSION {
+            return Err(SpsaTuneResultError::UnsupportedScheduleSchema {
+                version: self.schedule_schema_version,
+            });
+        }
+        if self.stats_version != colosseum_core::rng::RNG_VERSION {
+            return Err(SpsaTuneResultError::UnsupportedStatsVersion {
+                version: self.stats_version,
+            });
+        }
+        self.settings.validate()?;
+        if self.engine_sha256.len() != 64
+            || !self
+                .engine_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(SpsaTuneResultError::InvalidExecutableHash);
+        }
+        if !(1..=100).contains(&self.window.percent) {
+            return Err(SpsaTuneResultError::InvalidWindowPercent {
+                percent: self.window.percent,
+            });
+        }
+        let planned_samples = u32::try_from(
+            (u64::from(self.settings.iterations) * u64::from(self.window.percent)).div_ceil(100),
+        )
+        .expect("a percentage of a u32 horizon fits in u32");
+        let expected_start = self.settings.iterations - planned_samples;
+        if self.window.planned_iterations != self.settings.iterations
+            || self.window.start_iteration != expected_start
+            || self.window.end_iteration_exclusive != self.settings.iterations
+            || self.window.planned_samples != planned_samples
+            || self.window.samples_used == 0
+            || self.window.samples_used > planned_samples
+        {
+            return Err(SpsaTuneResultError::InvalidWindow);
+        }
+        if self.parameters.is_empty() {
+            return Err(SpsaTuneResultError::EmptyParameters);
+        }
+        let mut names = HashSet::with_capacity(self.parameters.len());
+        for parameter in &self.parameters {
+            if !names.insert(&parameter.name) {
+                return Err(SpsaTuneResultError::DuplicateResultParameter {
+                    name: parameter.name.clone(),
+                });
+            }
+            if parameter.min >= parameter.max
+                || parameter.original < parameter.min
+                || parameter.original > parameter.max
+                || parameter.tuned < parameter.min
+                || parameter.tuned > parameter.max
+                || !parameter.mean.is_finite()
+                || parameter.mean < parameter.min as f64
+                || parameter.mean > parameter.max as f64
+            {
+                return Err(SpsaTuneResultError::InvalidResultParameter {
+                    name: parameter.name.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn verify_gate_identity(
+        &self,
+        actual_sha256: String,
+        allow_mismatch: bool,
+    ) -> Result<SpsaGateIdentity, SpsaTuneResultError> {
+        self.validate()?;
+        let status = if actual_sha256 == self.engine_sha256 {
+            SpsaGateHashStatus::Verified
+        } else if allow_mismatch {
+            SpsaGateHashStatus::MismatchOverridden
+        } else {
+            return Err(SpsaTuneResultError::ExecutableHashMismatch {
+                expected: self.engine_sha256.clone(),
+                actual: actual_sha256,
+            });
+        };
+        Ok(SpsaGateIdentity {
+            expected_sha256: self.engine_sha256.clone(),
+            actual_sha256,
+            status,
+        })
     }
 }
 
@@ -631,6 +904,63 @@ pub enum SpsaTuneAuditError {
         "SPSA parameter {name:?} c_end {c_end} rounds to zero at the end of the schedule; use at least 0.5 for an integer UCI option"
     )]
     PerturbationRoundsToZero { name: String, c_end: f64 },
+}
+
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum SpsaTuneResultError {
+    #[error(transparent)]
+    Settings(#[from] SpsaRunSettingsError),
+    #[error(transparent)]
+    Schedule(#[from] SpsaError),
+    #[error("SPSA final-window percent must be in 1..=100, got {percent}")]
+    InvalidWindowPercent { percent: u32 },
+    #[error("SPSA schedule horizon {schedule} does not match run setting {settings}")]
+    ScheduleHorizonMismatch { schedule: u32, settings: u32 },
+    #[error("SPSA centre history extends beyond the configured horizon")]
+    HistoryBeyondHorizon,
+    #[error("SPSA centre history expected iteration {expected}, got {actual}")]
+    HistoryOrder { expected: u32, actual: u32 },
+    #[error("SPSA iteration {iteration} has {actual} centres; expected {expected}")]
+    CenterDimension {
+        iteration: u32,
+        expected: usize,
+        actual: usize,
+    },
+    #[error(
+        "SPSA final window starts at iteration {start_iteration}, but only {completed_iterations} iterations are complete"
+    )]
+    FinalWindowNotReached {
+        start_iteration: u32,
+        completed_iterations: u32,
+    },
+    #[error("SPSA iteration {iteration} has invalid centre {value} for {name:?}")]
+    InvalidCenter {
+        iteration: u32,
+        name: String,
+        value: f64,
+    },
+    #[error("SPSA final-window mean for {name:?} is not finite")]
+    NonFiniteMean { name: String },
+    #[error("unsupported SPSA tune-result schema version {version}")]
+    UnsupportedResultSchema { version: u32 },
+    #[error("unsupported SPSA schedule schema version {version}")]
+    UnsupportedScheduleSchema { version: u32 },
+    #[error("unsupported SPSA statistics version {version}")]
+    UnsupportedStatsVersion { version: u32 },
+    #[error("SPSA tune-result executable SHA-256 must be 64 lowercase hexadecimal characters")]
+    InvalidExecutableHash,
+    #[error("SPSA tune-result window is inconsistent with its frozen horizon")]
+    InvalidWindow,
+    #[error("SPSA tune result contains no parameters")]
+    EmptyParameters,
+    #[error("SPSA tune-result parameter {name:?} is duplicated")]
+    DuplicateResultParameter { name: String },
+    #[error("SPSA tune-result parameter {name:?} is outside its recorded bounds")]
+    InvalidResultParameter { name: String },
+    #[error(
+        "SPSA gate executable SHA-256 mismatch: expected {expected}, got {actual}; use the explicit mismatch override only if this is intentional"
+    )]
+    ExecutableHashMismatch { expected: String, actual: String },
 }
 
 /// Capability token proving that the schedule read from durable storage is
@@ -977,6 +1307,60 @@ mod tests {
                     rail: 1,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn final_window_result_is_horizon_frozen_rounded_and_hash_gated() {
+        let bound = bind(parameter(16, 1, 1024, 1.0));
+        let settings = SpsaRunSettings::new(10, 2).unwrap();
+        let schedule =
+            SpsaScheduleArtifact::derive(settings.iterations, 0.002, 7, &bound.end_specs())
+                .unwrap();
+        let mut history = (0..7)
+            .map(|iteration| SpsaCenterSample {
+                iteration,
+                centers: vec![16.0],
+            })
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            bound.result_from_centers("0".repeat(64), &schedule, settings, 30, &history),
+            Err(SpsaTuneResultError::FinalWindowNotReached {
+                start_iteration: 7,
+                completed_iterations: 7,
+            })
+        ));
+        for (iteration, center) in [(7, 10.0), (8, 11.0), (9, 13.5)] {
+            history.push(SpsaCenterSample {
+                iteration,
+                centers: vec![center],
+            });
+        }
+        let result = bound
+            .result_from_centers("0".repeat(64), &schedule, settings, 30, &history)
+            .unwrap();
+        assert_eq!(result.window.start_iteration, 7);
+        assert_eq!(result.window.planned_samples, 3);
+        assert_eq!(result.window.samples_used, 3);
+        assert_eq!(result.parameters[0].mean, 11.5);
+        assert_eq!(result.parameters[0].tuned, 12);
+        assert_eq!(
+            result
+                .verify_gate_identity("0".repeat(64), false)
+                .unwrap()
+                .status,
+            SpsaGateHashStatus::Verified
+        );
+        assert!(matches!(
+            result.verify_gate_identity("1".repeat(64), false),
+            Err(SpsaTuneResultError::ExecutableHashMismatch { .. })
+        ));
+        assert_eq!(
+            result
+                .verify_gate_identity("1".repeat(64), true)
+                .unwrap()
+                .status,
+            SpsaGateHashStatus::MismatchOverridden
         );
     }
 

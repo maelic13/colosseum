@@ -12,3 +12,5 @@ The first public CLI release is not yet published.
   kill/resume recovery at complete-iteration boundaries.
 - Added live-schema SPSA configuration audits with durable warnings for
   non-default or rail-seeded parameters.
+- Added frozen final-window SPSA result artifacts and SHA-256-verified
+  `sprt --apply` gating of original versus tuned UCI vectors.

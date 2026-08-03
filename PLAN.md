@@ -903,6 +903,21 @@ report an unattributable divergence.
   versions. A changed executable hash is refused unless explicitly overridden,
   and an override is prominent in the gate record.
 
+  **Implementation evidence (5.7):** application policy freezes a configurable
+  1–100% final horizon window (default 10%, sample count rounded up), validates
+  ordered centre history and emits the half-away-from-zero rounded mean with
+  original values, rails, exact window, executable hash and result/schedule/
+  statistics versions. A completed tune writes ready UCI lines, versioned JSON
+  and an `[engine.options]` TOML fragment; its main result also retains the
+  resolved engine launch and full schedule/tune conditions. `sprt --apply`
+  consumes that result unedited, constructs tuned A versus original B from an
+  otherwise identical launch, verifies executable content before dry-run or
+  launch, refuses per-side mutation, and records either `verified` or the
+  prominently warned `mismatch-overridden` identity in configuration, result
+  and run record. The result policy accepts partial history only once the frozen
+  final window begins so the Phase-5.9 read-only adapter can expose the same
+  calculation mid-run without inventing a second rule.
+
 **Success criteria**
 
 - Schedule property tests: `c[N-1] == c_end`,
