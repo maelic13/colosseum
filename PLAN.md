@@ -825,6 +825,21 @@ report an unattributable divergence.
   cannot produce that token.
 - The tune file selects numeric UCI options and supplies initial value, tuning
   bounds and `c_end` per knob, validated against the live UCI option schema.
+  Its strict root schema is an ordered `[[parameters]]` array; each entry has
+  exactly `name`, `initial`, `min`, `max` and `c_end`. Array order is the
+  versioned SPSA knob/draw order, so a map keyed by parameter name is not an
+  equivalent representation. TOML parsing belongs to the CLI adapter; the
+  application binds every parsed name to a live advertised `spin` option before
+  schedule derivation. The later config audit owns duplicate, range and
+  rounding-resolution policy.
+
+  **Implementation evidence (5.3):** [`SpsaTune`](crates/colosseum-application/src/spsa.rs)
+  is the runtime-neutral ordered numeric vector and preserves both requested
+  values and the observed spin schema. The strict CLI TOML adapter rejects
+  unknown/malformed fields; absent and non-spin options are rejected against
+  the handshake schema. A hermetic integration test proves that an ordinary UCI
+  executable's live `Hash` spin declaration, rather than any engine descriptor,
+  supplies the binding range.
 - Defaults `N=5,000` and 32 games/iteration; configurable, not enforced minima.
 - Persistent driver: no per-iteration relaunch; a supplied book is loaded once.
 - Multi-session per S5.11.

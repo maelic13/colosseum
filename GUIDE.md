@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–4C plus the Phase-5.1/5.2 SPSA kernel and verified durable schedule are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
-| What is missing | SPSA tune-file/schema configuration and driver; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–4C plus the Phase-5.1–5.3 SPSA kernel, verified schedule and live-schema-bound tune vector are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
+| What is missing | SPSA defaults, configuration audit and driver; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4C · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 5.3 — tune-file parameter and live UCI-schema validation** |
+| Next step | **Phase 5.4 — configurable SPSA run defaults** |
 | Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
@@ -505,8 +505,15 @@ model as well.
   [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs),
   [`crates/colosseum-cli/src/spsa_schedule.rs`](crates/colosseum-cli/src/spsa_schedule.rs),
   [`crates/colosseum-cli/tests/spsa_schedule.rs`](crates/colosseum-cli/tests/spsa_schedule.rs)
-- ☐ **5.3** — **Model: Terra High.** Tune TOML selects numeric UCI options with initial value, bounds and
-  `c_end`; validated against the live UCI option schema
+- ☑ **5.3 — DONE** — **Model: Terra High.** A strict ordered TOML
+  `[[parameters]]` vector carries exactly a numeric UCI option `name`,
+  `initial`, `min`, `max` and `c_end`; the application binds every entry to the
+  ordinary executable's live advertised `spin` schema, preserving file order
+  for the versioned perturbation stream and rejecting absent/non-spin options —
+  evidence:
+  [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs),
+  [`crates/colosseum-cli/src/spsa_tune.rs`](crates/colosseum-cli/src/spsa_tune.rs),
+  [`crates/colosseum-cli/tests/spsa_tune.rs`](crates/colosseum-cli/tests/spsa_tune.rs)
 - ☐ **5.4** — **Model: Terra High.** Defaults 5,000 iterations and 32 games/iteration — configurable,
   neither enforced as a minimum
 - ☐ **5.5** — **Model: Sol High.** Persistent driver, book loaded once, complete paired mini-match as the
@@ -643,10 +650,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 5.3 — tune-file parameter and live UCI-schema validation. Model: GPT-5.6 Terra — High.**
-Add the required tune TOML parameter vector (numeric UCI option name, initial
-value, bounds and `c_end`) and validate it against the engine's live advertised
-schema.
+**Phase 5.4 — configurable SPSA run defaults. Model: GPT-5.6 Terra — High.**
+Introduce the `N=5,000` iteration and 32-game mini-match defaults, while
+allowing either value to be configured without treating them as minimums.
 
 ```
 git diff --check
