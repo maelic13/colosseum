@@ -459,9 +459,14 @@ model as well.
 
 ### Phase 4C — Optional calibration
 
-- ☐ **4C.1** — **Model: Terra High.** Byte-identical binaries; representative TC/book/adjudication/
-  concurrency/placement; configurable fixed N/confidence/tolerance
-  (defaults 30k / 95% / ±5 nElo); never a prerequisite
+- ☑ **4C.1 — DONE** — **Model: Terra High.** `calibrate` resolves optional
+  representative fixed-N conditions and requires equal SHA-256 executable
+  identities before launch; defaults are 30k games / 95% / ±5 nElo and every
+  match control, optional book and durable artifact remains available —
+  evidence: [`crates/colosseum-application/src/calibration.rs`](crates/colosseum-application/src/calibration.rs),
+  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
+  [`docs/cli/calibration.md`](docs/cli/calibration.md)
 - ☐ **4C.2** — **Model: Terra High.** PASS iff interval is inside tolerance; FAIL iff wholly outside one
   edge; overlap is INCONCLUSIVE; any engine fault is INVALID
 - ☐ **4C.3** — **EXIT · Model: Sol High.** Hash/config/persistence checks, deterministic tests for
@@ -612,10 +617,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4C.1 — calibration configuration and fixed-N symmetry run. Model: GPT-5.6 Terra — High.**
-Require byte-identical binaries, resolve the representative match conditions
-plus configurable fixed N/confidence/tolerance, and keep calibration explicitly
-optional rather than a prerequisite for any other command.
+**Phase 4C.2 — calibration decision and fault classification. Model: GPT-5.6 Terra — High.**
+Classify the fixed-N interval only by full tolerance containment; make every
+engine fault invalid and preserve an explicit inconclusive outcome.
 
 ```
 git diff --check

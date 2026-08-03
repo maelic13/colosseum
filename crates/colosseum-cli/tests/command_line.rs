@@ -25,7 +25,68 @@ fn help_is_headless_and_names_the_product() {
     assert!(stdout.contains("capabilities"));
     assert!(stdout.contains("match"));
     assert!(stdout.contains("sprt"));
+    assert!(stdout.contains("calibrate"));
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn calibration_dry_run_records_the_optional_default_design_and_binary_identity() {
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+    let output = cli()
+        .arg("calibrate")
+        .arg(binary)
+        .arg(binary)
+        .args([
+            "--dry-run",
+            "--json",
+            "--a-engine-arg=__uci-stub",
+            "--b-engine-arg=__uci-stub",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["type"], "dry-run");
+    assert_eq!(value["command"], "calibrate");
+    let config = &value["resolved_configuration"];
+    assert_eq!(config["design"]["games"], 30_000);
+    assert_eq!(config["design"]["confidence"], 0.95);
+    assert_eq!(config["design"]["tolerance_nelo"], 5.0);
+    assert_eq!(
+        config["binaries"]["engine_a_sha256"],
+        config["binaries"]["engine_b_sha256"]
+    );
+    assert_eq!(
+        config["binaries"]["engine_a_sha256"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
+}
+
+#[test]
+fn calibration_refuses_nonidentical_executable_content_before_launch() {
+    let cli_binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+    let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
+    let output = cli()
+        .args(["calibrate", "--dry-run"])
+        .arg(cli_binary)
+        .arg(fixture)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("byte-identical executables")
+    );
 }
 
 #[test]

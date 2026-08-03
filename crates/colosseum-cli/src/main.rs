@@ -10,22 +10,26 @@ use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use colosseum_application::{
-    CheckEngine, CompletePair, ComplianceReport, ComplianceStatus, EngineInspection,
+    CalibrationBinaries, CalibrationDesign, CalibrationInterval, CalibrationStatus, CheckEngine,
+    CompletePair, ComplianceReport, ComplianceStatus, DEFAULT_CALIBRATION_CONFIDENCE,
+    DEFAULT_CALIBRATION_GAMES, DEFAULT_CALIBRATION_TOLERANCE_NELO, EngineInspection,
     EngineLaunchSpec, InspectEngine, RuntimeParticipant, SprtBundle, SprtDesign, SprtParameters,
-    UciOptionSchema,
+    UciOptionSchema, classify_calibration,
 };
 use colosseum_cli::{
     EngineArgs, OfficialSample, RunDirectory, RunRecord, RunRecorder, RunStatus, built_in_defaults,
     parse_cpu_list, resolve_config,
 };
 use colosseum_core::{
-    AdjudicationConfig, DrawAdjudication, OpeningBook, OpeningOrder, ParticipantId,
-    ResignAdjudication, TimeControl,
+    AdjudicationConfig, DrawAdjudication, EloModel, GameResult, OpeningBook, OpeningOrder,
+    PairGameResult, ParticipantId, PentanomialVector, ResignAdjudication, TimeControl,
+    fixed_n_achieved_resolution,
 };
 use colosseum_engine::CpuPlacementPolicy;
 use colosseum_uci::UciSessionFactory;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 mod capabilities;
 mod match_runner;
@@ -61,6 +65,8 @@ enum Command {
     Match(Box<MatchCommand>),
     /// Run a finite pair-atomic sequential probability ratio test.
     Sprt(Box<SprtCommand>),
+    /// Measure identical-binary symmetry under representative match conditions.
+    Calibrate(Box<CalibrationCommand>),
     /// Inspect or compliance-check an ordinary UCI executable.
     Engine(EngineCommand),
     /// Verify this exact executable's protocol, process and persistence paths.
@@ -247,6 +253,22 @@ struct SprtCommand {
     conditions: MatchConditions,
 }
 
+#[derive(Debug, Args)]
+struct CalibrationCommand {
+    /// Complete games to measure; it must be even so every sample is colour-paired.
+    #[arg(long, default_value_t = DEFAULT_CALIBRATION_GAMES)]
+    games: u32,
+    /// Two-sided confidence level for the normalized-Elo interval.
+    #[arg(long, default_value_t = DEFAULT_CALIBRATION_CONFIDENCE)]
+    confidence: f64,
+    /// Inclusive normalized-Elo interval tolerance around zero.
+    #[arg(long, default_value_t = DEFAULT_CALIBRATION_TOLERANCE_NELO)]
+    tolerance_nelo: f64,
+
+    #[command(flatten)]
+    conditions: MatchConditions,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum SprtBundleArg {
     Gainer,
@@ -311,6 +333,7 @@ async fn main() -> ExitCode {
         Command::Capabilities => run_capabilities(cli.json),
         Command::Match(command) => run_match(*command, cli.json, cli.dry_run).await,
         Command::Sprt(command) => run_sprt(*command, cli.json, cli.dry_run).await,
+        Command::Calibrate(command) => run_calibration(*command, cli.json, cli.dry_run).await,
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
         Command::SelfTest if cli.dry_run => unsupported_dry_run("self-test"),
         Command::SelfTest => run_self_test(cli.json).await,
@@ -840,6 +863,10 @@ enum MachineOutput<'a> {
         run_directory: PathBuf,
         report: sprt_runner::SprtReport,
     },
+    Calibration {
+        run_directory: PathBuf,
+        report: CalibrationReport,
+    },
     DryRun {
         command: &'a str,
         config_sha256: &'a str,
@@ -859,6 +886,446 @@ enum MachineOutput<'a> {
         run_directory: &'a Path,
         record: RunRecord,
     },
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CalibrationReport {
+    status: CalibrationStatus,
+    design: CalibrationDesign,
+    binaries: CalibrationBinaries,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    interval: Option<CalibrationInterval>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    statistics_unavailable: Option<String>,
+    fixed_match: match_runner::FixedMatchReport,
+}
+
+struct PreparedCalibration {
+    design: CalibrationDesign,
+    binaries: CalibrationBinaries,
+    engine_a: EngineLaunchSpec,
+    engine_b: EngineLaunchSpec,
+    engine_a_time_control: match_runner::ConfiguredTimeControl,
+    engine_b_time_control: match_runner::ConfiguredTimeControl,
+    adjudication: AdjudicationConfig,
+    fault_policy: match_runner::FaultPolicy,
+    execution: match_runner::MatchExecutionPlan,
+    master_seed: u64,
+    master_seed_generated: bool,
+    openings: match_runner::MatchOpenings,
+    current_directory: PathBuf,
+    resolved: colosseum_cli::ResolvedConfig,
+}
+
+async fn run_calibration(command: CalibrationCommand, machine: bool, dry_run: bool) -> ExitCode {
+    let prepared = match prepare_calibration(&command) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if dry_run {
+        print_output(
+            &MachineOutput::DryRun {
+                command: "calibrate",
+                config_sha256: prepared.resolved.sha256(),
+                resolved_configuration: prepared.resolved.value(),
+                invocations: vec![&prepared.engine_a, &prepared.engine_b],
+            },
+            machine,
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    let conditions = &command.conditions;
+    let opened = match &conditions.run_directory {
+        Some(path) => RunDirectory::open_explicit(path, &prepared.resolved, conditions.restart),
+        None => RunDirectory::create_unique(
+            &prepared.current_directory,
+            "calibrate",
+            &prepared.resolved,
+        ),
+    };
+    let opened = match opened {
+        Ok(opened) => opened,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if let Some(archived) = &opened.archived {
+        eprintln!("archived previous run at {}", archived.display());
+    }
+    let directory = Arc::new(opened.directory);
+    let completed_games = if opened.resumed
+        && (directory.paths().checkpoint.exists() || directory.paths().previous_checkpoint.exists())
+    {
+        match directory.read_checkpoint::<match_runner::MatchCheckpoint>() {
+            Ok(checkpoint) => checkpoint.games,
+            Err(error) => {
+                eprintln!("resume failed: {error}");
+                return ExitCode::from(3);
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let observer = match DurableMatchOutput::new(Arc::clone(&directory), completed_games.clone()) {
+        Ok(observer) => Arc::new(observer),
+        Err(error) => {
+            eprintln!("calibration output failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
+    let mut recorder = match if opened.resumed {
+        RunRecorder::resume(&directory)
+    } else {
+        RunRecorder::begin(&directory, "calibrate")
+    } {
+        Ok(recorder) => recorder,
+        Err(error) => {
+            eprintln!("run record failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    if let Err(error) = recorder.set_workflow(json!({
+        "kind": "calibration",
+        "optional": true,
+        "design": prepared.design,
+        "binaries": prepared.binaries,
+        "engine_a_time_control": prepared.engine_a_time_control,
+        "engine_b_time_control": prepared.engine_b_time_control,
+        "adjudication": prepared.adjudication,
+        "fault_policy": prepared.fault_policy,
+        "execution": prepared.execution,
+        "master_seed": prepared.master_seed,
+        "master_seed_generated": prepared.master_seed_generated,
+        "openings": prepared.openings.report(),
+    })) {
+        eprintln!("run record failed: {error}");
+        return ExitCode::from(3);
+    }
+    let progress = match_runner::MatchProgress::default();
+    let request = match_runner::FixedMatchRequest {
+        engine_a: prepared.engine_a,
+        engine_b: prepared.engine_b,
+        games: prepared.design.games,
+        engine_a_time_control: prepared.engine_a_time_control,
+        engine_b_time_control: prepared.engine_b_time_control,
+        adjudication: prepared.adjudication,
+        fault_policy: prepared.fault_policy,
+        execution: prepared.execution,
+        master_seed: prepared.master_seed,
+        master_seed_generated: prepared.master_seed_generated,
+        openings: prepared.openings,
+        completed_games,
+        progress: progress.clone(),
+        observer: Some(observer.clone()),
+    };
+    if !machine {
+        eprintln!(
+            "calibration run directory: {}",
+            directory.paths().root.display()
+        );
+    }
+    let calibration_future = match_runner::run_fixed_match(request);
+    tokio::pin!(calibration_future);
+    let period = Duration::from_secs(conditions.progress_interval_secs);
+    let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    let outcome = loop {
+        tokio::select! {
+            result = &mut calibration_future => break result,
+            _ = interval.tick() => {
+                let snapshot = progress.snapshot();
+                eprintln!("calibration progress: {}/{} attempted, {} scored, {} faults", snapshot.attempted, prepared.design.games, snapshot.scored, snapshot.faults);
+            }
+        }
+    };
+    let fixed_match = match outcome {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("calibration failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let (status, interval, statistics_unavailable, exit_code) = match fixed_match.status {
+        match_runner::MatchStatus::InfrastructureError => {
+            eprintln!("calibration failed: a non-scorable infrastructure fault occurred");
+            return ExitCode::from(3);
+        }
+        match_runner::MatchStatus::Invalid => (CalibrationStatus::Invalid, None, None, 5),
+        match_runner::MatchStatus::Completed => {
+            let (interval, unavailable) = match calibration_interval(&fixed_match, prepared.design)
+            {
+                Ok((interval, unavailable)) => (interval, unavailable),
+                Err(error) => {
+                    eprintln!("calibration failed: {error}");
+                    return ExitCode::from(3);
+                }
+            };
+            let status =
+                classify_calibration(prepared.design, interval, fixed_match.faults.engine_total());
+            let exit_code = calibration_exit_code(status);
+            (status, interval, unavailable, exit_code)
+        }
+    };
+    let report = CalibrationReport {
+        status,
+        design: prepared.design,
+        binaries: prepared.binaries,
+        interval,
+        statistics_unavailable,
+        fixed_match,
+    };
+    if let Err(error) = observer.finish_calibration(&report) {
+        eprintln!("calibration output failed: {error}");
+        return ExitCode::from(3);
+    }
+    let pentanomial = calibration_sample(&report.fixed_match)
+        .map(|sample| sample.counts().map(u64::from))
+        .unwrap_or([0; 5]);
+    let sample = OfficialSample {
+        committed_units: u64::from(report.fixed_match.games_attempted),
+        scored_games: u64::from(report.fixed_match.games_completed),
+        completed_pairs: u64::from(report.fixed_match.games_completed / 2),
+        pentanomial,
+        unpaired_games: 0,
+    };
+    if let Err(error) = recorder.update_sample(sample) {
+        eprintln!("run record failed: {error}");
+        return ExitCode::from(3);
+    }
+    let run_status = if status == CalibrationStatus::Invalid {
+        RunStatus::Invalid
+    } else {
+        RunStatus::Completed
+    };
+    if let Err(error) = recorder.finish(run_status) {
+        eprintln!("run record failed: {error}");
+        return ExitCode::from(3);
+    }
+    if machine {
+        print_json(&MachineOutput::Calibration {
+            run_directory: directory.paths().root.clone(),
+            report,
+        });
+    } else {
+        print_calibration(&report, &directory.paths().root);
+    }
+    ExitCode::from(exit_code)
+}
+
+fn prepare_calibration(command: &CalibrationCommand) -> Result<PreparedCalibration, String> {
+    let design = CalibrationDesign::new(command.games, command.confidence, command.tolerance_nelo)
+        .map_err(|error| error.to_string())?;
+    let conditions = &command.conditions;
+    if conditions.book.is_none()
+        && (conditions.book_start != 0
+            || conditions.book_plies.is_some()
+            || conditions.book_order != BookOrderArg::Sequential)
+    {
+        return Err("book order/start/plies require --book".into());
+    }
+    let resumed_seed = conditions
+        .run_directory
+        .as_deref()
+        .filter(|path| path.exists() && !conditions.restart)
+        .and_then(read_stored_seed);
+    let (master_seed, master_seed_generated) = match resumed_seed {
+        Some(seed) if conditions.seed.is_none() => seed,
+        _ => resolve_master_seed(conditions.seed)?,
+    };
+    let adjudication = resolve_adjudication(conditions);
+    let fault_policy = match_runner::FaultPolicy {
+        max_engine_faults: conditions.max_engine_faults,
+        max_time_losses: conditions.max_time_losses,
+    };
+    let engine_a_time_control = resolve_time_control(
+        "engine A",
+        conditions.a_movetime_ms,
+        conditions.a_base_ms,
+        conditions.a_increment_ms,
+        conditions.a_nodes,
+        conditions.a_depth,
+        conditions.a_margin_ms,
+    )?;
+    let engine_b_time_control = resolve_time_control(
+        "engine B",
+        conditions.b_movetime_ms,
+        conditions.b_base_ms,
+        conditions.b_increment_ms,
+        conditions.b_nodes,
+        conditions.b_depth,
+        conditions.b_margin_ms,
+    )?;
+    let engine_a = resolve_match_engine(
+        conditions.engine_a.clone(),
+        conditions.a_label.clone(),
+        conditions.a_arguments.clone(),
+        conditions.a_cwd.clone(),
+        conditions.a_environment.clone(),
+        conditions.a_options.clone(),
+        conditions.a_buttons.clone(),
+        conditions.a_cores.clone(),
+    )
+    .map_err(|error| error.to_string())?;
+    let engine_b = resolve_match_engine(
+        conditions.engine_b.clone(),
+        conditions.b_label.clone(),
+        conditions.b_arguments.clone(),
+        conditions.b_cwd.clone(),
+        conditions.b_environment.clone(),
+        conditions.b_options.clone(),
+        conditions.b_buttons.clone(),
+        conditions.b_cores.clone(),
+    )
+    .map_err(|error| error.to_string())?;
+    let binaries = CalibrationBinaries::new(
+        executable_sha256(&engine_a.executable)?,
+        executable_sha256(&engine_b.executable)?,
+    )
+    .map_err(|error| error.to_string())?;
+    let placement = resolve_placement(&conditions.placement, conditions.headroom_cores)?;
+    let execution = match_runner::plan_execution(
+        &engine_a,
+        &engine_b,
+        conditions.concurrency as usize,
+        conditions.cores_per_engine as usize,
+        placement,
+        conditions.memory_budget_mb,
+    )
+    .map_err(|error| error.to_string())?;
+    let book = conditions.book.clone().map(|path| {
+        let mut book = OpeningBook::new(path);
+        book.order = match conditions.book_order {
+            BookOrderArg::Sequential => OpeningOrder::Sequential,
+            BookOrderArg::Random => OpeningOrder::Random,
+        };
+        book.plies = conditions.book_plies.unwrap_or(8);
+        book
+    });
+    let openings =
+        match_runner::resolve_openings(book, conditions.book_start, design.games, master_seed)
+            .map_err(|error| error.to_string())?;
+    let current_directory = std::env::current_dir().map_err(|error| error.to_string())?;
+    let resolved = resolve_config(
+        built_in_defaults(),
+        None,
+        json!({
+            "command": "calibrate",
+            "design": design,
+            "binaries": &binaries,
+            "engine_a": &engine_a,
+            "engine_b": &engine_b,
+            "engine_a_time_control": engine_a_time_control,
+            "engine_b_time_control": engine_b_time_control,
+            "adjudication": adjudication,
+            "fault_policy": fault_policy,
+            "execution": execution,
+            "master_seed": master_seed,
+            "master_seed_generated": master_seed_generated,
+            "openings": openings.report(),
+        }),
+        &[],
+        &current_directory,
+        &match conditions.book {
+            Some(_) => vec![
+                "/engine_a/executable".into(),
+                "/engine_b/executable".into(),
+                "/openings/path".into(),
+            ],
+            None => vec!["/engine_a/executable".into(), "/engine_b/executable".into()],
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(PreparedCalibration {
+        design,
+        binaries,
+        engine_a,
+        engine_b,
+        engine_a_time_control,
+        engine_b_time_control,
+        adjudication,
+        fault_policy,
+        execution,
+        master_seed,
+        master_seed_generated,
+        openings,
+        current_directory,
+        resolved,
+    })
+}
+
+fn executable_sha256(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|error| {
+        format!(
+            "cannot hash calibration executable {}: {error}",
+            path.display()
+        )
+    })?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn calibration_interval(
+    report: &match_runner::FixedMatchReport,
+    design: CalibrationDesign,
+) -> Result<(Option<CalibrationInterval>, Option<String>), String> {
+    let sample = calibration_sample(report)?;
+    match fixed_n_achieved_resolution(&sample, EloModel::Normalized, design.significance()) {
+        Ok(resolution) => Ok((Some(resolution.into()), None)),
+        Err(error) => Ok((None, Some(error.to_string()))),
+    }
+}
+
+fn calibration_sample(
+    report: &match_runner::FixedMatchReport,
+) -> Result<PentanomialVector, String> {
+    if report.games.len() != report.games_requested as usize {
+        return Err("calibration did not retain every requested game".into());
+    }
+    let mut sample = PentanomialVector::default();
+    for pair in report.games.chunks_exact(2) {
+        let [first, second] = pair else {
+            unreachable!("chunks_exact(2) always has pairs")
+        };
+        if !first.scorable || !second.scorable {
+            return Err("calibration cannot compute an interval from a non-scorable game".into());
+        }
+        if first.number + 1 != second.number
+            || first.white != match_runner::MatchSide::A
+            || second.white != match_runner::MatchSide::B
+        {
+            return Err(
+                "calibration game schedule is not a complete colour-reversed prefix".into(),
+            );
+        }
+        sample.record_pair(
+            result_for_engine_a(first.white, first.result),
+            result_for_engine_a(second.white, second.result),
+        );
+    }
+    Ok(sample)
+}
+
+fn result_for_engine_a(white: match_runner::MatchSide, result: GameResult) -> PairGameResult {
+    match (white, result) {
+        (_, GameResult::Draw) => PairGameResult::Draw,
+        (match_runner::MatchSide::A, GameResult::WhiteWin)
+        | (match_runner::MatchSide::B, GameResult::BlackWin) => PairGameResult::Win,
+        (match_runner::MatchSide::A, GameResult::BlackWin)
+        | (match_runner::MatchSide::B, GameResult::WhiteWin) => PairGameResult::Loss,
+    }
+}
+
+fn calibration_exit_code(status: CalibrationStatus) -> u8 {
+    match status {
+        CalibrationStatus::Pass => 0,
+        CalibrationStatus::Fail => 1,
+        CalibrationStatus::Inconclusive => 4,
+        CalibrationStatus::Invalid => 5,
+    }
 }
 
 async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitCode {
@@ -1255,6 +1722,23 @@ impl DurableMatchOutput {
             .append_log(&line)
             .map_err(|error| error.to_string())
     }
+
+    fn finish_calibration(&self, report: &CalibrationReport) -> Result<(), String> {
+        let bytes = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
+        fs::write(self.directory.paths().root.join("result.json"), bytes)
+            .map_err(|error| error.to_string())?;
+        let mut line = serde_json::to_vec(&json!({
+            "event": "calibration-finished",
+            "status": report.status,
+            "attempted": report.fixed_match.games_attempted,
+            "scored": report.fixed_match.games_completed,
+        }))
+        .map_err(|error| error.to_string())?;
+        line.push(b'\n');
+        self.directory
+            .append_log(&line)
+            .map_err(|error| error.to_string())
+    }
 }
 
 impl match_runner::MatchObserver for DurableMatchOutput {
@@ -1572,6 +2056,26 @@ fn print_sprt(report: &sprt_runner::SprtReport, run_directory: &Path) {
             .invalid_pair
             .map_or_else(|| "none".into(), |value| value.to_string())
     );
+    println!("artifacts: {}", run_directory.display());
+}
+
+fn print_calibration(report: &CalibrationReport, run_directory: &Path) {
+    println!(
+        "calibration {:?}: {} games, {:.0}% confidence, ±{} nElo tolerance",
+        report.status,
+        report.design.games,
+        report.design.confidence * 100.0,
+        report.design.tolerance_nelo
+    );
+    if let Some(interval) = report.interval {
+        println!(
+            "normalized Elo: {:.3} [{:.3}, {:.3}]",
+            interval.estimate_nelo, interval.lower_nelo, interval.upper_nelo
+        );
+    }
+    if let Some(reason) = &report.statistics_unavailable {
+        println!("interval unavailable: {reason}");
+    }
     println!("artifacts: {}", run_directory.display());
 }
 

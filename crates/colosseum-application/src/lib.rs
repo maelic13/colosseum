@@ -3,6 +3,7 @@
 //! This package owns use-case inputs, outputs and ports. It deliberately has no
 //! process, filesystem, database, GUI, channel or async-runtime implementation.
 
+pub mod calibration;
 pub mod check;
 pub mod commit;
 pub mod inspect;
@@ -11,6 +12,11 @@ pub mod pair_commit;
 pub mod ports;
 pub mod sprt;
 
+pub use calibration::{
+    CalibrationBinaries, CalibrationDesign, CalibrationError, CalibrationInterval,
+    CalibrationStatus, DEFAULT_CALIBRATION_CONFIDENCE, DEFAULT_CALIBRATION_GAMES,
+    DEFAULT_CALIBRATION_TOLERANCE_NELO, classify_calibration,
+};
 pub use check::{CheckEngine, ComplianceCheck, ComplianceReport, ComplianceStatus};
 pub use commit::{CommitUnit, CommitUnitDependencies};
 pub use inspect::InspectEngine;
