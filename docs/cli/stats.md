@@ -65,3 +65,36 @@ stable named RNG stream and sampling algorithm. Capped trials are reported,
 not discarded. The resulting length distribution is neither an SPRT stopping
 rule nor a guarantee for the eventual engines or workload. Use `--json` for
 the complete machine-readable reports.
+
+## PGN search telemetry
+
+When the authoritative source is PGN, `stats` reads search annotations from
+mainline move comments. It supports exactly these forms:
+
+```text
+{[%depth 18] [%emt 0.250] [%nodes 500000]}
+{depth=18 time=250ms nodes=500000}
+{d=18 t=0.250s n=500000}
+```
+
+`%emt` is elapsed move time in seconds (a `H:M:S` value is also accepted).
+Key/value `time`/`t` requires an explicit `ms` or `s` suffix. Depth and nodes
+must be positive integers. Other comments and annotation tags are left
+untouched and ignored by telemetry analysis.
+
+Each engine receives an eligible post-opening move count, an annotated-move
+coverage fraction, and separate coverage/mean/median reports for depth,
+elapsed seconds, nodes and implied NPS. A metric with no valid samples is
+labelled `unavailable`; missing data is never converted to zero. Implied NPS
+requires nodes and positive elapsed time on the same move.
+
+Colosseum-generated PGNs record the non-standard `OpeningPlyCount` tag whenever
+the harness pre-plays book moves. Those plies are excluded. For PGNs without
+that tag, individual comments containing the word `book` are excluded. If an
+external producer records opening moves in neither way, they cannot be
+identified and the coverage denominator includes them.
+
+Node accounting is engine-defined. Compare implied NPS only when node semantics
+are compatible—normally versions or builds from the same engine lineage. The
+JSON report and stderr warning retain this limitation whenever telemetry is
+available.

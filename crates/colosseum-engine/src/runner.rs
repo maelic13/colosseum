@@ -1302,6 +1302,7 @@ fn render_pgn(
         time_control: spec.time_control_label.clone(),
         termination: Some(termination),
         fen: spec.start_fen.clone(),
+        opening_plies: spec.opening_moves.len() as u32,
     };
     build_pgn(&tags, san_moves)
 }

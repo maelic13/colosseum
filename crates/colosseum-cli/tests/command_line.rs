@@ -179,6 +179,47 @@ fn statistics_plans_are_explicit_and_seed_reproducible() {
 }
 
 #[test]
+fn pgn_statistics_report_search_telemetry_without_counting_opening_moves() {
+    let root = tempfile::tempdir().unwrap();
+    let pgn = root.path().join("telemetry.pgn");
+    std::fs::write(
+        &pgn,
+        r#"[Event "telemetry"]
+[White "A"]
+[Black "B"]
+[Result "1/2-1/2"]
+[OpeningPlyCount "2"]
+
+1. e4 {[%depth 1] [%emt 1] [%nodes 1] unknown-preserved} e5 {d=1 t=1s n=1}
+2. Nf3 {[%depth 10] [%emt 0.5] [%nodes 500]} Nc6 {d=20 t=250ms n=1000}
+3. Bb5 {[%depth 30] [%emt 1.5] [%nodes 3000]} a6 {d=40 t=0.75s n=1500} 1/2-1/2
+"#,
+    )
+    .unwrap();
+    let output = cli().arg("stats").arg(&pgn).arg("--json").output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let telemetry = &output["report"]["telemetry"];
+    assert_eq!(telemetry["status"], "available");
+    assert_eq!(telemetry["excluded_opening_moves"], 2);
+    assert_eq!(telemetry["engines"][0]["engine"], "A");
+    assert_eq!(telemetry["engines"][0]["eligible_moves"], 2);
+    assert_eq!(telemetry["engines"][0]["depth"]["mean"], 20.0);
+    assert_eq!(telemetry["engines"][0]["implied_nps"]["median"], 1500.0);
+    assert!(
+        output["report"]["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning.as_str().unwrap().contains("node accounting"))
+    );
+}
+
+#[test]
 fn book_tools_hash_verify_stats_and_slice_without_an_engine() {
     let root = tempfile::tempdir().unwrap();
     let input = root.path().join("openings.epd");

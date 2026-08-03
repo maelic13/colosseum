@@ -31,3 +31,5 @@ The first public CLI release is not yet published.
   authority and fail-closed unpaired fallback when pair identity is absent.
 - Added explicit fixed-sample difference/equivalence planning, descriptive
   achieved resolution and seeded capped SPRT expected-length simulation.
+- Added read-only PGN search telemetry with documented annotations, per-engine
+  coverage, opening exclusion and compatibility-labelled implied NPS.

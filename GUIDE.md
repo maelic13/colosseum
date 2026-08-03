@@ -15,10 +15,10 @@ numbers, internal naming or method argumentation.
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
 | What exists | Phases 0–5 are complete: fixed matches, externally checked pair-atomic capped SPRT, optional identical-binary calibration and exact durable SPSA with planning, diagnostics, final artifacts and hash-verified gate loop over ordinary UCI engines |
-| What is missing | Telemetry/suite tools, tournaments, release-candidate parity/gap decisions, documentation and release acceptance |
+| What is missing | Position-suite tools, tournaments, release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 5 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 6.7 — PGN search telemetry** |
+| Next step | **Phase 6.8 — fixed-work position suites** |
 | Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
@@ -632,9 +632,13 @@ model as well.
   [`crates/colosseum-application/src/stats_plan.rs`](crates/colosseum-application/src/stats_plan.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/stats.md`](docs/cli/stats.md)
-- ☐ **6.7** — **Model: Terra High.** PGN telemetry lists supported annotations and coverage; excludes
-  opening moves; reports unavailable rather than zero; warns that node
-  semantics must be compatible
+- ☑ **6.7 — DONE** — **Model: Terra High.** Read-only PGN telemetry documents
+  bracketed and key/value annotations, reports per-engine and per-metric
+  coverage/mean/median, excludes tagged or `book` opening moves, labels missing
+  values unavailable and warns about node compatibility — evidence:
+  [`crates/colosseum-cli/src/pgn_telemetry.rs`](crates/colosseum-cli/src/pgn_telemetry.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
+  [`docs/cli/stats.md`](docs/cli/stats.md)
 - ☐ **6.8** — **Model: Terra High.** `suite` runs EPD/FEN at fixed time/nodes/depth with `bm`/`am`,
   per-position results, aggregate pass rate and compatible-baseline compare
 - ☐ **6.9** — **EXIT · Model: Sol High.** Fake engine-reported nps cannot affect authoritative speed;
@@ -731,10 +735,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 6.7 — PGN search telemetry. Model: GPT-5.6 Terra — High.**
-Parse documented PGN search annotations, report per-engine coverage and
-aggregates after excluding opening moves, label insufficient coverage as
-unavailable, and warn that node semantics must be compatible.
+**Phase 6.8 — fixed-work position suites. Model: GPT-5.6 Terra — High.**
+Add `suite` over EPD/FEN inputs at fixed time, nodes or depth, with `bm`/`am`
+expectations, per-position evidence, aggregate pass rate and compatible
+baseline comparison.
 
 ```
 git diff --check

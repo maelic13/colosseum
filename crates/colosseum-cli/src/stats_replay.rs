@@ -7,6 +7,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use crate::pgn_telemetry::{SearchTelemetryReport, analyze_pgn, unavailable};
+
 const Z95: f64 = 1.959_963_984_540_054;
 
 #[derive(Debug, Clone, Serialize)]
@@ -38,6 +40,7 @@ pub struct StatsReplayReport {
     pub paired_statistics_unavailable: Option<String>,
     pub attempts: Vec<ReplayAttempt>,
     pub warnings: Vec<String>,
+    pub telemetry: SearchTelemetryReport,
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +82,7 @@ fn replay_directory(path: &Path, subject: Option<&str>) -> Result<StatsReplayRep
             continue;
         }
         match read_source(authority, &candidate, subject) {
-            Ok((games, perspective, paired_capable)) if !games.is_empty() => {
+            Ok((games, perspective, paired_capable, telemetry)) if !games.is_empty() => {
                 attempts.push(ReplayAttempt {
                     authority,
                     path: candidate.clone(),
@@ -93,6 +96,7 @@ fn replay_directory(path: &Path, subject: Option<&str>) -> Result<StatsReplayRep
                     games,
                     paired_capable,
                     attempts,
+                    telemetry,
                 ));
             }
             Ok(_) => attempts.push(ReplayAttempt {
@@ -122,7 +126,7 @@ fn replay_file(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, 
         Some(value) if value.eq_ignore_ascii_case("log") => "forensic-log",
         _ => "console",
     };
-    let (games, perspective, paired_capable) = read_source(authority, path, subject)?;
+    let (games, perspective, paired_capable, telemetry) = read_source(authority, path, subject)?;
     if games.is_empty() {
         return Err(format!("{} contains no scored games", path.display()));
     }
@@ -139,6 +143,7 @@ fn replay_file(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, 
         games,
         paired_capable,
         attempts,
+        telemetry,
     ))
 }
 
@@ -146,23 +151,35 @@ fn read_source(
     authority: &'static str,
     path: &Path,
     subject: Option<&str>,
-) -> Result<(Vec<RawGame>, String, bool), String> {
+) -> Result<(Vec<RawGame>, String, bool, SearchTelemetryReport), String> {
     let text = fs::read_to_string(path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     match authority {
-        "structured-run-store" => {
-            structured_games(&text).map(|games| (games, "engine A".into(), true))
-        }
+        "structured-run-store" => structured_games(&text).map(|games| {
+            (
+                games,
+                "engine A".into(),
+                true,
+                unavailable("structured source has no PGN move annotations"),
+            )
+        }),
         "pgn-export" => Ok((
             pgn_games(&text, subject),
             subject.map_or_else(|| "White side".into(), |value| value.to_owned()),
             false,
+            analyze_pgn(&text),
         )),
-        "forensic-log" => Ok((log_games(&text), "engine A".into(), true)),
+        "forensic-log" => Ok((
+            log_games(&text),
+            "engine A".into(),
+            true,
+            unavailable("forensic log has no PGN move annotations"),
+        )),
         _ => Ok((
             result_tokens(&text),
             "White side (console tokens)".into(),
             false,
+            unavailable("console source has no PGN move annotations"),
         )),
     }
 }
@@ -356,6 +373,7 @@ fn build_report(
     games: Vec<RawGame>,
     paired_capable: bool,
     attempts: Vec<ReplayAttempt>,
+    telemetry: SearchTelemetryReport,
 ) -> StatsReplayReport {
     let mut wins = 0;
     let mut draws = 0;
@@ -426,6 +444,9 @@ fn build_report(
                 .into(),
         );
     }
+    if telemetry.status == "available" {
+        warnings.push(telemetry.node_semantics_warning.into());
+    }
     StatsReplayReport {
         authority,
         source,
@@ -447,6 +468,7 @@ fn build_report(
         paired_statistics_unavailable: unavailable,
         attempts,
         warnings,
+        telemetry,
     }
 }
 
@@ -465,6 +487,7 @@ mod tests {
             games,
             false,
             vec![],
+            unavailable("fixture has no annotations"),
         );
         assert_eq!(report.wins, 2);
         assert_eq!(report.complete_pairs, 0);

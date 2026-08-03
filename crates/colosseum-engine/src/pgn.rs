@@ -19,6 +19,8 @@ pub struct PgnTags {
     pub termination: Option<Termination>,
     /// Set for non-standard start positions (adds `SetUp`/`FEN` tags).
     pub fen: Option<String>,
+    /// Pre-played opening half-moves, excluded from search telemetry.
+    pub opening_plies: u32,
 }
 
 /// Render a complete PGN game (header + movetext + result token).
@@ -47,6 +49,9 @@ pub fn build_pgn(tags: &PgnTags, san_moves: &[String]) -> String {
     if let Some(fen) = &tags.fen {
         tag("SetUp", "1");
         tag("FEN", fen);
+    }
+    if tags.opening_plies > 0 {
+        tag("OpeningPlyCount", &tags.opening_plies.to_string());
     }
 
     let (start_move, black_first) = fen_move_context(tags.fen.as_deref());
@@ -152,11 +157,13 @@ mod tests {
             time_control: "movetime/100ms".into(),
             termination: Some(Termination::Checkmate),
             fen: None,
+            opening_plies: 2,
         };
         let pgn = build_pgn(&tags, &["e4".into(), "e5".into(), "Qh5".into()]);
         assert!(pgn.contains("[White \"Stockfish\"]"));
         assert!(pgn.contains("[Result \"1-0\"]"));
         assert!(pgn.contains("[Termination \"normal\"]"));
+        assert!(pgn.contains("[OpeningPlyCount \"2\"]"));
         assert!(pgn.contains("1. e4 e5 2. Qh5"));
         assert!(pgn.trim_end().ends_with("1-0"));
     }
@@ -175,6 +182,7 @@ mod tests {
             time_control: String::new(),
             termination: None,
             fen: Some("rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2".into()),
+            opening_plies: 0,
         };
         let pgn = build_pgn(&tags, &["Nc6".into(), "Bb5".into(), "a6".into()]);
         // Black moves first at move 2, then White's move 3, then Black's move 3.
@@ -196,6 +204,7 @@ mod tests {
             time_control: String::new(),
             termination: None,
             fen: None,
+            opening_plies: 0,
         };
         let pgn = build_pgn(&tags, &[]);
         assert!(pgn.contains("[White \"Engine \\\"X\\\"\"]"));

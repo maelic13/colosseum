@@ -1137,6 +1137,13 @@ annotations; exclude pre-played opening moves; and report `unavailable` when
 coverage is insufficient. Fixed-node telemetry is comparable only when node
 accounting has compatible semantics—normally the same engine lineage.
 
+Implemented Phase 6.7 recognizes bracketed `%depth`/`%emt`/`%nodes` and
+explicit-unit key/value comments. It reports denominators and coverage beside
+every aggregate, never maps missing values to zero, and keeps the analysis
+read-only so unknown annotations remain untouched. Colosseum PGNs now record
+`OpeningPlyCount`; external per-move `book` comments are the fallback exclusion
+signal. The report retains a node-semantics compatibility warning.
+
 **Experiment planning**
 
 - `stats plan fixed` accepts target effect/equivalence margin, significance,

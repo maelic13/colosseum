@@ -2541,6 +2541,22 @@ fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
                 if let Some(reason) = &report.paired_statistics_unavailable {
                     println!("paired statistics unavailable: {reason}");
                 }
+                println!("search telemetry: {}", report.telemetry.status);
+                if let Some(reason) = &report.telemetry.unavailable_reason {
+                    println!("telemetry unavailable: {reason}");
+                }
+                for engine in &report.telemetry.engines {
+                    println!(
+                        "{}: {}/{} annotated moves ({:.1}%); depth mean/median {}; elapsed mean/median {}; implied NPS mean/median {}",
+                        engine.engine,
+                        engine.annotated_moves,
+                        engine.eligible_moves,
+                        engine.annotation_coverage * 100.0,
+                        metric_text(&engine.depth),
+                        metric_text(&engine.elapsed_seconds),
+                        metric_text(&engine.implied_nps),
+                    );
+                }
             }
             ExitCode::SUCCESS
         }
@@ -2548,6 +2564,13 @@ fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
             eprintln!("statistics replay failed: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn metric_text(metric: &colosseum_cli::pgn_telemetry::TelemetryMetric) -> String {
+    match (metric.mean, metric.median) {
+        (Some(mean), Some(median)) => format!("{mean:.3}/{median:.3}"),
+        _ => "unavailable".into(),
     }
 }
 

@@ -3,6 +3,7 @@
 pub mod config;
 pub mod engine_args;
 pub mod master_seed;
+pub mod pgn_telemetry;
 pub mod run_directory;
 pub mod run_record;
 pub mod spsa_schedule;
