@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–4C plus the Phase-5.1–5.7 SPSA kernel, verified schedule, audited tune vector, durable driver, final-window artifacts and hash-verified SPRT loop closure are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
-| What is missing | SPSA planning/status and exit; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–4C plus the Phase-5.1–5.8 SPSA kernel, verified schedule, audited tune vector, durable driver, final-window artifacts, hash-verified SPRT loop closure and offline schedule/cost planning are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
+| What is missing | SPSA status and exit; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4C · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 5.8 — SPSA schedule and cost planning** |
+| Next step | **Phase 5.9 — SPSA read-only diagnostics** |
 | Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
@@ -553,9 +553,15 @@ model as well.
   [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
   [`docs/cli/spsa.md`](docs/cli/spsa.md),
   [`docs/cli/sprt.md`](docs/cli/sprt.md)
-- ☐ **5.8** — **Model: Terra High.** `spsa plan` reports factual schedule/game/cost/resolution information.
-  Optional convergence simulation requires an explicit synthetic model and
-  is never presented as a chess-convergence forecast
+- ☑ **5.8 — DONE** — **Model: Terra High.** Offline `spsa plan` validates the
+  exact ordered schedule and reports per-knob `c/a/r` trajectories, the first
+  sub-half-unit rounding hazard, checked iteration/game/pair and durability
+  counts, comparison horizons, and a wall-time range only from explicit
+  seconds/game assumptions or pilot observations. Every output labels this as
+  workload arithmetic rather than a chess-convergence forecast — evidence:
+  [`crates/colosseum-application/src/spsa_plan.rs`](crates/colosseum-application/src/spsa_plan.rs),
+  [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
+  [`docs/cli/spsa.md`](docs/cli/spsa.md)
 - ☐ **5.9** — **Model: Terra High.** `spsa status` reads an atomic snapshot and reports trajectory/thirds,
   boundary contact, little seed movement, stability and dead perturbation
   as labelled heuristics—never causal proof or automatic advice
@@ -678,10 +684,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 5.8 — SPSA schedule and cost planning. Model: GPT-5.6 Terra — High.**
-Add factual offline `spsa plan` output for schedule trajectories, game/pair and
-checkpoint counts, rounding hazards and user-supplied or pilot-derived wall-time
-ranges; keep any optional synthetic convergence model explicitly separate.
+**Phase 5.9 — SPSA read-only diagnostics. Model: GPT-5.6 Terra — High.**
+Extend the common atomic status snapshot with per-knob trajectories, thirds,
+bound contact, seed movement, recent stability and rounding-resolution signals;
+label every observation as heuristic and never emit causal or stop/continue advice.
 
 ```
 git diff --check

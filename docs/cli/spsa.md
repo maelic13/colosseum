@@ -46,6 +46,28 @@ starting values, not minimums. `--iterations 1 --games-per-iteration 2` is a
 valid smoke run; games per iteration must be positive and even so every opening
 has both colour assignments.
 
+Inspect the exact gain schedule and workload before launching an engine:
+
+```text
+colosseum-cli spsa plan --tune tune.toml --r-end 0.002 \
+  --seconds-per-game-low 20 --seconds-per-game-high 35 \
+  --concurrency 8 --compare-iterations 2500 --compare-iterations 10000
+```
+
+`spsa plan` is offline. It validates the tune-file invariants, reports total
+iterations/games/pairs and durable checkpoint publications, and emits every
+knob's exact `c/a/r` trajectory plus the first perturbation below half a UCI
+integer unit, if one exists. Repeated `--compare-iterations` values show how
+the first/final gains and cost change when the horizon changes.
+
+A wall-time range is emitted only from explicit end-to-end game-duration
+evidence. Supply a low/high seconds-per-game assumption as above, or repeat
+`--pilot-game-seconds` with observed complete-game durations. Iterations remain
+sequential, while games inside one mini-match are grouped into the requested
+concurrency waves. This is workload arithmetic, not a prediction that a chess
+tune will converge; curvature, sensitivity, interactions, noise and distance
+from the optimum remain unknown.
+
 On successful completion, the tuned vector is the half-away-from-zero rounded
 mean of the final 10% of completed centre vectors. `--final-window-percent`
 changes that percentage from 1 through 100. The sample count is rounded up, so

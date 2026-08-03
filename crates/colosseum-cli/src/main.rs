@@ -16,9 +16,9 @@ use colosseum_application::{
     DEFAULT_CALIBRATION_GAMES, DEFAULT_CALIBRATION_TOLERANCE_NELO,
     DEFAULT_SPSA_FINAL_WINDOW_PERCENT, DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS,
     EngineInspection, EngineLaunchSpec, InspectEngine, RuntimeParticipant, SprtBundle, SprtDesign,
-    SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaGateHashStatus, SpsaRunSettings,
-    SpsaTuneAudit, SpsaTuneResult, SpsaTuneWarning, UciOptionSchema, UciOptionValue,
-    classify_calibration,
+    SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaGateHashStatus, SpsaPlanReport,
+    SpsaRunSettings, SpsaTimingInput, SpsaTuneAudit, SpsaTuneResult, SpsaTuneWarning,
+    UciOptionSchema, UciOptionValue, classify_calibration, plan_spsa,
 };
 use colosseum_cli::{
     EngineArgs, OfficialSample, RunDirectory, RunRecord, RunRecorder, RunStatus, built_in_defaults,
@@ -295,13 +295,17 @@ struct CalibrationCommand {
 }
 
 #[derive(Debug, Args)]
+#[command(subcommand_precedence_over_arg = true, subcommand_negates_reqs = true)]
 struct SpsaCommand {
+    #[command(subcommand)]
+    action: Option<SpsaAction>,
+
     #[command(flatten)]
-    engine: EngineArgs,
+    engine: SpsaEngineArgs,
 
     /// Ordered TOML parameter vector to tune against the live UCI schema.
     #[arg(long)]
-    tune: PathBuf,
+    tune: Option<PathBuf>,
     /// Terminal SPSA gain ratio shared by every tuned parameter.
     #[arg(long)]
     r_end: Option<f64>,
@@ -317,6 +321,96 @@ struct SpsaCommand {
 
     #[command(flatten)]
     conditions: SpsaConditions,
+}
+
+/// SPSA supports read-only nested commands that need no executable. The live
+/// run path validates the executable before resolving the shared engine args.
+#[derive(Debug, Args)]
+struct SpsaEngineArgs {
+    /// Path to the UCI engine executable; omitted only for a nested read-only command.
+    executable: Option<PathBuf>,
+    #[arg(long)]
+    label: Option<String>,
+    #[arg(long = "engine-arg", allow_hyphen_values = true)]
+    arguments: Vec<OsString>,
+    #[arg(long)]
+    cwd: Option<PathBuf>,
+    #[arg(long = "env", value_name = "KEY=VALUE")]
+    environment: Vec<String>,
+    #[arg(long = "option", value_name = "NAME=VALUE")]
+    options: Vec<String>,
+    #[arg(long = "button", value_name = "NAME")]
+    buttons: Vec<String>,
+    #[arg(long, value_name = "LIST")]
+    cores: Option<String>,
+}
+
+impl SpsaEngineArgs {
+    fn resolve(&self) -> Result<EngineLaunchSpec, String> {
+        let executable = self
+            .executable
+            .clone()
+            .ok_or_else(|| "an engine executable is required for a live SPSA run".to_owned())?;
+        EngineArgs {
+            executable,
+            label: self.label.clone(),
+            arguments: self.arguments.clone(),
+            cwd: self.cwd.clone(),
+            environment: self.environment.clone(),
+            options: self.options.clone(),
+            buttons: self.buttons.clone(),
+            cores: self.cores.clone(),
+        }
+        .resolve()
+        .map_err(|error| error.to_string())
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum SpsaAction {
+    /// Report the exact gain schedule and factual workload without launching an engine.
+    Plan(SpsaPlanCommand),
+}
+
+#[derive(Debug, Args)]
+struct SpsaPlanCommand {
+    /// Ordered TOML parameter vector whose schedule should be planned.
+    #[arg(long)]
+    tune: PathBuf,
+    /// Terminal SPSA gain ratio shared by every tuned parameter.
+    #[arg(long)]
+    r_end: f64,
+    /// Number of SPSA centre updates in the primary horizon.
+    #[arg(long, default_value_t = DEFAULT_SPSA_ITERATIONS, value_parser = clap::value_parser!(u32).range(1..))]
+    iterations: u32,
+    /// Complete games in each pair-atomic mini-match.
+    #[arg(long, default_value_t = DEFAULT_SPSA_GAMES_PER_ITERATION, value_parser = clap::value_parser!(u32).range(1..))]
+    games_per_iteration: u32,
+    /// Number of games expected to run concurrently within each iteration.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
+    concurrency: u32,
+    /// Compare cost and first/final gain values at another horizon; repeatable.
+    #[arg(long = "compare-iterations", value_parser = clap::value_parser!(u32).range(1..))]
+    comparison_horizons: Vec<u32>,
+    /// Lower end-to-end seconds-per-game assumption for a wall-time range.
+    #[arg(
+        long,
+        requires = "seconds_per_game_high",
+        conflicts_with = "pilot_game_seconds",
+        value_parser = parse_positive_seconds
+    )]
+    seconds_per_game_low: Option<f64>,
+    /// Upper end-to-end seconds-per-game assumption for a wall-time range.
+    #[arg(
+        long,
+        requires = "seconds_per_game_low",
+        conflicts_with = "pilot_game_seconds",
+        value_parser = parse_positive_seconds
+    )]
+    seconds_per_game_high: Option<f64>,
+    /// Observed end-to-end duration of one pilot game; repeat for a sample range.
+    #[arg(long, value_parser = parse_positive_seconds)]
+    pilot_game_seconds: Vec<f64>,
 }
 
 #[derive(Debug, Args)]
@@ -449,7 +543,14 @@ async fn main() -> ExitCode {
         Command::Capabilities => run_capabilities(cli.json),
         Command::Match(command) => run_match(*command, cli.json, cli.dry_run).await,
         Command::Sprt(command) => run_sprt(*command, cli.json, cli.dry_run).await,
-        Command::Spsa(command) => run_spsa_command(*command, cli.json, cli.dry_run).await,
+        Command::Spsa(command) => {
+            let mut command = *command;
+            match command.action.take() {
+                Some(SpsaAction::Plan(_)) if cli.dry_run => unsupported_dry_run("spsa plan"),
+                Some(SpsaAction::Plan(plan)) => run_spsa_plan(plan, cli.json),
+                None => run_spsa_command(command, cli.json, cli.dry_run).await,
+            }
+        }
         Command::Calibrate(command) => run_calibration(*command, cli.json, cli.dry_run).await,
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
         Command::SelfTest if cli.dry_run => unsupported_dry_run("self-test"),
@@ -988,6 +1089,131 @@ fn sprt_exit_code(status: sprt_runner::SprtStatus) -> u8 {
     }
 }
 
+fn parse_positive_seconds(value: &str) -> Result<f64, String> {
+    let parsed = value
+        .parse::<f64>()
+        .map_err(|_| format!("expected a finite positive number of seconds, got {value}"))?;
+    if parsed.is_finite() && parsed > 0.0 {
+        Ok(parsed)
+    } else {
+        Err(format!(
+            "expected a finite positive number of seconds, got {value}"
+        ))
+    }
+}
+
+fn run_spsa_plan(command: SpsaPlanCommand, machine: bool) -> ExitCode {
+    let tune = match load_spsa_tune(&command.tune) {
+        Ok(tune) => tune,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let settings = match SpsaRunSettings::new(command.iterations, command.games_per_iteration) {
+        Ok(settings) => settings,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let timing = match (
+        command.seconds_per_game_low,
+        command.seconds_per_game_high,
+        command.pilot_game_seconds.is_empty(),
+    ) {
+        (Some(lower), Some(upper), true) => Some(SpsaTimingInput::Range {
+            lower_seconds_per_game: lower,
+            upper_seconds_per_game: upper,
+        }),
+        (None, None, false) => Some(SpsaTimingInput::PilotGames(command.pilot_game_seconds)),
+        (None, None, true) => None,
+        _ => {
+            eprintln!(
+                "configuration error: supply both --seconds-per-game-low and --seconds-per-game-high, or repeat --pilot-game-seconds"
+            );
+            return ExitCode::from(2);
+        }
+    };
+    let report = match plan_spsa(
+        &tune,
+        settings,
+        command.r_end,
+        command.concurrency,
+        timing,
+        &command.comparison_horizons,
+    ) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if machine {
+        print_json(&MachineOutput::SpsaPlan { report });
+    } else {
+        print_spsa_plan(&report);
+    }
+    ExitCode::SUCCESS
+}
+
+fn print_spsa_plan(report: &SpsaPlanReport) {
+    println!("SPSA schedule and workload plan");
+    println!("iterations: {}", report.settings.iterations);
+    println!(
+        "games: {} ({} pairs; {} games/iteration)",
+        report.total_games, report.total_pairs, report.settings.games_per_iteration
+    );
+    println!(
+        "durability: {} checkpoint publications; {} retained generations; {} schedule artifact",
+        report.checkpoint_publications,
+        report.checkpoint_generations_retained,
+        report.schedule_artifacts
+    );
+    if let Some(timing) = &report.wall_time {
+        println!(
+            "estimated wall time: {:.1}..{:.1} seconds ({} concurrent, {} game waves)",
+            timing.lower_seconds, timing.upper_seconds, timing.concurrency, timing.total_game_waves
+        );
+    } else {
+        println!("estimated wall time: unavailable (supply a seconds/game range or pilot samples)");
+    }
+    for knob in &report.knobs {
+        let first = knob
+            .trajectory
+            .first()
+            .expect("a validated schedule has an iteration");
+        let final_point = knob
+            .trajectory
+            .last()
+            .expect("a validated schedule has an iteration");
+        let hazard = knob
+            .first_rounding_resolution_hazard
+            .map_or_else(|| "none".into(), |iteration| iteration.to_string());
+        println!(
+            "{}: c {:.6}->{:.6}, a {:.6}->{:.6}, r {:.6}->{:.6}, first sub-half-unit hazard: {}",
+            knob.name,
+            first.c,
+            final_point.c,
+            first.a,
+            final_point.a,
+            first.r,
+            final_point.r,
+            hazard
+        );
+    }
+    for comparison in &report.horizon_comparisons {
+        println!(
+            "comparison horizon {}: {} games, {} pairs, {} checkpoints",
+            comparison.iterations,
+            comparison.games,
+            comparison.pairs,
+            comparison.checkpoint_publications
+        );
+    }
+    println!("interpretation: {}", report.interpretation);
+}
+
 async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) -> ExitCode {
     let conditions = &command.conditions;
     let stored_schedule_inputs = match conditions
@@ -1051,7 +1277,11 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
         eprintln!("configuration error: book order/start/plies require --book");
         return ExitCode::from(2);
     }
-    let tune = match load_spsa_tune(&command.tune) {
+    let Some(tune_path) = command.tune.as_ref() else {
+        eprintln!("configuration error: --tune is required for a live SPSA run");
+        return ExitCode::from(2);
+    };
+    let tune = match load_spsa_tune(tune_path) {
         Ok(tune) => tune,
         Err(error) => {
             eprintln!("configuration error: {error}");
@@ -1220,7 +1450,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
             "engine": &engine,
             "engine_sha256": "computed-and-checked-before-live-launch",
             "tune": {
-                "path": &command.tune,
+                "path": tune_path,
                 "parameters": &tune.parameters,
                 "live_schema": "verified-before-game-launch"
             },
@@ -1677,6 +1907,9 @@ enum MachineOutput<'a> {
     Spsa {
         run_directory: PathBuf,
         report: Box<SpsaReport>,
+    },
+    SpsaPlan {
+        report: SpsaPlanReport,
     },
     Calibration {
         run_directory: PathBuf,

@@ -88,6 +88,104 @@ fn spsa_dry_run_resolves_defaults_and_schedule_without_launching_an_engine() {
 }
 
 #[test]
+fn spsa_plan_is_offline_and_reports_exact_schedule_cost_and_timing() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = write_tune(root.path());
+    let output = cli()
+        .args(["spsa", "plan", "--tune"])
+        .arg(&tune)
+        .args([
+            "--r-end",
+            "0.002",
+            "--iterations",
+            "4",
+            "--games-per-iteration",
+            "6",
+            "--concurrency",
+            "4",
+            "--seconds-per-game-low",
+            "2",
+            "--seconds-per-game-high",
+            "3",
+            "--compare-iterations",
+            "2",
+            "--compare-iterations",
+            "8",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["type"], "spsa-plan");
+    let report = &value["report"];
+    assert_eq!(report["total_games"], 24);
+    assert_eq!(report["total_pairs"], 12);
+    assert_eq!(report["checkpoint_publications"], 4);
+    assert_eq!(report["wall_time"]["waves_per_iteration"], 2);
+    assert_eq!(report["wall_time"]["lower_seconds"], 16.0);
+    assert_eq!(report["wall_time"]["upper_seconds"], 24.0);
+    assert_eq!(
+        report["knobs"][0]["trajectory"].as_array().unwrap().len(),
+        4
+    );
+    assert_eq!(report["knobs"][0]["trajectory"][3]["c"], 1.0);
+    assert_eq!(
+        report["knobs"][0]["first_rounding_resolution_hazard"],
+        Value::Null
+    );
+    assert_eq!(report["horizon_comparisons"][0]["iterations"], 2);
+    assert_eq!(report["horizon_comparisons"][1]["iterations"], 8);
+}
+
+#[test]
+fn spsa_plan_pilot_timing_is_a_labelled_observation_not_a_convergence_claim() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = write_tune(root.path());
+    let output = cli()
+        .args(["spsa", "plan", "--tune"])
+        .arg(&tune)
+        .args([
+            "--r-end",
+            "0.002",
+            "--iterations",
+            "3",
+            "--games-per-iteration",
+            "2",
+            "--concurrency",
+            "2",
+            "--pilot-game-seconds",
+            "1.25",
+            "--pilot-game-seconds",
+            "2.0",
+            "--pilot-game-seconds",
+            "1.5",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        value["report"]["wall_time"]["basis"]["source"],
+        "pilot-games"
+    );
+    assert_eq!(value["report"]["wall_time"]["lower_seconds"], 3.75);
+    assert_eq!(value["report"]["wall_time"]["upper_seconds"], 6.0);
+    assert!(
+        value["report"]["interpretation"]
+            .as_str()
+            .unwrap()
+            .contains("not a chess-convergence forecast")
+    );
+}
+
+#[test]
 fn spsa_configuration_audit_refuses_unmeasurable_vectors_before_engine_launch() {
     let root = tempfile::tempdir().unwrap();
     let tune = write_tune_contents(

@@ -12,6 +12,7 @@ pub mod pair_commit;
 pub mod ports;
 pub mod sprt;
 pub mod spsa;
+pub mod spsa_plan;
 
 pub use calibration::{
     CalibrationBinaries, CalibrationDesign, CalibrationError, CalibrationInterval,
@@ -33,4 +34,9 @@ pub use spsa::{
     SpsaPreflightError, SpsaResultParameter, SpsaRunSettings, SpsaRunSettingsError, SpsaTune,
     SpsaTuneAudit, SpsaTuneAuditError, SpsaTuneError, SpsaTuneParameter, SpsaTuneResult,
     SpsaTuneResultError, SpsaTuneWarning, SpsaTuningState, VerifiedSpsaSchedule,
+};
+pub use spsa_plan::{
+    SPSA_PLAN_SCHEMA_VERSION, SpsaHorizonComparison, SpsaHorizonKnob, SpsaKnobPlan, SpsaPlanError,
+    SpsaPlanPoint, SpsaPlanReport, SpsaTimingBasis, SpsaTimingInput, SpsaWallTimeEstimate,
+    plan_spsa,
 };

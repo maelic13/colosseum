@@ -14,3 +14,5 @@ The first public CLI release is not yet published.
   non-default or rail-seeded parameters.
 - Added frozen final-window SPSA result artifacts and SHA-256-verified
   `sprt --apply` gating of original versus tuned UCI vectors.
+- Added offline `spsa plan` schedule, workload, rounding-resolution, horizon
+  comparison and evidence-based wall-time reporting.

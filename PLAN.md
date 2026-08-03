@@ -952,6 +952,17 @@ distance.
 the wall-clock estimator covers a controlled stub run; a synthetic simulation
 is reproducible by seed and clearly separated from factual schedule output.
 
+**Implementation evidence (5.8):** runtime-neutral application policy validates
+the ordered tune and exact schedule, emits every per-knob `c/a/r` point, reports
+the first sub-half-unit rounding hazard, and computes iteration/game/pair,
+checkpoint-generation and schedule-artifact counts with checked arithmetic.
+Optional timing is derived only from an explicit end-to-end seconds/game range
+or repeated pilot-game observations and accounts for sequential iterations plus
+concurrent mini-match waves. Repeated comparison horizons re-derive first/final
+gain and cost rather than scaling one schedule. Output labels this as factual
+workload planning, never a chess-convergence forecast; no synthetic objective
+surface is implied when none is supplied.
+
 #### 5.5b SPSA diagnostics — `colosseum-cli spsa status`
 
 Read an atomic snapshot of a run directory without touching the running tune.
