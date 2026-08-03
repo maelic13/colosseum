@@ -1904,6 +1904,15 @@ triggers. No alias or speculative branding layer is introduced.
   exists), discoverability, offline availability, contribution friction, and
   whether the command reference can be generated from the argument parser so it
   cannot drift. Record the decision.
+
+**Accepted (9.1):** canonical CLI documentation is repository-versioned
+Markdown under `docs/cli/`, rendered on the web from the selected tag and
+included in exact release archives for offline use. A small unpublished Rust
+tool generates the complete public command reference from the real Clap model
+and provides a required drift-check mode. Handwritten guides own concepts and
+examples; a separate wiki or static-site source tree is not introduced for V1.
+[ADR-0010](docs/architecture/adr/0010-version-cli-documentation-with-the-binary.md)
+records the placement, generation and publication contract.
 - **(b) Write it.** README stays the front door for the whole project —
   what Colosseum GUI and Colosseum CLI are (or their Phase 9.0 replacement),
   install, links. User documentation covers

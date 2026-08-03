@@ -18,8 +18,8 @@ numbers, internal naming or method argumentation.
 | What is missing | User documentation, release artifacts and cross-platform/third-party release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 8 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 9.1 — documentation placement analysis** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Next step | **Phase 9.2 — README front door** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -708,12 +708,15 @@ model as well.
   retained Colosseum and Colosseum CLI after the dated review; ADR-0009 records
   the unchanged collision evidence, descriptive qualifier policy, accepted
   risk and future revisit triggers
-- ☐ **9.1** — **Model: Sol High. Documentation placement analysis:** in-repo `docs/` published as a
+- ☑ **9.1 — DONE** — **Model: Sol High. Documentation placement analysis:** in-repo `docs/` published as a
   static site, GitHub wiki, or generated reference plus guides. Criteria:
   versioning with the binary (a wiki does not version, which matters once
   `stats_version` exists), discoverability, offline availability,
   contribution friction, and whether the command reference can be generated
-  from the argument parser so it cannot drift. Record the decision
+  from the argument parser so it cannot drift. Record the decision — ADR-0010
+  selects versioned `docs/cli/` Markdown, release-archive inclusion and a
+  generated, CI-checked Clap command reference; the tagged repository render
+  is the V1 website and a separate wiki/site source is unnecessary
 - ☐ **9.2** — **Model: Terra High.** README as the project front door — what Colosseum GUI and
   Colosseum CLI are (or their Phase 9.0 replacement), install, links
 - ☐ **9.3** — **Model: Terra High.** User documentation: quickstart, command reference, run-file and
@@ -769,9 +772,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 9.1 — documentation placement analysis. Model: GPT-5.6 Sol — High.**
-Choose and record the versioned user-documentation system, including how its
-command reference stays synchronized with the CLI argument parser.
+**Phase 9.2 — README front door. Model: GPT-5.6 Terra — High.**
+Make the repository README introduce the GUI and independent CLI equally,
+provide correct platform installation paths, and link each product's complete
+versioned documentation and release lane.
 
 ```
 git diff --check

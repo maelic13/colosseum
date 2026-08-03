@@ -17,6 +17,7 @@ decision.
 | [0007](0007-name-the-cli-uci-rig.md) | Rejected | Name the independent CLI UCI Rig |
 | [0008](0008-use-colosseum-through-implementation.md) | Accepted | Use Colosseum consistently through implementation and defer an optional final rebrand |
 | [0009](0009-retain-colosseum-for-1-0.md) | Accepted | Retain Colosseum and Colosseum CLI for the 1.0 product family |
+| [0010](0010-version-cli-documentation-with-the-binary.md) | Accepted | Keep canonical CLI Markdown with the binary and generate parser-derived command reference |
 
 Phase 0.5's detailed release and CI design is in
 [`release-architecture.md`](../release-architecture.md).
@@ -28,3 +29,5 @@ Phase 0.8's implementation identity and optional Phase 9.0 naming gate are in
 [ADR-0008](0008-use-colosseum-through-implementation.md).
 Phase 9.0's final 1.0 identity and dated collision revalidation are in
 [ADR-0009](0009-retain-colosseum-for-1-0.md).
+Phase 9.1's versioned, offline and parser-synchronized documentation contract is
+in [ADR-0010](0010-version-cli-documentation-with-the-binary.md).
