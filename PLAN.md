@@ -634,6 +634,12 @@ correctness and is never a prerequisite for another command.
 through persistence and resume; PASS/FAIL/inconclusive/invalid each have
 deterministic tests.
 
+**Implementation evidence (4C.1–4C.2):** the CLI records the resolved
+SHA-256 identities and representative conditions in the ordinary durable run
+record; its fixed-N normalized-Elo classifier and automation exits are covered
+by hermetic command and application tests. Persistence/resume acceptance and a
+real-machine representative smoke remain Phase 4C.3 evidence.
+
 ### 5.4 Fixed match and SPRT — `colosseum-cli match|sprt`
 
 **Requirements**

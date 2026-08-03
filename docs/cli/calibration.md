@@ -30,3 +30,17 @@ Every live calibration writes the standard self-contained run directory,
 including the resolved configuration, binary identities, checkpoint, PGN,
 JSON-lines log, run record and final result. It can resume only with the same
 resolved configuration.
+
+The result uses a fixed two-sided normalized-Elo interval:
+
+| Result | Meaning | Exit code |
+|---|---|---:|
+| `pass` | The entire interval is within the configured tolerance. | 0 |
+| `fail` | The entire interval is above or below one tolerance edge. | 1 |
+| `inconclusive` | The interval overlaps an edge, or the sample has no estimable interval. | 4 |
+| `invalid` | Any engine-attributable fault occurred. | 5 |
+
+Infrastructure, persistence and runtime failures use exit code 3 and do not
+claim a calibration result. An inconclusive calibration is evidence of an
+unresolved measurement, not a failed engine or a reason to block another
+workflow.

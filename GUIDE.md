@@ -467,8 +467,14 @@ model as well.
   [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/calibration.md`](docs/cli/calibration.md)
-- ☐ **4C.2** — **Model: Terra High.** PASS iff interval is inside tolerance; FAIL iff wholly outside one
-  edge; overlap is INCONCLUSIVE; any engine fault is INVALID
+- ☑ **4C.2 — DONE** — **Model: Terra High.** Calibration evaluates a
+  normalized-Elo fixed-N interval as PASS only by full containment, FAIL only
+  outside one edge, otherwise INCONCLUSIVE; any engine fault is INVALID and
+  non-scorable infrastructure remains a runtime error — evidence:
+  [`crates/colosseum-application/src/calibration.rs`](crates/colosseum-application/src/calibration.rs),
+  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
+  [`docs/cli/calibration.md`](docs/cli/calibration.md)
 - ☐ **4C.3** — **EXIT · Model: Sol High.** Hash/config/persistence checks, deterministic tests for
   every outcome and one real-machine smoke run
 
@@ -617,9 +623,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4C.2 — calibration decision and fault classification. Model: GPT-5.6 Terra — High.**
-Classify the fixed-N interval only by full tolerance containment; make every
-engine fault invalid and preserve an explicit inconclusive outcome.
+**Phase 4C.3 — calibration acceptance. Model: GPT-5.6 Sol — High.**
+Verify hash/config/persistence and deterministic outcome coverage, then ask the
+developer to run the optional real-machine smoke command with representative
+conditions.
 
 ```
 git diff --check

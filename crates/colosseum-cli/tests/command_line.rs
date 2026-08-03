@@ -90,6 +90,82 @@ fn calibration_refuses_nonidentical_executable_content_before_launch() {
 }
 
 #[test]
+fn calibration_persists_a_degenerate_identical_binary_run_as_inconclusive() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("calibration");
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+    let output = cli()
+        .arg("calibrate")
+        .arg(binary)
+        .arg(binary)
+        .args([
+            "--games",
+            "4",
+            "--a-engine-arg=__uci-stub",
+            "--b-engine-arg=__uci-stub",
+            "--max-moves",
+            "2",
+            "--no-resign-adjudication",
+            "--dir",
+        ])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(4));
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["type"], "calibration");
+    assert_eq!(value["report"]["status"], "inconclusive");
+    assert!(value["report"]["interval"].is_null());
+    assert!(
+        value["report"]["statistics_unavailable"]
+            .as_str()
+            .unwrap()
+            .contains("zero variance")
+    );
+    for artifact in [
+        "checkpoint.json",
+        "run.log",
+        "games.pgn",
+        "result.json",
+        "run-record.json",
+    ] {
+        assert!(run.join(artifact).is_file(), "missing {artifact}");
+    }
+    let record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
+    assert_eq!(record["command"], "calibrate");
+    assert_eq!(record["status"], "completed");
+    assert_eq!(record["official_sample"]["completed_pairs"], 2);
+}
+
+#[test]
+fn calibration_marks_any_engine_fault_invalid_even_when_the_match_policy_allows_it() {
+    let root = tempfile::tempdir().unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
+    let output = cli()
+        .arg("calibrate")
+        .arg(fixture)
+        .arg(fixture)
+        .args(["--games", "2", "--max-engine-faults", "2", "--dir"])
+        .arg(root.path().join("invalid"))
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(5));
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["report"]["status"], "invalid");
+    assert!(
+        value["report"]["fixed_match"]["faults"]["engine_b"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+}
+
+#[test]
 fn sprt_named_bundles_expand_to_explicit_finite_designs() {
     for (preset, elo0, elo1) in [("gainer", 0.0, 5.0), ("simplify", -5.0, 0.0)] {
         let output = cli()
