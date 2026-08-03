@@ -1037,6 +1037,13 @@ while warm sessions use `ucinewgame`/`isready`. JSON retains the exact schedule,
 raw samples, per-build medians, arm median/best-build, bootstrap CI and
 per-round B/A ratio SD. A self pair is optional and tolerance-labelled.
 
+Phase 6.3 composes the existing topology, allowed-set and hard-affinity adapters
+with UCI sessions. A scaling sweep requires an explicit advertised thread spin
+name and a one-thread baseline; every point uses that many whole physical cores
+from the same stable pool. Fixed-total/per-thread Hash, selected CPU class/NUMA,
+median wall-time NPS, speedup and efficiency are structured evidence. Missing
+exact placement evidence is a refusal, not an unpinned fallback.
+
 **Success criteria**
 
 - A self-pair result is reported without being a prerequisite.

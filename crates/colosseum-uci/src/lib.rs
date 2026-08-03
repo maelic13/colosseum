@@ -22,4 +22,4 @@ pub use process::{
     SpawnOptions, process_is_alive,
 };
 pub use score::Score;
-pub use session::UciSessionFactory;
+pub use session::{AffinityUciSessionFactory, ProcessAffinityFn, UciSessionFactory};

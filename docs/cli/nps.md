@@ -45,3 +45,24 @@ The normal direct engine controls apply: `--engine-arg`, `--cwd`, `--env`,
 `--option`, and `--button`. `--deadline-ms` bounds the search (default 60000).
 Use `--json` for one machine-readable document or `--dry-run` to resolve the
 workload and invocation without launching the engine.
+
+## Thread scaling
+
+`--scale-threads 1,2,4,8 --threads-option Threads` runs a scaling sweep. The
+one-thread point is mandatory and is the speedup baseline. The option name is
+explicit: Colosseum does not guess a non-standard engine control. Every point
+sets that advertised option to the requested count and pins the process to the
+same number of whole physical cores; larger points use a stable prefix of the
+same detected core pool. A sweep refuses to run when exact SMT sibling identity,
+the allowed CPU set, hard affinity, or CPU-class/NUMA evidence is unavailable.
+
+Hash policy must be interpretable across points:
+
+- `--hash-policy fixed-total --hash-mb 256` sets 256 MiB at every point.
+- `--hash-policy per-thread --hash-mb 64` sets 64 MiB times the thread count.
+
+`--hash-option` defaults to `Hash`, but the engine must advertise it. Each point
+reports median NPS, wall-time speedup relative to one thread, parallel
+efficiency (`speedup / threads`), assigned physical-core count, actual Hash,
+core classes and NUMA nodes. Positions, fixed-node limits, repetitions,
+warm-up and seed remain identical across all points.

@@ -16,11 +16,12 @@ use colosseum_application::{
     DEFAULT_CALIBRATION_GAMES, DEFAULT_CALIBRATION_TOLERANCE_NELO,
     DEFAULT_SPSA_FINAL_WINDOW_PERCENT, DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS,
     EngineInspection, EngineLaunchSpec, InspectEngine, MeasureNps, NpsExperimentDesign,
-    NpsExperimentParticipant, NpsExperimentReport, NpsReport, NpsRequest, NpsStatePolicy,
-    RuntimeParticipant, SprtBundle, SprtDesign, SprtParameters, SpsaBoundTune, SpsaCenterSample,
-    SpsaCommittedUpdate, SpsaGateHashStatus, SpsaPlanReport, SpsaRunSettings, SpsaStatusReport,
-    SpsaTimingInput, SpsaTuneAudit, SpsaTuneResult, SpsaTuneWarning, SpsaTuningState,
-    UciOptionSchema, UciOptionValue, classify_calibration, diagnose_spsa, plan_spsa,
+    NpsExperimentParticipant, NpsExperimentReport, NpsHashPolicy, NpsReport, NpsRequest,
+    NpsScalingInput, NpsScalingReport, NpsStatePolicy, RuntimeParticipant, SprtBundle, SprtDesign,
+    SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaCommittedUpdate, SpsaGateHashStatus,
+    SpsaPlanReport, SpsaRunSettings, SpsaStatusReport, SpsaTimingInput, SpsaTuneAudit,
+    SpsaTuneResult, SpsaTuneWarning, SpsaTuningState, UciOptionSchema, UciOptionValue,
+    classify_calibration, diagnose_spsa, plan_spsa, summarize_nps_scaling,
 };
 use colosseum_cli::{
     EngineArgs, OfficialSample, RunDirectory, RunRecord, RunRecorder, RunStatus, built_in_defaults,
@@ -32,8 +33,11 @@ use colosseum_core::{
     PairGameResult, ParticipantId, PentanomialVector, ResignAdjudication, SpsaEndSpec,
     SpsaScheduleArtifact, TimeControl, fixed_n_achieved_resolution,
 };
-use colosseum_engine::CpuPlacementPolicy;
-use colosseum_uci::UciSessionFactory;
+use colosseum_engine::{
+    CpuPlacementPlan, CpuPlacementPolicy, detect_allowed_cpu_set, detect_cpu_characteristics,
+    detect_cpu_topology, plan_cpu_placement,
+};
+use colosseum_uci::{AffinityUciSessionFactory, UciSessionFactory};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -588,6 +592,21 @@ struct NpsCommand {
     /// Maximum absolute self-pair median difference before warning.
     #[arg(long, default_value_t = 0.5)]
     self_tolerance_percent: f64,
+    /// Comma-separated search-thread counts; enables a pinned scaling sweep.
+    #[arg(long, value_name = "1,2,4,8")]
+    scale_threads: Option<String>,
+    /// Advertised UCI spin option controlling engine search threads.
+    #[arg(long, requires = "scale_threads")]
+    threads_option: Option<String>,
+    /// Hash allocation rule used by a scaling sweep.
+    #[arg(long, value_enum, default_value_t = NpsHashPolicyArg::FixedTotal)]
+    hash_policy: NpsHashPolicyArg,
+    /// Hash MiB: total under fixed-total, or per thread under per-thread.
+    #[arg(long, default_value_t = 16, value_parser = clap::value_parser!(u64).range(1..))]
+    hash_mb: u64,
+    /// Advertised UCI spin option controlling hash size.
+    #[arg(long, default_value = "Hash")]
+    hash_option: String,
     /// Maximum wall time allowed for the fixed-node search.
     #[arg(long, default_value_t = 60_000, value_parser = clap::value_parser!(u64).range(1..))]
     deadline_ms: u64,
@@ -604,6 +623,21 @@ impl From<NpsStateArg> for NpsStatePolicy {
         match value {
             NpsStateArg::Cold => Self::Cold,
             NpsStateArg::Warm => Self::Warm,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum NpsHashPolicyArg {
+    FixedTotal,
+    PerThread,
+}
+
+impl From<NpsHashPolicyArg> for NpsHashPolicy {
+    fn from(value: NpsHashPolicyArg) -> Self {
+        match value {
+            NpsHashPolicyArg::FixedTotal => Self::FixedTotal,
+            NpsHashPolicyArg::PerThread => Self::PerThread,
         }
     }
 }
@@ -2163,6 +2197,9 @@ async fn run_nps(command: NpsCommand, machine: bool, dry_run: bool) -> ExitCode 
         eprintln!("configuration error: --self-tolerance-percent must be finite and non-negative");
         return ExitCode::from(2);
     }
+    if command.scale_threads.is_some() {
+        return run_nps_scaling(command, base_launch, machine, dry_run).await;
+    }
     let comparison = command.against.is_some()
         || command.self_pair
         || !command.a_builds.is_empty()
@@ -2273,11 +2310,22 @@ async fn run_nps(command: NpsCommand, machine: bool, dry_run: bool) -> ExitCode 
             deadline_ms: design.deadline_ms,
         };
         return print_nps_result(
-            MeasureNps::execute(&UciSessionFactory, &participants[0].participant, request).await,
+            MeasureNps::execute(
+                &AffinityUciSessionFactory::new(apply_nps_affinity),
+                &participants[0].participant,
+                request,
+            )
+            .await,
             machine,
         );
     }
-    match CompareNps::execute(&UciSessionFactory, &participants, design).await {
+    match CompareNps::execute(
+        &AffinityUciSessionFactory::new(apply_nps_affinity),
+        &participants,
+        design,
+    )
+    .await
+    {
         Ok(report) => {
             let self_pair = participants[0].participant.launch.executable
                 == participants
@@ -2334,6 +2382,328 @@ async fn run_nps(command: NpsCommand, machine: bool, dry_run: bool) -> ExitCode 
             ExitCode::FAILURE
         }
     }
+}
+
+fn apply_nps_affinity(
+    process_id: u32,
+    allocation: &colosseum_application::CpuAllocation,
+) -> Result<(), String> {
+    colosseum_engine::apply_process_affinity(process_id, allocation)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+async fn run_nps_scaling(
+    command: NpsCommand,
+    base_launch: EngineLaunchSpec,
+    machine: bool,
+    dry_run: bool,
+) -> ExitCode {
+    if command.against.is_some()
+        || command.self_pair
+        || !command.a_builds.is_empty()
+        || !command.b_builds.is_empty()
+        || !command.moves.is_empty()
+    {
+        eprintln!(
+            "configuration error: scaling sweep cannot be combined with A/B builds or --move"
+        );
+        return ExitCode::from(2);
+    }
+    let threads = match parse_scaling_threads(command.scale_threads.as_deref().unwrap_or_default())
+    {
+        Ok(threads) => threads,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let Some(threads_option) = command.threads_option.as_deref() else {
+        eprintln!("configuration error: --threads-option is required for a scaling sweep");
+        return ExitCode::from(2);
+    };
+    let topology = match detect_cpu_topology() {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("configuration error: scaling requires exact CPU topology: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let allowed = match detect_allowed_cpu_set(&topology) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("configuration error: scaling requires the allowed CPU set: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let characteristics = match detect_cpu_characteristics(&topology) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("configuration error: scaling requires CPU class/NUMA evidence: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let placement = match plan_cpu_placement(
+        &topology,
+        &allowed,
+        &CpuPlacementPolicy::Auto {
+            headroom_physical_cores: 0,
+        },
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("configuration error: cannot allocate scaling cores: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let CpuPlacementPlan::WholePhysicalCores { cores, .. } = placement else {
+        eprintln!("configuration error: scaling requires whole physical-core placement");
+        return ExitCode::from(2);
+    };
+    if threads.last().copied().unwrap_or(0) as usize > cores.len() {
+        eprintln!(
+            "configuration error: requested {} threads but only {} allowed physical cores are available",
+            threads.last().copied().unwrap_or(0),
+            cores.len()
+        );
+        return ExitCode::from(2);
+    }
+    let positions = if command.positions.is_empty() {
+        vec!["startpos".into()]
+    } else {
+        command.positions.clone()
+    };
+    if positions == ["startpos"] {
+        eprintln!(
+            "nps warning: startpos alone is a weak workload; use representative positions for decisions"
+        );
+    }
+    let hash_policy: NpsHashPolicy = command.hash_policy.into();
+    let mut jobs = Vec::new();
+    for (job_index, thread_count) in threads.iter().copied().enumerate() {
+        let selected = &cores[..thread_count as usize];
+        let cpus = selected
+            .iter()
+            .flat_map(|core| core.logical_cpus.iter().copied())
+            .collect::<Vec<_>>();
+        let point_hash = match hash_policy {
+            NpsHashPolicy::FixedTotal => command.hash_mb,
+            NpsHashPolicy::PerThread => {
+                match command.hash_mb.checked_mul(u64::from(thread_count)) {
+                    Some(value) => value,
+                    None => {
+                        eprintln!("configuration error: per-thread Hash size overflows u64");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+        };
+        let mut launch = base_launch.clone();
+        launch.options.insert(
+            threads_option.to_owned(),
+            UciOptionValue::String(thread_count.to_string()),
+        );
+        launch.options.insert(
+            command.hash_option.clone(),
+            UciOptionValue::String(point_hash.to_string()),
+        );
+        launch.allocated_cpus = colosseum_application::CpuAllocation::Enforced(cpus.clone());
+        let participants = ["A", "B"]
+            .into_iter()
+            .enumerate()
+            .map(|(side, arm)| NpsExperimentParticipant {
+                arm: arm.into(),
+                build: format!("{}t", thread_count),
+                participant: RuntimeParticipant {
+                    id: ParticipantId::from_u128((job_index * 2 + side + 1) as u128),
+                    launch: launch.clone(),
+                },
+            })
+            .collect();
+        let selected_characteristics = characteristics
+            .cores
+            .iter()
+            .filter(|item| item.logical_cpus.iter().any(|cpu| cpus.contains(cpu)))
+            .collect::<Vec<_>>();
+        let mut core_classes = selected_characteristics
+            .iter()
+            .map(|item| format!("{:?}", item.core_class))
+            .collect::<Vec<_>>();
+        core_classes.sort();
+        core_classes.dedup();
+        let mut numa_nodes = selected_characteristics
+            .iter()
+            .filter_map(|item| item.numa_node)
+            .map(|node| format!("{}:{}", node.group, node.number))
+            .collect::<Vec<_>>();
+        numa_nodes.sort();
+        numa_nodes.dedup();
+        jobs.push(NpsScalingJob {
+            threads: thread_count,
+            hash_mb: point_hash,
+            cpus,
+            core_classes,
+            numa_nodes,
+            participants,
+            design: NpsExperimentDesign {
+                nodes: command.nodes,
+                positions: positions.clone(),
+                repetitions: command.repetitions,
+                warmup_repetitions: command.warmup,
+                deadline_ms: command.deadline_ms,
+                state_policy: command.state.into(),
+                seed: command.seed,
+                bootstrap_samples: command.bootstrap_samples,
+            },
+        });
+    }
+    let current_directory = match std::env::current_dir() {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("configuration error: cannot read current directory: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut path_pointers = Vec::new();
+    for job in 0..jobs.len() {
+        for participant in 0..2 {
+            path_pointers.push(format!(
+                "/jobs/{job}/participants/{participant}/participant/launch/executable"
+            ));
+            if jobs[job].participants[participant]
+                .participant
+                .launch
+                .working_directory
+                .is_some()
+            {
+                path_pointers.push(format!(
+                    "/jobs/{job}/participants/{participant}/participant/launch/working_directory"
+                ));
+            }
+        }
+    }
+    let resolved = match resolve_config(
+        built_in_defaults(),
+        None,
+        json!({
+            "command": "nps-scaling",
+            "hash_policy": hash_policy,
+            "threads_option": threads_option,
+            "hash_option": command.hash_option,
+            "jobs": jobs,
+            "topology": topology,
+            "characteristics": characteristics,
+        }),
+        &[],
+        &current_directory,
+        &path_pointers,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let jobs: Vec<NpsScalingJob> = serde_json::from_value(resolved.value()["jobs"].clone())
+        .expect("resolved scaling jobs retain their schema");
+    if dry_run {
+        let invocations = jobs
+            .iter()
+            .flat_map(|job| job.participants.iter().map(|item| &item.participant.launch))
+            .collect();
+        print_output(
+            &MachineOutput::DryRun {
+                command: "nps-scaling",
+                config_sha256: resolved.sha256(),
+                resolved_configuration: resolved.value(),
+                invocations,
+            },
+            machine,
+        );
+        return ExitCode::SUCCESS;
+    }
+    let factory = AffinityUciSessionFactory::new(apply_nps_affinity);
+    let mut inputs = Vec::new();
+    for job in jobs {
+        let comparison = match CompareNps::execute(&factory, &job.participants, job.design).await {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("nps scaling failed at {} threads: {error}", job.threads);
+                return ExitCode::FAILURE;
+            }
+        };
+        let mut values = comparison
+            .samples
+            .iter()
+            .map(|sample| sample.measurement.authoritative_nps)
+            .collect::<Vec<_>>();
+        values.sort_by(f64::total_cmp);
+        let median_nps = if values.len().is_multiple_of(2) {
+            (values[values.len() / 2 - 1] + values[values.len() / 2]) / 2.0
+        } else {
+            values[values.len() / 2]
+        };
+        inputs.push(NpsScalingInput {
+            threads: job.threads,
+            pinned_physical_cores: job.threads,
+            hash_mb: job.hash_mb,
+            median_nps,
+            core_classes: job.core_classes,
+            numa_nodes: job.numa_nodes,
+        });
+    }
+    let report = match summarize_nps_scaling(hash_policy, inputs) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("nps scaling failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if machine {
+        print_json(&MachineOutput::NpsScaling { report });
+    } else {
+        for point in &report.points {
+            println!(
+                "{} threads / {} cores / {} MiB Hash: {:.3} NPS, {:.3}x speedup, {:.2}% efficiency",
+                point.input.threads,
+                point.input.pinned_physical_cores,
+                point.input.hash_mb,
+                point.input.median_nps,
+                point.speedup,
+                point.parallel_efficiency * 100.0
+            );
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn parse_scaling_threads(value: &str) -> Result<Vec<u32>, String> {
+    let mut threads = value
+        .split(',')
+        .map(|item| {
+            item.parse::<u32>()
+                .map_err(|_| format!("invalid scaling thread count {item:?}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    threads.sort_unstable();
+    if threads.first().copied() != Some(1)
+        || threads.contains(&0)
+        || threads.windows(2).any(|pair| pair[0] == pair[1])
+    {
+        return Err("scaling thread counts must be unique, positive, and include 1".into());
+    }
+    Ok(threads)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NpsScalingJob {
+    threads: u32,
+    hash_mb: u64,
+    cpus: Vec<colosseum_application::LogicalCpuId>,
+    core_classes: Vec<String>,
+    numa_nodes: Vec<String>,
+    participants: Vec<NpsExperimentParticipant>,
+    design: NpsExperimentDesign,
 }
 
 fn print_nps_result(
@@ -2491,6 +2861,9 @@ enum MachineOutput<'a> {
     },
     NpsComparison {
         report: NpsExperimentReport,
+    },
+    NpsScaling {
+        report: NpsScalingReport,
     },
     SelfTest {
         report: self_test::SelfTestReport,
@@ -4195,5 +4568,13 @@ mod tests {
         assert_eq!(calibration_exit_code(CalibrationStatus::Fail), 1);
         assert_eq!(calibration_exit_code(CalibrationStatus::Inconclusive), 4);
         assert_eq!(calibration_exit_code(CalibrationStatus::Invalid), 5);
+    }
+
+    #[test]
+    fn scaling_thread_list_requires_unique_positive_one_thread_baseline() {
+        assert_eq!(parse_scaling_threads("4,1,2").unwrap(), [1, 2, 4]);
+        assert!(parse_scaling_threads("2,4").is_err());
+        assert!(parse_scaling_threads("1,2,2").is_err());
+        assert!(parse_scaling_threads("1,0").is_err());
     }
 }

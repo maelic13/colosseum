@@ -13,34 +13,77 @@ use crate::{EngineProcess, GoLimits, SearchOutput, SpawnOptions, UciError, UciPo
 #[derive(Debug, Clone, Default)]
 pub struct UciSessionFactory;
 
+pub type ProcessAffinityFn = fn(u32, &CpuAllocation) -> Result<(), String>;
+
+#[derive(Debug, Clone, Copy)]
+pub struct AffinityUciSessionFactory {
+    apply: ProcessAffinityFn,
+}
+
+impl AffinityUciSessionFactory {
+    #[must_use]
+    pub fn new(apply: ProcessAffinityFn) -> Self {
+        Self { apply }
+    }
+}
+
 impl EngineSessionFactory for UciSessionFactory {
     fn open(
         &self,
         participant: &RuntimeParticipant,
     ) -> PortFuture<'_, Result<Box<dyn EngineSession>, ApplicationError>> {
-        let id = participant.id;
-        let launch = participant.launch.clone();
-        Box::pin(async move {
-            if !matches!(launch.allocated_cpus, CpuAllocation::Unrestricted) {
-                return Err(ApplicationError::ConfigurationFault(
-                    "logical CPU allocation is not available until the topology/affinity adapter is composed"
-                        .into(),
-                ));
-            }
-            let process = EngineProcess::spawn(SpawnOptions {
-                path: launch.executable,
-                args: launch.arguments,
-                working_dir: launch.working_directory,
-                env: launch.environment,
-            })
-            .await
-            .map_err(|error| engine_error(id, error))?;
-            Ok(Box::new(UciSession {
-                id,
-                process: Some(process),
-            }) as Box<dyn EngineSession>)
-        })
+        open_session(participant.id, participant.launch.clone(), None)
     }
+}
+
+impl EngineSessionFactory for AffinityUciSessionFactory {
+    fn open(
+        &self,
+        participant: &RuntimeParticipant,
+    ) -> PortFuture<'_, Result<Box<dyn EngineSession>, ApplicationError>> {
+        open_session(participant.id, participant.launch.clone(), Some(self.apply))
+    }
+}
+
+fn open_session(
+    id: ParticipantId,
+    launch: colosseum_application::EngineLaunchSpec,
+    apply_affinity: Option<ProcessAffinityFn>,
+) -> PortFuture<'static, Result<Box<dyn EngineSession>, ApplicationError>> {
+    Box::pin(async move {
+        if !matches!(launch.allocated_cpus, CpuAllocation::Unrestricted) && apply_affinity.is_none()
+        {
+            return Err(ApplicationError::ConfigurationFault(
+                "logical CPU allocation requires a composed affinity adapter".into(),
+            ));
+        }
+        let process = EngineProcess::spawn(SpawnOptions {
+            path: launch.executable,
+            args: launch.arguments,
+            working_dir: launch.working_directory,
+            env: launch.environment,
+        })
+        .await
+        .map_err(|error| engine_error(id, error))?;
+        if let Some(apply) = apply_affinity {
+            let process_id = process
+                .id()
+                .ok_or_else(|| ApplicationError::InfrastructureFault {
+                    operation: "process-affinity".into(),
+                    message: "spawned engine has no process identifier".into(),
+                })?;
+            apply(process_id, &launch.allocated_cpus).map_err(|message| {
+                ApplicationError::InfrastructureFault {
+                    operation: "process-affinity".into(),
+                    message,
+                }
+            })?;
+        }
+        Ok(Box::new(UciSession {
+            id,
+            process: Some(process),
+        }) as Box<dyn EngineSession>)
+    })
 }
 
 struct UciSession {

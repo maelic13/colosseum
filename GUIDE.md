@@ -18,8 +18,8 @@ numbers, internal naming or method argumentation.
 | What is missing | Speed/scaling, book/replay/planning/suite tools, tournaments, release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 5 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 6.3 — thread-scaling sweep** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Next step | **Phase 6.4 — opening-book utilities** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -602,9 +602,14 @@ model as well.
   evidence: [`crates/colosseum-application/src/nps.rs`](crates/colosseum-application/src/nps.rs),
   [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
   [`docs/cli/nps.md`](docs/cli/nps.md)
-- ☐ **6.3** — **Model: Sol High.** Scaling sweep over explicit engine thread counts: matching physical
-  cores, pinned workload, fixed-total/per-thread Hash policy, wall-time
-  speedup/efficiency, CPU class/NUMA recorded
+- ☑ **6.3 — DONE** — **Model: Sol High.** Scaling requires an explicit
+  advertised thread option and one-thread baseline, pins each process to the
+  matching number of whole allowed physical cores from a stable pool, keeps the
+  seeded workload fixed, records fixed-total/per-thread Hash plus class/NUMA,
+  and reports wall-time speedup/efficiency — evidence:
+  [`crates/colosseum-application/src/nps.rs`](crates/colosseum-application/src/nps.rs),
+  [`crates/colosseum-uci/src/session.rs`](crates/colosseum-uci/src/session.rs),
+  [`docs/cli/nps.md`](docs/cli/nps.md)
 - ☐ **6.4** — **Model: Terra High.** `book slice` / `hash` / `stats` / `verify`
 - ☐ **6.5** — **Model: Terra High.** `stats` authority: structured run store > PGN export > forensic log >
   console; missing pair identity falls back to labelled unpaired statistics
@@ -709,10 +714,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 6.3 — pinned thread-scaling sweep. Model: GPT-5.6 Sol — High.**
-Add an NPS scaling sweep over explicit search-thread counts with matching
-physical-core placement, identical seeded workloads, declared fixed-total or
-per-thread Hash, speedup/efficiency and CPU-class/NUMA evidence.
+**Phase 6.4 — opening-book utilities. Model: GPT-5.6 Terra — High.**
+Add deterministic `book slice`, `book hash`, `book stats` and `book verify`
+commands over supported EPD/PGN inputs without requiring an engine process.
 
 ```
 git diff --check

@@ -88,7 +88,9 @@ pub async fn run(args: StubArgs) -> std::io::Result<()> {
                     .await?;
                 stdout.write_all(b"id author Colosseum\n").await?;
                 stdout
-                    .write_all(b"option name Hash type spin default 16 min 1 max 1024\nuciok\n")
+                    .write_all(
+                        b"option name Hash type spin default 16 min 1 max 1048576\noption name Threads type spin default 1 min 1 max 1024\nuciok\n",
+                    )
                     .await?;
                 stdout.flush().await?;
                 stderr.flush().await?;

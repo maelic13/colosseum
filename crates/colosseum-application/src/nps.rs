@@ -98,6 +98,37 @@ pub struct NpsExperimentReport {
     pub per_round_ratio_sd: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NpsHashPolicy {
+    FixedTotal,
+    PerThread,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NpsScalingInput {
+    pub threads: u32,
+    pub pinned_physical_cores: u32,
+    pub hash_mb: u64,
+    pub median_nps: f64,
+    pub core_classes: Vec<String>,
+    pub numa_nodes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NpsScalingPoint {
+    #[serde(flatten)]
+    pub input: NpsScalingInput,
+    pub speedup: f64,
+    pub parallel_efficiency: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NpsScalingReport {
+    pub hash_policy: NpsHashPolicy,
+    pub points: Vec<NpsScalingPoint>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum NpsError {
     #[error("fixed-node workload must contain at least one node")]
@@ -116,6 +147,54 @@ pub enum NpsError {
     EmptyExperiment,
     #[error("bootstrap sample count must be at least one")]
     ZeroBootstrapSamples,
+    #[error("scaling sweep requires a one-thread baseline and positive unique thread counts")]
+    InvalidScalingThreads,
+    #[error("scaling point for {threads} threads is not pinned to {threads} physical cores")]
+    ScalingCoreMismatch { threads: u32 },
+    #[error("scaling NPS values must be finite and positive")]
+    InvalidScalingNps,
+}
+
+pub fn summarize_nps_scaling(
+    hash_policy: NpsHashPolicy,
+    mut inputs: Vec<NpsScalingInput>,
+) -> Result<NpsScalingReport, NpsError> {
+    inputs.sort_by_key(|input| input.threads);
+    if inputs.first().map(|input| input.threads) != Some(1)
+        || inputs.iter().any(|input| input.threads == 0)
+        || inputs
+            .windows(2)
+            .any(|pair| pair[0].threads == pair[1].threads)
+    {
+        return Err(NpsError::InvalidScalingThreads);
+    }
+    for input in &inputs {
+        if input.pinned_physical_cores != input.threads {
+            return Err(NpsError::ScalingCoreMismatch {
+                threads: input.threads,
+            });
+        }
+        if !input.median_nps.is_finite() || input.median_nps <= 0.0 {
+            return Err(NpsError::InvalidScalingNps);
+        }
+    }
+    let baseline = inputs[0].median_nps;
+    let points = inputs
+        .into_iter()
+        .map(|input| {
+            let speedup = input.median_nps / baseline;
+            let parallel_efficiency = speedup / f64::from(input.threads);
+            NpsScalingPoint {
+                input,
+                speedup,
+                parallel_efficiency,
+            }
+        })
+        .collect();
+    Ok(NpsScalingReport {
+        hash_policy,
+        points,
+    })
 }
 
 pub struct MeasureNps;
@@ -268,8 +347,17 @@ async fn prepare_session(
     session: &mut dyn EngineSession,
     participant: &RuntimeParticipant,
 ) -> Result<(), ApplicationError> {
-    session.inspect().await?;
+    let inspection = session.inspect().await?;
     for (name, value) in &participant.launch.options {
+        if !inspection
+            .options
+            .iter()
+            .any(|schema| schema.name() == name)
+        {
+            return Err(ApplicationError::ConfigurationFault(format!(
+                "UCI option {name:?} was not advertised by the engine"
+            )));
+        }
         let value = value.command_value();
         session.set_option(name, value.as_deref()).await?;
     }
@@ -676,5 +764,27 @@ mod tests {
         assert_eq!(report.arms[1].median_nps, 210.0);
         assert_eq!(report.arms[0].best_of_nps, 105.0);
         assert_eq!(report.per_round_ratio_sd, Some(0.0));
+    }
+
+    #[test]
+    fn scaling_speedup_and_efficiency_match_hand_arithmetic() {
+        let input = |threads, median_nps| NpsScalingInput {
+            threads,
+            pinned_physical_cores: threads,
+            hash_mb: 128,
+            median_nps,
+            core_classes: vec!["performance".into()],
+            numa_nodes: vec!["0:0".into()],
+        };
+        let report = summarize_nps_scaling(
+            NpsHashPolicy::FixedTotal,
+            vec![input(4, 300.0), input(1, 100.0), input(2, 180.0)],
+        )
+        .unwrap();
+        assert_eq!(report.points[0].speedup, 1.0);
+        assert_eq!(report.points[1].speedup, 1.8);
+        assert_eq!(report.points[1].parallel_efficiency, 0.9);
+        assert_eq!(report.points[2].speedup, 3.0);
+        assert_eq!(report.points[2].parallel_efficiency, 0.75);
     }
 }

@@ -23,3 +23,5 @@ The first public CLI release is not yet published.
 - Added seeded multi-build NPS A/B schedules with explicit warm/cold state,
   strict alternation, warm-up, per-build and arm medians, best-of summaries,
   bootstrap intervals, optional self-pair checks and round-noise diagnostics.
+- Added pinned fixed-node thread-scaling sweeps with explicit thread controls,
+  fixed-total/per-thread Hash, topology evidence, speedup and efficiency.
