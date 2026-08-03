@@ -1725,6 +1725,15 @@ the exact stream; synthetic convergence smoke test passes; plan arithmetic and
 diagnostics match fixtures; the tune result feeds `sprt --apply` unedited with
 the original executable hash.
 
+**Accepted (5.10):** the exact schedule/RNG/rounding and written-artifact
+properties, complete hard-audit matrix, pair-atomic fault policy, kill/resume,
+factual plan, read-only diagnostics and unedited hash-verified gate loop pass as
+one hermetic suite. A seeded noisy two-dimensional quadratic finishes within a
+declared 5.0 RMSE band; this checks the mechanism and is explicitly not a chess
+convergence forecast. Criterion owners and the real-engine evidence boundary
+are recorded in [`docs/architecture/phase-5-exit.md`](docs/architecture/phase-5-exit.md)
+and [`docs/fixtures/phase5/acceptance.json`](docs/fixtures/phase5/acceptance.json).
+
 ### Phase 6 — Speed, planning, replay, books and position suites
 
 Specs 5.6 + 5.9 + 5.10 + 5.12. **Exit:** wall-clock/fixed-node and skew-bias

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "phase": "5",
+  "gates": [
+    {
+      "id": "schedule-rng-rounding-properties",
+      "evidence": "colosseum_core::spsa::tests::{schedule_matches_hand_computed_fishtest_coefficients_per_iteration,named_seed_and_knob_order_reproduce_every_perturbation_and_arm,send_time_rounding_is_half_away_from_zero_and_centers_stay_floating,score_sign_swap_negates_the_update_and_bounds_clip,end_state_inputs_back_solve_every_knob_at_multiple_horizons}"
+    },
+    {
+      "id": "written-schedule-preflight",
+      "evidence": "spsa_schedule::{a_mutated_written_schedule_cannot_produce_the_preflight_launch_token,resume_refuses_a_valid_schedule_derived_from_different_inputs}"
+    },
+    {
+      "id": "hard-audit-matrix",
+      "evidence": "colosseum_application::spsa::tests::{tune_binding_rejects_empty_missing_and_non_spin_live_options,configuration_audit_rejects_duplicate_unmeasurable_and_out_of_range_vectors}"
+    },
+    {
+      "id": "pair-atomic-fault-policy",
+      "evidence": "spsa_driver::{complete_mini_match_is_one_durable_gradient_commit,engine_fault_commits_invalid_evidence_but_never_a_gradient}"
+    },
+    {
+      "id": "exact-kill-resume",
+      "evidence": "spsa_driver::killed_tune_resumes_the_exact_rng_iteration_and_durable_prefix"
+    },
+    {
+      "id": "synthetic-convergence",
+      "evidence": "colosseum_core::spsa::tests::seeded_noisy_quadratic_converges_within_the_declared_rmse_band"
+    },
+    {
+      "id": "plan-arithmetic-and-timing",
+      "evidence": "colosseum_application::spsa_plan::tests::{schedule_and_cost_match_hand_computed_workload,pilot_range_covers_every_controlled_game_sample}; spsa_driver::spsa_plan_is_offline_and_reports_exact_schedule_cost_and_timing"
+    },
+    {
+      "id": "status-diagnostics-and-read-only-live-snapshot",
+      "evidence": "colosseum_application::spsa_status::tests::{diagnostics_match_hand_computed_thirds_and_eta,short_history_is_explicitly_insufficient}; spsa_driver::killed_tune_resumes_the_exact_rng_iteration_and_durable_prefix"
+    },
+    {
+      "id": "unedited-result-to-verified-gate",
+      "evidence": "spsa_driver::{sprt_apply_consumes_the_unedited_spsa_result_and_verifies_executable_content,sprt_apply_refuses_hash_mismatch_unless_the_override_is_prominent}"
+    },
+    {
+      "id": "workspace-regression",
+      "evidence": "cargo check --workspace --tests; cargo clippy --workspace; cargo test --workspace --all-targets"
+    }
+  ]
+}

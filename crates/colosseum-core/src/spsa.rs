@@ -917,4 +917,63 @@ mod tests {
             Err(SpsaError::UnsupportedStatsVersion { .. })
         ));
     }
+
+    #[test]
+    fn seeded_noisy_quadratic_converges_within_the_declared_rmse_band() {
+        const ITERATIONS: u32 = 5_000;
+        const OPTIMUM: [f64; 2] = [25.0, -15.0];
+        let artifact = SpsaScheduleArtifact::derive(
+            ITERATIONS,
+            0.01,
+            MASTER,
+            &[
+                SpsaEndSpec {
+                    name: "x".into(),
+                    min: -100,
+                    max: 100,
+                    c_end: 0.5,
+                },
+                SpsaEndSpec {
+                    name: "y".into(),
+                    min: -100,
+                    max: 100,
+                    c_end: 0.5,
+                },
+            ],
+        )
+        .unwrap();
+        let knobs = artifact
+            .knobs
+            .iter()
+            .map(|knob| knob.knob().unwrap())
+            .collect::<Vec<_>>();
+        let mut centers = vec![-60.0, 70.0];
+        let mut noise = NamedRng::new(MASTER, "spsa-synthetic-quadratic-test").unwrap();
+        let objective = |values: &[SpsaArmValue], noise: f64| {
+            -values
+                .iter()
+                .zip(OPTIMUM)
+                .map(|(value, optimum)| (value.sent as f64 - optimum).powi(2))
+                .sum::<f64>()
+                + noise
+        };
+        for iteration in 0..ITERATIONS {
+            let prepared =
+                prepare_iteration(artifact.schedule, MASTER, iteration, &centers, &knobs).unwrap();
+            let noise_sample =
+                |rng: &mut NamedRng| rng.bounded_u64(2_001).unwrap() as f64 / 100.0 - 10.0;
+            let difference = objective(&prepared.plus, noise_sample(&mut noise))
+                - objective(&prepared.minus, noise_sample(&mut noise));
+            let score_difference = (difference * 0.05).round().clamp(-32.0, 32.0) as i32;
+            centers = update_centers(&centers, &knobs, &prepared, score_difference).unwrap();
+        }
+        let rmse = (centers
+            .iter()
+            .zip(OPTIMUM)
+            .map(|(actual, expected)| (actual - expected).powi(2))
+            .sum::<f64>()
+            / OPTIMUM.len() as f64)
+            .sqrt();
+        assert!(rmse <= 5.0, "centers={centers:?}, RMSE={rmse}");
+    }
 }

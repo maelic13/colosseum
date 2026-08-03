@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–4C plus the Phase-5.1–5.9 SPSA kernel, verified schedule, audited tune vector, durable driver, final-window artifacts, hash-verified SPRT loop closure, offline planning and read-only trajectory diagnostics are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
-| What is missing | SPSA exit; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–5 are complete: fixed matches, externally checked pair-atomic capped SPRT, optional identical-binary calibration and exact durable SPSA with planning, diagnostics, final artifacts and hash-verified gate loop over ordinary UCI engines |
+| What is missing | Speed/scaling, book/replay/planning/suite tools, tournaments, release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 4C · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 5.10 — SPSA phase exit** |
+| Platform status | Windows ☑ local through Phase 5 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 6.1 — authoritative fixed-node NPS measurement** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -573,10 +573,17 @@ model as well.
   [`crates/colosseum-cli/src/run_directory.rs`](crates/colosseum-cli/src/run_directory.rs),
   [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
   [`docs/cli/spsa.md`](docs/cli/spsa.md)
-- ☐ **5.10** — **EXIT · Model: Sol High.** Schedule property tests; every hard audit class rejected
-  by a fixture; exact RNG stream survives resume; synthetic convergence
-  smoke test passes; plan arithmetic/status match fixtures; stub tune feeds
-  `sprt --apply` unedited with verified executable hash
+- ☑ **5.10 — EXIT PASSED** — **Model: Sol High.** Schedule/RNG/rounding and
+  written-artifact properties, every hard audit class, pair-atomic fault
+  policy, exact kill/resume, plan/status fixtures and the unedited
+  hash-verified `sprt --apply` loop pass together. A reproducible noisy
+  quadratic converges within its declared RMSE band without being presented as
+  a chess forecast; no long real-engine job is an implementation prerequisite —
+  evidence:
+  [`crates/colosseum-core/src/spsa.rs`](crates/colosseum-core/src/spsa.rs),
+  [`crates/colosseum-cli/tests/phase5_acceptance.rs`](crates/colosseum-cli/tests/phase5_acceptance.rs),
+  [`docs/fixtures/phase5/acceptance.json`](docs/fixtures/phase5/acceptance.json),
+  [`docs/architecture/phase-5-exit.md`](docs/architecture/phase-5-exit.md)
 
 ### Phase 6 — Speed, planning, replay, books and position suites
 
@@ -692,10 +699,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 5.10 — SPSA phase exit. Model: GPT-5.6 Sol — High.**
-Assemble executable acceptance evidence for schedule/RNG/rounding properties,
-every audit refusal, exact resume, synthetic convergence, plan/status fixtures
-and the unedited hash-verified `sprt --apply` loop before beginning benchmarking.
+**Phase 6.1 — authoritative fixed-node NPS measurement. Model: GPT-5.6 Sol — High.**
+Add an `nps` application use case and CLI adapter whose authoritative sample is
+harness monotonic wall time over fixed-node UCI searches; engine-reported
+time/NPS remains diagnostic and cannot alter the result.
 
 ```
 git diff --check
