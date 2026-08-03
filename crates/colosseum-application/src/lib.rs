@@ -13,6 +13,7 @@ pub mod ports;
 pub mod sprt;
 pub mod spsa;
 pub mod spsa_plan;
+pub mod spsa_status;
 
 pub use calibration::{
     CalibrationBinaries, CalibrationDesign, CalibrationError, CalibrationInterval,
@@ -39,4 +40,11 @@ pub use spsa_plan::{
     SPSA_PLAN_SCHEMA_VERSION, SpsaHorizonComparison, SpsaHorizonKnob, SpsaKnobPlan, SpsaPlanError,
     SpsaPlanPoint, SpsaPlanReport, SpsaTimingBasis, SpsaTimingInput, SpsaWallTimeEstimate,
     plan_spsa,
+};
+pub use spsa_status::{
+    SPSA_DIAGNOSTIC_MIN_HISTORY, SPSA_FREQUENT_BOUND_CONTACT_FRACTION,
+    SPSA_LITTLE_MOVEMENT_RANGE_FRACTION, SPSA_RECENT_STABILITY_RANGE_FRACTION,
+    SPSA_STATUS_SCHEMA_VERSION, SpsaEta, SpsaHeuristic, SpsaHeuristicState, SpsaKnobDiagnostics,
+    SpsaStatusError, SpsaStatusReport, SpsaThirdSummary, SpsaThirdsComparison, SpsaTrajectoryPoint,
+    diagnose_spsa,
 };

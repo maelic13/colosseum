@@ -16,3 +16,5 @@ The first public CLI release is not yet published.
   `sprt --apply` gating of original versus tuned UCI vectors.
 - Added offline `spsa plan` schedule, workload, rounding-resolution, horizon
   comparison and evidence-based wall-time reporting.
+- Added read-only `spsa status` trajectory, thirds, ETA and explicitly
+  non-causal heuristic diagnostics over atomic durable snapshots.

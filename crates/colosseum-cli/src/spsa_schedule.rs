@@ -2,7 +2,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use colosseum_application::{SpsaPreflightError, VerifiedSpsaSchedule};
@@ -74,6 +74,28 @@ pub fn persist_and_verify_spsa_schedule(
         serde_json::from_slice(&bytes).map_err(|source| SpsaScheduleStoreError::Json {
             operation: "parse written schedule",
             path: path.clone(),
+            source,
+        })?;
+    VerifiedSpsaSchedule::verify_written(expected, written).map_err(Into::into)
+}
+
+/// Read and verify an existing schedule without creating or replacing files.
+/// Command-specific status uses this path so observation cannot take ownership
+/// of, repair or otherwise mutate a live run.
+pub fn read_and_verify_spsa_schedule(
+    root: &Path,
+    expected: &SpsaScheduleArtifact,
+) -> Result<VerifiedSpsaSchedule, SpsaScheduleStoreError> {
+    let path = root.join(SPSA_SCHEDULE_FILE);
+    let bytes = fs::read(&path).map_err(|source| SpsaScheduleStoreError::Io {
+        operation: "read written schedule",
+        path: path.clone(),
+        source,
+    })?;
+    let written =
+        serde_json::from_slice(&bytes).map_err(|source| SpsaScheduleStoreError::Json {
+            operation: "parse written schedule",
+            path,
             source,
         })?;
     VerifiedSpsaSchedule::verify_written(expected, written).map_err(Into::into)

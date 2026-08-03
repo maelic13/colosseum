@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–4C plus the Phase-5.1–5.8 SPSA kernel, verified schedule, audited tune vector, durable driver, final-window artifacts, hash-verified SPRT loop closure and offline schedule/cost planning are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
-| What is missing | SPSA status and exit; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–4C plus the Phase-5.1–5.9 SPSA kernel, verified schedule, audited tune vector, durable driver, final-window artifacts, hash-verified SPRT loop closure, offline planning and read-only trajectory diagnostics are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
+| What is missing | SPSA exit; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4C · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 5.9 — SPSA read-only diagnostics** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 5.10 — SPSA phase exit** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -562,9 +562,17 @@ model as well.
   [`crates/colosseum-application/src/spsa_plan.rs`](crates/colosseum-application/src/spsa_plan.rs),
   [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
   [`docs/cli/spsa.md`](docs/cli/spsa.md)
-- ☐ **5.9** — **Model: Terra High.** `spsa status` reads an atomic snapshot and reports trajectory/thirds,
-  boundary contact, little seed movement, stability and dead perturbation
-  as labelled heuristics—never causal proof or automatic advice
+- ☑ **5.9 — DONE** — **Model: Terra High.** Read-only `spsa status` verifies
+  the persisted schedule and checksum-protected checkpoint, replays the durable
+  centre prefix, and reports percent/ETA, normalized trajectory and thirds plus
+  explicitly thresholded bound-contact, seed-movement, recent-stability and
+  rounding-resolution heuristics. Short runs remain insufficient, every signal
+  carries non-causal caveats, no advice is emitted, and live/stopped fixtures
+  prove non-blocking and byte-preserving observation — evidence:
+  [`crates/colosseum-application/src/spsa_status.rs`](crates/colosseum-application/src/spsa_status.rs),
+  [`crates/colosseum-cli/src/run_directory.rs`](crates/colosseum-cli/src/run_directory.rs),
+  [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
+  [`docs/cli/spsa.md`](docs/cli/spsa.md)
 - ☐ **5.10** — **EXIT · Model: Sol High.** Schedule property tests; every hard audit class rejected
   by a fixture; exact RNG stream survives resume; synthetic convergence
   smoke test passes; plan arithmetic/status match fixtures; stub tune feeds
@@ -684,10 +692,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 5.9 — SPSA read-only diagnostics. Model: GPT-5.6 Terra — High.**
-Extend the common atomic status snapshot with per-knob trajectories, thirds,
-bound contact, seed movement, recent stability and rounding-resolution signals;
-label every observation as heuristic and never emit causal or stop/continue advice.
+**Phase 5.10 — SPSA phase exit. Model: GPT-5.6 Sol — High.**
+Assemble executable acceptance evidence for schedule/RNG/rounding properties,
+every audit refusal, exact resume, synthetic convergence, plan/status fixtures
+and the unedited hash-verified `sprt --apply` loop before beginning benchmarking.
 
 ```
 git diff --check

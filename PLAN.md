@@ -979,6 +979,20 @@ clipping or an unsuitable range; never automatically advise continue/abandon.
 reports insufficient history rather than inventing a trend; status against a
 live atomically-updated run neither blocks nor mutates it.
 
+**Implementation evidence (5.9):** the application layer validates the exact
+durable centre prefix and computes normalized trajectories, three equal history
+segments, current perturbation and linear durable-checkpoint ETA. Six completed
+iterations are required before history heuristics: exact bound contact at 20%,
+net seed movement at 1% of range and latest-third span at 1%; the half-unit UCI
+rounding boundary remains schedule-factual. Every signal carries the same
+objective/noise/gain/clipping/range caveat and no continue/abandon advice.
+The CLI reads the checksum-verified current checkpoint with previous-generation
+fallback, verifies the persisted schedule, replays every committed update, and
+never opens run ownership or writes recovery state. Live-fixture coverage proves
+bounded non-blocking observation and a stopped-run byte snapshot proves the
+command is non-mutating. Once the frozen final window begins, status reuses the
+5.7 result policy to expose an on-demand gate candidate.
+
 ### 5.6 Speed / NPS A/B — `colosseum-cli nps`
 
 **Requirements**

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
@@ -374,6 +375,27 @@ fn complete_mini_match_is_one_durable_gradient_commit() {
     assert_eq!(record["official_sample"]["committed_units"], 1);
     assert_eq!(record["official_sample"]["completed_pairs"], 1);
     assert_eq!(record["official_sample"]["scored_games"], 2);
+
+    let status = cli()
+        .args(["spsa", "status"])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    assert!(status.stderr.is_empty());
+    let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["type"], "spsa-status");
+    assert_eq!(status["report"]["diagnostics"]["completed_iterations"], 1);
+    assert_eq!(status["report"]["diagnostics"]["percent_complete"], 100.0);
+    assert_eq!(
+        status["report"]["diagnostics"]["knobs"][0]["frequent_bound_contact"]["state"],
+        "insufficient-history"
+    );
+    assert_eq!(
+        status["report"]["candidate_result"]["parameters"][0]["tuned"],
+        16
+    );
 }
 
 #[test]
@@ -560,11 +582,43 @@ fn killed_tune_resumes_the_exact_rng_iteration_and_durable_prefix() {
         .spawn()
         .unwrap();
     wait_for_first_commit(&mut child, &run);
+    let status_start = Instant::now();
+    let live_status = cli()
+        .args(["spsa", "status"])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(
+        live_status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&live_status.stderr)
+    );
+    assert!(status_start.elapsed() < Duration::from_secs(2));
+    let live_status: Value = serde_json::from_slice(&live_status.stdout).unwrap();
+    let durable_iterations = live_status["report"]["diagnostics"]["completed_iterations"]
+        .as_u64()
+        .unwrap();
+    assert!((1..=3).contains(&durable_iterations));
+    assert_eq!(
+        live_status["report"]["diagnostics"]["knobs"][0]["recent_stability"]["state"],
+        "insufficient-history"
+    );
     let before = checkpoint_payload(&run)["completed_iterations"][0].clone();
     let active_engines = wait_for_active_engines(&mut child, &pid_file);
     child.kill().unwrap();
     child.wait().unwrap();
     assert_processes_reaped(active_engines);
+
+    let bytes_before_status = run_files(&run);
+    let stopped_status = cli()
+        .args(["spsa", "status"])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(stopped_status.status.success());
+    assert_eq!(run_files(&run), bytes_before_status);
 
     let output = long_tune(&tune, &run, &pid_file, "99", "4", "1")
         .arg("--json")
@@ -703,4 +757,13 @@ fn wait_for_first_commit(child: &mut Child, run: &std::path::Path) {
         std::thread::sleep(Duration::from_millis(25));
     }
     panic!("timed out waiting for the first durable SPSA iteration");
+}
+
+fn run_files(run: &std::path::Path) -> BTreeMap<std::ffi::OsString, Vec<u8>> {
+    std::fs::read_dir(run)
+        .unwrap()
+        .map(|entry| entry.unwrap())
+        .filter(|entry| entry.file_type().unwrap().is_file())
+        .map(|entry| (entry.file_name(), std::fs::read(entry.path()).unwrap()))
+        .collect()
 }

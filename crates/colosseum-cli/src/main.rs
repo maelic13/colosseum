@@ -16,13 +16,15 @@ use colosseum_application::{
     DEFAULT_CALIBRATION_GAMES, DEFAULT_CALIBRATION_TOLERANCE_NELO,
     DEFAULT_SPSA_FINAL_WINDOW_PERCENT, DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS,
     EngineInspection, EngineLaunchSpec, InspectEngine, RuntimeParticipant, SprtBundle, SprtDesign,
-    SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaGateHashStatus, SpsaPlanReport,
-    SpsaRunSettings, SpsaTimingInput, SpsaTuneAudit, SpsaTuneResult, SpsaTuneWarning,
-    UciOptionSchema, UciOptionValue, classify_calibration, plan_spsa,
+    SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaCommittedUpdate, SpsaGateHashStatus,
+    SpsaPlanReport, SpsaRunSettings, SpsaStatusReport, SpsaTimingInput, SpsaTuneAudit,
+    SpsaTuneResult, SpsaTuneWarning, SpsaTuningState, UciOptionSchema, UciOptionValue,
+    classify_calibration, diagnose_spsa, plan_spsa,
 };
 use colosseum_cli::{
     EngineArgs, OfficialSample, RunDirectory, RunRecord, RunRecorder, RunStatus, built_in_defaults,
-    load_spsa_tune, parse_cpu_list, persist_and_verify_spsa_schedule, resolve_config,
+    load_spsa_tune, parse_cpu_list, persist_and_verify_spsa_schedule,
+    read_and_verify_spsa_schedule, resolve_config,
 };
 use colosseum_core::{
     AdjudicationConfig, DrawAdjudication, EloModel, GameResult, OpeningBook, OpeningOrder,
@@ -370,6 +372,11 @@ impl SpsaEngineArgs {
 enum SpsaAction {
     /// Report the exact gain schedule and factual workload without launching an engine.
     Plan(SpsaPlanCommand),
+    /// Read the last durable tune snapshot and report labelled trajectory heuristics.
+    Status {
+        /// Self-contained SPSA run directory to inspect without mutation.
+        run_directory: PathBuf,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -548,6 +555,12 @@ async fn main() -> ExitCode {
             match command.action.take() {
                 Some(SpsaAction::Plan(_)) if cli.dry_run => unsupported_dry_run("spsa plan"),
                 Some(SpsaAction::Plan(plan)) => run_spsa_plan(plan, cli.json),
+                Some(SpsaAction::Status { .. }) if cli.dry_run => {
+                    unsupported_dry_run("spsa status")
+                }
+                Some(SpsaAction::Status { run_directory }) => {
+                    run_spsa_status(&run_directory, cli.json)
+                }
                 None => run_spsa_command(command, cli.json, cli.dry_run).await,
             }
         }
@@ -1212,6 +1225,215 @@ fn print_spsa_plan(report: &SpsaPlanReport) {
         );
     }
     println!("interpretation: {}", report.interpretation);
+}
+
+#[derive(Debug, Deserialize)]
+struct StoredSpsaWorkflow {
+    settings: SpsaRunSettings,
+    final_window_percent: u32,
+    bound_tune: SpsaBoundTune,
+    engine_sha256: String,
+    schedule: SpsaScheduleArtifact,
+}
+
+#[derive(Debug, Serialize)]
+struct SpsaStatusOutput {
+    run_status: RunStatus,
+    diagnostics: SpsaStatusReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    candidate_result: Option<SpsaTuneResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    candidate_unavailable_reason: Option<String>,
+    snapshot_authority: String,
+}
+
+fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
+    let record = match RunRecord::read(run_directory) {
+        Ok(record) => record,
+        Err(error) => {
+            eprintln!("SPSA status failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if record.command != "spsa"
+        || record.workflow.get("kind").and_then(Value::as_str) != Some("spsa")
+    {
+        eprintln!(
+            "SPSA status failed: {} is a {:?} run, not an SPSA tune",
+            run_directory.display(),
+            record.command
+        );
+        return ExitCode::from(2);
+    }
+    let workflow = match serde_json::from_value::<StoredSpsaWorkflow>(record.workflow.clone()) {
+        Ok(workflow) => workflow,
+        Err(error) => {
+            eprintln!("SPSA status failed: invalid stored workflow: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let checkpoint = if run_directory.join("checkpoint.json").exists()
+        || run_directory.join("checkpoint.previous.json").exists()
+    {
+        match RunDirectory::read_checkpoint_snapshot::<spsa_driver::SpsaCheckpoint>(run_directory) {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                eprintln!("SPSA status failed: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        spsa_driver::SpsaCheckpoint::default()
+    };
+    let verified_schedule = match read_and_verify_spsa_schedule(run_directory, &workflow.schedule) {
+        Ok(schedule) => schedule,
+        Err(error) => {
+            eprintln!("SPSA status failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let durable_updates = checkpoint
+        .completed_iterations
+        .iter()
+        .map(|iteration| SpsaCommittedUpdate {
+            iteration: iteration.iteration,
+            centers_before: iteration.centers_before.clone(),
+            prepared: iteration.prepared.clone(),
+            score: iteration.score,
+            centers_after: iteration.centers_after.clone(),
+        })
+        .collect::<Vec<_>>();
+    let replayed = match SpsaTuningState::resume(
+        verified_schedule,
+        workflow.settings,
+        workflow.bound_tune.initial_centers(),
+        &durable_updates,
+    ) {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!("SPSA status failed: checkpoint does not replay: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Some(invalid) = &checkpoint.invalid_iteration {
+        let prepared = replayed.prepare_next();
+        if invalid.iteration != replayed.completed_iterations()
+            || invalid.centers_before != replayed.centers()
+            || prepared.as_ref().ok().and_then(|value| value.as_ref()) != Some(&invalid.prepared)
+        {
+            eprintln!(
+                "SPSA status failed: terminal invalid iteration does not match the durable prefix"
+            );
+            return ExitCode::FAILURE;
+        }
+    }
+    let centers = checkpoint
+        .completed_iterations
+        .iter()
+        .map(|iteration| SpsaCenterSample {
+            iteration: iteration.iteration,
+            centers: iteration.centers_after.clone(),
+        })
+        .collect::<Vec<_>>();
+    let resumed = record
+        .anomalies
+        .iter()
+        .any(|anomaly| anomaly.code == "run-resumed");
+    let elapsed = (!resumed).then_some(
+        record
+            .updated_unix_ms
+            .saturating_sub(record.started_unix_ms) as f64
+            / 1_000.0,
+    );
+    let invalid = checkpoint.invalid_iteration.is_some() || record.status == RunStatus::Invalid;
+    let diagnostics = match diagnose_spsa(
+        &workflow.bound_tune,
+        &workflow.schedule,
+        workflow.settings,
+        &centers,
+        invalid,
+        elapsed,
+    ) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("SPSA status failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let (candidate_result, candidate_unavailable_reason) = if invalid {
+        (
+            None,
+            Some("the tune is invalid; no gate candidate is emitted".into()),
+        )
+    } else {
+        match workflow.bound_tune.result_from_centers(
+            workflow.engine_sha256,
+            &workflow.schedule,
+            workflow.settings,
+            workflow.final_window_percent,
+            &centers,
+        ) {
+            Ok(result) => (Some(result), None),
+            Err(error) => (None, Some(error.to_string())),
+        }
+    };
+    let output = SpsaStatusOutput {
+        run_status: record.status,
+        diagnostics,
+        candidate_result,
+        candidate_unavailable_reason,
+        snapshot_authority: "checksum-verified current checkpoint with previous-generation fallback; read-only and never recovered in place".into(),
+    };
+    if machine {
+        print_json(&MachineOutput::SpsaStatus {
+            run_directory,
+            report: output,
+        });
+    } else {
+        print_spsa_status(&output, run_directory);
+    }
+    ExitCode::SUCCESS
+}
+
+fn print_spsa_status(report: &SpsaStatusOutput, run_directory: &Path) {
+    println!(
+        "SPSA {:?}: {}/{} iterations ({:.2}%)",
+        report.run_status,
+        report.diagnostics.completed_iterations,
+        report.diagnostics.settings.iterations,
+        report.diagnostics.percent_complete
+    );
+    match report.diagnostics.eta.remaining_seconds {
+        Some(seconds) => println!("ETA: {:.1} seconds", seconds),
+        None => println!(
+            "ETA unavailable: {}",
+            report
+                .diagnostics
+                .eta
+                .unavailable_reason
+                .as_deref()
+                .unwrap_or("no reason recorded")
+        ),
+    }
+    for knob in &report.diagnostics.knobs {
+        println!(
+            "{}: {:.6} ({:.2}% of range); bound-contact {:?}, seed-movement {:?}, recent-stability {:?}, rounding-resolution {:?}",
+            knob.name,
+            knob.current,
+            knob.current_normalized_to_range * 100.0,
+            knob.frequent_bound_contact.state,
+            knob.little_net_movement.state,
+            knob.recent_stability.state,
+            knob.dead_perturbation.state
+        );
+    }
+    if let Some(reason) = &report.candidate_unavailable_reason {
+        println!("gate candidate unavailable: {reason}");
+    } else {
+        println!("gate candidate: available in JSON output");
+    }
+    println!("interpretation: {}", report.diagnostics.interpretation);
+    println!("snapshot: {}", run_directory.display());
 }
 
 async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) -> ExitCode {
@@ -1910,6 +2132,10 @@ enum MachineOutput<'a> {
     },
     SpsaPlan {
         report: SpsaPlanReport,
+    },
+    SpsaStatus {
+        run_directory: &'a Path,
+        report: SpsaStatusOutput,
     },
     Calibration {
         run_directory: PathBuf,

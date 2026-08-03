@@ -68,6 +68,32 @@ concurrency waves. This is workload arithmetic, not a prediction that a chess
 tune will converge; curvature, sensitivity, interactions, noise and distance
 from the optimum remain unknown.
 
+Inspect the last checksum-verified durable snapshot of a running, interrupted
+or completed tune without acquiring ownership or changing any run bytes:
+
+```text
+colosseum-cli spsa status path/to/spsa-run
+```
+
+The report includes completed iteration and percentage, a linear ETA when an
+uninterrupted elapsed-to-checkpoint basis exists, and every knob's current
+floating centre and normalized trajectory. With at least six completed
+iterations it compares the mean of each history third and labels these fixed
+heuristics:
+
+- frequent exact bound contact means at least 20% of completed centres;
+- little seed movement means at most 1% of the requested range;
+- recent stability means the latest third spans at most 1% of the range;
+- a scheduled perturbation below `0.5` is below UCI integer resolution.
+
+Short histories say `insufficient-history`; they do not manufacture a trend.
+Every signal explains that it can arise from the objective, noise, gain,
+clipping, host variation or an unsuitable range. None is a causal or
+convergence claim, and the command never advises continuing or abandoning a
+tune. Once the frozen final window has begun, JSON status also exposes the same
+partial candidate-vector policy used at completion; earlier snapshots explain
+why no candidate exists.
+
 On successful completion, the tuned vector is the half-away-from-zero rounded
 mean of the final 10% of completed centre vectors. `--final-window-percent`
 changes that percentage from 1 through 100. The sample count is rounded up, so

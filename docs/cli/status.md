@@ -21,6 +21,11 @@ guard records `aborted` and an anomaly, preserving even zero-sample attempts.
 `run-record.json`; it never resumes, repairs, checkpoints or changes the run.
 Use `--json` for the common single-document machine output.
 
+SPSA tunes additionally support `colosseum-cli spsa status <run-dir>`. That
+command reads the checksum-verified checkpoint generation and extends the
+common lifecycle view with trajectory, thirds, ETA and explicitly heuristic
+per-knob observations. It likewise never repairs or mutates the run.
+
 Run-record schema history:
 
 | Version | Change |

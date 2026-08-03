@@ -21,5 +21,6 @@ pub use run_record::{
 };
 pub use spsa_schedule::{
     SPSA_SCHEDULE_FILE, SpsaScheduleStoreError, persist_and_verify_spsa_schedule,
+    read_and_verify_spsa_schedule,
 };
 pub use spsa_tune::{SpsaTuneFileError, load_spsa_tune};

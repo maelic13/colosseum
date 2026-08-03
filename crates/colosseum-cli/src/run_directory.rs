@@ -241,9 +241,19 @@ impl RunDirectory {
     /// Read the current generation, falling back only when it is absent or
     /// fails schema/checksum/JSON validation.
     pub fn read_checkpoint<T: DeserializeOwned>(&self) -> Result<T, RunDirectoryError> {
-        match read_generation(&self.paths.checkpoint) {
+        Self::read_checkpoint_snapshot(&self.paths.root)
+    }
+
+    /// Read a checksum-verified checkpoint without opening run ownership or
+    /// writing any recovery state. Status adapters use this against live runs.
+    pub fn read_checkpoint_snapshot<T: DeserializeOwned>(
+        root: &Path,
+    ) -> Result<T, RunDirectoryError> {
+        let current_path = root.join("checkpoint.json");
+        let previous_path = root.join("checkpoint.previous.json");
+        match read_generation(&current_path) {
             Ok(value) => serde_json::from_value(value).map_err(RunDirectoryError::Json),
-            Err(current) => match read_generation(&self.paths.previous_checkpoint) {
+            Err(current) => match read_generation(&previous_path) {
                 Ok(value) => serde_json::from_value(value).map_err(RunDirectoryError::Json),
                 Err(previous) => Err(RunDirectoryError::NoValidCheckpoint {
                     current: current.to_string(),
