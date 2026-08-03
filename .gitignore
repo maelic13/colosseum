@@ -7,6 +7,7 @@
 # (kept — do not ignore)
 
 # Local app data produced during development / testing
+/colosseum-runs/
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
