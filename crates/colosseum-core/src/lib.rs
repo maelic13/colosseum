@@ -35,10 +35,16 @@ pub use options::{
 };
 pub use pairing::{gauntlet, generate_schedule, round_robin};
 pub use rating::{ml_ratings, ml_ratings_anchored, performance_rating, rating_error};
-pub use rng::{NamedRng, RngError, derive_stream_seed};
+pub use rng::{
+    NamedRng, RNG_ALGORITHM_ID, RNG_DERIVATION_ID, RNG_U64_SAMPLING_ID, RngError,
+    derive_stream_seed,
+};
 pub use spsa::{
-    SPSA_ALPHA, SPSA_GAMMA, SPSA_STABILITY_FRACTION, SpsaArmValue, SpsaCoefficients, SpsaError,
-    SpsaIteration, SpsaKnob, SpsaSchedule, perturbations_for_iteration, prepare_iteration,
+    SPSA_ALPHA, SPSA_END_STATE_RELATIVE_TOLERANCE, SPSA_GAMMA, SPSA_PERTURBATION_BYTES_PER_DRAW,
+    SPSA_PERTURBATION_DRAW_ORDER, SPSA_PERTURBATION_SAMPLER_ID, SPSA_SCHEDULE_SCHEMA_VERSION,
+    SPSA_STABILITY_FRACTION, SpsaArmValue, SpsaCoefficients, SpsaDerivedKnob, SpsaEndSpec,
+    SpsaError, SpsaIteration, SpsaKnob, SpsaPerturbationContract, SpsaSchedule,
+    SpsaScheduleArtifact, perturbations_for_iteration, prepare_iteration,
     round_half_away_from_zero, update_centers,
 };
 pub use standings::{EngineStanding, GameOutcome, HeadToHead, PairGameResult, Standings};

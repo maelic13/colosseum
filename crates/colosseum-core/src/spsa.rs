@@ -8,12 +8,193 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::rng::{NamedRng, stream_names};
+use crate::rng::{
+    NamedRng, RNG_ALGORITHM_ID, RNG_DERIVATION_ID, RNG_U64_SAMPLING_ID, RNG_VERSION,
+    derive_stream_seed, stream_names,
+};
 
 pub const SPSA_ALPHA: f64 = 0.601;
 pub const SPSA_GAMMA: f64 = 0.102;
 pub const SPSA_STABILITY_FRACTION: f64 = 0.1;
+pub const SPSA_SCHEDULE_SCHEMA_VERSION: u32 = 1;
+pub const SPSA_PERTURBATION_SAMPLER_ID: &str = "rademacher-minus-one-plus-one-v1";
+pub const SPSA_PERTURBATION_DRAW_ORDER: &str = "iteration-major-knob-order";
+pub const SPSA_PERTURBATION_BYTES_PER_DRAW: u32 = 8;
+pub const SPSA_END_STATE_RELATIVE_TOLERANCE: f64 = 1e-12;
 const MAX_EXACT_F64_INTEGER: i64 = 9_007_199_254_740_991;
+
+/// Runtime-independent inputs needed to derive one knob's complete gain schedule.
+/// The name fixes tune-file knob order in the persisted reproducibility record;
+/// live UCI-schema validation remains an application concern.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpsaEndSpec {
+    pub name: String,
+    pub min: i64,
+    pub max: i64,
+    pub c_end: f64,
+}
+
+/// Immutable per-knob schedule written before a tune may launch a game.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpsaDerivedKnob {
+    pub name: String,
+    pub min: i64,
+    pub max: i64,
+    pub c_end: f64,
+    pub c0: f64,
+    pub a0: f64,
+}
+
+impl SpsaDerivedKnob {
+    pub fn knob(&self) -> Result<SpsaKnob, SpsaError> {
+        SpsaKnob::new(self.min, self.max, self.c0, self.a0)
+    }
+}
+
+/// Complete versioned perturbation contract. These fields are intentionally
+/// explicit rather than inferred from a library dependency or implementation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpsaPerturbationContract {
+    pub algorithm: String,
+    pub derivation: String,
+    pub u64_sampling: String,
+    pub sampler: String,
+    pub stream_name: String,
+    pub stream_seed_sha256: String,
+    pub master_seed: u64,
+    pub draw_order: String,
+    pub bytes_per_draw: u32,
+}
+
+impl SpsaPerturbationContract {
+    fn new(master_seed: u64) -> Self {
+        let stream_seed = derive_stream_seed(master_seed, stream_names::SPSA_PERTURBATIONS)
+            .expect("the built-in SPSA stream name is valid");
+        Self {
+            algorithm: RNG_ALGORITHM_ID.into(),
+            derivation: RNG_DERIVATION_ID.into(),
+            u64_sampling: RNG_U64_SAMPLING_ID.into(),
+            sampler: SPSA_PERTURBATION_SAMPLER_ID.into(),
+            stream_name: stream_names::SPSA_PERTURBATIONS.into(),
+            stream_seed_sha256: hex(&stream_seed),
+            master_seed,
+            draw_order: SPSA_PERTURBATION_DRAW_ORDER.into(),
+            bytes_per_draw: SPSA_PERTURBATION_BYTES_PER_DRAW,
+        }
+    }
+}
+
+/// Self-describing schedule artifact. It contains everything required to
+/// reproduce gain coefficients and perturbation draws without hidden state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpsaScheduleArtifact {
+    pub schema_version: u32,
+    pub stats_version: u32,
+    pub schedule: SpsaSchedule,
+    pub r_end: f64,
+    pub perturbations: SpsaPerturbationContract,
+    pub knobs: Vec<SpsaDerivedKnob>,
+}
+
+impl SpsaScheduleArtifact {
+    pub fn derive(
+        iterations: u32,
+        r_end: f64,
+        master_seed: u64,
+        end_specs: &[SpsaEndSpec],
+    ) -> Result<Self, SpsaError> {
+        let schedule = SpsaSchedule::new(iterations)?;
+        validate_positive_finite("r_end", r_end)?;
+        if end_specs.is_empty() {
+            return Err(SpsaError::EmptyVector);
+        }
+        let final_step = f64::from(iterations);
+        let c_scale = final_step.powf(schedule.gamma());
+        let a_scale = (schedule.stability_constant() + final_step).powf(schedule.alpha());
+        let knobs = end_specs
+            .iter()
+            .enumerate()
+            .map(|(index, spec)| {
+                validate_positive_finite("c_end", spec.c_end).map_err(|_| {
+                    SpsaError::InvalidEndValue {
+                        index,
+                        name: spec.name.clone(),
+                        field: "c_end",
+                        value: spec.c_end,
+                    }
+                })?;
+                let c0 = spec.c_end * c_scale;
+                let a_end = r_end * spec.c_end.powi(2);
+                let a0 = a_end * a_scale;
+                let knob = SpsaKnob::new(spec.min, spec.max, c0, a0)?;
+                let final_coefficients = schedule.coefficients(iterations - 1, knob)?;
+                assert_end_state(index, &spec.name, final_coefficients.c, spec.c_end, "c")?;
+                assert_end_state(index, &spec.name, final_coefficients.a, a_end, "a")?;
+                assert_end_state(index, &spec.name, final_coefficients.r, r_end, "r")?;
+                Ok(SpsaDerivedKnob {
+                    name: spec.name.clone(),
+                    min: spec.min,
+                    max: spec.max,
+                    c_end: spec.c_end,
+                    c0,
+                    a0,
+                })
+            })
+            .collect::<Result<Vec<_>, SpsaError>>()?;
+        Ok(Self {
+            schema_version: SPSA_SCHEDULE_SCHEMA_VERSION,
+            stats_version: RNG_VERSION,
+            schedule,
+            r_end,
+            perturbations: SpsaPerturbationContract::new(master_seed),
+            knobs,
+        })
+    }
+
+    /// Re-derive every redundant field and reject unsupported reproducibility
+    /// metadata. Persistence adapters call this after reading the written file.
+    pub fn validate(&self) -> Result<(), SpsaError> {
+        if self.schema_version != SPSA_SCHEDULE_SCHEMA_VERSION {
+            return Err(SpsaError::UnsupportedArtifactSchema {
+                version: self.schema_version,
+            });
+        }
+        if self.stats_version != RNG_VERSION {
+            return Err(SpsaError::UnsupportedStatsVersion {
+                version: self.stats_version,
+            });
+        }
+        self.schedule.validate()?;
+        let expected_specs = self
+            .knobs
+            .iter()
+            .map(|knob| SpsaEndSpec {
+                name: knob.name.clone(),
+                min: knob.min,
+                max: knob.max,
+                c_end: knob.c_end,
+            })
+            .collect::<Vec<_>>();
+        let expected = Self::derive(
+            self.schedule.iterations(),
+            self.r_end,
+            self.perturbations.master_seed,
+            &expected_specs,
+        )?;
+        if self.perturbations != expected.perturbations {
+            return Err(SpsaError::PerturbationContractMismatch);
+        }
+        for (index, (stored, derived)) in self.knobs.iter().zip(&expected.knobs).enumerate() {
+            assert_end_state(index, &stored.name, stored.c0, derived.c0, "c0")?;
+            assert_end_state(index, &stored.name, stored.a0, derived.a0, "a0")?;
+        }
+        Ok(())
+    }
+}
 
 /// Fixed run-wide schedule. Gain decays from the completed iteration index,
 /// never from a game or pair count.
@@ -317,6 +498,39 @@ fn validate_vectors(centers: &[f64], knobs: &[SpsaKnob]) -> Result<(), SpsaError
     Ok(())
 }
 
+fn validate_positive_finite(name: &'static str, value: f64) -> Result<(), SpsaError> {
+    if value.is_finite() && value > 0.0 {
+        Ok(())
+    } else {
+        Err(SpsaError::InvalidGain { name, value })
+    }
+}
+
+fn assert_end_state(
+    index: usize,
+    name: &str,
+    actual: f64,
+    expected: f64,
+    field: &'static str,
+) -> Result<(), SpsaError> {
+    let tolerance = SPSA_END_STATE_RELATIVE_TOLERANCE * expected.abs().max(1.0);
+    if actual.is_finite() && (actual - expected).abs() <= tolerance {
+        Ok(())
+    } else {
+        Err(SpsaError::DerivedScheduleMismatch {
+            index,
+            name: name.into(),
+            field,
+            stored: actual,
+            derived: expected,
+        })
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum SpsaError {
     #[error("SPSA iterations must be greater than zero")]
@@ -362,6 +576,31 @@ pub enum SpsaError {
     RoundedValueOutOfRange { value: f64 },
     #[error("SPSA update produced a non-finite centre")]
     NonFiniteUpdate,
+    #[error("unsupported SPSA schedule artifact schema version {version}")]
+    UnsupportedArtifactSchema { version: u32 },
+    #[error("unsupported SPSA statistics version {version}")]
+    UnsupportedStatsVersion { version: u32 },
+    #[error(
+        "SPSA end value {field} for knob {index} ({name}) must be finite and positive; got {value}"
+    )]
+    InvalidEndValue {
+        index: usize,
+        name: String,
+        field: &'static str,
+        value: f64,
+    },
+    #[error("persisted SPSA perturbation contract does not match its master seed and version")]
+    PerturbationContractMismatch,
+    #[error(
+        "SPSA derived {field} mismatch for knob {index} ({name}): stored {stored}, derived {derived}"
+    )]
+    DerivedScheduleMismatch {
+        index: usize,
+        name: String,
+        field: &'static str,
+        stored: f64,
+        derived: f64,
+    },
 }
 
 #[cfg(test)]
@@ -532,6 +771,150 @@ mod tests {
         assert!(matches!(
             round_half_away_from_zero(9_223_372_036_854_775_808.0),
             Err(SpsaError::RoundedValueOutOfRange { .. })
+        ));
+    }
+
+    #[test]
+    fn end_state_inputs_back_solve_every_knob_at_multiple_horizons() {
+        for iterations in [1, 2, 17, 5_000] {
+            let artifact = SpsaScheduleArtifact::derive(
+                iterations,
+                0.002,
+                MASTER,
+                &[
+                    SpsaEndSpec {
+                        name: "Aspiration".into(),
+                        min: 1,
+                        max: 500,
+                        c_end: 0.75,
+                    },
+                    SpsaEndSpec {
+                        name: "Reduction".into(),
+                        min: -100,
+                        max: 100,
+                        c_end: 2.5,
+                    },
+                ],
+            )
+            .unwrap();
+            artifact.validate().unwrap();
+            for knob in &artifact.knobs {
+                let terminal = artifact
+                    .schedule
+                    .coefficients(iterations - 1, knob.knob().unwrap())
+                    .unwrap();
+                assert_end_state(0, &knob.name, terminal.c, knob.c_end, "c").unwrap();
+                assert_end_state(
+                    0,
+                    &knob.name,
+                    terminal.a,
+                    artifact.r_end * knob.c_end.powi(2),
+                    "a",
+                )
+                .unwrap();
+                assert_end_state(0, &knob.name, terminal.r, artifact.r_end, "r").unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn back_solve_matches_an_independently_computed_golden_fixture() {
+        let artifact = SpsaScheduleArtifact::derive(
+            100,
+            0.002,
+            MASTER,
+            &[SpsaEndSpec {
+                name: "Reduction".into(),
+                min: -100,
+                max: 100,
+                c_end: 2.5,
+            }],
+        )
+        .unwrap();
+        close(artifact.knobs[0].c0, 3.998_895_071_536_672_2);
+        close(artifact.knobs[0].a0, 0.210_759_430_697_629_92);
+        let terminal = artifact
+            .schedule
+            .coefficients(99, artifact.knobs[0].knob().unwrap())
+            .unwrap();
+        close(terminal.c, 2.5);
+        close(terminal.a, 0.0125);
+        close(terminal.r, 0.002);
+    }
+
+    #[test]
+    fn artifact_pins_exact_rng_seed_algorithm_sampling_and_draw_order() {
+        let artifact = SpsaScheduleArtifact::derive(
+            5_000,
+            0.002,
+            MASTER,
+            &[SpsaEndSpec {
+                name: "Tempo".into(),
+                min: -100,
+                max: 100,
+                c_end: 1.0,
+            }],
+        )
+        .unwrap();
+        assert_eq!(artifact.schema_version, 1);
+        assert_eq!(artifact.stats_version, RNG_VERSION);
+        assert_eq!(artifact.perturbations.algorithm, RNG_ALGORITHM_ID);
+        assert_eq!(artifact.perturbations.derivation, RNG_DERIVATION_ID);
+        assert_eq!(artifact.perturbations.u64_sampling, RNG_U64_SAMPLING_ID);
+        assert_eq!(artifact.perturbations.sampler, SPSA_PERTURBATION_SAMPLER_ID);
+        assert_eq!(
+            artifact.perturbations.stream_name,
+            stream_names::SPSA_PERTURBATIONS
+        );
+        assert_eq!(
+            artifact.perturbations.stream_seed_sha256,
+            "e58ef38a32c2012aa43f0ff3de0a4e1acabf563789afb301c0feff708776dc6f"
+        );
+        assert_eq!(
+            artifact.perturbations.draw_order,
+            SPSA_PERTURBATION_DRAW_ORDER
+        );
+        assert_eq!(artifact.perturbations.bytes_per_draw, 8);
+
+        let encoded = serde_json::to_vec(&artifact).unwrap();
+        let decoded: SpsaScheduleArtifact = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, artifact);
+        decoded.validate().unwrap();
+    }
+
+    #[test]
+    fn artifact_validation_rejects_mutated_schedule_and_rng_contract() {
+        let artifact = SpsaScheduleArtifact::derive(
+            100,
+            0.01,
+            MASTER,
+            &[SpsaEndSpec {
+                name: "Tempo".into(),
+                min: -100,
+                max: 100,
+                c_end: 1.0,
+            }],
+        )
+        .unwrap();
+        let mut wrong_gain = artifact.clone();
+        wrong_gain.knobs[0].c0 *= 2.0;
+        assert!(matches!(
+            wrong_gain.validate(),
+            Err(SpsaError::DerivedScheduleMismatch { field: "c0", .. })
+        ));
+
+        let mut wrong_rng = artifact.clone();
+        wrong_rng.perturbations.draw_order = "knob-major-iteration-order".into();
+        assert_eq!(
+            wrong_rng.validate(),
+            Err(SpsaError::PerturbationContractMismatch)
+        );
+
+        let mut wrong_version = artifact;
+        wrong_version.stats_version += 1;
+        assert!(matches!(
+            wrong_version.validate(),
+            Err(SpsaError::UnsupportedStatsVersion { .. })
         ));
     }
 }

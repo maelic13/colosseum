@@ -11,6 +11,7 @@ pub mod model;
 pub mod pair_commit;
 pub mod ports;
 pub mod sprt;
+pub mod spsa;
 
 pub use calibration::{
     CalibrationBinaries, CalibrationDesign, CalibrationError, CalibrationInterval,
@@ -24,3 +25,4 @@ pub use model::*;
 pub use pair_commit::{CompletePair, PairCommitError, PairCommitQueue};
 pub use ports::*;
 pub use sprt::{SprtBundle, SprtDesign, SprtDesignError, SprtParameters};
+pub use spsa::{SpsaPreflightError, VerifiedSpsaSchedule};

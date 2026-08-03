@@ -5,6 +5,9 @@ use thiserror::Error;
 
 pub const RNG_DERIVATION_LABEL: &[u8] = b"colosseum-rng-v1\0";
 pub const RNG_VERSION: u32 = 1;
+pub const RNG_ALGORITHM_ID: &str = "chacha12-64-bit-counter-zero-stream-v1";
+pub const RNG_DERIVATION_ID: &str = "sha256-colosseum-rng-v1";
+pub const RNG_U64_SAMPLING_ID: &str = "little-endian-u64-rejection-v1";
 
 pub mod stream_names {
     pub const OPENING_ORDER: &str = "opening-order";

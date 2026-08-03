@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–4C plus the Phase-5.1 SPSA mathematical kernel are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
-| What is missing | SPSA schedule derivation/configuration/driver; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–4C plus the Phase-5.1/5.2 SPSA kernel and verified durable schedule are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
+| What is missing | SPSA tune-file/schema configuration and driver; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4C · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 5.2 — end-state SPSA schedule derivation and assertion** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Next step | **Phase 5.3 — tune-file parameter and live UCI-schema validation** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -494,8 +494,17 @@ model as well.
   arm/score symmetry, rounding and typed invalid input tests pass — evidence:
   [`crates/colosseum-core/src/spsa.rs`](crates/colosseum-core/src/spsa.rs),
   [`crates/colosseum-core/src/rng.rs`](crates/colosseum-core/src/rng.rs)
-- ☐ **5.2** — **Model: Sol High.** Back-solve from each `c_end`, run `r_end` and horizon; persist exact RNG
-  algorithm/seed/draw order; assert written schedule before play
+- ☑ **5.2 — DONE** — **Model: Sol High.** Every knob's `c0/a0` is back-solved
+  from `c_end`, run `r_end` and horizon and its terminal `c/a/r` is asserted;
+  `spsa-schedule.json` explicitly records the versioned RNG algorithm,
+  derivation, master/stream seed, sampler and iteration-major knob draw order,
+  then is read back and must exactly match before the application can issue a
+  launch-capable verified token; mutation and differing-input resume tests
+  refuse that token — evidence:
+  [`crates/colosseum-core/src/spsa.rs`](crates/colosseum-core/src/spsa.rs),
+  [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs),
+  [`crates/colosseum-cli/src/spsa_schedule.rs`](crates/colosseum-cli/src/spsa_schedule.rs),
+  [`crates/colosseum-cli/tests/spsa_schedule.rs`](crates/colosseum-cli/tests/spsa_schedule.rs)
 - ☐ **5.3** — **Model: Terra High.** Tune TOML selects numeric UCI options with initial value, bounds and
   `c_end`; validated against the live UCI option schema
 - ☐ **5.4** — **Model: Terra High.** Defaults 5,000 iterations and 32 games/iteration — configurable,
@@ -634,10 +643,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 5.2 — end-state schedule derivation and assertion. Model: GPT-5.6 Sol — High.**
-Back-solve every knob's `c0/a0` from `c_end`, the run's `r_end` and horizon;
-persist the exact RNG/seed/draw-order schedule and verify the written artifact
-before any game can start.
+**Phase 5.3 — tune-file parameter and live UCI-schema validation. Model: GPT-5.6 Terra — High.**
+Add the required tune TOML parameter vector (numeric UCI option name, initial
+value, bounds and `c_end`) and validate it against the engine's live advertised
+schema.
 
 ```
 git diff --check

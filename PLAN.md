@@ -811,6 +811,18 @@ report an unattributable divergence.
   half-away-from-zero ties, floating centres, score-sign symmetry and clipping
   are pinned by tests. End-state back-solving and persisted schedule assertion
   remain 5.2 responsibilities.
+
+  **Implementation evidence (5.2):** the core back-solves `c0/a0` from each
+  `c_end`, run `r_end` and `N`, then asserts the terminal `c/a/r` values at a
+  relative tolerance of `1e-12`; an independent golden fixture and multiple
+  horizons pin the result. The self-describing schedule artifact records its
+  schema/statistics versions, exact ChaCha12/derivation/sampling identifiers,
+  master and derived stream seeds, stable stream name, eight-byte Rademacher
+  draws and iteration-major knob order. The CLI atomically creates
+  `spsa-schedule.json` without replacing an existing resume artifact, reads it
+  back, and only the application-layer verified-schedule token can cross the
+  future game-launch boundary. Invalid, mutated or differently derived files
+  cannot produce that token.
 - The tune file selects numeric UCI options and supplies initial value, tuning
   bounds and `c_end` per knob, validated against the live UCI option schema.
 - Defaults `N=5,000` and 32 games/iteration; configurable, not enforced minima.
