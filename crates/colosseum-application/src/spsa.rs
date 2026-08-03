@@ -1,5 +1,7 @@
 //! Runtime-neutral SPSA preflight and live-schema binding policy.
 
+use std::collections::HashSet;
+
 use colosseum_core::{
     SpsaEndSpec, SpsaError, SpsaIteration, SpsaKnob, SpsaScheduleArtifact, prepare_iteration,
     update_centers,
@@ -366,17 +368,64 @@ pub struct SpsaBoundParameter {
     pub advertised: SpsaLiveSpin,
 }
 
-/// Schema-bound tune vector ready for later audit, schedule derivation and
-/// game-driver use cases.
+/// Schema-bound tune vector ready for audit, schedule derivation and game-driver
+/// use cases.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpsaBoundTune {
     pub parameters: Vec<SpsaBoundParameter>,
 }
 
+/// Non-fatal observations from an SPSA configuration audit. They remain in the
+/// run record because a deliberate non-default starting point can materially
+/// affect how a tune should be interpreted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum SpsaTuneWarning {
+    InitialDiffersFromEngineDefault {
+        name: String,
+        initial: i64,
+        advertised_default: i64,
+    },
+    InitialOnLowerRail {
+        name: String,
+        initial: i64,
+        rail: i64,
+    },
+    InitialOnUpperRail {
+        name: String,
+        initial: i64,
+        rail: i64,
+    },
+}
+
+/// Completed application-level SPSA configuration audit.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpsaTuneAudit {
+    pub warnings: Vec<SpsaTuneWarning>,
+}
+
 impl SpsaTune {
+    /// Validate tune-file invariants that do not require launching the engine.
+    /// This runs before schedule derivation so a dry run has the same hard
+    /// duplicate, range-shape and UCI-integer-resolution protections as a live
+    /// tune. The live-schema portion is completed by [`SpsaBoundTune::audit`].
+    pub fn audit_configuration(&self) -> Result<(), SpsaTuneAuditError> {
+        let mut names = HashSet::with_capacity(self.parameters.len());
+        for parameter in &self.parameters {
+            if !names.insert(&parameter.name) {
+                return Err(SpsaTuneAuditError::DuplicateParameter {
+                    name: parameter.name.clone(),
+                });
+            }
+            validate_tune_parameter_shape(parameter)?;
+        }
+        Ok(())
+    }
+
     /// Bind every ordered entry to the schema observed from this ordinary UCI
-    /// executable. Range, duplicate and rounding-resolution policy is
-    /// intentionally added by the dedicated Phase-5.6 audit.
+    /// executable. The resulting vector is then checked by
+    /// [`SpsaBoundTune::audit`] for range, duplicate and rounding-resolution
+    /// policy.
     pub fn bind_live_schema(
         &self,
         inspection: &EngineInspection,
@@ -423,6 +472,61 @@ impl SpsaTune {
 }
 
 impl SpsaBoundTune {
+    /// Validate the complete tune vector against the observed UCI spin schema.
+    /// The audit deliberately separates hard refusals from warnings: all hard
+    /// failures would make one or both arms unmeasurable, while defaults and
+    /// rail seeds can be intentional experimental choices.
+    pub fn audit(&self) -> Result<SpsaTuneAudit, SpsaTuneAuditError> {
+        let mut warnings = Vec::new();
+        let mut names = HashSet::with_capacity(self.parameters.len());
+        for bound in &self.parameters {
+            let parameter = &bound.parameter;
+            if !names.insert(&parameter.name) {
+                return Err(SpsaTuneAuditError::DuplicateParameter {
+                    name: parameter.name.clone(),
+                });
+            }
+            validate_tune_parameter_shape(parameter)?;
+            for (field, value) in [
+                ("initial", parameter.initial),
+                ("min", parameter.min),
+                ("max", parameter.max),
+            ] {
+                if value < bound.advertised.min || value > bound.advertised.max {
+                    return Err(SpsaTuneAuditError::ValueOutsideAdvertisedRange {
+                        name: parameter.name.clone(),
+                        field,
+                        value,
+                        advertised_min: bound.advertised.min,
+                        advertised_max: bound.advertised.max,
+                    });
+                }
+            }
+            if parameter.initial != bound.advertised.default {
+                warnings.push(SpsaTuneWarning::InitialDiffersFromEngineDefault {
+                    name: parameter.name.clone(),
+                    initial: parameter.initial,
+                    advertised_default: bound.advertised.default,
+                });
+            }
+            if parameter.initial == parameter.min {
+                warnings.push(SpsaTuneWarning::InitialOnLowerRail {
+                    name: parameter.name.clone(),
+                    initial: parameter.initial,
+                    rail: parameter.min,
+                });
+            }
+            if parameter.initial == parameter.max {
+                warnings.push(SpsaTuneWarning::InitialOnUpperRail {
+                    name: parameter.name.clone(),
+                    initial: parameter.initial,
+                    rail: parameter.max,
+                });
+            }
+        }
+        Ok(SpsaTuneAudit { warnings })
+    }
+
     #[must_use]
     pub fn end_specs(&self) -> Vec<SpsaEndSpec> {
         self.parameters
@@ -443,6 +547,34 @@ impl SpsaBoundTune {
             .map(|bound| bound.parameter.initial as f64)
             .collect()
     }
+}
+
+fn validate_tune_parameter_shape(parameter: &SpsaTuneParameter) -> Result<(), SpsaTuneAuditError> {
+    if parameter.min >= parameter.max {
+        return Err(SpsaTuneAuditError::InvalidTuningBounds {
+            name: parameter.name.clone(),
+            min: parameter.min,
+            max: parameter.max,
+        });
+    }
+    if parameter.initial < parameter.min || parameter.initial > parameter.max {
+        return Err(SpsaTuneAuditError::InitialOutsideTuningBounds {
+            name: parameter.name.clone(),
+            initial: parameter.initial,
+            min: parameter.min,
+            max: parameter.max,
+        });
+    }
+    // UCI receives integer values. At the final schedule point `c == c_end`;
+    // with the binding half-away-from-zero rule, a magnitude below 0.5 sends
+    // zero for both arms around an integral centre, making the knob unmeasured.
+    if parameter.c_end.is_finite() && parameter.c_end > 0.0 && parameter.c_end < 0.5 {
+        return Err(SpsaTuneAuditError::PerturbationRoundsToZero {
+            name: parameter.name.clone(),
+            c_end: parameter.c_end,
+        });
+    }
+    Ok(())
 }
 
 fn option_kind(option: &UciOptionSchema) -> &'static str {
@@ -466,6 +598,39 @@ pub enum SpsaTuneError {
         name: String,
         advertised_kind: &'static str,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum SpsaTuneAuditError {
+    #[error("SPSA tune parameter {name:?} is declared more than once")]
+    DuplicateParameter { name: String },
+    #[error(
+        "SPSA parameter {name:?} has invalid tuning bounds: min {min} must be less than max {max}"
+    )]
+    InvalidTuningBounds { name: String, min: i64, max: i64 },
+    #[error(
+        "SPSA parameter {name:?} initial value {initial} must lie within its tuning bounds [{min}, {max}]"
+    )]
+    InitialOutsideTuningBounds {
+        name: String,
+        initial: i64,
+        min: i64,
+        max: i64,
+    },
+    #[error(
+        "SPSA parameter {name:?} {field} value {value} is outside advertised UCI spin range [{advertised_min}, {advertised_max}]"
+    )]
+    ValueOutsideAdvertisedRange {
+        name: String,
+        field: &'static str,
+        value: i64,
+        advertised_min: i64,
+        advertised_max: i64,
+    },
+    #[error(
+        "SPSA parameter {name:?} c_end {c_end} rounds to zero at the end of the schedule; use at least 0.5 for an integer UCI option"
+    )]
+    PerturbationRoundsToZero { name: String, c_end: f64 },
 }
 
 /// Capability token proving that the schedule read from durable storage is
@@ -516,6 +681,29 @@ mod tests {
             options,
             diagnostics: Vec::new(),
         }
+    }
+
+    fn parameter(initial: i64, min: i64, max: i64, c_end: f64) -> SpsaTuneParameter {
+        SpsaTuneParameter {
+            name: "Hash".into(),
+            initial,
+            min,
+            max,
+            c_end,
+        }
+    }
+
+    fn bind(parameter: SpsaTuneParameter) -> SpsaBoundTune {
+        SpsaTune {
+            parameters: vec![parameter],
+        }
+        .bind_live_schema(&inspection(vec![UciOptionSchema::Spin {
+            name: "Hash".into(),
+            default: 16,
+            min: 1,
+            max: 1024,
+        }]))
+        .unwrap()
     }
 
     #[test]
@@ -702,6 +890,93 @@ mod tests {
                 .map(|spec| spec.name)
                 .collect::<Vec<_>>(),
             ["Reduction", "Aspiration"]
+        );
+    }
+
+    #[test]
+    fn configuration_audit_rejects_duplicate_unmeasurable_and_out_of_range_vectors() {
+        assert_eq!(
+            SpsaTune {
+                parameters: vec![parameter(16, 1, 1024, 1.0), parameter(16, 1, 1024, 1.0)]
+            }
+            .audit_configuration(),
+            Err(SpsaTuneAuditError::DuplicateParameter {
+                name: "Hash".into()
+            })
+        );
+        assert_eq!(
+            SpsaTune {
+                parameters: vec![parameter(16, 32, 32, 1.0)]
+            }
+            .audit_configuration(),
+            Err(SpsaTuneAuditError::InvalidTuningBounds {
+                name: "Hash".into(),
+                min: 32,
+                max: 32,
+            })
+        );
+        assert_eq!(
+            SpsaTune {
+                parameters: vec![parameter(16, 32, 64, 1.0)]
+            }
+            .audit_configuration(),
+            Err(SpsaTuneAuditError::InitialOutsideTuningBounds {
+                name: "Hash".into(),
+                initial: 16,
+                min: 32,
+                max: 64,
+            })
+        );
+        assert_eq!(
+            SpsaTune {
+                parameters: vec![parameter(16, 1, 1024, 0.499_999)]
+            }
+            .audit_configuration(),
+            Err(SpsaTuneAuditError::PerturbationRoundsToZero {
+                name: "Hash".into(),
+                c_end: 0.499_999,
+            })
+        );
+        assert_eq!(
+            bind(parameter(1025, 1, 1025, 1.0)).audit(),
+            Err(SpsaTuneAuditError::ValueOutsideAdvertisedRange {
+                name: "Hash".into(),
+                field: "initial",
+                value: 1025,
+                advertised_min: 1,
+                advertised_max: 1024,
+            })
+        );
+        assert_eq!(
+            bind(parameter(16, 0, 1024, 1.0)).audit(),
+            Err(SpsaTuneAuditError::ValueOutsideAdvertisedRange {
+                name: "Hash".into(),
+                field: "min",
+                value: 0,
+                advertised_min: 1,
+                advertised_max: 1024,
+            })
+        );
+        assert!(bind(parameter(16, 1, 1024, 0.5)).audit().is_ok());
+    }
+
+    #[test]
+    fn configuration_audit_records_default_and_rail_warnings_without_refusal() {
+        let audit = bind(parameter(1, 1, 1024, 1.0)).audit().unwrap();
+        assert_eq!(
+            audit.warnings,
+            vec![
+                SpsaTuneWarning::InitialDiffersFromEngineDefault {
+                    name: "Hash".into(),
+                    initial: 1,
+                    advertised_default: 16,
+                },
+                SpsaTuneWarning::InitialOnLowerRail {
+                    name: "Hash".into(),
+                    initial: 1,
+                    rail: 1,
+                },
+            ]
         );
     }
 

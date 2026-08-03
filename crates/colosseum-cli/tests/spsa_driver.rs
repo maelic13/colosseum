@@ -9,9 +9,8 @@ fn cli() -> Command {
 }
 
 fn write_tune(root: &std::path::Path) -> std::path::PathBuf {
-    let path = root.join("tune.toml");
-    std::fs::write(
-        &path,
+    write_tune_contents(
+        root,
         r#"
 [[parameters]]
 name = "Hash"
@@ -21,7 +20,11 @@ max = 1024
 c_end = 1.0
 "#,
     )
-    .unwrap();
+}
+
+fn write_tune_contents(root: &std::path::Path, contents: &str) -> std::path::PathBuf {
+    let path = root.join("tune.toml");
+    std::fs::write(&path, contents).unwrap();
     path
 }
 
@@ -82,6 +85,78 @@ fn spsa_dry_run_resolves_defaults_and_schedule_without_launching_an_engine() {
     assert_eq!(config["settings"]["games_per_iteration"], 32);
     assert_eq!(config["schedule"]["perturbations"]["master_seed"], 7);
     assert_eq!(config["tune"]["live_schema"], "verified-before-game-launch");
+}
+
+#[test]
+fn spsa_configuration_audit_refuses_unmeasurable_vectors_before_engine_launch() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = write_tune_contents(
+        root.path(),
+        r#"
+[[parameters]]
+name = "Hash"
+initial = 16
+min = 1
+max = 1024
+c_end = 0.49
+"#,
+    );
+    let output = cli()
+        .args(["spsa", "definitely-missing-engine", "--tune"])
+        .arg(&tune)
+        .args(["--r-end", "0.002", "--dry-run"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8(output.stdout).unwrap().is_empty());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("rounds to zero at the end of the schedule")
+    );
+}
+
+#[test]
+fn spsa_configuration_audit_records_nonfatal_live_schema_warnings() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = write_tune_contents(
+        root.path(),
+        r#"
+[[parameters]]
+name = "Hash"
+initial = 1
+min = 1
+max = 1024
+c_end = 1.0
+"#,
+    );
+    let run = root.path().join("warnings");
+    let output = stub_command(&tune, &run).arg("--json").output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("starts at 1, but the engine advertises default 16"));
+    assert!(stderr.contains("starts on its lower rail"));
+    let output: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        output["report"]["tune_audit"]["warnings"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    let record: Value =
+        serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
+    assert_eq!(
+        record["workflow"]["tune_audit"]["warnings"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]

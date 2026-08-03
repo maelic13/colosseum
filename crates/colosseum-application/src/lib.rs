@@ -29,5 +29,6 @@ pub use spsa::{
     DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS, SpsaBoundParameter, SpsaBoundTune,
     SpsaCommittedUpdate, SpsaDriverPolicyError, SpsaInvalidUpdate, SpsaIterationTransition,
     SpsaLiveSpin, SpsaMiniMatchScore, SpsaPreflightError, SpsaRunSettings, SpsaRunSettingsError,
-    SpsaTune, SpsaTuneError, SpsaTuneParameter, SpsaTuningState, VerifiedSpsaSchedule,
+    SpsaTune, SpsaTuneAudit, SpsaTuneAuditError, SpsaTuneError, SpsaTuneParameter, SpsaTuneWarning,
+    SpsaTuningState, VerifiedSpsaSchedule,
 };

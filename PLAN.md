@@ -883,6 +883,15 @@ report an unattributable divergence.
      still being updated, and random-walks for the rest of the run
   6. initial value disagrees with the engine default *(warn — may be deliberate)*
   7. initial value on a rail *(warn — one-sided gradient)*
+
+  **Implementation evidence (5.6):** the application-owned audit checks the
+  ordered vector before schedule derivation for duplicate names, valid tuning
+  bounds, an initial centre inside those bounds and an integer-resolvable final
+  perturbation. After the live UCI handshake it rejects every requested value
+  outside the advertised spin range, while a non-default centre or either
+  tuning rail becomes an ordered, serializable warning. The CLI presents those
+  warnings and records them in the SPSA report and run record; dry-run performs
+  every audit that does not require a live engine.
 - **Closing the loop.** A tune must not end at "here is a vector". On
   completion, and on demand mid-run, emit the rounded mean of the final 10% of
   completed centre vectors (window configurable and frozen in the run record) as

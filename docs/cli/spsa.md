@@ -5,6 +5,16 @@ engine executable. The engine needs no manifest, custom benchmark command or
 source-tree integration. Colosseum reads the option schema from the normal UCI
 handshake before playing the first game.
 
+Before a live run, Colosseum audits every requested parameter against that
+advertised `spin` range. Duplicate names, an initial value outside its requested
+tuning range, invalid tuning bounds, any initial/bound outside the engine range,
+and a terminal perturbation below `0.5` are rejected. The last rule matters
+because UCI receives integers: below that magnitude the final plus/minus arms
+can both receive the same value, so the knob is no longer being measured. A
+starting value different from the engine default or equal to either requested
+tuning rail is allowed but reported as a warning and retained in the result and
+run record; both can be intentional choices.
+
 The required tune file is an ordered TOML parameter vector:
 
 ```toml

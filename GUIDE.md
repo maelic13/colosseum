@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–4C plus the Phase-5.1–5.5 SPSA kernel, verified schedule, live-schema-bound tune vector, configurable settings and durable pair-atomic driver are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
-| What is missing | SPSA configuration audit, loop closure, planning/status and exit; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–4C plus the Phase-5.1–5.6 SPSA kernel, verified schedule, live-schema-bound and audited tune vector, configurable settings and durable pair-atomic driver are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
+| What is missing | SPSA loop closure, planning/status and exit; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4C · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 5.6 — SPSA configuration audit** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 5.7 — SPSA loop closure and verified SPRT apply** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -531,9 +531,16 @@ model as well.
   [`crates/colosseum-cli/src/spsa_driver.rs`](crates/colosseum-cli/src/spsa_driver.rs),
   [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
   [`docs/cli/spsa.md`](docs/cli/spsa.md)
-- ☐ **5.6** — **Model: Terra High.** Config audit: reject absent/non-spin options, duplicates, bounds
-  outside the engine's range, `min>=max`, and perturbations rounding to
-  zero; warn on default disagreement and a seed on a rail
+- ☑ **5.6 — DONE** — **Model: Terra High.** The application-owned audit rejects
+  duplicate names, invalid tuning bounds, initial values outside their
+  tuning range, and final perturbations that round to zero; its live-schema
+  pass rejects values outside the advertised spin range while recording ordered
+  warnings for engine-default disagreement and lower/upper rail seeds. The CLI
+  performs safe checks in dry-run, displays live warnings, and stores them in
+  the result and run record — evidence:
+  [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs),
+  [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
+  [`docs/cli/spsa.md`](docs/cli/spsa.md)
 - ☐ **5.7** — **Model: Sol High. Close the loop:** rounded mean over frozen final-10% window as
   setoptions/JSON/run fragment; `sprt --apply` gates original versus tuned
   vector with the same executable hash unless explicitly overridden
@@ -662,11 +669,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 5.6 — SPSA configuration audit. Model: GPT-5.6 Terra — High.**
-Audit the ordered tune vector against the live UCI schema: reject duplicates,
-out-of-range initial values/bounds, non-measurable ranges and perturbations that
-round to zero before the horizon; warn on engine-default disagreement and an
-initial value on a rail.
+**Phase 5.7 — SPSA loop closure and verified SPRT apply. Model: GPT-5.6 Sol — High.**
+Emit the frozen final-window parameter result in setoption, JSON and run-file
+forms, then let `sprt --apply` gate the original and tuned vectors only when the
+executable hash remains verified (or a prominent override is chosen).
 
 ```
 git diff --check

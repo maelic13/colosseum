@@ -15,7 +15,7 @@ use colosseum_application::{
     DEFAULT_CALIBRATION_GAMES, DEFAULT_CALIBRATION_TOLERANCE_NELO,
     DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS, EngineInspection, EngineLaunchSpec,
     InspectEngine, RuntimeParticipant, SprtBundle, SprtDesign, SprtParameters, SpsaBoundTune,
-    SpsaRunSettings, UciOptionSchema, classify_calibration,
+    SpsaRunSettings, SpsaTuneAudit, SpsaTuneWarning, UciOptionSchema, classify_calibration,
 };
 use colosseum_cli::{
     EngineArgs, OfficialSample, RunDirectory, RunRecord, RunRecorder, RunStatus, built_in_defaults,
@@ -865,6 +865,10 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
             return ExitCode::from(2);
         }
     };
+    if let Err(error) = tune.audit_configuration() {
+        eprintln!("configuration error: {error}");
+        return ExitCode::from(2);
+    }
     let resumed_seed = conditions
         .run_directory
         .as_deref()
@@ -1140,6 +1144,16 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
             return ExitCode::from(2);
         }
     };
+    let tune_audit = match bound_tune.audit() {
+        Ok(audit) => audit,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    for warning in &tune_audit.warnings {
+        print_spsa_tune_warning(warning);
+    }
     let verified_schedule = match persist_and_verify_spsa_schedule(&directory, &expected_schedule) {
         Ok(schedule) => schedule,
         Err(error) => {
@@ -1165,6 +1179,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
         "settings": settings,
         "r_end": r_end,
         "bound_tune": &bound_tune,
+        "tune_audit": &tune_audit,
         "engine_sha256": &engine_sha256,
         "schedule": verified_schedule.artifact(),
         "engine_time_control": engine_time_control,
@@ -1247,6 +1262,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
     let status = driver.status;
     let report = SpsaReport {
         bound_tune,
+        tune_audit,
         engine_sha256,
         engine_time_control,
         adjudication,
@@ -1466,6 +1482,7 @@ struct CalibrationReport {
 #[derive(Debug, Clone, Serialize)]
 struct SpsaReport {
     bound_tune: SpsaBoundTune,
+    tune_audit: SpsaTuneAudit,
     engine_sha256: String,
     engine_time_control: match_runner::ConfiguredTimeControl,
     adjudication: AdjudicationConfig,
@@ -2866,6 +2883,32 @@ fn print_spsa(report: &SpsaReport, run_directory: &Path) {
         );
     }
     println!("artifacts: {}", run_directory.display());
+}
+
+fn print_spsa_tune_warning(warning: &SpsaTuneWarning) {
+    match warning {
+        SpsaTuneWarning::InitialDiffersFromEngineDefault {
+            name,
+            initial,
+            advertised_default,
+        } => eprintln!(
+            "SPSA tune warning: {name:?} starts at {initial}, but the engine advertises default {advertised_default}; this may be deliberate"
+        ),
+        SpsaTuneWarning::InitialOnLowerRail {
+            name,
+            initial,
+            rail,
+        } => eprintln!(
+            "SPSA tune warning: {name:?} starts on its lower rail ({initial} = {rail}); its initial gradient is one-sided"
+        ),
+        SpsaTuneWarning::InitialOnUpperRail {
+            name,
+            initial,
+            rail,
+        } => eprintln!(
+            "SPSA tune warning: {name:?} starts on its upper rail ({initial} = {rail}); its initial gradient is one-sided"
+        ),
+    }
 }
 
 fn print_calibration(report: &CalibrationReport, run_directory: &Path) {
