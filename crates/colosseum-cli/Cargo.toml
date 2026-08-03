@@ -30,7 +30,7 @@ colosseum-uci = { path = "../colosseum-uci" }
 dunce = "1.0.5"
 getrandom = "0.3.4"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
+serde_json = { version = "1.0.150", features = ["float_roundtrip"] }
 sha2 = "0.10.9"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-std", "io-util", "time"] }

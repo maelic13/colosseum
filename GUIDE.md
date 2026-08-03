@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–4C plus the Phase-5.1–5.4 SPSA kernel, verified schedule, live-schema-bound tune vector and configurable run settings are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
-| What is missing | SPSA configuration audit and driver; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–4C plus the Phase-5.1–5.5 SPSA kernel, verified schedule, live-schema-bound tune vector, configurable settings and durable pair-atomic driver are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls and recovery |
+| What is missing | SPSA configuration audit, loop closure, planning/status and exit; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 4C · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 5.5 — durable pair-atomic SPSA driver** |
-| Recommended model | **GPT-5.6 Sol — High** |
+| Next step | **Phase 5.6 — SPSA configuration audit** |
+| Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
 
@@ -520,9 +520,17 @@ model as well.
   zero counts or an odd game count that cannot form colour-reversed pairs are
   rejected — evidence:
   [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs)
-- ☐ **5.5** — **Model: Sol High.** Persistent driver, book loaded once, complete paired mini-match as the
-  commit unit; engine fault invalidates rather than becoming a gradient;
-  multi-session per the durable contract
+- ☑ **5.5 — DONE** — **Model: Sol High.** The real `spsa` command keeps one
+  driver and one in-memory optional book across the tune, accepts only a
+  written-and-read-back schedule token; an application-owned state machine
+  commits complete fault-free paired mini-matches as single durable iterations,
+  records engine-fault iterations as invalid without applying a gradient, and
+  replays exact centres/RNG/arms/scores across hard-kill resume while the CLI
+  adapter owns execution, persistence and executable-content checking — evidence:
+  [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs),
+  [`crates/colosseum-cli/src/spsa_driver.rs`](crates/colosseum-cli/src/spsa_driver.rs),
+  [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
+  [`docs/cli/spsa.md`](docs/cli/spsa.md)
 - ☐ **5.6** — **Model: Terra High.** Config audit: reject absent/non-spin options, duplicates, bounds
   outside the engine's range, `min>=max`, and perturbations rounding to
   zero; warn on default disagreement and a seed on a rail
@@ -654,10 +662,11 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 5.5 — durable pair-atomic SPSA driver. Model: GPT-5.6 Sol — High.**
-Implement the persistent driver: load an optional book once, execute and commit
-only complete paired mini-matches, invalidate on an engine fault rather than
-producing a gradient, and integrate the common durable-run contract.
+**Phase 5.6 — SPSA configuration audit. Model: GPT-5.6 Terra — High.**
+Audit the ordered tune vector against the live UCI schema: reject duplicates,
+out-of-range initial values/bounds, non-measurable ranges and perturbations that
+round to zero before the horizon; warn on engine-default disagreement and an
+initial value on a rail.
 
 ```
 git diff --check

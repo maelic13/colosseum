@@ -117,7 +117,7 @@ pub struct FaultPolicy {
     pub max_time_losses: u32,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MatchFaultCounts {
     pub engine_a: u32,
     pub engine_b: u32,

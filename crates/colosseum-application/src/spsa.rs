@@ -1,6 +1,9 @@
 //! Runtime-neutral SPSA preflight and live-schema binding policy.
 
-use colosseum_core::{SpsaEndSpec, SpsaError, SpsaScheduleArtifact};
+use colosseum_core::{
+    SpsaEndSpec, SpsaError, SpsaIteration, SpsaKnob, SpsaScheduleArtifact, prepare_iteration,
+    update_centers,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -68,6 +71,262 @@ pub enum SpsaRunSettingsError {
         "SPSA games per iteration must be even so each mini-match contains complete colour pairs; got {games_per_iteration}"
     )]
     IncompleteColourPair { games_per_iteration: u32 },
+}
+
+/// Score of one complete SPSA mini-match from the plus arm's perspective.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpsaMiniMatchScore {
+    pub plus_wins: u32,
+    pub plus_losses: u32,
+    pub draws: u32,
+    pub difference: i32,
+}
+
+impl SpsaMiniMatchScore {
+    fn validate(self, expected_games: u32) -> Result<(), SpsaDriverPolicyError> {
+        let games = self
+            .plus_wins
+            .checked_add(self.plus_losses)
+            .and_then(|value| value.checked_add(self.draws))
+            .ok_or(SpsaDriverPolicyError::ScoreOverflow)?;
+        let difference = i32::try_from(self.plus_wins)
+            .and_then(|wins| i32::try_from(self.plus_losses).map(|losses| wins - losses))
+            .map_err(|_| SpsaDriverPolicyError::ScoreOverflow)?;
+        if games != expected_games || difference != self.difference {
+            return Err(SpsaDriverPolicyError::InvalidScore {
+                expected_games,
+                actual_games: games,
+                expected_difference: difference,
+                actual_difference: self.difference,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Runtime-neutral official update retained in a durable SPSA checkpoint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpsaCommittedUpdate {
+    pub iteration: u32,
+    pub centers_before: Vec<f64>,
+    pub prepared: SpsaIteration,
+    pub score: SpsaMiniMatchScore,
+    pub centers_after: Vec<f64>,
+}
+
+/// Terminal policy result for a complete mini-match containing an engine fault.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpsaInvalidUpdate {
+    pub iteration: u32,
+    pub centers_before: Vec<f64>,
+    pub prepared: SpsaIteration,
+    pub engine_faults: u32,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SpsaIterationTransition {
+    Committed(SpsaCommittedUpdate),
+    Invalid(SpsaInvalidUpdate),
+}
+
+/// Application-owned SPSA state machine. Runtime adapters execute the prepared
+/// games and durably persist returned transitions; they cannot advance the gain
+/// schedule or apply a forfeit as a gradient themselves.
+#[derive(Debug, Clone)]
+pub struct SpsaTuningState {
+    schedule: VerifiedSpsaSchedule,
+    settings: SpsaRunSettings,
+    knobs: Vec<SpsaKnob>,
+    centers: Vec<f64>,
+    completed_iterations: u32,
+    invalid: bool,
+}
+
+impl SpsaTuningState {
+    pub fn resume(
+        schedule: VerifiedSpsaSchedule,
+        settings: SpsaRunSettings,
+        initial_centers: Vec<f64>,
+        history: &[SpsaCommittedUpdate],
+    ) -> Result<Self, SpsaDriverPolicyError> {
+        settings.validate()?;
+        let artifact = schedule.artifact();
+        if artifact.schedule.iterations() != settings.iterations {
+            return Err(SpsaDriverPolicyError::ScheduleHorizonMismatch {
+                schedule: artifact.schedule.iterations(),
+                settings: settings.iterations,
+            });
+        }
+        if history.len() > settings.iterations as usize {
+            return Err(SpsaDriverPolicyError::HistoryBeyondHorizon);
+        }
+        let knobs = artifact
+            .knobs
+            .iter()
+            .map(|knob| knob.knob())
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut state = Self {
+            schedule,
+            settings,
+            knobs,
+            centers: initial_centers,
+            completed_iterations: 0,
+            invalid: false,
+        };
+        for stored in history {
+            let iteration = state.completed_iterations;
+            let prepared = state
+                .prepare_next()?
+                .ok_or(SpsaDriverPolicyError::HistoryBeyondHorizon)?;
+            if stored.iteration != iteration
+                || stored.centers_before != state.centers
+                || stored.prepared != prepared
+            {
+                return Err(SpsaDriverPolicyError::HistoryMismatch { iteration });
+            }
+            let transition = state.commit_iteration(
+                prepared,
+                settings.pairs_per_iteration(),
+                Some(stored.score),
+                0,
+            )?;
+            let SpsaIterationTransition::Committed(replayed) = transition else {
+                unreachable!("fault-free history can only produce a committed update")
+            };
+            if &replayed != stored {
+                return Err(SpsaDriverPolicyError::HistoryMismatch { iteration });
+            }
+        }
+        // Validate even a fresh initial vector before an adapter may launch.
+        if state.completed_iterations < state.settings.iterations {
+            state.prepare_next()?;
+        }
+        Ok(state)
+    }
+
+    pub fn prepare_next(&self) -> Result<Option<SpsaIteration>, SpsaDriverPolicyError> {
+        if self.invalid {
+            return Err(SpsaDriverPolicyError::TuneAlreadyInvalid);
+        }
+        if self.completed_iterations == self.settings.iterations {
+            return Ok(None);
+        }
+        let artifact = self.schedule.artifact();
+        prepare_iteration(
+            artifact.schedule,
+            artifact.perturbations.master_seed,
+            self.completed_iterations,
+            &self.centers,
+            &self.knobs,
+        )
+        .map(Some)
+        .map_err(Into::into)
+    }
+
+    pub fn commit_iteration(
+        &mut self,
+        prepared: SpsaIteration,
+        completed_pairs: u32,
+        score: Option<SpsaMiniMatchScore>,
+        engine_faults: u32,
+    ) -> Result<SpsaIterationTransition, SpsaDriverPolicyError> {
+        if self.invalid {
+            return Err(SpsaDriverPolicyError::TuneAlreadyInvalid);
+        }
+        let iteration = self.completed_iterations;
+        let expected = self
+            .prepare_next()?
+            .ok_or(SpsaDriverPolicyError::HorizonComplete)?;
+        if prepared != expected {
+            return Err(SpsaDriverPolicyError::PreparedIterationMismatch { iteration });
+        }
+        if completed_pairs != self.settings.pairs_per_iteration() {
+            return Err(SpsaDriverPolicyError::IncompleteMiniMatch {
+                iteration,
+                expected_pairs: self.settings.pairs_per_iteration(),
+                completed_pairs,
+            });
+        }
+        if engine_faults > 0 {
+            if score.is_some() {
+                return Err(SpsaDriverPolicyError::FaultedGradientSupplied { iteration });
+            }
+            self.invalid = true;
+            return Ok(SpsaIterationTransition::Invalid(SpsaInvalidUpdate {
+                iteration,
+                centers_before: self.centers.clone(),
+                prepared,
+                engine_faults,
+                reason: "an engine-attributable fault invalidates the complete mini-match; no gradient was applied".into(),
+            }));
+        }
+        let score = score.ok_or(SpsaDriverPolicyError::MissingScore { iteration })?;
+        score.validate(self.settings.games_per_iteration)?;
+        let centers_before = self.centers.clone();
+        let centers_after =
+            update_centers(&centers_before, &self.knobs, &prepared, score.difference)?;
+        self.centers.clone_from(&centers_after);
+        self.completed_iterations += 1;
+        Ok(SpsaIterationTransition::Committed(SpsaCommittedUpdate {
+            iteration,
+            centers_before,
+            prepared,
+            score,
+            centers_after,
+        }))
+    }
+
+    #[must_use]
+    pub fn centers(&self) -> &[f64] {
+        &self.centers
+    }
+
+    #[must_use]
+    pub const fn completed_iterations(&self) -> u32 {
+        self.completed_iterations
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum SpsaDriverPolicyError {
+    #[error(transparent)]
+    Settings(#[from] SpsaRunSettingsError),
+    #[error(transparent)]
+    Schedule(#[from] SpsaError),
+    #[error("SPSA schedule horizon {schedule} does not match run setting {settings}")]
+    ScheduleHorizonMismatch { schedule: u32, settings: u32 },
+    #[error("SPSA durable history extends beyond the configured horizon")]
+    HistoryBeyondHorizon,
+    #[error("SPSA durable history does not reproduce iteration {iteration}")]
+    HistoryMismatch { iteration: u32 },
+    #[error("SPSA prepared inputs do not reproduce iteration {iteration}")]
+    PreparedIterationMismatch { iteration: u32 },
+    #[error("SPSA mini-match {iteration} completed {completed_pairs}/{expected_pairs} pairs")]
+    IncompleteMiniMatch {
+        iteration: u32,
+        expected_pairs: u32,
+        completed_pairs: u32,
+    },
+    #[error(
+        "SPSA score count/difference is inconsistent: expected {expected_games} games and difference {expected_difference}, got {actual_games} games and {actual_difference}"
+    )]
+    InvalidScore {
+        expected_games: u32,
+        actual_games: u32,
+        expected_difference: i32,
+        actual_difference: i32,
+    },
+    #[error("SPSA score count overflow")]
+    ScoreOverflow,
+    #[error("SPSA iteration {iteration} supplied a gradient despite an engine fault")]
+    FaultedGradientSupplied { iteration: u32 },
+    #[error("SPSA iteration {iteration} has no complete mini-match score")]
+    MissingScore { iteration: u32 },
+    #[error("SPSA tune is already invalid")]
+    TuneAlreadyInvalid,
+    #[error("SPSA horizon is already complete")]
+    HorizonComplete,
 }
 
 /// Required contents of one ordered SPSA tune-file entry. This is deliberately
@@ -317,6 +576,77 @@ mod tests {
             VerifiedSpsaSchedule::verify_written(&expected, schedule(8)).unwrap_err(),
             SpsaPreflightError::WrittenScheduleMismatch
         );
+    }
+
+    #[test]
+    fn application_state_owns_complete_iteration_commit_and_exact_resume() {
+        let artifact = schedule(7);
+        let verified = VerifiedSpsaSchedule::verify_written(&artifact, artifact.clone()).unwrap();
+        let settings = SpsaRunSettings::new(100, 2).unwrap();
+        let mut state =
+            SpsaTuningState::resume(verified.clone(), settings, vec![0.0], &[]).unwrap();
+        let prepared = state.prepare_next().unwrap().unwrap();
+        assert!(matches!(
+            state.commit_iteration(prepared.clone(), 0, None, 0),
+            Err(SpsaDriverPolicyError::IncompleteMiniMatch { .. })
+        ));
+        let score = SpsaMiniMatchScore {
+            plus_wins: 1,
+            plus_losses: 0,
+            draws: 1,
+            difference: 1,
+        };
+        let SpsaIterationTransition::Committed(update) =
+            state.commit_iteration(prepared, 1, Some(score), 0).unwrap()
+        else {
+            panic!("fault-free complete mini-match must commit")
+        };
+        assert_eq!(state.completed_iterations(), 1);
+        assert_eq!(state.centers(), update.centers_after);
+
+        let resumed = SpsaTuningState::resume(verified, settings, vec![0.0], &[update]).unwrap();
+        assert_eq!(resumed.completed_iterations(), 1);
+        assert_eq!(resumed.centers(), state.centers());
+        assert_eq!(
+            resumed.prepare_next().unwrap().unwrap().iteration,
+            1,
+            "resume must continue the exact RNG iteration"
+        );
+    }
+
+    #[test]
+    fn application_state_never_turns_an_engine_fault_into_a_gradient() {
+        let artifact = schedule(7);
+        let verified = VerifiedSpsaSchedule::verify_written(&artifact, artifact.clone()).unwrap();
+        let settings = SpsaRunSettings::new(100, 2).unwrap();
+        let mut state = SpsaTuningState::resume(verified, settings, vec![0.0], &[]).unwrap();
+        let prepared = state.prepare_next().unwrap().unwrap();
+        assert!(matches!(
+            state.commit_iteration(
+                prepared.clone(),
+                1,
+                Some(SpsaMiniMatchScore {
+                    plus_wins: 1,
+                    plus_losses: 0,
+                    draws: 1,
+                    difference: 1,
+                }),
+                1,
+            ),
+            Err(SpsaDriverPolicyError::FaultedGradientSupplied { iteration: 0 })
+        ));
+        let SpsaIterationTransition::Invalid(invalid) =
+            state.commit_iteration(prepared, 1, None, 1).unwrap()
+        else {
+            panic!("engine fault must invalidate")
+        };
+        assert_eq!(invalid.centers_before, [0.0]);
+        assert_eq!(state.centers(), [0.0]);
+        assert_eq!(state.completed_iterations(), 0);
+        assert!(matches!(
+            state.prepare_next(),
+            Err(SpsaDriverPolicyError::TuneAlreadyInvalid)
+        ));
     }
 
     #[test]

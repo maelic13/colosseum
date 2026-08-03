@@ -27,6 +27,7 @@ pub use ports::*;
 pub use sprt::{SprtBundle, SprtDesign, SprtDesignError, SprtParameters};
 pub use spsa::{
     DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS, SpsaBoundParameter, SpsaBoundTune,
-    SpsaLiveSpin, SpsaPreflightError, SpsaRunSettings, SpsaRunSettingsError, SpsaTune,
-    SpsaTuneError, SpsaTuneParameter, VerifiedSpsaSchedule,
+    SpsaCommittedUpdate, SpsaDriverPolicyError, SpsaInvalidUpdate, SpsaIterationTransition,
+    SpsaLiveSpin, SpsaMiniMatchScore, SpsaPreflightError, SpsaRunSettings, SpsaRunSettingsError,
+    SpsaTune, SpsaTuneError, SpsaTuneParameter, SpsaTuningState, VerifiedSpsaSchedule,
 };

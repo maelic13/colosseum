@@ -12,18 +12,19 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use colosseum_application::{
     CalibrationBinaries, CalibrationDesign, CalibrationInterval, CalibrationStatus, CheckEngine,
     CompletePair, ComplianceReport, ComplianceStatus, DEFAULT_CALIBRATION_CONFIDENCE,
-    DEFAULT_CALIBRATION_GAMES, DEFAULT_CALIBRATION_TOLERANCE_NELO, EngineInspection,
-    EngineLaunchSpec, InspectEngine, RuntimeParticipant, SprtBundle, SprtDesign, SprtParameters,
-    UciOptionSchema, classify_calibration,
+    DEFAULT_CALIBRATION_GAMES, DEFAULT_CALIBRATION_TOLERANCE_NELO,
+    DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS, EngineInspection, EngineLaunchSpec,
+    InspectEngine, RuntimeParticipant, SprtBundle, SprtDesign, SprtParameters, SpsaBoundTune,
+    SpsaRunSettings, UciOptionSchema, classify_calibration,
 };
 use colosseum_cli::{
     EngineArgs, OfficialSample, RunDirectory, RunRecord, RunRecorder, RunStatus, built_in_defaults,
-    parse_cpu_list, resolve_config,
+    load_spsa_tune, parse_cpu_list, persist_and_verify_spsa_schedule, resolve_config,
 };
 use colosseum_core::{
     AdjudicationConfig, DrawAdjudication, EloModel, GameResult, OpeningBook, OpeningOrder,
-    PairGameResult, ParticipantId, PentanomialVector, ResignAdjudication, TimeControl,
-    fixed_n_achieved_resolution,
+    PairGameResult, ParticipantId, PentanomialVector, ResignAdjudication, SpsaEndSpec,
+    SpsaScheduleArtifact, TimeControl, fixed_n_achieved_resolution,
 };
 use colosseum_engine::CpuPlacementPolicy;
 use colosseum_uci::UciSessionFactory;
@@ -35,6 +36,7 @@ mod capabilities;
 mod match_runner;
 mod self_test;
 mod sprt_runner;
+mod spsa_driver;
 mod uci_stub;
 
 #[derive(Debug, Parser)]
@@ -65,6 +67,8 @@ enum Command {
     Match(Box<MatchCommand>),
     /// Run a finite pair-atomic sequential probability ratio test.
     Sprt(Box<SprtCommand>),
+    /// Tune numeric UCI options with durable pair-atomic SPSA.
+    Spsa(Box<SpsaCommand>),
     /// Measure identical-binary symmetry under representative match conditions.
     Calibrate(Box<CalibrationCommand>),
     /// Inspect or compliance-check an ordinary UCI executable.
@@ -269,6 +273,94 @@ struct CalibrationCommand {
     conditions: MatchConditions,
 }
 
+#[derive(Debug, Args)]
+struct SpsaCommand {
+    #[command(flatten)]
+    engine: EngineArgs,
+
+    /// Ordered TOML parameter vector to tune against the live UCI schema.
+    #[arg(long)]
+    tune: PathBuf,
+    /// Terminal SPSA gain ratio shared by every tuned parameter.
+    #[arg(long)]
+    r_end: Option<f64>,
+    /// Number of SPSA centre updates in the tune horizon.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    iterations: Option<u32>,
+    /// Complete games in each pair-atomic mini-match.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    games_per_iteration: Option<u32>,
+
+    #[command(flatten)]
+    conditions: SpsaConditions,
+}
+
+#[derive(Debug, Args)]
+struct SpsaConditions {
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    movetime_ms: Option<u64>,
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    base_ms: Option<u64>,
+    #[arg(long)]
+    increment_ms: Option<u64>,
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    nodes: Option<u64>,
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    depth: Option<u32>,
+    #[arg(long, default_value_t = match_runner::DEFAULT_MARGIN_MS)]
+    margin_ms: u64,
+
+    /// Disable the default conservative draw adjudication.
+    #[arg(long)]
+    no_draw_adjudication: bool,
+    #[arg(long, default_value_t = 40, value_parser = clap::value_parser!(u32).range(1..))]
+    draw_move: u32,
+    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..))]
+    draw_moves: u32,
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(i32).range(0..))]
+    draw_score_cp: i32,
+    /// Disable the default two-sided resignation adjudication.
+    #[arg(long)]
+    no_resign_adjudication: bool,
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..))]
+    resign_moves: u32,
+    #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(i32).range(1..))]
+    resign_score_cp: i32,
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    max_moves: Option<u32>,
+
+    /// Number of games allowed to run at once.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
+    concurrency: u32,
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
+    cores_per_engine: u32,
+    #[arg(long, default_value = "off")]
+    placement: String,
+    #[arg(long, default_value_t = 2)]
+    headroom_cores: usize,
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    memory_budget_mb: Option<u64>,
+
+    /// Optional EPD or PGN opening book; it is parsed once per process session.
+    #[arg(long)]
+    book: Option<PathBuf>,
+    #[arg(long, value_enum, default_value_t = BookOrderArg::Sequential)]
+    book_order: BookOrderArg,
+    #[arg(long, default_value_t = 0)]
+    book_start: usize,
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    book_plies: Option<u32>,
+    #[arg(long)]
+    seed: Option<u64>,
+
+    #[arg(long = "dir")]
+    run_directory: Option<PathBuf>,
+    #[arg(long, requires = "run_directory")]
+    restart: bool,
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..))]
+    progress_interval_secs: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum SprtBundleArg {
     Gainer,
@@ -333,6 +425,7 @@ async fn main() -> ExitCode {
         Command::Capabilities => run_capabilities(cli.json),
         Command::Match(command) => run_match(*command, cli.json, cli.dry_run).await,
         Command::Sprt(command) => run_sprt(*command, cli.json, cli.dry_run).await,
+        Command::Spsa(command) => run_spsa_command(*command, cli.json, cli.dry_run).await,
         Command::Calibrate(command) => run_calibration(*command, cli.json, cli.dry_run).await,
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
         Command::SelfTest if cli.dry_run => unsupported_dry_run("self-test"),
@@ -715,6 +808,472 @@ fn sprt_exit_code(status: sprt_runner::SprtStatus) -> u8 {
     }
 }
 
+async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) -> ExitCode {
+    let conditions = &command.conditions;
+    let stored_schedule_inputs = match conditions
+        .run_directory
+        .as_deref()
+        .filter(|path| path.exists() && !conditions.restart)
+        .map(read_stored_spsa_inputs)
+        .transpose()
+    {
+        Ok(inputs) => inputs,
+        Err(error) => {
+            eprintln!("resume failed: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let (iterations, games_per_iteration, r_end) =
+        if let Some((stored, stored_r_end)) = stored_schedule_inputs {
+            eprintln!(
+                "resuming the stored SPSA horizon: {} iterations, {} games per iteration, r_end {}",
+                stored.iterations, stored.games_per_iteration, stored_r_end
+            );
+            (stored.iterations, stored.games_per_iteration, stored_r_end)
+        } else {
+            let Some(r_end) = command.r_end else {
+                eprintln!("configuration error: --r-end is required for a new SPSA run");
+                return ExitCode::from(2);
+            };
+            (
+                command.iterations.unwrap_or(DEFAULT_SPSA_ITERATIONS),
+                command
+                    .games_per_iteration
+                    .unwrap_or(DEFAULT_SPSA_GAMES_PER_ITERATION),
+                r_end,
+            )
+        };
+    let settings = match SpsaRunSettings::new(iterations, games_per_iteration) {
+        Ok(settings) => settings,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if conditions.book.is_none()
+        && (conditions.book_start != 0
+            || conditions.book_plies.is_some()
+            || conditions.book_order != BookOrderArg::Sequential)
+    {
+        eprintln!("configuration error: book order/start/plies require --book");
+        return ExitCode::from(2);
+    }
+    let tune = match load_spsa_tune(&command.tune) {
+        Ok(tune) => tune,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let resumed_seed = conditions
+        .run_directory
+        .as_deref()
+        .filter(|path| path.exists() && !conditions.restart)
+        .and_then(read_stored_seed);
+    let (master_seed, master_seed_generated) = match resumed_seed {
+        Some(seed) if conditions.seed.is_none() => seed,
+        _ => match resolve_master_seed(conditions.seed) {
+            Ok(seed) => seed,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        },
+    };
+    let engine = match command.engine.resolve() {
+        Ok(engine) => engine,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if !matches!(
+        engine.allocated_cpus,
+        colosseum_application::CpuAllocation::Unrestricted
+    ) {
+        eprintln!(
+            "configuration error: SPSA --cores cannot describe two disjoint arms; use --placement with --cores-per-engine"
+        );
+        return ExitCode::from(2);
+    }
+    let engine_time_control = match resolve_time_control(
+        "SPSA engine",
+        conditions.movetime_ms,
+        conditions.base_ms,
+        conditions.increment_ms,
+        conditions.nodes,
+        conditions.depth,
+        conditions.margin_ms,
+    ) {
+        Ok(control) => control,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let adjudication = AdjudicationConfig {
+        max_moves: conditions.max_moves,
+        draw: (!conditions.no_draw_adjudication).then_some(DrawAdjudication {
+            min_ply: conditions.draw_move.saturating_mul(2),
+            move_count: conditions.draw_moves,
+            score_cp: conditions.draw_score_cp,
+        }),
+        resign: (!conditions.no_resign_adjudication).then_some(ResignAdjudication {
+            move_count: conditions.resign_moves,
+            score_cp: conditions.resign_score_cp,
+        }),
+    };
+    let placement = match resolve_placement(&conditions.placement, conditions.headroom_cores) {
+        Ok(placement) => placement,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut planning_engine = engine.clone();
+    for parameter in &tune.parameters {
+        if colosseum_core::is_hash_option(&parameter.name) {
+            planning_engine.options.insert(
+                parameter.name.clone(),
+                colosseum_application::UciOptionValue::Spin(parameter.max),
+            );
+        }
+    }
+    let execution = match match_runner::plan_execution(
+        &planning_engine,
+        &planning_engine,
+        conditions.concurrency as usize,
+        conditions.cores_per_engine as usize,
+        placement,
+        conditions.memory_budget_mb,
+    ) {
+        Ok(execution) => execution,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let total_games = match settings
+        .iterations
+        .checked_mul(settings.games_per_iteration)
+    {
+        Some(total) => total,
+        None => {
+            eprintln!("configuration error: SPSA game horizon is too large");
+            return ExitCode::from(2);
+        }
+    };
+    let book = conditions.book.clone().map(|path| {
+        let mut book = OpeningBook::new(path);
+        book.order = match conditions.book_order {
+            BookOrderArg::Sequential => OpeningOrder::Sequential,
+            BookOrderArg::Random => OpeningOrder::Random,
+        };
+        book.plies = conditions.book_plies.unwrap_or(8);
+        book
+    });
+    // This is the only book parse in one SPSA process session. The resolved
+    // in-memory entries are reused by every iteration and game worker.
+    let openings =
+        match match_runner::resolve_openings(book, conditions.book_start, total_games, master_seed)
+        {
+            Ok(openings) => openings,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        };
+    let end_specs = tune
+        .parameters
+        .iter()
+        .map(|parameter| SpsaEndSpec {
+            name: parameter.name.clone(),
+            min: parameter.min,
+            max: parameter.max,
+            c_end: parameter.c_end,
+        })
+        .collect::<Vec<_>>();
+    let expected_schedule =
+        match SpsaScheduleArtifact::derive(settings.iterations, r_end, master_seed, &end_specs) {
+            Ok(schedule) => schedule,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        };
+    let current_directory = match std::env::current_dir() {
+        Ok(directory) => directory,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut path_pointers = vec!["/engine/executable".into(), "/tune/path".into()];
+    if engine.working_directory.is_some() {
+        path_pointers.push("/engine/working_directory".into());
+    }
+    if conditions.book.is_some() {
+        path_pointers.push("/openings/path".into());
+    }
+    let resolved = match resolve_config(
+        built_in_defaults(),
+        None,
+        json!({
+            "command": "spsa",
+            "engine": &engine,
+            "engine_sha256": "computed-and-checked-before-live-launch",
+            "tune": {
+                "path": &command.tune,
+                "parameters": &tune.parameters,
+                "live_schema": "verified-before-game-launch"
+            },
+            "settings": settings,
+            "r_end": r_end,
+            "schedule": &expected_schedule,
+            "engine_time_control": engine_time_control,
+            "adjudication": adjudication,
+            "execution": execution,
+            "master_seed": master_seed,
+            "master_seed_generated": master_seed_generated,
+            "openings": openings.report(),
+        }),
+        &[],
+        &current_directory,
+        &path_pointers,
+    ) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if dry_run {
+        print_output(
+            &MachineOutput::DryRun {
+                command: "spsa",
+                config_sha256: resolved.sha256(),
+                resolved_configuration: resolved.value(),
+                invocations: vec![&engine],
+            },
+            machine,
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    let opened = match &conditions.run_directory {
+        Some(path) => RunDirectory::open_explicit(path, &resolved, conditions.restart),
+        None => RunDirectory::create_unique(&current_directory, "spsa", &resolved),
+    };
+    let opened = match opened {
+        Ok(opened) => opened,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if let Some(archived) = &opened.archived {
+        eprintln!("archived previous run at {}", archived.display());
+    }
+    let resumed = opened.resumed;
+    let directory = Arc::new(opened.directory);
+    let engine_sha256 = match executable_sha256(&engine.executable) {
+        Ok(hash) => hash,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if resumed {
+        let stored_record = match RunRecord::read(&directory.paths().root) {
+            Ok(record) => record,
+            Err(error) => {
+                eprintln!("resume failed: {error}");
+                return ExitCode::from(3);
+            }
+        };
+        let stored_hash = stored_record
+            .workflow
+            .get("engine_sha256")
+            .and_then(Value::as_str);
+        if stored_hash != Some(engine_sha256.as_str()) {
+            eprintln!(
+                "resume failed: SPSA engine content changed (stored {}, current {})",
+                stored_hash.unwrap_or("missing"),
+                engine_sha256
+            );
+            return ExitCode::from(2);
+        }
+    }
+    let mut recorder = match if resumed {
+        RunRecorder::resume(&directory)
+    } else {
+        RunRecorder::begin(&directory, "spsa")
+    } {
+        Ok(recorder) => recorder,
+        Err(error) => {
+            eprintln!("run record failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+
+    let mut inspection_launch = engine.clone();
+    inspection_launch.allocated_cpus = colosseum_application::CpuAllocation::Unrestricted;
+    let inspection = match InspectEngine::execute(
+        &UciSessionFactory,
+        &RuntimeParticipant {
+            id: ParticipantId::from_u128(51),
+            launch: inspection_launch,
+        },
+    )
+    .await
+    {
+        Ok(inspection) => inspection,
+        Err(error) => {
+            eprintln!("SPSA engine inspection failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let bound_tune = match tune.bind_live_schema(&inspection) {
+        Ok(bound) => bound,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let verified_schedule = match persist_and_verify_spsa_schedule(&directory, &expected_schedule) {
+        Ok(schedule) => schedule,
+        Err(error) => {
+            eprintln!("SPSA schedule preflight failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let checkpoint = if resumed
+        && (directory.paths().checkpoint.exists() || directory.paths().previous_checkpoint.exists())
+    {
+        match directory.read_checkpoint::<spsa_driver::SpsaCheckpoint>() {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                eprintln!("resume failed: {error}");
+                return ExitCode::from(3);
+            }
+        }
+    } else {
+        spsa_driver::SpsaCheckpoint::default()
+    };
+    if let Err(error) = recorder.set_workflow(json!({
+        "kind": "spsa",
+        "settings": settings,
+        "r_end": r_end,
+        "bound_tune": &bound_tune,
+        "engine_sha256": &engine_sha256,
+        "schedule": verified_schedule.artifact(),
+        "engine_time_control": engine_time_control,
+        "adjudication": adjudication,
+        "execution": execution,
+        "master_seed": master_seed,
+        "master_seed_generated": master_seed_generated,
+        "openings": openings.report(),
+        "fault_policy": "any engine fault invalidates the iteration and tune"
+    })) {
+        eprintln!("run record failed: {error}");
+        return ExitCode::from(3);
+    }
+    let observer = match DurableSpsaOutput::new(
+        Arc::clone(&directory),
+        checkpoint.clone(),
+        recorder,
+        settings,
+    ) {
+        Ok(output) => Arc::new(output),
+        Err(error) => {
+            eprintln!("SPSA output failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
+    if !machine {
+        eprintln!("SPSA run directory: {}", directory.paths().root.display());
+        if resumed {
+            eprintln!(
+                "resuming {} complete durable iteration(s); the stored schedule remains authoritative",
+                checkpoint.completed_iterations.len()
+            );
+        }
+    }
+    let progress = spsa_driver::SpsaProgress::default();
+    let driver_request = spsa_driver::SpsaDriverRequest {
+        schedule: verified_schedule,
+        settings,
+        initial_centers: bound_tune.initial_centers(),
+        base_engine: engine.clone(),
+        game_settings: match_runner::PairGameSettings {
+            engine_a: engine.clone(),
+            engine_b: engine,
+            engine_a_time_control: engine_time_control,
+            engine_b_time_control: engine_time_control,
+            adjudication,
+            openings: openings.clone(),
+        },
+        execution: execution.clone(),
+        checkpoint,
+        progress: progress.clone(),
+        observer: Some(observer.clone()),
+    };
+    let driver_future = spsa_driver::run_spsa(driver_request);
+    tokio::pin!(driver_future);
+    let period = Duration::from_secs(conditions.progress_interval_secs);
+    let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    let outcome = loop {
+        tokio::select! {
+            result = &mut driver_future => break result,
+            _ = interval.tick() => {
+                let snapshot = progress.snapshot();
+                eprintln!(
+                    "SPSA progress: {}/{} committed iterations, {} complete pairs played",
+                    snapshot.completed_iterations,
+                    settings.iterations,
+                    snapshot.completed_pairs
+                );
+            }
+        }
+    };
+    let driver = match outcome {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("SPSA failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let status = driver.status;
+    let report = SpsaReport {
+        bound_tune,
+        engine_sha256,
+        engine_time_control,
+        adjudication,
+        execution,
+        master_seed,
+        master_seed_generated,
+        openings: openings.report().clone(),
+        driver,
+    };
+    if let Err(error) = observer.finish(&report) {
+        eprintln!("SPSA output failed: {error}");
+        return ExitCode::from(3);
+    }
+    if machine {
+        print_json(&MachineOutput::Spsa {
+            run_directory: directory.paths().root.clone(),
+            report,
+        });
+    } else {
+        print_spsa(&report, &directory.paths().root);
+    }
+    match status {
+        spsa_driver::SpsaStatus::Completed => ExitCode::SUCCESS,
+        spsa_driver::SpsaStatus::Invalid => ExitCode::from(5),
+    }
+}
+
 fn resolve_sprt_design(command: &SprtCommand) -> Result<SprtDesign, String> {
     let bundle = command.preset.map(Into::into);
     let defaults = bundle.map(SprtBundle::defaults);
@@ -863,6 +1422,10 @@ enum MachineOutput<'a> {
         run_directory: PathBuf,
         report: sprt_runner::SprtReport,
     },
+    Spsa {
+        run_directory: PathBuf,
+        report: SpsaReport,
+    },
     Calibration {
         run_directory: PathBuf,
         report: CalibrationReport,
@@ -898,6 +1461,19 @@ struct CalibrationReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     statistics_unavailable: Option<String>,
     fixed_match: match_runner::FixedMatchReport,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SpsaReport {
+    bound_tune: SpsaBoundTune,
+    engine_sha256: String,
+    engine_time_control: match_runner::ConfiguredTimeControl,
+    adjudication: AdjudicationConfig,
+    execution: match_runner::MatchExecutionPlan,
+    master_seed: u64,
+    master_seed_generated: bool,
+    openings: match_runner::OpeningPolicyReport,
+    driver: spsa_driver::SpsaDriverReport,
 }
 
 struct PreparedCalibration {
@@ -1259,12 +1835,8 @@ fn prepare_calibration(command: &CalibrationCommand) -> Result<PreparedCalibrati
 }
 
 fn executable_sha256(path: &Path) -> Result<String, String> {
-    let bytes = fs::read(path).map_err(|error| {
-        format!(
-            "cannot hash calibration executable {}: {error}",
-            path.display()
-        )
-    })?;
+    let bytes = fs::read(path)
+        .map_err(|error| format!("cannot hash executable {}: {error}", path.display()))?;
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
@@ -1672,6 +2244,45 @@ fn read_stored_seed(root: &Path) -> Option<(u64, bool)> {
     ))
 }
 
+fn read_stored_spsa_inputs(root: &Path) -> Result<(SpsaRunSettings, f64), String> {
+    let path = root.join("resolved-config.json");
+    let bytes = fs::read(&path).map_err(|error| {
+        format!(
+            "cannot read stored configuration {}: {error}",
+            path.display()
+        )
+    })?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(|error| {
+        format!(
+            "cannot parse stored configuration {}: {error}",
+            path.display()
+        )
+    })?;
+    if value.get("command").and_then(Value::as_str) != Some("spsa") {
+        return Err(format!(
+            "stored configuration {} is not an SPSA run",
+            path.display()
+        ));
+    }
+    let iterations = value
+        .pointer("/settings/iterations")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| "stored SPSA iteration horizon is missing or invalid".to_owned())?;
+    let games_per_iteration = value
+        .pointer("/settings/games_per_iteration")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| "stored SPSA mini-match size is missing or invalid".to_owned())?;
+    let r_end = value
+        .get("r_end")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| "stored SPSA r_end is missing or invalid".to_owned())?;
+    let settings =
+        SpsaRunSettings::new(iterations, games_per_iteration).map_err(|error| error.to_string())?;
+    Ok((settings, r_end))
+}
+
 struct DurableMatchOutput {
     directory: Arc<RunDirectory>,
     games: Mutex<Vec<match_runner::MatchGame>>,
@@ -1885,6 +2496,178 @@ impl sprt_runner::PairObserver for DurableSprtOutput {
     }
 }
 
+struct DurableSpsaOutput {
+    directory: Arc<RunDirectory>,
+    checkpoint: Mutex<spsa_driver::SpsaCheckpoint>,
+    recorder: Mutex<Option<RunRecorder>>,
+    settings: SpsaRunSettings,
+}
+
+impl DurableSpsaOutput {
+    fn new(
+        directory: Arc<RunDirectory>,
+        checkpoint: spsa_driver::SpsaCheckpoint,
+        mut recorder: RunRecorder,
+        settings: SpsaRunSettings,
+    ) -> Result<Self, String> {
+        recorder
+            .update_sample(spsa_official_sample(&checkpoint, settings))
+            .map_err(|error| error.to_string())?;
+        let output = Self {
+            directory,
+            checkpoint: Mutex::new(checkpoint),
+            recorder: Mutex::new(Some(recorder)),
+            settings,
+        };
+        output.rewrite_pgn()?;
+        Ok(output)
+    }
+
+    fn persist_checkpoint(&self) -> Result<(), String> {
+        let checkpoint = self
+            .checkpoint
+            .lock()
+            .map_err(|_| "SPSA checkpoint lock poisoned")?;
+        self.directory
+            .write_checkpoint(&*checkpoint)
+            .map_err(|error| error.to_string())?;
+        let sample = spsa_official_sample(&checkpoint, self.settings);
+        drop(checkpoint);
+        let mut recorder = self
+            .recorder
+            .lock()
+            .map_err(|_| "SPSA run-record lock poisoned")?;
+        recorder
+            .as_mut()
+            .ok_or("SPSA run recorder is already finished")?
+            .update_sample(sample)
+            .map_err(|error| error.to_string())
+    }
+
+    fn rewrite_pgn(&self) -> Result<(), String> {
+        let checkpoint = self
+            .checkpoint
+            .lock()
+            .map_err(|_| "SPSA PGN lock poisoned")?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(self.directory.paths().root.join("games.pgn"))
+            .map_err(|error| error.to_string())?;
+        for iteration in &checkpoint.completed_iterations {
+            for pair in &iteration.pairs {
+                for game in [&pair.first, &pair.second] {
+                    writeln!(
+                        file,
+                        "{{Colosseum SPSA iteration: {}; sample: committed}}",
+                        iteration.iteration
+                    )
+                    .map_err(|error| error.to_string())?;
+                    writeln!(file, "{}\n", game.pgn.trim_end())
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+        }
+        if let Some(iteration) = &checkpoint.invalid_iteration {
+            for pair in &iteration.pairs {
+                for game in [&pair.first, &pair.second] {
+                    writeln!(
+                        file,
+                        "{{Colosseum SPSA iteration: {}; sample: invalid}}",
+                        iteration.iteration
+                    )
+                    .map_err(|error| error.to_string())?;
+                    writeln!(file, "{}\n", game.pgn.trim_end())
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+        }
+        file.sync_all().map_err(|error| error.to_string())
+    }
+
+    fn append_event(&self, event: Value) -> Result<(), String> {
+        let mut line = serde_json::to_vec(&event).map_err(|error| error.to_string())?;
+        line.push(b'\n');
+        self.directory
+            .append_log(&line)
+            .map_err(|error| error.to_string())
+    }
+
+    fn finish(&self, report: &SpsaReport) -> Result<(), String> {
+        let bytes = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
+        fs::write(self.directory.paths().root.join("result.json"), bytes)
+            .map_err(|error| error.to_string())?;
+        self.append_event(json!({
+            "event": "spsa-finished",
+            "status": report.driver.status,
+            "completed_iterations": report.driver.completed_iterations.len(),
+            "invalid_iteration": report.driver.invalid_iteration.as_ref().map(|value| value.iteration),
+        }))?;
+        let status = match report.driver.status {
+            spsa_driver::SpsaStatus::Completed => RunStatus::Completed,
+            spsa_driver::SpsaStatus::Invalid => RunStatus::Invalid,
+        };
+        let recorder = self
+            .recorder
+            .lock()
+            .map_err(|_| "SPSA run-record lock poisoned")?
+            .take()
+            .ok_or("SPSA run recorder is already finished")?;
+        recorder.finish(status).map_err(|error| error.to_string())
+    }
+}
+
+impl spsa_driver::SpsaObserver for DurableSpsaOutput {
+    fn iteration_committed(
+        &self,
+        iteration: &spsa_driver::SpsaCommittedIteration,
+    ) -> Result<(), String> {
+        self.checkpoint
+            .lock()
+            .map_err(|_| "SPSA checkpoint lock poisoned")?
+            .completed_iterations
+            .push(iteration.clone());
+        self.persist_checkpoint()?;
+        self.rewrite_pgn()?;
+        self.append_event(json!({
+            "event": "spsa-iteration-committed",
+            "iteration": iteration,
+        }))
+    }
+
+    fn iteration_invalid(
+        &self,
+        iteration: &spsa_driver::SpsaInvalidIteration,
+    ) -> Result<(), String> {
+        self.checkpoint
+            .lock()
+            .map_err(|_| "SPSA checkpoint lock poisoned")?
+            .invalid_iteration = Some(iteration.clone());
+        self.persist_checkpoint()?;
+        self.rewrite_pgn()?;
+        self.append_event(json!({
+            "event": "spsa-iteration-invalid",
+            "iteration": iteration,
+        }))
+    }
+}
+
+fn spsa_official_sample(
+    checkpoint: &spsa_driver::SpsaCheckpoint,
+    settings: SpsaRunSettings,
+) -> OfficialSample {
+    let iterations = checkpoint.completed_iterations.len() as u64;
+    let pairs = iterations * u64::from(settings.pairs_per_iteration());
+    OfficialSample {
+        committed_units: iterations,
+        scored_games: pairs * 2,
+        completed_pairs: pairs,
+        pentanomial: [0; 5],
+        unpaired_games: 0,
+    }
+}
+
 fn resolve_master_seed(configured: Option<u64>) -> Result<(u64, bool), String> {
     if let Some(seed) = configured {
         return Ok((seed, false));
@@ -2056,6 +2839,32 @@ fn print_sprt(report: &sprt_runner::SprtReport, run_directory: &Path) {
             .invalid_pair
             .map_or_else(|| "none".into(), |value| value.to_string())
     );
+    println!("artifacts: {}", run_directory.display());
+}
+
+fn print_spsa(report: &SpsaReport, run_directory: &Path) {
+    println!(
+        "SPSA {:?}: {}/{} complete iterations ({} games each)",
+        report.driver.status,
+        report.driver.completed_iterations.len(),
+        report.driver.settings.iterations,
+        report.driver.settings.games_per_iteration
+    );
+    for (parameter, center) in report
+        .bound_tune
+        .parameters
+        .iter()
+        .zip(&report.driver.final_centers)
+    {
+        println!("{}: {:.6}", parameter.parameter.name, center);
+    }
+    if let Some(invalid) = &report.driver.invalid_iteration {
+        println!(
+            "iteration {} invalid: {} engine faults; no gradient applied",
+            invalid.iteration,
+            invalid.faults.engine_a + invalid.faults.engine_b
+        );
+    }
     println!("artifacts: {}", run_directory.display());
 }
 

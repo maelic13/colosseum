@@ -6,3 +6,7 @@ The CLI follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 The first public CLI release is not yet published.
+
+- Added durable pair-atomic SPSA tuning over ordinary UCI spin options, with
+  exact schedule preflight, optional books, engine-fault invalidation and
+  kill/resume recovery at complete-iteration boundaries.

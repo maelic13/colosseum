@@ -25,6 +25,7 @@ fn help_is_headless_and_names_the_product() {
     assert!(stdout.contains("capabilities"));
     assert!(stdout.contains("match"));
     assert!(stdout.contains("sprt"));
+    assert!(stdout.contains("spsa"));
     assert!(stdout.contains("calibrate"));
     assert!(output.stderr.is_empty());
 }

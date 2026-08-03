@@ -854,6 +854,24 @@ report an unattributable divergence.
 - A mini-match is committed only when all of its scheduled colour pairs
   complete. An engine-attributable fault invalidates the iteration and tune;
   it is never converted into a gradient or selectively retried.
+
+  **Implementation evidence (5.5):** the `spsa` composition root accepts one
+  ordinary UCI executable plus the required ordered tune file, binds it through
+  the live handshake and passes only the schedule token read back from
+  `spsa-schedule.json` into the application-owned `SpsaTuningState`. That state
+  machine alone prepares the next arms, requires the complete mini-match,
+  applies a fault-free update, rejects fault-derived gradients and exactly
+  replays durable history. The CLI adapter owns UCI execution and persistence,
+  not tuning policy. Its optional book is parsed once per process session and
+  reused in memory; engines retain deliberate per-game isolation. Each
+  iteration runs a deterministic global pair-ID range and publishes one
+  checkpoint only after every colour pair finishes. A non-scorable failure
+  publishes no iteration; any engine fault publishes the complete invalid
+  evidence with no `centers_after` and no gradient. Resume replays every stored
+  centre, RNG draw, arm vector, score and update before continuing, compares
+  executable SHA-256, and keeps the stored schedule authoritative. The JSON
+  adapter enables exact float round trips after a three-iteration regression
+  exposed a one-ULP schedule change without it.
 - **Config audit**, against the live schema:
   1. option absent or not a numeric `spin` *(error)*
   2. duplicate parameter *(error)*

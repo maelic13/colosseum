@@ -111,3 +111,22 @@ fn resume_refuses_a_valid_schedule_derived_from_different_inputs() {
         ))
     ));
 }
+
+#[test]
+fn short_horizon_schedule_survives_exact_json_round_trip() {
+    let expected = SpsaScheduleArtifact::derive(
+        3,
+        0.002,
+        7,
+        &[SpsaEndSpec {
+            name: "Hash".into(),
+            min: 1,
+            max: 1024,
+            c_end: 1.0,
+        }],
+    )
+    .unwrap();
+    let bytes = serde_json::to_vec_pretty(&expected).unwrap();
+    let written: SpsaScheduleArtifact = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(written, expected);
+}
