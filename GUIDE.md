@@ -15,10 +15,10 @@ numbers, internal naming or method argumentation.
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
 | What exists | Phases 0–8 are complete: independent fixed match/SPRT/calibration/SPSA workflows plus speed/scaling, book, statistics planning/replay/telemetry, durable position suites, tournaments, external parity and reasoned runner-gap decisions |
-| What is missing | Final naming decision, user documentation, release artifacts and cross-platform/third-party release acceptance |
+| What is missing | User documentation, release artifacts and cross-platform/third-party release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 8 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 9.0 — optional final naming review** |
+| Next step | **Phase 9.1 — documentation placement analysis** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -697,14 +697,17 @@ model as well.
 
 ### Phase 9 — Documentation and release
 
-- ☐ **9.0** — **Model: Sol High. Optional final naming review:** judge the
+- ☑ **9.0 — DONE** — **Model: Sol High. Optional final naming review:** judge the
   implemented product and either retain Colosseum with a recorded decision or
   choose one replacement and perform the complete one-time migration before
   documentation and release. Recheck dated web, same-domain, GitHub,
   package-channel and preliminary trademark evidence. A rename covers the
   repository, packages/crates, binaries, releases/artifacts, installer and app
   IDs, config/data compatibility, updater URLs and docs; do not build neutral
-  aliases or a speculative branding framework merely to prepare for it
+  aliases or a speculative branding framework merely to prepare for it —
+  retained Colosseum and Colosseum CLI after the dated review; ADR-0009 records
+  the unchanged collision evidence, descriptive qualifier policy, accepted
+  risk and future revisit triggers
 - ☐ **9.1** — **Model: Sol High. Documentation placement analysis:** in-repo `docs/` published as a
   static site, GitHub wiki, or generated reference plus guides. Criteria:
   versioning with the binary (a wiki does not version, which matters once
@@ -766,10 +769,9 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 9.0 — optional final naming review. Model: GPT-5.6 Sol — High.**
-Judge the complete GUI/CLI product and either retain Colosseum with a dated,
-recorded collision review or select one replacement and perform the complete
-one-time migration before final user documentation and release.
+**Phase 9.1 — documentation placement analysis. Model: GPT-5.6 Sol — High.**
+Choose and record the versioned user-documentation system, including how its
+command reference stays synchronized with the CLI argument parser.
 
 ```
 git diff --check

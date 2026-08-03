@@ -8,6 +8,15 @@ implementation. It is historical evidence, not a naming instruction.
 Colosseum and `colosseum-cli` as the coherent implementation identity and
 deferred an optional whole-product review to Phase 9.0.
 
+Phase 9.0 completed that review on 2026-08-03. [ADR-0009](adr/0009-retain-colosseum-for-1-0.md)
+retains **Colosseum** and **Colosseum CLI** for 1.0, with descriptive
+chess-engine qualifiers and explicit acceptance of the known search and spoken
+collision risk. The review found no materially changed evidence: the same
+chess-domain GUI and unrelated wireless CLI remain active, `colosseum-cli`
+remains unused on the planned crates.io channel, GitHub remains crowded, and
+the exact TMview result counts remain 177 for COLOSSEUM and 128 for COLISEUM.
+The screen is dated, preliminary evidence rather than legal clearance.
+
 ## Current implementation identity
 
 | Surface | Name |
@@ -113,7 +122,8 @@ products, so they repeat the search problem under a new spelling.
 
 ## Revalidation rule
 
-Phase 9.0 repeats exact web, same-domain, GitHub, planned package-channel and
-preliminary trademark checks and records the date. It either retains Colosseum
-or explicitly performs a complete whole-product migration before documentation
-and release. No name change or compatibility alias is added silently.
+Phase 9.0 repeated exact web, same-domain, GitHub, planned package-channel and
+preliminary trademark checks on 2026-08-03. ADR-0009 records the decision to
+retain Colosseum for 1.0. Any future reconsideration uses ADR-0009's concrete
+triggers and requires a complete whole-product migration; no name change or
+compatibility alias is added silently.

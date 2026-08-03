@@ -1889,6 +1889,14 @@ The deliverable is a tool any engine developer can pick up.
   preliminary trademark checks. This is a decision gate, not a mandatory
   rename, and does not justify neutral aliases or branding abstractions in the
   implementation.
+
+**Accepted (9.0):** the dated web, same-domain, GitHub, crates.io and
+preliminary TMview revalidation found the known collision risk unchanged.
+Colosseum and Colosseum CLI are retained for the 1.0 product family; public
+introductory surfaces use a chess-engine-testing qualifier, and the executable
+remains exactly `colosseum-cli`. [ADR-0009](docs/architecture/adr/0009-retain-colosseum-for-1-0.md)
+records the evidence, accepted risk, legal limitation and future revisit
+triggers. No alias or speculative branding layer is introduced.
 - **(a) Documentation placement analysis.** Decide where user documentation
   lives: in-repo `docs/` published via a static site, a GitHub wiki, or
   generated command reference plus a handful of guides. Criteria: versioning
