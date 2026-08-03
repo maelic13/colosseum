@@ -16,6 +16,7 @@
 
 use colosseum_core::rng::stream_names;
 use colosseum_core::{NamedRng, OpeningBook, OpeningFormat, OpeningOrder};
+use serde::{Deserialize, Serialize};
 use shakmaty::fen::Fen;
 use shakmaty::san::San;
 use shakmaty::uci::UciMove;
@@ -332,6 +333,50 @@ pub struct OpeningSummary {
     pub first_label: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpeningAudit {
+    pub format: String,
+    pub candidates: usize,
+    pub usable: usize,
+    pub rejected_indices: Vec<usize>,
+}
+
+impl OpeningAudit {
+    #[must_use]
+    pub fn valid(&self) -> bool {
+        self.usable > 0 && self.rejected_indices.is_empty()
+    }
+}
+
+/// Strictly account for every non-comment EPD line or PGN game. Normal match
+/// loading may skip malformed candidates; this audit makes those skips visible.
+pub fn audit_opening_book(book: &OpeningBook) -> Result<OpeningAudit, OpeningError> {
+    let text = std::fs::read_to_string(&book.path)?;
+    let validity = match book.format {
+        OpeningFormat::Epd => text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| epd_to_fen(line).is_some())
+            .collect::<Vec<_>>(),
+        OpeningFormat::Pgn => split_pgn_games(&text)
+            .iter()
+            .map(|game| parse_pgn_game(game, book.plies.max(1) as usize).is_some())
+            .collect::<Vec<_>>(),
+    };
+    let rejected_indices = validity
+        .iter()
+        .enumerate()
+        .filter_map(|(index, valid)| (!valid).then_some(index + 1))
+        .collect::<Vec<_>>();
+    Ok(OpeningAudit {
+        format: book.format.label().into(),
+        candidates: validity.len(),
+        usable: validity.iter().filter(|valid| **valid).count(),
+        rejected_indices,
+    })
+}
+
 /// Load a book only to report how many openings it yields and a sample label.
 pub fn summarize(book: &OpeningBook) -> Result<OpeningSummary, OpeningError> {
     let openings = load_openings(book)?;
@@ -400,6 +445,20 @@ r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - bm Nf6;
         assert!(openings[0].moves.is_empty());
         // The second line's trailing opcode is ignored; FEN is still valid.
         assert!(position_from_fen(openings[1].start_fen.as_deref().unwrap()).is_some());
+    }
+
+    #[test]
+    fn strict_audit_accounts_for_rejected_candidates() {
+        let path = write_temp(
+            "audit.epd",
+            "8/8/8/8/8/8/K7/7k w - -\nnot a valid epd\n# ignored\n",
+        );
+        let book = OpeningBook::new(path);
+        let audit = audit_opening_book(&book).unwrap();
+        assert_eq!(audit.candidates, 2);
+        assert_eq!(audit.usable, 1);
+        assert_eq!(audit.rejected_indices, [2]);
+        assert!(!audit.valid());
     }
 
     #[test]

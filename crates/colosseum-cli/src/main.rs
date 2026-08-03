@@ -29,13 +29,14 @@ use colosseum_cli::{
     read_and_verify_spsa_schedule, resolve_config,
 };
 use colosseum_core::{
-    AdjudicationConfig, DrawAdjudication, EloModel, GameResult, OpeningBook, OpeningOrder,
-    PairGameResult, ParticipantId, PentanomialVector, ResignAdjudication, SpsaEndSpec,
-    SpsaScheduleArtifact, TimeControl, fixed_n_achieved_resolution,
+    AdjudicationConfig, DrawAdjudication, EloModel, GameResult, OpeningBook, OpeningFormat,
+    OpeningOrder, PairGameResult, ParticipantId, PentanomialVector, ResignAdjudication,
+    SpsaEndSpec, SpsaScheduleArtifact, TimeControl, fixed_n_achieved_resolution,
 };
 use colosseum_engine::{
-    CpuPlacementPlan, CpuPlacementPolicy, detect_allowed_cpu_set, detect_cpu_characteristics,
-    detect_cpu_topology, plan_cpu_placement,
+    CpuPlacementPlan, CpuPlacementPolicy, audit_opening_book, detect_allowed_cpu_set,
+    detect_cpu_characteristics, detect_cpu_topology, fen_after, load_openings_named,
+    plan_cpu_placement,
 };
 use colosseum_uci::{AffinityUciSessionFactory, UciSessionFactory};
 use serde::{Deserialize, Serialize};
@@ -80,11 +81,13 @@ enum Command {
     /// Tune numeric UCI options with durable pair-atomic SPSA.
     Spsa(Box<SpsaCommand>),
     /// Measure fixed-node search speed using harness monotonic wall time.
-    Nps(NpsCommand),
+    Nps(Box<NpsCommand>),
     /// Measure identical-binary symmetry under representative match conditions.
     Calibrate(Box<CalibrationCommand>),
     /// Inspect or compliance-check an ordinary UCI executable.
     Engine(EngineCommand),
+    /// Inspect, verify, hash or deterministically slice an opening book.
+    Book(BookCommand),
     /// Verify this exact executable's protocol, process and persistence paths.
     SelfTest,
     /// Read the official state of any CLI run without modifying it.
@@ -550,6 +553,74 @@ struct EngineInvocation {
 }
 
 #[derive(Debug, Args)]
+struct BookCommand {
+    #[command(subcommand)]
+    action: BookAction,
+}
+
+#[derive(Debug, Subcommand)]
+enum BookAction {
+    /// Write a deterministic canonical EPD subset.
+    Slice(BookSliceCommand),
+    /// Compute the SHA-256 of the exact input bytes.
+    Hash(BookInput),
+    /// Report parsed entry, uniqueness and ply statistics.
+    Stats(BookInput),
+    /// Strictly account for every candidate and reject malformed entries.
+    Verify(BookInput),
+}
+
+#[derive(Debug, Clone, Args)]
+struct BookInput {
+    /// EPD or PGN input path.
+    input: PathBuf,
+    /// Override format detection from the file extension.
+    #[arg(long, value_enum)]
+    format: Option<BookFormatArg>,
+    /// PGN half-moves retained per game.
+    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..))]
+    plies: u32,
+}
+
+#[derive(Debug, Args)]
+struct BookSliceCommand {
+    #[command(flatten)]
+    book: BookInput,
+    /// Canonical EPD output path.
+    output: PathBuf,
+    /// Number of ordered entries skipped before writing.
+    #[arg(long, default_value_t = 0)]
+    start: usize,
+    /// Maximum entries written.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    count: u64,
+    /// Sequential file order or named-stream random order.
+    #[arg(long, value_enum, default_value_t = BookOrderArg::Sequential)]
+    order: BookOrderArg,
+    /// Master seed used by random order.
+    #[arg(long, default_value_t = 0)]
+    seed: u64,
+    /// Permit replacing an existing output file.
+    #[arg(long)]
+    force: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum BookFormatArg {
+    Epd,
+    Pgn,
+}
+
+impl From<BookFormatArg> for OpeningFormat {
+    fn from(value: BookFormatArg) -> Self {
+        match value {
+            BookFormatArg::Epd => Self::Epd,
+            BookFormatArg::Pgn => Self::Pgn,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
 struct NpsCommand {
     #[command(flatten)]
     engine: EngineArgs,
@@ -664,9 +735,11 @@ async fn main() -> ExitCode {
                 None => run_spsa_command(command, cli.json, cli.dry_run).await,
             }
         }
-        Command::Nps(command) => run_nps(command, cli.json, cli.dry_run).await,
+        Command::Nps(command) => run_nps(*command, cli.json, cli.dry_run).await,
         Command::Calibrate(command) => run_calibration(*command, cli.json, cli.dry_run).await,
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
+        Command::Book(_) if cli.dry_run => unsupported_dry_run("book"),
+        Command::Book(command) => run_book(command.action, cli.json),
         Command::SelfTest if cli.dry_run => unsupported_dry_run("self-test"),
         Command::SelfTest => run_self_test(cli.json).await,
         Command::Status { .. } if cli.dry_run => unsupported_dry_run("status"),
@@ -2185,6 +2258,359 @@ async fn run_engine(command: EngineAction, machine: bool, dry_run: bool) -> Exit
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct BookHashReport {
+    path: PathBuf,
+    bytes: u64,
+    sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BookStatsReport {
+    path: PathBuf,
+    format: String,
+    sha256: String,
+    bytes: u64,
+    candidates: usize,
+    usable: usize,
+    rejected: usize,
+    unique: usize,
+    duplicates: usize,
+    min_plies: usize,
+    max_plies: usize,
+    mean_plies: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    eval_band: Option<BookEvalBand>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BookEvalBand {
+    samples: usize,
+    unit: String,
+    minimum: f64,
+    mean: f64,
+    maximum: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BookSliceReport {
+    input: PathBuf,
+    output: PathBuf,
+    input_sha256: String,
+    output_sha256: String,
+    start: usize,
+    requested_count: usize,
+    written: usize,
+    order: String,
+    seed: u64,
+}
+
+fn run_book(action: BookAction, machine: bool) -> ExitCode {
+    match action {
+        BookAction::Hash(input) => match hash_file_report(&input.input) {
+            Ok(report) => {
+                if machine {
+                    print_json(&MachineOutput::BookHash { report });
+                } else {
+                    println!("{}  {}", report.sha256, report.path.display());
+                    println!("bytes: {}", report.bytes);
+                }
+                ExitCode::SUCCESS
+            }
+            Err(error) => book_error(error),
+        },
+        BookAction::Verify(input) => match opening_book(&input)
+            .and_then(|book| audit_opening_book(&book).map_err(|error| error.to_string()))
+        {
+            Ok(audit) => {
+                let valid = audit.valid();
+                if machine {
+                    print_json(&MachineOutput::BookVerify { audit });
+                } else {
+                    println!(
+                        "{}: {} usable of {} candidates",
+                        if valid { "valid" } else { "invalid" },
+                        audit.usable,
+                        audit.candidates
+                    );
+                    if !audit.rejected_indices.is_empty() {
+                        println!(
+                            "rejected candidate indices: {}",
+                            audit
+                                .rejected_indices
+                                .iter()
+                                .map(usize::to_string)
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        );
+                    }
+                }
+                if valid {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::FAILURE
+                }
+            }
+            Err(error) => book_error(error),
+        },
+        BookAction::Stats(input) => match book_stats(&input) {
+            Ok(report) => {
+                if machine {
+                    print_json(&MachineOutput::BookStats { report });
+                } else {
+                    println!(
+                        "{}: {} usable / {} candidates; {} unique, {} duplicates",
+                        report.format,
+                        report.usable,
+                        report.candidates,
+                        report.unique,
+                        report.duplicates
+                    );
+                    println!(
+                        "plies: min {}, mean {:.3}, max {}",
+                        report.min_plies, report.mean_plies, report.max_plies
+                    );
+                    if let Some(eval) = &report.eval_band {
+                        println!(
+                            "eval band ({}; {} samples): {:.3}..{:.3}, mean {:.3}",
+                            eval.unit, eval.samples, eval.minimum, eval.maximum, eval.mean
+                        );
+                    }
+                    println!("SHA-256: {}", report.sha256);
+                }
+                ExitCode::SUCCESS
+            }
+            Err(error) => book_error(error),
+        },
+        BookAction::Slice(command) => match slice_book(&command) {
+            Ok(report) => {
+                if machine {
+                    print_json(&MachineOutput::BookSlice { report });
+                } else {
+                    println!(
+                        "wrote {} canonical EPD entries to {}",
+                        report.written,
+                        report.output.display()
+                    );
+                    println!("output SHA-256: {}", report.output_sha256);
+                }
+                ExitCode::SUCCESS
+            }
+            Err(error) => book_error(error),
+        },
+    }
+}
+
+fn opening_book(input: &BookInput) -> Result<OpeningBook, String> {
+    let format = input.format.map(Into::into).unwrap_or_else(|| {
+        OpeningFormat::from_extension(
+            input
+                .input
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default(),
+        )
+    });
+    Ok(OpeningBook {
+        path: input.input.clone(),
+        format,
+        order: OpeningOrder::Sequential,
+        count: None,
+        plies: input.plies,
+        seed: 0,
+    })
+}
+
+fn hash_file_report(path: &Path) -> Result<BookHashReport, String> {
+    let bytes =
+        fs::read(path).map_err(|error| format!("cannot read book {}: {error}", path.display()))?;
+    Ok(BookHashReport {
+        path: path.to_owned(),
+        bytes: bytes.len() as u64,
+        sha256: format!("{:x}", Sha256::digest(&bytes)),
+    })
+}
+
+fn book_stats(input: &BookInput) -> Result<BookStatsReport, String> {
+    let book = opening_book(input)?;
+    let audit = audit_opening_book(&book).map_err(|error| error.to_string())?;
+    let openings = load_openings_named(&book, 0).map_err(|error| error.to_string())?;
+    let hash = hash_file_report(&input.input)?;
+    let unique = openings
+        .iter()
+        .map(|opening| format!("{:?}\0{}", opening.start_fen, opening.moves.join(" ")))
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+    let min_plies = openings
+        .iter()
+        .map(|opening| opening.moves.len())
+        .min()
+        .unwrap_or(0);
+    let max_plies = openings
+        .iter()
+        .map(|opening| opening.moves.len())
+        .max()
+        .unwrap_or(0);
+    let mean_plies = openings
+        .iter()
+        .map(|opening| opening.moves.len() as f64)
+        .sum::<f64>()
+        / openings.len() as f64;
+    let text = fs::read_to_string(&input.input)
+        .map_err(|error| format!("cannot read book {}: {error}", input.input.display()))?;
+    let (eval_values, eval_unit) = book_eval_values(&text, book.format);
+    let eval_band = (!eval_values.is_empty()).then(|| BookEvalBand {
+        samples: eval_values.len(),
+        unit: eval_unit.into(),
+        minimum: eval_values.iter().copied().fold(f64::INFINITY, f64::min),
+        mean: eval_values.iter().sum::<f64>() / eval_values.len() as f64,
+        maximum: eval_values
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max),
+    });
+    Ok(BookStatsReport {
+        path: input.input.clone(),
+        format: book.format.label().into(),
+        sha256: hash.sha256,
+        bytes: hash.bytes,
+        candidates: audit.candidates,
+        usable: audit.usable,
+        rejected: audit.rejected_indices.len(),
+        unique,
+        duplicates: openings.len() - unique,
+        min_plies,
+        max_plies,
+        mean_plies,
+        eval_band,
+    })
+}
+
+fn book_eval_values(text: &str, format: OpeningFormat) -> (Vec<f64>, &'static str) {
+    match format {
+        OpeningFormat::Epd => {
+            let values = text
+                .lines()
+                .filter_map(|line| {
+                    let tokens = line
+                        .split(|character: char| character.is_whitespace() || character == ';')
+                        .filter(|token| !token.is_empty())
+                        .collect::<Vec<_>>();
+                    tokens
+                        .windows(2)
+                        .find_map(|pair| (pair[0] == "ce").then(|| pair[1].parse().ok()).flatten())
+                })
+                .collect();
+            (values, "centipawns (EPD ce)")
+        }
+        OpeningFormat::Pgn => {
+            let mut rest = text;
+            let mut values = Vec::new();
+            while let Some((_, after)) = rest.split_once("[%eval ") {
+                if let Some(value) = after
+                    .split(|character: char| character == ']' || character.is_whitespace())
+                    .next()
+                    .and_then(|value| value.parse().ok())
+                {
+                    values.push(value);
+                }
+                rest = after;
+            }
+            (values, "pawns (PGN %eval)")
+        }
+    }
+}
+
+fn slice_book(command: &BookSliceCommand) -> Result<BookSliceReport, String> {
+    if command.output == command.book.input {
+        return Err("slice output must differ from the input path".into());
+    }
+    let mut book = opening_book(&command.book)?;
+    let audit = audit_opening_book(&book).map_err(|error| error.to_string())?;
+    if !audit.valid() {
+        return Err(format!(
+            "book contains rejected candidates at indices {}",
+            audit
+                .rejected_indices
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
+    book.order = match command.order {
+        BookOrderArg::Sequential => OpeningOrder::Sequential,
+        BookOrderArg::Random => OpeningOrder::Random,
+    };
+    let openings = load_openings_named(&book, command.seed).map_err(|error| error.to_string())?;
+    if command.start >= openings.len() {
+        return Err(format!(
+            "slice start {} is outside {} usable entries",
+            command.start,
+            openings.len()
+        ));
+    }
+    let selected = openings
+        .iter()
+        .skip(command.start)
+        .take(usize::try_from(command.count).unwrap_or(usize::MAX))
+        .collect::<Vec<_>>();
+    let mut output = String::new();
+    for opening in &selected {
+        let fen = fen_after(opening.start_fen.as_deref(), &opening.moves)
+            .ok_or_else(|| format!("cannot materialize opening {:?}", opening.label))?;
+        output.push_str(&fen.split_whitespace().take(4).collect::<Vec<_>>().join(" "));
+        output.push('\n');
+    }
+    let mut options = OpenOptions::new();
+    options.write(true);
+    if command.force {
+        options.create(true).truncate(true);
+    } else {
+        options.create_new(true);
+    }
+    let mut file = options.open(&command.output).map_err(|error| {
+        format!(
+            "cannot create slice output {}: {error}",
+            command.output.display()
+        )
+    })?;
+    file.write_all(output.as_bytes()).map_err(|error| {
+        format!(
+            "cannot write slice output {}: {error}",
+            command.output.display()
+        )
+    })?;
+    file.sync_all().map_err(|error| {
+        format!(
+            "cannot flush slice output {}: {error}",
+            command.output.display()
+        )
+    })?;
+    let input_hash = hash_file_report(&command.book.input)?;
+    let output_hash = hash_file_report(&command.output)?;
+    Ok(BookSliceReport {
+        input: command.book.input.clone(),
+        output: command.output.clone(),
+        input_sha256: input_hash.sha256,
+        output_sha256: output_hash.sha256,
+        start: command.start,
+        requested_count: usize::try_from(command.count).unwrap_or(usize::MAX),
+        written: selected.len(),
+        order: match command.order {
+            BookOrderArg::Sequential => "sequential",
+            BookOrderArg::Random => "random",
+        }
+        .into(),
+        seed: command.seed,
+    })
+}
+
+fn book_error(error: String) -> ExitCode {
+    eprintln!("book command failed: {error}");
+    ExitCode::FAILURE
+}
+
 async fn run_nps(command: NpsCommand, machine: bool, dry_run: bool) -> ExitCode {
     let base_launch = match command.engine.resolve() {
         Ok(launch) => launch,
@@ -2565,12 +2991,12 @@ async fn run_nps_scaling(
         }
     };
     let mut path_pointers = Vec::new();
-    for job in 0..jobs.len() {
+    for (job, scaling_job) in jobs.iter().enumerate() {
         for participant in 0..2 {
             path_pointers.push(format!(
                 "/jobs/{job}/participants/{participant}/participant/launch/executable"
             ));
-            if jobs[job].participants[participant]
+            if scaling_job.participants[participant]
                 .participant
                 .launch
                 .working_directory
@@ -2855,6 +3281,18 @@ enum MachineOutput<'a> {
     },
     EngineCompliance {
         report: ComplianceReport,
+    },
+    BookHash {
+        report: BookHashReport,
+    },
+    BookStats {
+        report: BookStatsReport,
+    },
+    BookVerify {
+        audit: colosseum_engine::OpeningAudit,
+    },
+    BookSlice {
+        report: BookSliceReport,
     },
     Nps {
         report: NpsReport,

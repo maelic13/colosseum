@@ -31,6 +31,7 @@ Detailed contracts:
 - [Optional identical-binary calibration](calibration.md)
 - [SPSA tuning, planning and diagnostics](spsa.md)
 - [Fixed-node NPS measurement](nps.md)
+- [Opening-book utilities](book.md)
 - [Configuration files, inheritance and path origins](run-files.md)
 - [Master seed and named random streams](randomness.md)
 - [Human, JSON and dry-run output](output.md)

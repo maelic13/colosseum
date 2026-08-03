@@ -25,3 +25,5 @@ The first public CLI release is not yet published.
   bootstrap intervals, optional self-pair checks and round-noise diagnostics.
 - Added pinned fixed-node thread-scaling sweeps with explicit thread controls,
   fixed-total/per-thread Hash, topology evidence, speedup and efficiency.
+- Added engine-free EPD/PGN `book hash`, `verify`, `stats` and deterministic
+  canonical-EPD `slice` utilities.

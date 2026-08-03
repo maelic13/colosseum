@@ -27,8 +27,95 @@ fn help_is_headless_and_names_the_product() {
     assert!(stdout.contains("sprt"));
     assert!(stdout.contains("spsa"));
     assert!(stdout.contains("nps"));
+    assert!(stdout.contains("book"));
     assert!(stdout.contains("calibrate"));
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn book_tools_hash_verify_stats_and_slice_without_an_engine() {
+    let root = tempfile::tempdir().unwrap();
+    let input = root.path().join("openings.epd");
+    std::fs::write(
+        &input,
+        "8/8/8/8/8/8/K7/7k w - - ce 20;\n8/8/8/8/8/8/1K6/7k w - -\n8/8/8/8/8/8/2K5/7k w - -\n",
+    )
+    .unwrap();
+
+    let hash = cli()
+        .args(["book", "hash"])
+        .arg(&input)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(hash.status.success());
+    let hash: serde_json::Value = serde_json::from_slice(&hash.stdout).unwrap();
+    assert_eq!(hash["type"], "book-hash");
+    assert_eq!(hash["report"]["sha256"].as_str().unwrap().len(), 64);
+
+    let stats = cli()
+        .args(["book", "stats"])
+        .arg(&input)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(stats.status.success());
+    let stats: serde_json::Value = serde_json::from_slice(&stats.stdout).unwrap();
+    assert_eq!(stats["report"]["usable"], 3);
+    assert_eq!(stats["report"]["unique"], 3);
+    assert_eq!(stats["report"]["mean_plies"], 0.0);
+    assert_eq!(stats["report"]["eval_band"]["samples"], 1);
+    assert_eq!(stats["report"]["eval_band"]["mean"], 20.0);
+
+    let verified = cli()
+        .args(["book", "verify"])
+        .arg(&input)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(verified.status.success());
+    let verified: serde_json::Value = serde_json::from_slice(&verified.stdout).unwrap();
+    assert_eq!(verified["audit"]["rejected_indices"], serde_json::json!([]));
+
+    let first = root.path().join("first.epd");
+    let second = root.path().join("second.epd");
+    for output in [&first, &second] {
+        let sliced = cli()
+            .args(["book", "slice"])
+            .arg(&input)
+            .arg(output)
+            .args([
+                "--count", "2", "--order", "random", "--seed", "42", "--json",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            sliced.status.success(),
+            "{}",
+            String::from_utf8_lossy(&sliced.stderr)
+        );
+        let sliced: serde_json::Value = serde_json::from_slice(&sliced.stdout).unwrap();
+        assert_eq!(sliced["report"]["written"], 2);
+    }
+    assert_eq!(
+        std::fs::read(first).unwrap(),
+        std::fs::read(second).unwrap()
+    );
+
+    let invalid = root.path().join("invalid.epd");
+    std::fs::write(&invalid, "not an epd\n").unwrap();
+    let rejected = cli()
+        .args(["book", "verify"])
+        .arg(&invalid)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(rejected.status.code(), Some(1));
+    let rejected: serde_json::Value = serde_json::from_slice(&rejected.stdout).unwrap();
+    assert_eq!(
+        rejected["audit"]["rejected_indices"],
+        serde_json::json!([1])
+    );
 }
 
 #[test]

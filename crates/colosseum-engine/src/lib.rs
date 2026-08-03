@@ -49,7 +49,8 @@ pub use error::EngineError;
 pub use live::{EvalPoint, LiveGameHandle, LiveGameState, LiveSearch};
 #[cfg(feature = "runner")]
 pub use openings::{
-    OpeningError, OpeningSummary, ResolvedOpening, load_openings, load_openings_named, summarize,
+    OpeningAudit, OpeningError, OpeningSummary, ResolvedOpening, audit_opening_book, fen_after,
+    load_openings, load_openings_named, summarize,
 };
 pub use placement::{
     CpuPlacementError, CpuPlacementPlan, CpuPlacementPolicy, DEFAULT_AUTO_HEADROOM_PHYSICAL_CORES,

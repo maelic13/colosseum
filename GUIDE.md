@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | Speed/scaling, book/replay/planning/suite tools, tournaments, release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 5 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 6.4 — opening-book utilities** |
+| Next step | **Phase 6.5 — statistics replay authority** |
 | Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
@@ -610,7 +610,13 @@ model as well.
   [`crates/colosseum-application/src/nps.rs`](crates/colosseum-application/src/nps.rs),
   [`crates/colosseum-uci/src/session.rs`](crates/colosseum-uci/src/session.rs),
   [`docs/cli/nps.md`](docs/cli/nps.md)
-- ☐ **6.4** — **Model: Terra High.** `book slice` / `hash` / `stats` / `verify`
+- ☑ **6.4 — DONE** — **Model: Terra High.** Engine-free `book hash`, strict
+  candidate-accounting `verify`, parsed uniqueness/ply `stats`, and seeded
+  canonical-EPD `slice` share the production EPD/PGN parser; slices refuse
+  malformed input and accidental overwrite and record both hashes — evidence:
+  [`crates/colosseum-engine/src/openings.rs`](crates/colosseum-engine/src/openings.rs),
+  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
+  [`docs/cli/book.md`](docs/cli/book.md)
 - ☐ **6.5** — **Model: Terra High.** `stats` authority: structured run store > PGN export > forensic log >
   console; missing pair identity falls back to labelled unpaired statistics
 - ☐ **6.6** — **Model: Sol High.** `stats plan fixed|sprt` with explicit assumptions; fixed-N required
@@ -714,9 +720,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 6.4 — opening-book utilities. Model: GPT-5.6 Terra — High.**
-Add deterministic `book slice`, `book hash`, `book stats` and `book verify`
-commands over supported EPD/PGN inputs without requiring an engine process.
+**Phase 6.5 — statistics replay authority. Model: GPT-5.6 Terra — High.**
+Add `stats` replay with explicit source precedence: structured run store, PGN
+export, forensic log, then console; retain paired statistics only when pair
+identity is provable and label unpaired fallback honestly.
 
 ```
 git diff --check

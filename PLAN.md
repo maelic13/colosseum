@@ -1097,6 +1097,13 @@ test that pins the current schema unless the changelog is updated.
 `slice` (deterministic given a seed), `hash`, `stats` (count, ply depth, eval
 band where present), `verify` (every position legal and parseable).
 
+Implemented Phase 6.4 shares the match parser but adds strict candidate
+accounting: verify names every rejected one-based EPD-line/PGN-game index.
+Hash covers exact bytes; stats adds usable/unique/duplicate and ply counts plus
+EPD `ce` or PGN `%eval` bands when present. Slice requires a clean audit,
+applies the named opening-order stream, materializes canonical EPD with LF line
+endings, refuses overwrite by default and records input/output hashes.
+
 **Success criteria:** slicing is byte-reproducible across platforms; `verify`
 rejects a known-bad fixture.
 
