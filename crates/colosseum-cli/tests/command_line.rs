@@ -71,6 +71,52 @@ fn nps_uses_fixed_nodes_and_exposes_engine_claim_as_diagnostic_only() {
 }
 
 #[test]
+fn nps_comparison_records_seeded_warm_schedule_and_robust_summaries() {
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+    let output = cli()
+        .arg("nps")
+        .arg(binary)
+        .args([
+            "--nodes",
+            "1000",
+            "--self-pair",
+            "--repetitions",
+            "2",
+            "--warmup",
+            "1",
+            "--state",
+            "warm",
+            "--seed",
+            "42",
+            "--bootstrap-samples",
+            "100",
+            "--engine-arg=__uci-stub",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["type"], "nps-comparison");
+    assert_eq!(value["report"]["design"]["seed"], 42);
+    assert_eq!(value["report"]["design"]["state_policy"], "warm");
+    assert_eq!(value["report"]["schedule"].as_array().unwrap().len(), 6);
+    assert_eq!(value["report"]["samples"].as_array().unwrap().len(), 4);
+    assert_eq!(value["report"]["arms"].as_array().unwrap().len(), 2);
+    assert!(
+        value["report"]["arms"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|arm| arm["builds"][0]["samples"] == 2)
+    );
+}
+
+#[test]
 fn calibration_dry_run_records_the_optional_default_design_and_binary_identity() {
     let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
     let output = cli()

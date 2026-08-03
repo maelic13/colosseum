@@ -1030,6 +1030,13 @@ sample unless `info nodes` proves at least the requested work completed. Speed
 is requested nodes divided by harness wall time; neither `info time` nor
 `info nps` participates. Multi-arm experiment design remains Phase 6.2.
 
+Phase 6.2 implements that design as Cartesian build pairs so unequal build
+counts still permit strict arm alternation. Position, pair and warm-up order use
+named seeded streams; cold starts exclude startup from the charged interval,
+while warm sessions use `ucinewgame`/`isready`. JSON retains the exact schedule,
+raw samples, per-build medians, arm median/best-build, bootstrap CI and
+per-round B/A ratio SD. A self pair is optional and tolerance-labelled.
+
 **Success criteria**
 
 - A self-pair result is reported without being a prerequisite.

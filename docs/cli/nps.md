@@ -19,9 +19,27 @@ only. They cannot affect `authoritative_nps`.
 
 Use `--position "<FEN>"` and repeat `--move <uci-move>` when appropriate. An
 omitted position searches `startpos`; the command warns because one initial
-position is a weak basis for performance decisions. Multi-position A/B design,
-repetitions, warm-up, estimators, and state policy are not yet part of this
-single-sample command.
+position is a weak basis for performance decisions.
+
+Add `--against <EXE>` for a comparison. Repeat `--position` for the position
+suite and use `--a-build` / `--b-build` for additional executables in either
+arm. Each build gets its own median so pooling cannot conceal non-overlap.
+Colosseum shuffles the position and build-pair order from `--seed`, then runs
+each pair in strict A/B or B/A alternation. The resolved design and complete
+schedule are included in JSON output.
+
+`--state warm` (the default) keeps every engine process alive, sending
+`ucinewgame` and `isready` before each search. `--state cold` restarts the
+engine for every search; handshake and startup occur before the charged search
+interval. `--warmup` repetitions are run but excluded from summaries. Hash is
+not assumed to be clear in either mode; an explicitly configured button is sent
+only at process preparation.
+
+Arm output includes the median, the best per-build median, a seeded 95%
+bootstrap interval for the median, and the standard deviation of per-round B/A
+ratios as a machine-noise diagnostic. `--self-pair` compares the primary binary
+with itself. It is recommended, not required; a matching self pair outside
+`--self-tolerance-percent` (default ±0.5%) emits a warning.
 
 The normal direct engine controls apply: `--engine-arg`, `--cwd`, `--env`,
 `--option`, and `--button`. `--deadline-ms` bounds the search (default 60000).

@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | Speed/scaling, book/replay/planning/suite tools, tournaments, release-candidate parity/gap decisions, documentation and release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 5 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 6.2 — reproducible multi-arm NPS comparison** |
+| Next step | **Phase 6.3 — thread-scaling sweep** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -594,9 +594,14 @@ model as well.
   [`crates/colosseum-application/src/nps.rs`](crates/colosseum-application/src/nps.rs),
   [`crates/colosseum-uci/src/process.rs`](crates/colosseum-uci/src/process.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs)
-- ☐ **6.2** — **Model: Sol High.** One or more executables per arm with per-executable medians; self pair
-  optional; seeded order, warm-up, cold/warm state policy, strict
-  alternation, median/best-of, bootstrap CI and per-round SD
+- ☑ **6.2 — DONE** — **Model: Sol High.** One or more executables per arm use a
+  persisted named-stream schedule over positions and Cartesian build pairs;
+  strict A/B alternation, excluded warm-up, explicit cold/warm lifecycle,
+  per-executable and arm medians, best-build summary, seeded bootstrap CI,
+  optional self pair/tolerance and per-round ratio SD are structured output —
+  evidence: [`crates/colosseum-application/src/nps.rs`](crates/colosseum-application/src/nps.rs),
+  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
+  [`docs/cli/nps.md`](docs/cli/nps.md)
 - ☐ **6.3** — **Model: Sol High.** Scaling sweep over explicit engine thread counts: matching physical
   cores, pinned workload, fixed-total/per-thread Hash policy, wall-time
   speedup/efficiency, CPU class/NUMA recorded
@@ -704,11 +709,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 6.2 — reproducible multi-arm NPS comparison. Model: GPT-5.6 Sol — High.**
-Extend `nps` with multiple executables per arm, seeded positions and warm-up,
-explicit cold/warm state, strict alternation, robust arm/per-executable
-estimators, bootstrap median intervals, optional self-pair checks and
-per-round noise diagnostics.
+**Phase 6.3 — pinned thread-scaling sweep. Model: GPT-5.6 Sol — High.**
+Add an NPS scaling sweep over explicit search-thread counts with matching
+physical-core placement, identical seeded workloads, declared fixed-total or
+per-thread Hash, speedup/efficiency and CPU-class/NUMA evidence.
 
 ```
 git diff --check

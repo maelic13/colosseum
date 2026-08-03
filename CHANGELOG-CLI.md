@@ -20,3 +20,6 @@ The first public CLI release is not yet published.
   non-causal heuristic diagnostics over atomic durable snapshots.
 - Added fixed-node `nps` measurement using harness monotonic wall time, with
   reported-node verification and engine time/NPS retained only as diagnostics.
+- Added seeded multi-build NPS A/B schedules with explicit warm/cold state,
+  strict alternation, warm-up, per-build and arm medians, best-of summaries,
+  bootstrap intervals, optional self-pair checks and round-noise diagnostics.
