@@ -457,9 +457,14 @@ right" is not a criterion.
   (process group/job object). Normal shutdown is bounded and escalates from UCI
   `quit` to termination; cancellation and harness failure leave no owned engine
   or descendant running.
-- Implemented containment uses a kill-on-close Windows Job Object and a
-  dedicated Unix process group. Windows children are created suspended,
-  assigned before execution and then resumed, closing the assignment race.
+- Implemented containment uses per-engine kill-on-close Windows Job Objects and
+  dedicated Unix process groups. The CLI additionally installs an outer
+  process-lifetime Windows job before doing any work, so owner death during the
+  spawn-to-assignment window still reaps the new child; Windows children are
+  created suspended, assigned before execution and then resumed. Linux children
+  also request `PR_SET_PDEATHSIG(SIGKILL)` and verify the parent did not change
+  during setup. The Phase-4C kill/resume fixture records both active PIDs and
+  asserts their disappearance before resuming.
 - Stdout and stderr are drained concurrently. Protocol lines and in-memory
   queues have documented finite limits; traffic is streamed to artifacts
   outside the clock-critical path. An over-limit protocol line is an

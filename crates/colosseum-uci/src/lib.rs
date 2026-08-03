@@ -19,7 +19,7 @@ pub use parse::{InfoLine, parse_bestmove, parse_info_line, parse_option_line};
 pub use position::{GoLimits, UciPosition};
 pub use process::{
     EngineProcess, HandshakeInfo, MAX_PROTOCOL_LINE_BYTES, MAX_STDERR_LINE_BYTES, SearchOutput,
-    SpawnOptions, process_is_alive,
+    SpawnOptions, install_process_tree_guard, process_is_alive,
 };
 pub use score::Score;
 pub use session::{AffinityUciSessionFactory, ProcessAffinityFn, UciSessionFactory};

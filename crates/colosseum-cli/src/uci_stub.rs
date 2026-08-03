@@ -37,6 +37,12 @@ pub async fn run(args: StubArgs) -> std::io::Result<()> {
         return Ok(());
     }
 
+    if !matches!(args.mode, StubMode::Descendant)
+        && let Some(path) = &args.pid_file
+    {
+        std::fs::write(path, std::process::id().to_string())?;
+    }
+
     let mut descendant = if matches!(args.mode, StubMode::Descendant) {
         let child = std::process::Command::new(std::env::current_exe()?)
             .args(["__uci-stub", "--mode", "orphan-child"])

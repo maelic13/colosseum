@@ -89,6 +89,13 @@ pub fn process_is_alive(pid: u32) -> bool {
     process_alive_platform(pid)
 }
 
+/// Install a process-lifetime guard for every subsequently created descendant.
+/// The CLI calls this before parsing or launching work, closing the small gap
+/// before a per-engine job can be attached when the owner is killed abruptly.
+pub fn install_process_tree_guard() -> Result<(), UciError> {
+    install_process_tree_guard_platform()
+}
+
 /// A running UCI engine.
 pub struct EngineProcess {
     containment: ProcessContainment,
@@ -129,6 +136,26 @@ impl EngineProcess {
         {
             use std::os::unix::process::CommandExt;
             std_cmd.process_group(0);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::process::CommandExt;
+            let parent = unsafe { libc::getpid() };
+            // SAFETY: pre_exec performs only async-signal-safe libc calls.
+            unsafe {
+                std_cmd.pre_exec(move || {
+                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    if libc::getppid() != parent {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Interrupted,
+                            "engine owner exited during spawn",
+                        ));
+                    }
+                    Ok(())
+                });
+            }
         }
         #[cfg(windows)]
         {
@@ -787,4 +814,46 @@ fn process_alive_platform(pid: u32) -> bool {
         CloseHandle(process);
         result
     }
+}
+
+#[cfg(windows)]
+fn install_process_tree_guard_platform() -> Result<(), UciError> {
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        SetInformationJobObject,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    // SAFETY: the job is configured before assignment. On success its handle is
+    // deliberately process-lifetime: the OS closes it during process teardown,
+    // which is exactly what triggers descendant termination after abrupt exit.
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return Err(UciError::Io(std::io::Error::last_os_error()));
+        }
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            std::ptr::addr_of!(limits).cast(),
+            std::mem::size_of_val(&limits) as u32,
+        ) == 0
+            || AssignProcessToJobObject(job, GetCurrentProcess()) == 0
+        {
+            windows_sys::Win32::Foundation::CloseHandle(job);
+            return Err(UciError::Io(std::io::Error::last_os_error()));
+        }
+        // Do not CloseHandle on the success path. Closing a kill-on-close job
+        // containing this process would terminate the CLI itself. The kernel
+        // owns cleanup when the process exits normally or is killed.
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn install_process_tree_guard_platform() -> Result<(), UciError> {
+    Ok(())
 }

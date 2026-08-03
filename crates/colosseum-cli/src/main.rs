@@ -715,6 +715,10 @@ impl From<NpsHashPolicyArg> for NpsHashPolicy {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    if let Err(error) = colosseum_uci::install_process_tree_guard() {
+        eprintln!("infrastructure error: cannot install process-tree guard: {error}");
+        return ExitCode::from(3);
+    }
     let cli = Cli::parse();
     match cli.command {
         Command::Capabilities if cli.dry_run => unsupported_dry_run("capabilities"),
