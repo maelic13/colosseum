@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | User documentation, release artifacts and cross-platform/third-party release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 8 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 9.2 — README front door** |
+| Next step | **Phase 9.3 — complete CLI user documentation** |
 | Recommended model | **GPT-5.6 Terra — High** |
 
 ## Forward tracker
@@ -717,8 +717,11 @@ model as well.
   selects versioned `docs/cli/` Markdown, release-archive inclusion and a
   generated, CI-checked Clap command reference; the tagged repository render
   is the V1 website and a separate wiki/site source is unnecessary
-- ☐ **9.2** — **Model: Terra High.** README as the project front door — what Colosseum GUI and
+- ☑ **9.2 — DONE** — **Model: Terra High.** README as the project front door — what Colosseum GUI and
   Colosseum CLI are (or their Phase 9.0 replacement), install, links
+  — presents both independent products, accurate current release state,
+  platform-specific GUI installation, source CLI installation, first commands
+  and separate documentation/release histories
 - ☐ **9.3** — **Model: Terra High.** User documentation: quickstart, command reference, run-file and
   tune-file reference, a worked example per command, "how to trust a result"
   from PLAN §S3 Tier C, and a compatibility page (what the tool needs from a
@@ -772,10 +775,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 9.2 — README front door. Model: GPT-5.6 Terra — High.**
-Make the repository README introduce the GUI and independent CLI equally,
-provide correct platform installation paths, and link each product's complete
-versioned documentation and release lane.
+**Phase 9.3 — complete CLI user documentation. Model: GPT-5.6 Terra — High.**
+Complete the quickstart, parser-derived command reference, run/tune formats,
+worked examples, result-trust guidance and UCI compatibility contract; add a
+required documentation drift check.
 
 ```
 git diff --check

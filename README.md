@@ -5,32 +5,43 @@
 <h1 align="center">Colosseum</h1>
 
 <p align="center">
-  Run chess engines against each other — and watch them play.
+  Run, watch and rigorously test ordinary UCI chess engines.
 </p>
 
 ![Colosseum — Arena tab with live game view](docs/screenshot.png)
 
-> **v1.0.2 · Windows · Linux · macOS · Free and open source (GPL-3.0)**
+> **Colosseum GUI 1.0.2 · Colosseum CLI 0.1.0 in development · Windows · Linux · macOS · GPL-3.0-or-later**
 
 ---
 
-## What it does
+## Two independent tools
 
-- **Play engines against each other** — round robin or gauntlet, many games at once.
-- **Watch live** — full board, move list with opening names, evaluation graph, clocks, and each engine's search output.
-- **Get real ratings** — Elo computed from all results at once (with error bars), not a running K-factor tally.
-- **Any UCI engine** — add one executable or scan a whole folder; options are detected automatically.
-- **Set it up your way** — time controls from bullet to fixed depth, opening books, adjudication rules, endgame tablebases, pondering.
-- **Nothing gets lost** — every game is saved as it finishes; stop any time and resume later.
-- **Take the results with you** — live PGN output and CSV export of standings and crosstables.
+| Product | Best for | Highlights |
+|---|---|---|
+| **Colosseum GUI** (`colosseum`) | Interactive engine tournaments | Live boards, round robins and gauntlets, ratings with error bars, engine library, PGN and CSV export |
+| **Colosseum CLI** (`colosseum-cli`) | Reproducible chess-engine development testing | Fixed matches, pair-atomic SPRT, SPSA, calibration, NPS/scaling, suites, tournaments, book utilities and statistics replay |
+
+Both products launch ordinary [Universal Chess Interface (UCI)](https://www.shredderchess.com/chess-info/features/uci-universal-chess-interface.html)
+executables as separate processes. Engines need no Colosseum manifest, custom
+build command or source-tree integration. The GUI and CLI share tested engine
+infrastructure but have independent versions, binaries, configuration and
+release artifacts.
 
 ---
 
-## Download & install
+## Colosseum GUI
 
-Get the file for your system from the
-[latest release](https://github.com/maelic13/colosseum/releases/latest).
-Release downloads are the only supported way to install Colosseum.
+Use the desktop application to play many games concurrently and watch them
+live. It detects engine options, supports opening books, adjudication,
+tablebases and pondering, persists every finished game, and can resume an
+interrupted tournament.
+
+### Download and install
+
+Download the current GUI from the
+[Colosseum 1.0.2 release](https://github.com/maelic13/colosseum/releases/tag/v1.0.2).
+Future GUI releases use `gui-v…` tags; the complete history is on the
+[releases page](https://github.com/maelic13/colosseum/releases).
 
 ### Windows
 
@@ -59,7 +70,7 @@ The app is not signed yet, so macOS blocks it on first launch. Open
 
 ---
 
-## Getting started
+### Getting started
 
 1. **Engines tab** — click *Add Engine* and pick an engine executable
    (or *Scan Folder* to add many at once). Set a starting Elo if you know it.
@@ -79,7 +90,7 @@ Tips:
 
 ---
 
-## Where your files are
+### Where the GUI stores files
 
 | | Windows | Linux | macOS |
 |---|---|---|---|
@@ -90,14 +101,49 @@ Start Colosseum with `--portable` to keep everything next to the program instead
 
 ---
 
-## Help & more
+## Colosseum CLI for UCI chess engines
+
+The headless CLI is designed for committed, repeatable experiments. It records
+resolved inputs, seeds, capabilities, games, checkpoints and statistics in a
+self-contained run directory; failures and non-conforming engine behavior stay
+visible in machine-readable results.
+
+The first CLI release is not published yet. To use the current source version,
+install Rust 1.88 or newer and run:
+
+```text
+git clone https://github.com/maelic13/colosseum.git
+cd colosseum
+cargo build --release -p colosseum-cli --bin colosseum-cli
+./target/release/colosseum-cli --help
+./target/release/colosseum-cli self-test
+```
+
+On Windows, use `target\release\colosseum-cli.exe`. A first experiment can
+inspect two engines and run a fixed match without an opening book:
+
+```text
+colosseum-cli engine check ./candidate
+colosseum-cli engine check ./baseline
+colosseum-cli match ./candidate ./baseline --games 100 --movetime-ms 100
+```
+
+Run directories are created under `./colosseum-runs/` by default. Pass
+`--dir <path>` to a durable workflow when an experiment should live at an
+explicit path or be resumed there.
+
+Start with the [complete CLI guide](docs/cli/README.md), then consult the
+[CLI changelog](CHANGELOG-CLI.md). Portable archives and `cli-v…` releases will
+appear on the [releases page](https://github.com/maelic13/colosseum/releases).
+
+---
+
+## Help and project links
 
 - Something broken or missing? [Open an issue](https://github.com/maelic13/colosseum/issues).
-- Developing chess engines? The independent headless CLI can already inspect
-  and compliance-check ordinary UCI executables; see the
-  [CLI guide](docs/cli/README.md). Experiment runners are still under development.
-- What changed in each version: [CHANGELOG.md](CHANGELOG.md)
-- Building from source: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+- Product release histories: [GUI changelog](CHANGELOG-GUI.md) ·
+  [CLI changelog](CHANGELOG-CLI.md)
+- Building, testing and releasing from source: [development guide](docs/DEVELOPMENT.md)
 
 ---
 
