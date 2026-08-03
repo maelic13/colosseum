@@ -2233,4 +2233,12 @@ mod tests {
         assert_eq!(sprt_exit_code(sprt_runner::SprtStatus::Inconclusive), 4);
         assert_eq!(sprt_exit_code(sprt_runner::SprtStatus::Invalid), 5);
     }
+
+    #[test]
+    fn calibration_terminal_classes_have_distinct_automation_exit_codes() {
+        assert_eq!(calibration_exit_code(CalibrationStatus::Pass), 0);
+        assert_eq!(calibration_exit_code(CalibrationStatus::Fail), 1);
+        assert_eq!(calibration_exit_code(CalibrationStatus::Inconclusive), 4);
+        assert_eq!(calibration_exit_code(CalibrationStatus::Invalid), 5);
+    }
 }

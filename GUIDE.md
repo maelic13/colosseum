@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–3 and Phase 4A/4B are complete: fixed matches plus externally checked, pair-atomic capped SPRT over ordinary UCI engines, shared controls, deterministic commit/stopping, recovery, strict JSON and distinct automation exits |
-| What is missing | Optional calibration; SPSA; benchmarking; Texel/data-generation and release work |
+| What exists | Phases 0–4C are complete: fixed matches, externally checked pair-atomic capped SPRT and optional identical-binary calibration over ordinary UCI engines, with shared controls, recovery, strict JSON and distinct automation exits |
+| What is missing | SPSA; benchmarking; Texel/data-generation and release work |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 4B · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 4C.1 — calibration configuration and fixed-N symmetry run** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Platform status | Windows ☑ local through Phase 4C · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
+| Next step | **Phase 5.1 — exact seeded SPSA perturbation and update** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -475,8 +475,14 @@ model as well.
   [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
   [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
   [`docs/cli/calibration.md`](docs/cli/calibration.md)
-- ☐ **4C.3** — **EXIT · Model: Sol High.** Hash/config/persistence checks, deterministic tests for
-  every outcome and one real-machine smoke run
+- ☑ **4C.3 — EXIT DONE** — **Model: Sol High.** Unequal hashes are refused;
+  exact config/design/identity round-trip through kill/resume while mismatch is
+  rejected; boundary fixtures cover PASS/FAIL/INCONCLUSIVE/INVALID and exits;
+  the recorded Basilisk 1.9.0 Windows smoke completed two pairs over enforced
+  disjoint affinity with no faults and the correct zero-variance INCONCLUSIVE —
+  evidence: [`crates/colosseum-cli/tests/phase4c_acceptance.rs`](crates/colosseum-cli/tests/phase4c_acceptance.rs),
+  [`docs/architecture/phase-4c-exit.md`](docs/architecture/phase-4c-exit.md),
+  [`docs/fixtures/phase4c/acceptance.json`](docs/fixtures/phase4c/acceptance.json)
 
 ### Phase 5 — SPSA
 
@@ -623,10 +629,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 4C.3 — calibration acceptance. Model: GPT-5.6 Sol — High.**
-Verify hash/config/persistence and deterministic outcome coverage, then ask the
-developer to run the optional real-machine smoke command with representative
-conditions.
+**Phase 5.1 — exact SPSA perturbation and update. Model: GPT-5.6 Sol — High.**
+Implement PLAN §5.5's seeded Rademacher perturbation, arm construction,
+Fishtest-compatible schedules, update, clipping and send-time rounding, with
+decay applied once per completed iteration.
 
 ```
 git diff --check

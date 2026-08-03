@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "phase": "4C",
+  "gates": [
+    {
+      "id": "binary-content-identity",
+      "evidence": "command_line::calibration_refuses_nonidentical_executable_content_before_launch"
+    },
+    {
+      "id": "configuration-and-resume",
+      "evidence": "phase4c_acceptance::killed_calibration_resumes_exact_configuration_and_refuses_mismatch"
+    },
+    {
+      "id": "deterministic-outcome-classification",
+      "evidence": "phase4c_acceptance::every_calibration_outcome_is_deterministic_at_its_exact_boundaries"
+    },
+    {
+      "id": "distinct-automation-exits",
+      "evidence": "main::tests::calibration_terminal_classes_have_distinct_automation_exit_codes"
+    },
+    {
+      "id": "fault-invalidity",
+      "evidence": "command_line::calibration_marks_any_engine_fault_invalid_even_when_the_match_policy_allows_it"
+    },
+    {
+      "id": "real-machine-smoke",
+      "evidence": "Basilisk 1.9.0 identical-binary depth-1 smoke on the Windows development host, recorded below"
+    },
+    {
+      "id": "workspace-regression",
+      "evidence": "cargo check --workspace --tests; cargo clippy --workspace; cargo test --workspace --all-targets"
+    }
+  ],
+  "real_machine_smoke": {
+    "date": "2026-08-03",
+    "scope": "short real-engine pipeline and machine-placement smoke; not a statistical symmetry claim",
+    "platform": "windows-x86_64",
+    "logical_cpus_visible": 22,
+    "engine": "Basilisk 1.9.0",
+    "engine_sha256": "faddaf8cb7ef97acaafc7a3827db9a09c32613e0e064fb992aaa26fbf7ba0547",
+    "binary_hashes_equal": true,
+    "games": 4,
+    "completed_pairs": 2,
+    "time_control": "depth 1",
+    "max_moves": 2,
+    "book": null,
+    "master_seed": 20260803,
+    "concurrency": 2,
+    "cores_per_engine": 1,
+    "placement": "auto",
+    "affinity": "enforced",
+    "allocated_logical_cpus": [2, 3, 4, 5],
+    "engine_faults": 0,
+    "infrastructure_faults": 0,
+    "pentanomial": [0, 0, 2, 0, 0],
+    "result": "inconclusive",
+    "statistics_unavailable": "zero variance",
+    "config_sha256": "013988ac3f3e9301f1b7c7dd8ab8b6ab18b6528f88f94f9759cfd8789bbcb86b"
+  }
+}

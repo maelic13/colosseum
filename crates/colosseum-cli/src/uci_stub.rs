@@ -21,6 +21,9 @@ pub enum StubMode {
 pub struct StubArgs {
     #[arg(long, value_enum, default_value_t = StubMode::Conforming)]
     mode: StubMode,
+    /// Deterministic search delay used by kill/resume acceptance tests.
+    #[arg(long, default_value_t = 0)]
+    sleep_ms: u64,
     #[arg(long)]
     pid_file: Option<PathBuf>,
 }
@@ -107,6 +110,9 @@ pub async fn run(args: StubArgs) -> std::io::Result<()> {
                 if line.contains("movetime 10000") {
                     searching = true;
                 } else {
+                    if args.sleep_ms > 0 {
+                        tokio::time::sleep(std::time::Duration::from_millis(args.sleep_ms)).await;
+                    }
                     write_bestmove(&mut stdout, &position).await?;
                 }
             }

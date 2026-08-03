@@ -634,11 +634,14 @@ correctness and is never a prerequisite for another command.
 through persistence and resume; PASS/FAIL/inconclusive/invalid each have
 deterministic tests.
 
-**Implementation evidence (4C.1–4C.2):** the CLI records the resolved
+**Implementation evidence (Phase 4C complete):** the CLI records the resolved
 SHA-256 identities and representative conditions in the ordinary durable run
-record; its fixed-N normalized-Elo classifier and automation exits are covered
-by hermetic command and application tests. Persistence/resume acceptance and a
-real-machine representative smoke remain Phase 4C.3 evidence.
+record. Hermetic acceptance covers exact configuration resume, mismatch
+refusal, every interval/fault outcome and every automation exit. A short
+Basilisk 1.9.0 Windows smoke verified real UCI processes, two concurrent slots,
+enforced disjoint affinity and durable zero-variance `INCONCLUSIVE` output; it
+is pipeline evidence, not a full tolerance measurement. See
+[`docs/architecture/phase-4c-exit.md`](docs/architecture/phase-4c-exit.md).
 
 ### 5.4 Fixed match and SPRT — `colosseum-cli match|sprt`
 
@@ -1600,7 +1603,9 @@ SPSA builds on the runner.
 
 Implement 5.3 over the trusted runner. **Exit:** representative configuration
 round-trips; byte mismatch is rejected; PASS/FAIL/INCONCLUSIVE/INVALID fixtures
-and one real-machine smoke run behave as specified.
+and one real-machine smoke run behave as specified. **Accepted:** hermetic
+resume/config/outcome gates and the recorded Basilisk smoke pass; evidence is
+versioned in [`docs/fixtures/phase4c/acceptance.json`](docs/fixtures/phase4c/acceptance.json).
 
 ### Phase 5 — SPSA
 
