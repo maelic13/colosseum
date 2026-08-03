@@ -40,6 +40,71 @@ fn help_is_headless_and_names_the_product() {
 }
 
 #[test]
+fn run_file_drives_the_real_parser_and_cli_options_win() {
+    let root = tempfile::tempdir().unwrap();
+    let base = root.path().join("common.toml");
+    let run = root.path().join("gate.toml");
+    std::fs::write(
+        &base,
+        "[options]\ngames = 10\na-movetime-ms = 50\nb-movetime-ms = 50\nseed = 7\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &run,
+        "extend = \"common.toml\"\ncommand = [\"match\"]\npositionals = [\"candidate\", \"baseline\"]\n",
+    )
+    .unwrap();
+
+    let output = cli()
+        .args(["--run-file"])
+        .arg(&run)
+        .args(["--games", "20", "--dry-run", "--json"])
+        .current_dir(root.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["type"], "dry-run");
+    assert_eq!(value["resolved_configuration"]["games"], 20);
+    let expected_candidate = dunce::canonicalize(root.path()).unwrap().join("candidate");
+    assert_eq!(
+        value["invocations"][0]["executable"],
+        expected_candidate.to_string_lossy().as_ref()
+    );
+
+    let all_cli = cli()
+        .args([
+            "match",
+            "candidate",
+            "baseline",
+            "--games",
+            "20",
+            "--a-movetime-ms",
+            "50",
+            "--b-movetime-ms",
+            "50",
+            "--seed",
+            "7",
+            "--dry-run",
+            "--json",
+        ])
+        .current_dir(root.path())
+        .output()
+        .unwrap();
+    assert!(all_cli.status.success());
+    let all_cli: serde_json::Value = serde_json::from_slice(&all_cli.stdout).unwrap();
+    assert_eq!(value["config_sha256"], all_cli["config_sha256"]);
+    assert_eq!(
+        value["resolved_configuration"],
+        all_cli["resolved_configuration"]
+    );
+}
+
+#[test]
 fn tournament_plans_share_one_round_robin_and_gauntlet_scheduler() {
     let round_robin = cli()
         .args([

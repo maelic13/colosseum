@@ -1,13 +1,10 @@
 # Colosseum CLI guide
 
-Colosseum CLI is the independent, headless side of Colosseum for chess-engine
-development and reproducible experiments. The current development version can
-inspect and compliance-check ordinary UCI executables, run a fixed-N direct
-match, capped pair-atomic SPRT, or optional identical-binary calibration,
-resolve reproducible configuration, validate its own installed executable, and
-read durable run status, tune UCI parameters with SPSA, make an authoritative
-single-search fixed-node speed measurement, and run durable multi-engine
-tournaments with joint ratings.
+Colosseum CLI is the independent, headless Colosseum product for chess-engine
+development and reproducible experiments. It consumes ordinary UCI
+executables, records self-contained evidence and provides fixed matches, SPRT,
+SPSA, calibration, NPS/scaling, suites, tournaments, book tools and statistics
+planning/replay.
 
 Start with an executable path; no manifest or engine-side integration is
 required:
@@ -28,6 +25,9 @@ colosseum-cli status ./colosseum-runs/my-run
 
 Detailed contracts:
 
+- [Quickstart](quickstart.md)
+- [Complete parser-derived command reference](command-reference.md)
+- [Worked example for every public command](examples.md)
 - [Direct engine controls and compliance checks](engine-controls.md)
 - [Fixed direct-engine matches](match.md)
 - [Capped pair-based SPRT designs](sprt.md)
@@ -39,9 +39,12 @@ Detailed contracts:
 - [Fixed-work EPD/FEN position suites](suite.md)
 - [Round-robin and gauntlet tournaments](tournament.md)
 - [Configuration files, inheritance and path origins](run-files.md)
+- [SPSA tune-file reference](tune-files.md)
 - [Master seed and named random streams](randomness.md)
 - [Human, JSON and dry-run output](output.md)
 - [Installed-executable self-test](self-test.md)
 - [Run directories and checkpoint recovery](run-directories.md)
 - [Official run records and read-only status](status.md)
 - [CPU topology, restrictions and affinity capabilities](cpu-topology.md)
+- [How to trust and report a result](trust-results.md)
+- [Engine compatibility, limits and failure behavior](compatibility.md)

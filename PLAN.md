@@ -1922,6 +1922,17 @@ records the placement, generation and publication contract.
   engine, and what it does with non-conforming ones). Explain that engines are
   launched as separate processes and tell users to consult the relevant licence
   terms; do not make a blanket legal conclusion.
+
+**Accepted (9.3):** `docs/cli/` now contains the quickstart, generated complete
+command reference, per-command examples, run/tune format references,
+result-trust guidance and explicit UCI compatibility/failure contract. The
+unpublished `colosseum-docs` workspace tool renders the real Clap model and CI
+rejects drift. Documentation review also found that Phase 2.4's tested run-file
+resolver had never been connected to the executable; the public `--run-file`
+and `--unset-run-option` adapter now expands inheritable TOML through that
+resolver into the ordinary parser, with command-line precedence and declaring-
+file-relative paths. An integration fixture proves its normalized configuration
+and hash equal the equivalent all-CLI invocation.
 - **(c) Ship.** Per Phase 0(c)'s release model; all supported platforms; use
   the identity accepted at Phase 9.0 and its dated
   web/GitHub/package-channel/preliminary-trademark screen;

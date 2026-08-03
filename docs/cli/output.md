@@ -14,13 +14,18 @@ represented by separate executable, argument-vector, working-directory,
 environment, UCI-option and CPU-allocation fields. It is deliberately not a
 shell command string: shell quoting is neither exact nor portable.
 
-The currently emitted `type` values are:
+The command-specific `type` values include:
 
-- `dry-run`
-- `engine-inspection`
-- `engine-compliance`
-- `fixed-match`
-- `sprt`
+- `capabilities`, `dry-run`, `self-test` and `run-status`;
+- `engine-inspection` and `engine-compliance`;
+- `fixed-match`, `sprt`, `calibration`, `spsa`, `spsa-plan` and `spsa-status`;
+- `nps`, `nps-comparison` and `nps-scaling`;
+- `book-hash`, `book-stats`, `book-verify` and `book-slice`;
+- `stats-replay`, `stats-fixed-plan` and `stats-sprt-plan`;
+- `tournament-plan` and `tournament`.
+
+Position-suite JSON follows the same one-document stdout rule and identifies
+its dry-run or suite report explicitly.
 
 Human-readable mode is the default. Automation should select `--json` and use
 the process exit status as the primary success/failure signal.

@@ -1,5 +1,16 @@
 //! Reusable CLI driving-adapter types.
 
+mod capabilities;
+mod composition;
+mod match_runner;
+mod run_file;
+mod self_test;
+mod sprt_runner;
+mod spsa_driver;
+mod suite_driver;
+mod tournament_driver;
+mod uci_stub;
+
 pub mod config;
 pub mod engine_args;
 pub mod master_seed;
@@ -9,6 +20,8 @@ pub mod run_record;
 pub mod spsa_schedule;
 pub mod spsa_tune;
 pub mod stats_replay;
+
+pub use composition::{command_spec, run};
 
 pub use config::{ConfigError, ResolvedConfig, ValueOrigin, built_in_defaults, resolve_config};
 pub use engine_args::{EngineArgs, EngineArgsError, parse_cpu_list};

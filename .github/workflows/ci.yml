@@ -35,6 +35,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
+      - name: Check generated CLI documentation
+        run: cargo run -p colosseum-docs -- --check
+
       - name: Check workspace tests
         run: cargo check --workspace --tests
 

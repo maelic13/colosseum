@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::{built_in_defaults, resolve_config};
 use colosseum_application::{CheckEngine, RuntimeParticipant};
-use colosseum_cli::{built_in_defaults, resolve_config};
 use colosseum_core::ParticipantId;
 use colosseum_uci::{
     EngineProcess, GoLimits, SpawnOptions, UciPosition, UciSessionFactory, process_is_alive,

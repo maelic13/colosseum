@@ -12,7 +12,7 @@ use serde_json::Value;
 const ACCEPTANCE: &str = include_str!("../../../docs/fixtures/phase4c/acceptance.json");
 const CALIBRATION_SOURCE: &str = include_str!("../../colosseum-application/src/calibration.rs");
 const COMMAND_LINE: &str = include_str!("command_line.rs");
-const MAIN: &str = include_str!("../src/main.rs");
+const COMPOSITION: &str = include_str!("../src/composition.rs");
 
 fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_colosseum-cli"))
@@ -177,7 +177,9 @@ fn acceptance_manifest_names_every_phase_4c_exit_gate_and_test_owner() {
         assert!(COMMAND_LINE.contains(symbol), "missing CLI test {symbol}");
     }
     assert!(CALIBRATION_SOURCE.contains("classify_calibration"));
-    assert!(MAIN.contains("calibration_terminal_classes_have_distinct_automation_exit_codes"));
+    assert!(
+        COMPOSITION.contains("calibration_terminal_classes_have_distinct_automation_exit_codes")
+    );
     let smoke = &manifest["real_machine_smoke"];
     assert_eq!(smoke["engine"], "Basilisk 1.9.0");
     assert_eq!(smoke["result"], "inconclusive");

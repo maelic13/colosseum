@@ -15,11 +15,11 @@ numbers, internal naming or method argumentation.
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
 | What exists | Phases 0–8 are complete: independent fixed match/SPRT/calibration/SPSA workflows plus speed/scaling, book, statistics planning/replay/telemetry, durable position suites, tournaments, external parity and reasoned runner-gap decisions |
-| What is missing | User documentation, release artifacts and cross-platform/third-party release acceptance |
+| What is missing | Release artifacts and cross-platform/third-party release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows ☑ local through Phase 8 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 9.3 — complete CLI user documentation** |
-| Recommended model | **GPT-5.6 Terra — High** |
+| Next step | **Phase 9.4 — independent product release workflows and exact artifacts** |
+| Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
 
@@ -722,12 +722,16 @@ model as well.
   — presents both independent products, accurate current release state,
   platform-specific GUI installation, source CLI installation, first commands
   and separate documentation/release histories
-- ☐ **9.3** — **Model: Terra High.** User documentation: quickstart, command reference, run-file and
+- ☑ **9.3 — DONE** — **Model: Terra High.** User documentation: quickstart, command reference, run-file and
   tune-file reference, a worked example per command, "how to trust a result"
   from PLAN §S3 Tier C, and a compatibility page (what the tool needs from a
   UCI engine, what it does with non-conforming ones). State that engines are
   separate processes and direct users to applicable licences; make no
-  blanket legal conclusion
+  blanket legal conclusion — versioned offline guides now cover every required
+  subject and public command; `colosseum-docs --check` prevents parser/reference
+  drift. Review also connected the previously library-only run-file resolver to
+  the real CLI with inheritance, unsetting, path origins and tested all-CLI
+  normalized-config/hash equivalence
 - ☐ **9.4** — **Model: Sol High.** Ship per Phase 0.5's release model; all supported platforms;
   use the Phase 9.0 identity and its dated
   web/GitHub/package-channel/preliminary-trademark screen;
@@ -775,10 +779,10 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 9.3 — complete CLI user documentation. Model: GPT-5.6 Terra — High.**
-Complete the quickstart, parser-derived command reference, run/tune formats,
-worked examples, result-trust guidance and UCI compatibility contract; add a
-required documentation drift check.
+**Phase 9.4 — ship exact independent artifacts. Model: GPT-5.6 Sol — High.**
+Implement the final GUI/CLI release workflows and packaging helpers, then prove
+the exact supported-platform artifacts with version/help/self-test/JSON and
+dependency-inspection smoke gates before publication.
 
 ```
 git diff --check

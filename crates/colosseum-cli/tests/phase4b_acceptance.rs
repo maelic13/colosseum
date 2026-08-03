@@ -5,7 +5,7 @@ use serde_json::Value;
 const ACCEPTANCE: &str = include_str!("../../../docs/fixtures/phase4b/acceptance.json");
 const SPRT_RUNNER: &str = include_str!("../src/sprt_runner.rs");
 const COMMAND_LINE: &str = include_str!("command_line.rs");
-const MAIN: &str = include_str!("../src/main.rs");
+const COMPOSITION: &str = include_str!("../src/composition.rs");
 const STATISTICS: &str = include_str!("../../colosseum-core/tests/statistics_fixtures.rs");
 
 #[test]
@@ -54,7 +54,7 @@ fn acceptance_manifest_names_every_phase_4b_exit_gate_and_test_owner() {
     ] {
         assert!(COMMAND_LINE.contains(symbol), "missing CLI test {symbol}");
     }
-    assert!(MAIN.contains("sprt_terminal_classes_have_distinct_automation_exit_codes"));
+    assert!(COMPOSITION.contains("sprt_terminal_classes_have_distinct_automation_exit_codes"));
     for symbol in [
         "analytic_fixture_covers_every_phase_one_statistics_contract",
         "phase_4b_ordered_fastchess_stream_has_the_same_terminal_pair",

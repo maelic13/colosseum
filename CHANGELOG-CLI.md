@@ -7,6 +7,12 @@ The CLI follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The first public CLI release is not yet published.
 
+- Added optional inheritable TOML run files that map directly to public CLI
+  commands/options, resolve paths relative to their declaring file and allow
+  command-line replacement or strict unsetting of inherited options.
+- Added versioned offline user documentation with a parser-generated command
+  reference, quickstart, worked examples, format references, compatibility
+  contract and result-trust guidance.
 - Added durable pair-atomic SPSA tuning over ordinary UCI spin options, with
   exact schedule preflight, optional books, engine-fault invalidation and
   kill/resume recovery at complete-iteration boundaries.

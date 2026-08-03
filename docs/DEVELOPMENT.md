@@ -72,6 +72,7 @@ to other Macs requires codesigning and notarization — see
 cargo check --workspace --tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
+cargo run -p colosseum-docs -- --check
 ```
 
 Those commands are the required hermetic suite: they use only inputs owned by
@@ -117,6 +118,7 @@ colosseum/
 │  ├─ colosseum-gui/      eframe/egui GUI composition root
 │  └─ colosseum-cli/      independent headless CLI composition root
 ├─ tools/release/         product tag/version/changelog validation
+├─ tools/docs/            parser-derived CLI command-reference generator
 ├─ packaging/             Linux desktop entry + icon (.deb / .rpm / Arch assets)
 ├─ docs/                  This guide, design guidelines, macOS signing notes
 └─ .github/workflows/     push/PR CI plus the legacy GUI release workflow
@@ -144,3 +146,16 @@ Push/pull-request CI runs the hermetic workspace on Windows, Linux and macOS in
 debug and release profiles, and independently builds the headless CLI artifact.
 The existing `release.yml` remains the legacy GUI publication workflow until
 the product-specific publication workflows are implemented.
+
+## CLI documentation
+
+Canonical CLI user documentation lives under `docs/cli/`. The complete command
+reference is generated from the same Clap model as the shipped executable:
+
+```bash
+cargo run -p colosseum-docs
+cargo run -p colosseum-docs -- --check
+```
+
+The first command updates `docs/cli/command-reference.md`; the second is the
+read-only CI/release drift gate. Edit parser help rather than the generated file.

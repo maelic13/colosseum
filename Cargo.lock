@@ -810,6 +810,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "colosseum-docs"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "colosseum-cli",
+]
+
+[[package]]
 name = "colosseum-engine"
 version = "0.1.0"
 dependencies = [

@@ -125,7 +125,7 @@ inspect two engines and run a fixed match without an opening book:
 ```text
 colosseum-cli engine check ./candidate
 colosseum-cli engine check ./baseline
-colosseum-cli match ./candidate ./baseline --games 100 --movetime-ms 100
+colosseum-cli match ./candidate ./baseline --games 100 --a-movetime-ms 100 --b-movetime-ms 100
 ```
 
 Run directories are created under `./colosseum-runs/` by default. Pass
