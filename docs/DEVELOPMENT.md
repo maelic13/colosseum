@@ -1,7 +1,9 @@
 # Development guide
 
 Maintainer-facing notes: building from source, running the tests, and cutting
-a release. User documentation lives in [`README.md`](../README.md).
+a release. [`README.md`](../README.md) introduces both products;
+[`README-CLI.md`](../README-CLI.md) and [`cli/`](cli/README.md) are the CLI
+landing page and complete user guide.
 
 ## Prerequisites
 
@@ -136,10 +138,11 @@ The GUI and CLI own independent explicit versions in
 Their release notes are similarly separate in
 [`CHANGELOG-GUI.md`](../CHANGELOG-GUI.md) and
 [`CHANGELOG-CLI.md`](../CHANGELOG-CLI.md). Product tags use `gui-v<semver>` and
-`cli-v<semver>`; validate a prepared tag locally with:
+`cli-v<semver>`; validate prepared tags locally with:
 
 ```bash
 cargo run -p colosseum-release -- gui-v1.0.2
+cargo run -p colosseum-release -- cli-v0.1.0
 ```
 
 Push/pull-request CI runs the hermetic workspace on Windows, Linux and macOS in
@@ -152,11 +155,12 @@ Product release automation is split between `release-gui.yml` and
 Push the exact `cli` commit with `[cli candidate]` in its subject. This marker
 is needed before the workflow exists on `main`; afterward a manual dispatch of
 **Colosseum CLI candidate and release** is equivalent. Ordinary `cli` pushes
-skip the heavyweight jobs. A candidate creates no tag or GitHub Release. It builds
-Windows x64/Arm64, Linux x64 and macOS Arm64 archives, stages only the CLI,
-license, README and `docs/cli/`, then runs version/help/self-test/deterministic
-JSON smoke against each unpacked archive. The retained aggregate artifact is
-named `colosseum-cli-candidate-<full-commit-sha>` and contains checksums plus a
+skip the heavyweight jobs. A candidate creates no tag or GitHub Release. It
+builds Windows x64/Arm64, Linux x64 and macOS Arm64 archives, stages only the
+CLI, license, CLI-specific README, CLI changelog and `docs/cli/`, then checks
+packaged documentation links and runs version/help/self-test/deterministic JSON
+smoke against each unpacked archive. The retained aggregate artifact is named
+`colosseum-cli-candidate-<full-commit-sha>` and contains checksums plus a
 candidate identity file.
 
 Rerun the candidate after changing CLI code, dependencies, user documentation
@@ -178,3 +182,6 @@ cargo run -p colosseum-docs -- --check
 
 The first command updates `docs/cli/command-reference.md`; the second is the
 read-only CI/release drift gate. Edit parser help rather than the generated file.
+GitHub renders the documents from each release tag, and CLI archives contain
+the same guide for offline use. The archive's concise `README.md` directs users
+to `docs/cli/README.md`; release notes link to the tagged online copy.

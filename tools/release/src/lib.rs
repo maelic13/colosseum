@@ -193,7 +193,11 @@ pub fn stage_cli(
     };
     copy(binary, &stage.join(binary_name))?;
     copy(&root.join("LICENSE"), &stage.join("LICENSE"))?;
-    copy(&root.join("README.md"), &stage.join("README.md"))?;
+    copy(&root.join("README-CLI.md"), &stage.join("README.md"))?;
+    copy(
+        &root.join("CHANGELOG-CLI.md"),
+        &stage.join("CHANGELOG-CLI.md"),
+    )?;
     copy_tree(&root.join("docs/cli"), &stage.join("docs/cli"))?;
     Ok(stage)
 }
@@ -383,7 +387,8 @@ mod tests {
     fn stages_only_cli_binary_license_front_door_and_offline_docs() {
         let root = fixture();
         fs::write(root.path().join("LICENSE"), "license").unwrap();
-        fs::write(root.path().join("README.md"), "readme").unwrap();
+        fs::write(root.path().join("README-CLI.md"), "cli readme").unwrap();
+        fs::write(root.path().join("CHANGELOG-CLI.md"), "cli changes").unwrap();
         fs::create_dir_all(root.path().join("docs/cli/formats")).unwrap();
         fs::write(root.path().join("docs/cli/quickstart.md"), "quick").unwrap();
         fs::write(root.path().join("docs/cli/formats/run.md"), "run").unwrap();
@@ -396,7 +401,14 @@ mod tests {
             "binary"
         );
         assert!(stage.join("LICENSE").is_file());
-        assert!(stage.join("README.md").is_file());
+        assert_eq!(
+            fs::read_to_string(stage.join("README.md")).unwrap(),
+            "cli readme"
+        );
+        assert_eq!(
+            fs::read_to_string(stage.join("CHANGELOG-CLI.md")).unwrap(),
+            "cli changes"
+        );
         assert!(stage.join("docs/cli/quickstart.md").is_file());
         assert!(stage.join("docs/cli/formats/run.md").is_file());
         assert!(matches!(

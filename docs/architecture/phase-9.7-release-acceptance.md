@@ -2,11 +2,17 @@
 
 Date: 2026-08-07
 
-Colosseum CLI 0.1.0 is accepted for merge and stable publication.  This record
-does not create a tag or GitHub Release; those remain maintainer-owned remote
-operations after the acceptance commit is pushed and merged.
+> **Acceptance reopened:** a post-acceptance documentation audit found that the
+> archive omitted `CHANGELOG-CLI.md` and staged the combined repository README,
+> whose local image and changelog links were absent from the package. The
+> executable and real-engine evidence below remains valid, but this candidate
+> must not be published. A new exact candidate is required after the packaging
+> correction; this record will be updated only after its archive gates pass.
 
-## Final candidate
+This record does not create a tag or GitHub Release; those remain
+maintainer-owned remote operations.
+
+## Superseded candidate
 
 | Field | Accepted value |
 |---|---|
@@ -70,7 +76,7 @@ colour reversal, W/D/L, termination, faults and pentanomial projection.
   package allowlist and changes neither executable nor packaged user files, so
   it does not invalidate the candidate baseline.
 
-Phase 9.7 and the implementation plan are complete.  The remaining sequence
-is operational: push this acceptance commit, merge `cli` to `main`, create
-`cli-v0.1.0` at the merged stable source, push the tag, and confirm the stable
-release workflow succeeds.
+The candidate remains accepted as binary and real-engine evidence, but not as
+the final distributable package. Phase 9.7 is reopened until a corrected
+four-platform candidate passes exact-archive documentation and executable
+smoke. Do not merge or create `cli-v0.1.0` before that replacement is recorded.

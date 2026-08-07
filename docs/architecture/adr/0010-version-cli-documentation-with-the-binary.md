@@ -30,7 +30,7 @@ behavior it documents.
 |---|---|
 | Repository | `docs/cli/README.md` is the user guide index; all internal links are relative and work in a source checkout. |
 | Web | The repository's rendered Markdown at the selected release tag is the V1 web documentation. A future static-site rendering may project the same files but is not a second source of truth. |
-| Release archive | Every CLI archive includes `docs/cli/`, `README.md`, `CHANGELOG-CLI.md` and `LICENSE` from the exact release tag. |
+| Release archive | Every CLI archive includes `docs/cli/`, `CHANGELOG-CLI.md` and `LICENSE` from the exact release tag. The concise repository `README-CLI.md` is staged as the archive's top-level `README.md`, so its local links resolve inside the package. Exact-archive smoke rejects missing or broken local documentation links. |
 | Command reference | `docs/cli/command-reference.md` is generated deterministically from the real Clap `Command` tree, including nested public subcommands; hidden implementation commands stay excluded. |
 | Drift gate | A repository-owned Rust documentation tool provides write and `--check` modes. Required CI and release validation fail when regeneration differs from the committed reference. |
 | Format contracts | Human explanation remains handwritten. Concrete run/tune schemas, version fields and examples are tested against the same serializers/parsers; format changes update the relevant changelog. |

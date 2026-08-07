@@ -8,8 +8,6 @@
   Run, watch and rigorously test ordinary UCI chess engines.
 </p>
 
-![Colosseum — Arena tab with live game view](docs/screenshot.png)
-
 > **Colosseum GUI 1.0.2 · Colosseum CLI 0.1.0 · Windows · Linux · macOS · GPL-3.0-or-later**
 
 ---
@@ -35,6 +33,8 @@ Use the desktop application to play many games concurrently and watch them
 live. It detects engine options, supports opening books, adjudication,
 tablebases and pondering, persists every finished game, and can resume an
 interrupted tournament.
+
+![Colosseum — Arena tab with live game view](docs/screenshot.png)
 
 ### Download and install
 
@@ -136,9 +136,10 @@ Run directories are created under `./colosseum-runs/` by default. Pass
 `--dir <path>` to a durable workflow when an experiment should live at an
 explicit path or be resumed there.
 
-Start with the [complete CLI guide](docs/cli/README.md), then consult the
-[CLI changelog](CHANGELOG-CLI.md). Portable archives and independently
-versioned `cli-v…` releases are available on the
+Start with the concise [CLI overview](README-CLI.md) or go directly to the
+[complete CLI guide](docs/cli/README.md). Consult the
+[CLI changelog](CHANGELOG-CLI.md) for release history. Portable archives and
+independently versioned `cli-v…` releases are available on the
 [releases page](https://github.com/maelic13/colosseum/releases).
 
 ---

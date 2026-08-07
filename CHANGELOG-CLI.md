@@ -9,6 +9,11 @@ The CLI follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 First public release.
 
+Download an archive from the
+[Colosseum CLI 0.1.0 release](https://github.com/maelic13/colosseum/releases/tag/cli-v0.1.0),
+then follow the
+[version-matched CLI guide](https://github.com/maelic13/colosseum/blob/cli-v0.1.0/docs/cli/README.md).
+
 - Added an independent headless harness for ordinary UCI executables, with
   engine inspection/compliance checks, fixed matches, pair-atomic capped SPRT
   gates and optional fixed-sample calibration.

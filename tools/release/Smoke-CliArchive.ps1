@@ -34,9 +34,39 @@ try {
 
     $binaryName = if ($Platform -eq "windows") { "colosseum-cli.exe" } else { "colosseum-cli" }
     $binary = Join-Path $root $binaryName
-    foreach ($required in @($binary, (Join-Path $root "LICENSE"), (Join-Path $root "README.md"), (Join-Path $root "docs/cli/quickstart.md"), (Join-Path $root "docs/cli/command-reference.md"))) {
+    foreach ($required in @($binary, (Join-Path $root "LICENSE"), (Join-Path $root "README.md"), (Join-Path $root "CHANGELOG-CLI.md"), (Join-Path $root "docs/cli/README.md"), (Join-Path $root "docs/cli/quickstart.md"), (Join-Path $root "docs/cli/command-reference.md"))) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "required archive file is missing: $required"
+        }
+    }
+
+    $rootPath = [System.IO.Path]::GetFullPath($root)
+    $pathComparison = if ($Platform -eq "windows") {
+        [StringComparison]::OrdinalIgnoreCase
+    } else {
+        [StringComparison]::Ordinal
+    }
+    foreach ($markdown in Get-ChildItem -LiteralPath $root -Filter "*.md" -File -Recurse) {
+        $content = Get-Content -LiteralPath $markdown.FullName -Raw
+        foreach ($match in [regex]::Matches($content, '\[[^\]]*\]\((?<target>[^)]+)\)')) {
+            $target = $match.Groups["target"].Value.Trim()
+            if ($target.StartsWith("<") -and $target.EndsWith(">")) {
+                $target = $target.Substring(1, $target.Length - 2)
+            }
+            if (-not $target -or $target.StartsWith("#") -or $target -match '^[A-Za-z][A-Za-z0-9+.-]*:') {
+                continue
+            }
+            $relative = ($target -split '#', 2)[0]
+            if (-not $relative) { continue }
+            $resolved = [System.IO.Path]::GetFullPath((Join-Path $markdown.DirectoryName $relative))
+            $insideRoot = $resolved.Equals($rootPath, $pathComparison) -or
+                $resolved.StartsWith($rootPath + [System.IO.Path]::DirectorySeparatorChar, $pathComparison)
+            if (-not $insideRoot) {
+                throw "packaged Markdown link escapes the archive: $($markdown.FullName) -> $target"
+            }
+            if (-not (Test-Path -LiteralPath $resolved)) {
+                throw "packaged Markdown link is broken: $($markdown.FullName) -> $target"
+            }
         }
     }
 

@@ -756,12 +756,15 @@ model as well.
   package passed archive smoke; no usability defect was found. Its evidence and
   the required fresh CI-candidate action are in
   [`docs/architecture/phase-9.6-usability.md`](docs/architecture/phase-9.6-usability.md).
-- ☑ **9.7 — EXIT / ACCEPTANCE PASSED** — **Model: Sol High.** Final candidate
-  `f0e3185` passed four-platform exact-archive smoke. Its Windows and Linux
+- ◐ **9.7 — REOPENED: CORRECTED CANDIDATE REQUIRED** — **Model: Sol High.**
+  Prior candidate `f0e3185` passed four-platform executable smoke. Its Windows and Linux
   executables each drove Rarog and Basilisk through the Phase 8.1 oracle: eight
   draws, four pairs, `[0,0,4,0,0]`, adjudicated draws, zero faults and expected
-  capped-inconclusive exit. Independent version/tag/artifact/release-note
-  validation passed — evidence:
+  capped-inconclusive exit. A later audit found its archive omitted the CLI
+  changelog and used a repository README with broken packaged links. Preserve
+  the binary/engine evidence, but require a fresh four-platform candidate to
+  pass the corrected documentation/package smoke before final acceptance —
+  evidence:
   [`docs/architecture/phase-9.7-release-acceptance.md`](docs/architecture/phase-9.7-release-acceptance.md)
 
 ## Recurring procedures
