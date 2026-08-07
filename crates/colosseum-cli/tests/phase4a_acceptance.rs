@@ -27,7 +27,8 @@ fn base_match(run: &Path, games: u32) -> Command {
 fn successful_json(output: Output) -> serde_json::Value {
     assert!(
         output.status.success(),
-        "stderr: {}",
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     serde_json::from_slice(&output.stdout).unwrap()
@@ -213,7 +214,10 @@ fn clock_match(root: &Path, sleep_ms: u64, budget_ms: u64, margin_ms: u64) -> Ou
 #[test]
 fn sleeping_fixture_is_charged_and_margin_outcomes_are_attributed() {
     let root = tempfile::tempdir().unwrap();
-    let accepted = successful_json(clock_match(&root.path().join("accepted"), 80, 50, 100));
+    // The live process fixture accepts scheduler jitter up to 500 ms below;
+    // keep its forfeit margin outside that same tolerance window. Exact
+    // sub/equal/super-margin boundaries are deterministic runner unit tests.
+    let accepted = successful_json(clock_match(&root.path().join("accepted"), 80, 50, 500));
     let charged_ns =
         accepted["report"]["games"][0]["clock_accounting"]["white_charged_elapsed"]["min_ns"]
             .as_u64()
