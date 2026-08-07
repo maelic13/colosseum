@@ -10,7 +10,7 @@
 
 ![Colosseum — Arena tab with live game view](docs/screenshot.png)
 
-> **Colosseum GUI 1.0.2 · Colosseum CLI 0.1.0 in development · Windows · Linux · macOS · GPL-3.0-or-later**
+> **Colosseum GUI 1.0.2 · Colosseum CLI 0.1.0 · Windows · Linux · macOS · GPL-3.0-or-later**
 
 ---
 
@@ -108,8 +108,12 @@ resolved inputs, seeds, capabilities, games, checkpoints and statistics in a
 self-contained run directory; failures and non-conforming engine behavior stay
 visible in machine-readable results.
 
-The first CLI release is not published yet. To use the current source version,
-install Rust 1.88 or newer and run:
+Download the archive for your platform from the
+[Colosseum CLI 0.1.0 release](https://github.com/maelic13/colosseum/releases/tag/cli-v0.1.0),
+extract it and run `colosseum-cli --help` or `colosseum-cli self-test`.
+The archives include the complete offline CLI guide.
+
+To build from source instead, install Rust 1.88 or newer and run:
 
 ```text
 git clone https://github.com/maelic13/colosseum.git
@@ -133,8 +137,9 @@ Run directories are created under `./colosseum-runs/` by default. Pass
 explicit path or be resumed there.
 
 Start with the [complete CLI guide](docs/cli/README.md), then consult the
-[CLI changelog](CHANGELOG-CLI.md). Portable archives and `cli-v…` releases will
-appear on the [releases page](https://github.com/maelic13/colosseum/releases).
+[CLI changelog](CHANGELOG-CLI.md). Portable archives and independently
+versioned `cli-v…` releases are available on the
+[releases page](https://github.com/maelic13/colosseum/releases).
 
 ---
 

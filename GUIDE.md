@@ -14,8 +14,8 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–8 plus 9.0–9.6 are complete: the independent CLI workflows and documentation have been coverage- and usability-accepted |
-| What is missing | A fresh four-platform candidate after the 9.5 CLI change, then final validation-engine release acceptance |
+| What exists | Phases 0–8 plus 9.0–9.6 are complete; candidate `86c493c` passed Rarog and Basilisk Phase-8.1 gates on Windows and WSL Linux |
+| What is missing | Reissue the candidate after final release-documentation correction, repeat exact-artifact smoke, then close 9.7 |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and release CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
 | Next step | **Phase 9.7 — final release acceptance** (after the maintainer reissues the candidate) |
@@ -756,9 +756,13 @@ model as well.
   package passed archive smoke; no usability defect was found. Its evidence and
   the required fresh CI-candidate action are in
   [`docs/architecture/phase-9.6-usability.md`](docs/architecture/phase-9.6-usability.md).
-- ☐ **9.7** — **EXIT / ACCEPTANCE · Model: Sol High.** Both validation engines run one real gate
-  through the released artifact on ≥2 operating systems and agree with 8.1;
-  independent CLI version/tag/artifact/release notes verified
+- ◐ **9.7 — IN PROGRESS** — **EXIT / ACCEPTANCE · Model: Sol High.** Candidate
+  `86c493c` ran Rarog and Basilisk gates on Windows and WSL Linux; all four
+  reproduced Phase 8.1's eight draws, four pairs, `[0,0,4,0,0]`, draw
+  adjudication, zero faults and expected capped-inconclusive exit. Final audit
+  found and corrected the packaged README's development status and missing
+  `0.1.0` changelog heading; a fresh exact candidate remains required before
+  acceptance.
 
 ## Recurring procedures
 
@@ -793,13 +797,13 @@ Not steps — they are never "done".
 ## What to do now
 
 **Phase 9.7 — final release acceptance. Model: GPT-5.6 Sol — High.**
-First, the maintainer must reissue an unpublished four-platform candidate from
-the current `cli` source: push an intended commit whose subject includes
-`[cli candidate]`, wait for its archive checks, and retain the workflow-run
-identity. Then run one real validation-engine gate through that artifact on at
-least two operating systems, compare it with Phase 8.1, and verify the final
-independent version/tag/artifact/release notes before merging. Do not create
-the tag, release or remote operations from this workspace.
+Push the release-documentation correction whose subject includes
+`[cli candidate]`, wait for its fresh four-platform archive checks, and retain
+the bundle. Verify that candidate's binary/package identity against the
+already-green Windows/Linux Rarog and Basilisk gates, then record the exact
+candidate, release-note output and `cli-v0.1.0` validation before accepting the
+step. Do not create the tag, release or other remote operations from this
+workspace.
 
 ```
 git diff --check

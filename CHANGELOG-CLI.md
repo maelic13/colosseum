@@ -5,8 +5,16 @@ The CLI follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-The first public CLI release is not yet published.
+## [0.1.0] - 2026-08-07
 
+First public release.
+
+- Added an independent headless harness for ordinary UCI executables, with
+  engine inspection/compliance checks, fixed matches, pair-atomic capped SPRT
+  gates and optional fixed-sample calibration.
+- Added reproducible run records with executable/input hashes, one master seed,
+  resolved configuration, explicit statistical and clock models, fault
+  evidence, bounded CPU placement and durable resume for long workflows.
 - Added optional inheritable TOML run files that map directly to public CLI
   commands/options, resolve paths relative to their declaring file and allow
   command-line replacement or strict unsetting of inherited options.
