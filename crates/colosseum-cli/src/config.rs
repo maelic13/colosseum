@@ -577,7 +577,6 @@ fn normalize_path(path: &Path) -> PathBuf {
     normalized
 }
 
-#[cfg(windows)]
 fn normalize_absolute_path(path: &Path) -> PathBuf {
     let mut existing = path;
     let mut suffix = Vec::new();
@@ -596,11 +595,6 @@ fn normalize_absolute_path(path: &Path) -> PathBuf {
         normalized.push(component);
     }
     normalized
-}
-
-#[cfg(not(windows))]
-fn normalize_absolute_path(path: &Path) -> PathBuf {
-    path.to_path_buf()
 }
 
 fn write(path: &Path, bytes: &[u8]) -> Result<(), ConfigError> {

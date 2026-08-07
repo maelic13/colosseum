@@ -168,6 +168,43 @@ fn run_file_and_equivalent_cli_path_normalize_to_identical_json() {
     assert_eq!(from_file.sha256(), from_cli.sha256());
 }
 
+#[cfg(unix)]
+#[test]
+fn symlinked_cli_path_matches_the_run_file_canonical_identity() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let actual = root.path().join("actual");
+    fs::create_dir_all(actual.join("bin")).unwrap();
+    let alias = root.path().join("alias");
+    symlink(&actual, &alias).unwrap();
+    let run = actual.join("run.toml");
+    write(&run, "[engine]\npath = \"bin/engine\"\n");
+    let pointer = vec!["/engine/path".to_owned()];
+
+    let from_file = resolve_config(
+        built_in_defaults(),
+        Some(&run),
+        json!({}),
+        &[],
+        root.path(),
+        &pointer,
+    )
+    .unwrap();
+    let from_cli = resolve_config(
+        built_in_defaults(),
+        None,
+        json!({"engine": {"path": alias.join("bin/engine")}}),
+        &[],
+        root.path(),
+        &pointer,
+    )
+    .unwrap();
+
+    assert_eq!(from_file.canonical_json(), from_cli.canonical_json());
+    assert_eq!(from_file.sha256(), from_cli.sha256());
+}
+
 #[test]
 fn rfc6901_unset_handles_escaped_object_names_and_cli_clearing() {
     let root = tempfile::tempdir().unwrap();
