@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "phase": "9.7",
+  "candidate": {
+    "product": "colosseum-cli",
+    "version": "0.1.0",
+    "source_commit": "f0e318555482cc9769eb0682d0ebf3141ce54916",
+    "workflow_run": 31209582676,
+    "aggregate_sha256": "4ba416cd91c41bc7742bcc83fab2bc7ba4c51ef3a37457d6d85dd85069267582",
+    "archives": {
+      "windows-x86_64": "b25f9eaed42da8f65eee8273c5177cd33e385ca4b5d5d60c5c386c27230aa45c",
+      "windows-arm64": "c1eb7756df223268fb8865f6fb98d3b4bbe4389744c334103b29ccb2132adab9",
+      "linux-x86_64": "931fe2d056ad17a476c6e1ac807d9da4401797d9d3e41469bfa2a0840d125bf7",
+      "macos-aarch64": "21cd1a91d9619b9ac7066fce66812e808ad3ec4781c5f1f1ce4e8d47dfb314f0"
+    }
+  },
+  "oracle_projection": {
+    "status": "inconclusive",
+    "exit_code": 4,
+    "games": 8,
+    "pairs": 4,
+    "wins": 0,
+    "draws": 8,
+    "losses": 0,
+    "pentanomial": [0, 0, 4, 0, 0],
+    "termination": "AdjudicatedDraw",
+    "faults": 0
+  },
+  "gates": [
+    { "os": "windows", "engine": "rarog", "result_sha256": "0e79418ab909b14448e7247d47bc430fbdfbc2b9958cec069ce63cf09e13d9c2" },
+    { "os": "windows", "engine": "basilisk", "result_sha256": "1ff65ba2300bab810f5493d7bb3cdccedc3dafaac611a802c36dfda969d5cb04" },
+    { "os": "linux", "engine": "rarog", "result_sha256": "6b5930014d7e0c618ceb7ed170e2beaab22808afe5ab6bb8ba7ceaa390dd10bf" },
+    { "os": "linux", "engine": "basilisk", "result_sha256": "1562555c26fd279f9b9c7aed24d73b5535e7ba39b1e5ef99ed0c9d3c0dabd947" }
+  ],
+  "release": {
+    "tag": "cli-v0.1.0",
+    "validation": "passed",
+    "release_notes_sha256": "d961c4768313381b3c094390fedbab9124a21d3a24052a4a726bbbd05ef8c645"
+  }
+}

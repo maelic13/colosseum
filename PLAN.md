@@ -1,6 +1,6 @@
 # Colosseum — engine-development harness plan
 
-`colosseum-cli` is a planned headless, cross-platform harness for
+`colosseum-cli` is a headless, cross-platform harness for
 **developing** chess engines on one machine: SPRT gates, SPSA tuning, fixed matches, tournaments,
 speed measurement, position suites, and the run-record machinery that makes
 those numbers trustworthy. Its only contract with an engine is a UCI
@@ -34,9 +34,10 @@ argumentation.
 
 ---
 
-## S1. Current state
+## S1. Implemented state
 
-**The CLI is not built yet. This document is step 0 for that work.**
+**The CLI 0.1.0 implementation and release acceptance are complete.** This
+document remains the binding design record and maintenance specification.
 
 **Colosseum is the implementation identity for the whole product.** The desktop
 product and executable are **Colosseum** / `colosseum`; its Cargo package is
@@ -1989,6 +1990,17 @@ commands, identities, hashes and triage are in
   and the residual list. Any exception is classified as a generic gap or
   intentional project policy. Each engine also runs one real gate through the
   released artifact on at least two operating systems, agreeing with 8(a).
+
+**Accepted (9.7):** final candidate
+`f0e318555482cc9769eb0682d0ebf3141ce54916` (workflow `31209582676`) passed
+exact-archive smoke for all four supported packages.  Its Windows and Linux
+executables each drove Rarog and Basilisk through the Phase 8.1 oracle gate;
+all four runs matched eight draws, four complete pairs, pentanomial
+`[0,0,4,0,0]`, adjudicated-draw termination, zero faults and the expected
+capped-inconclusive exit.  The independent `0.1.0` version, `cli-v0.1.0` tag
+contract, packaged README and product-owned release notes validate.  Exact
+identities and hashes are retained in
+[`docs/architecture/phase-9.7-release-acceptance.md`](docs/architecture/phase-9.7-release-acceptance.md).
 
 ---
 
