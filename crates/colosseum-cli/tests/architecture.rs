@@ -145,6 +145,7 @@ fn independent_release_lanes_are_complete_and_least_privileged() {
     assert!(cli.contains("[cli candidate]"));
     assert!(cli.contains("CANDIDATE.json"));
     assert!(cli.contains("Smoke-CliArchive.ps1"));
+    assert!(cli.contains("(cd release-artifacts && sha256sum --check SHA256SUMS)"));
     assert!(gui.contains("Smoke-GuiArchive.ps1"));
 
     for workflow in [&gui, &cli] {
