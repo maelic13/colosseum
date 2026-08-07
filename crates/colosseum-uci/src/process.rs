@@ -570,28 +570,6 @@ fn charged_elapsed(start: Instant, read_finished: Instant) -> Duration {
     read_finished.saturating_duration_since(start)
 }
 
-#[cfg(test)]
-mod clock_tests {
-    use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn charged_search_time_is_independent_of_a_mid_search_wall_clock_jump() {
-        let start = Instant::now();
-        let read_finished = start + Duration::from_millis(42);
-        let wall_before = UNIX_EPOCH + Duration::from_secs(2_000_000_000);
-        let wall_after = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
-        assert!(
-            wall_after < wall_before,
-            "fixture represents a backward jump"
-        );
-        assert_eq!(
-            charged_elapsed(start, read_finished),
-            Duration::from_millis(42)
-        );
-    }
-}
-
 async fn read_bounded_line(
     reader: &mut BufReader<ChildStdout>,
 ) -> Result<Option<String>, UciError> {
@@ -856,4 +834,26 @@ fn install_process_tree_guard_platform() -> Result<(), UciError> {
 #[cfg(not(windows))]
 fn install_process_tree_guard_platform() -> Result<(), UciError> {
     Ok(())
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn charged_search_time_is_independent_of_a_mid_search_wall_clock_jump() {
+        let start = Instant::now();
+        let read_finished = start + Duration::from_millis(42);
+        let wall_before = UNIX_EPOCH + Duration::from_secs(2_000_000_000);
+        let wall_after = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+        assert!(
+            wall_after < wall_before,
+            "fixture represents a backward jump"
+        );
+        assert_eq!(
+            charged_elapsed(start, read_finished),
+            Duration::from_millis(42)
+        );
+    }
 }

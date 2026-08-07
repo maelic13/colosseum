@@ -1,28 +1,52 @@
-name: Release
-# Title runs by the release tag ("v1.0.0") instead of the commit message.
+name: Colosseum GUI release
+# Title runs by the product-scoped tag instead of the commit message.
 run-name: ${{ github.ref_name }}
 
-# Triggered by publishing a GitHub Release (create the release + tag with a
-# hand-written description on github.com; this workflow then builds the
-# platform assets and attaches them to that release). Publishing from a
-# draft fires the same event — the assets appear a few minutes later.
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'gui-v*'
 
 permissions:
-  contents: write   # needed to upload assets to the release
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
 jobs:
+  required-ci:
+    name: Required workspace gates
+    uses: ./.github/workflows/ci.yml
+
+  validate:
+    name: Validate GUI release identity
+    needs: required-ci
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+
+      - name: Validate tag, manifest and GUI release notes
+        id: metadata
+        shell: bash
+        run: |
+          metadata="$(cargo run --locked -q -p colosseum-release -- "$GITHUB_REF_NAME")"
+          test "$(jq -r .product <<<"$metadata")" = gui
+          echo "version=$(jq -r .version <<<"$metadata")" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$(jq -r .prerelease <<<"$metadata")" >> "$GITHUB_OUTPUT"
+
   # ────────────────────────────────────────────────────────────────────────────
   # Build release binaries and produce platform-specific packages
   # ────────────────────────────────────────────────────────────────────────────
   build:
     name: Build (${{ matrix.target }})
+    needs: validate
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -56,14 +80,14 @@ jobs:
             arch: aarch64
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: release-${{ matrix.target }}
 
@@ -80,7 +104,7 @@ jobs:
       # Every target builds with an explicit --target, so the output is always at
       # target/<target>/release/ regardless of the host (native or cross).
       - name: Build release binary
-        run: cargo build --release --bin colosseum --target ${{ matrix.target }}
+        run: cargo build --locked --release -p colosseum-gui --bin colosseum --target ${{ matrix.target }}
 
       # ── Smoke test — verify the binary was produced and is a real binary ───
       - name: Smoke test (Unix)
@@ -109,8 +133,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $tag  = '${{ github.ref_name }}'
-          $name = "colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}"
+          $version = '${{ needs.validate.outputs.version }}'
+          $name = "colosseum-${version}-${{ matrix.platform }}-${{ matrix.arch }}"
           New-Item -ItemType Directory -Path "staging\$name" | Out-Null
           Copy-Item "target\${{ matrix.target }}\release\colosseum.exe" "staging\$name\colosseum.exe"
           Copy-Item "LICENSE"                                            "staging\$name\LICENSE"
@@ -124,12 +148,12 @@ jobs:
       # version on both x64 and Arm runners.
       - name: Install .NET SDK (Windows)
         if: runner.os == 'Windows'
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: '8.0.x'
 
       - name: Build MSI (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && needs.validate.outputs.prerelease != 'true'
         shell: pwsh
         run: |
           # Latest WiX (v7+). The OSMF EULA v1.1 must be accepted before any
@@ -138,18 +162,16 @@ jobs:
           # documented CI mechanism; the maintenance fee only applies from
           # US$10,000/yr of revenue on projects using WiX — Colosseum is free
           # software, so the fee is zero.
-          dotnet tool install --global wix
+          dotnet tool install --global wix --version 7.0.0
           # Ensure the global tools dir is on PATH for this step.
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           wix eula accept wix7
           wix extension add -g WixToolset.UI.wixext
 
-          $tag    = '${{ github.ref_name }}'
-          # MSI ProductVersion must be numeric x.y.z — strip the leading 'v' and
-          # any pre-release suffix (e.g. v0.1.0-rc.1 -> 0.1.0).
-          $ver    = ($tag.TrimStart('v') -split '-')[0]
+          $version = '${{ needs.validate.outputs.version }}'
+          $ver    = ($version -split '-')[0]
           $binDir = (Resolve-Path "target\${{ matrix.target }}\release").Path
-          $dest   = "colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}.msi"
+          $dest   = "colosseum-${version}-${{ matrix.platform }}-${{ matrix.arch }}.msi"
 
           wix build "crates\colosseum-gui\wix\main.wxs" `
             -arch ${{ matrix.wix_arch }} `
@@ -166,8 +188,8 @@ jobs:
       - name: Package tar.gz (Linux)
         if: runner.os == 'Linux'
         run: |
-          tag='${{ github.ref_name }}'
-          name="colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}"
+          version='${{ needs.validate.outputs.version }}'
+          name="colosseum-${version}-${{ matrix.platform }}-${{ matrix.arch }}"
           mkdir -p "staging/${name}"
           cp "target/${{ matrix.target }}/release/colosseum" "staging/${name}/colosseum"
           cp LICENSE                                          "staging/${name}/LICENSE"
@@ -181,9 +203,10 @@ jobs:
       - name: Package .deb and .rpm (Linux)
         if: runner.os == 'Linux'
         run: |
-          cargo install cargo-deb cargo-generate-rpm --locked
-          tag='${{ github.ref_name }}'
-          base="colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}"
+          cargo install cargo-deb --version 3.7.0 --locked
+          cargo install cargo-generate-rpm --version 0.21.0 --locked
+          version='${{ needs.validate.outputs.version }}'
+          base="colosseum-${version}-${{ matrix.platform }}-${{ matrix.arch }}"
 
           cargo deb -p colosseum-gui --no-build --target ${{ matrix.target }} \
             -o "${base}.deb"
@@ -199,13 +222,23 @@ jobs:
       - name: Package tar.gz (macOS)
         if: runner.os == 'macOS'
         run: |
-          tag='${{ github.ref_name }}'
-          name="colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}"
+          version='${{ needs.validate.outputs.version }}'
+          name="colosseum-${version}-${{ matrix.platform }}-${{ matrix.arch }}"
           mkdir -p "staging/${name}"
           cp "target/${{ matrix.target }}/release/colosseum" "staging/${name}/colosseum"
           cp LICENSE                                          "staging/${name}/LICENSE"
           tar -C staging -czf "${name}.tar.gz" "${name}"
           echo "ARTIFACT_TGZ=${name}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Smoke exact portable archive
+        shell: pwsh
+        run: |
+          $extension = if ('${{ matrix.platform }}' -eq 'windows') { 'zip' } else { 'tar.gz' }
+          ./tools/release/Smoke-GuiArchive.ps1 `
+            -Archive "colosseum-${{ needs.validate.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}.$extension" `
+            -Version '${{ needs.validate.outputs.version }}' `
+            -Platform '${{ matrix.platform }}' `
+            -Architecture '${{ matrix.arch }}'
 
       # ── macOS: .app bundle (icon + Info.plist + ad-hoc signature) ──────────
       # A double-clickable, Finder-friendly bundle: it carries the app icon and
@@ -220,8 +253,7 @@ jobs:
       - name: Assemble .app bundle (macOS)
         if: runner.os == 'macOS'
         run: |
-          tag='${{ github.ref_name }}'
-          ver="${tag#v}"
+          ver='${{ needs.validate.outputs.version }}'
           app="dmg-staging/Colosseum.app"
 
           mkdir -p "${app}/Contents/MacOS" "${app}/Contents/Resources"
@@ -275,8 +307,8 @@ jobs:
       - name: Package DMG (macOS)
         if: runner.os == 'macOS'
         run: |
-          tag='${{ github.ref_name }}'
-          dmg="colosseum-${tag}-${{ matrix.platform }}-${{ matrix.arch }}.dmg"
+          version='${{ needs.validate.outputs.version }}'
+          dmg="colosseum-${version}-${{ matrix.platform }}-${{ matrix.arch }}.dmg"
           icns="dmg-staging/Colosseum.app/Contents/Resources/colosseum.icns"
 
           # The macOS runner image ships an untrusted third-party tap (aws/tap)
@@ -294,7 +326,7 @@ jobs:
             -out dmg-background.tiff
 
           create-dmg \
-            --volname "Colosseum ${tag}" \
+            --volname "Colosseum ${version}" \
             --volicon "$icns" \
             --background dmg-background.tiff \
             --window-pos 200 120 \
@@ -312,7 +344,7 @@ jobs:
             echo "create-dmg produced no DMG; falling back to hdiutil."
             ln -s /Applications "dmg-staging/Applications"
             hdiutil create \
-              -volname "Colosseum ${tag}" \
+              -volname "Colosseum ${version}" \
               -srcfolder "dmg-staging/" \
               -ov -format UDZO \
               "$dmg"
@@ -324,42 +356,42 @@ jobs:
       # ── Upload artifacts (separate steps so missing ones are skipped) ───────
       - name: Upload ZIP
         if: env.ARTIFACT_ZIP != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: zip-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_ZIP }}
 
       - name: Upload MSI
         if: env.ARTIFACT_MSI != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: msi-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_MSI }}
 
       - name: Upload TGZ
         if: env.ARTIFACT_TGZ != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: tgz-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_TGZ }}
 
       - name: Upload DEB
         if: env.ARTIFACT_DEB != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: deb-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_DEB }}
 
       - name: Upload RPM
         if: env.ARTIFACT_RPM != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: rpm-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_RPM }}
 
       - name: Upload DMG
         if: env.ARTIFACT_DMG != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: dmg-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ARTIFACT_DMG }}
@@ -371,6 +403,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   build-arch:
     name: Build (x86_64 Arch package)
+    needs: validate
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel
@@ -381,14 +414,14 @@ jobs:
       - name: Install build dependencies
         run: pacman -Syu --noconfirm --needed git rust gtk3 libxkbcommon openssl
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: release-arch-x86_64
 
       - name: Build release binary
-        run: cargo build --release --bin colosseum
+        run: cargo build --locked --release -p colosseum-gui --bin colosseum
 
       - name: Smoke test
         run: |
@@ -403,9 +436,9 @@ jobs:
       # handed to an unprivileged user first.
       - name: Package .pkg.tar.zst
         run: |
-          tag='${{ github.ref_name }}'
-          # pkgver may not contain hyphens (v1.0.2-rc.1 -> 1.0.2_rc.1).
-          pkgver="$(echo "${tag#v}" | tr '-' '_')"
+          version='${{ needs.validate.outputs.version }}'
+          # pkgver may not contain hyphens (1.0.2-rc.1 -> 1.0.2_rc.1).
+          pkgver="$(echo "$version" | tr '-' '_')"
 
           mkdir -p pkgbuild
           cp target/release/colosseum        pkgbuild/colosseum
@@ -450,14 +483,14 @@ jobs:
             ls -1 pkgbuild/*.pkg.tar.zst || true
             exit 1
           }
-          dest="colosseum-${tag}-linux-x86_64.pkg.tar.zst"
+          dest="colosseum-${version}-linux-x86_64.pkg.tar.zst"
           mv "$built" "$dest"
           test -f "$dest" || { echo "ERROR: Arch package not produced"; exit 1; }
           echo "ARTIFACT_PKG=$dest" >> "$GITHUB_ENV"
 
       - name: Upload Arch package
         if: env.ARTIFACT_PKG != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: pkg-linux-arch-x86_64
           path: ${{ env.ARTIFACT_PKG }}
@@ -466,14 +499,16 @@ jobs:
   # Collect all platform artifacts and attach them to the triggering release
   # ────────────────────────────────────────────────────────────────────────────
   publish:
-    name: Attach assets to the release
-    needs: [build, build-arch]
+    name: Verify and publish GUI release
+    needs: [validate, build, build-arch]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: '*'
           merge-multiple: true
@@ -482,10 +517,24 @@ jobs:
       - name: List release artifacts
         run: ls -lh release-artifacts/
 
-      # The release (tag, title, description, pre-release flag) is authored by
-      # hand on github.com; this only uploads the files to it. No body/notes
-      # options here, so the hand-written description is never touched.
-      - name: Upload assets to the release
-        uses: softprops/action-gh-release@v3
+      - name: Generate and verify checksums
+        run: |
+          cd release-artifacts
+          sha256sum * > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+
+      - name: Extract GUI-owned release notes
+        run: cargo run --locked -q -p colosseum-release -- notes "$GITHUB_REF_NAME" release-artifacts/RELEASE-NOTES.md
+
+      - name: Publish product-scoped release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
-          files: release-artifacts/*
+          name: Colosseum GUI v${{ needs.validate.outputs.version }}
+          body_path: release-artifacts/RELEASE-NOTES.md
+          prerelease: ${{ needs.validate.outputs.prerelease == 'true' }}
+          files: |
+            release-artifacts/colosseum-*
+            release-artifacts/SHA256SUMS

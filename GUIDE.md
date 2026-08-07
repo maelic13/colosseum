@@ -732,11 +732,15 @@ model as well.
   drift. Review also connected the previously library-only run-file resolver to
   the real CLI with inheritance, unsetting, path origins and tested all-CLI
   normalized-config/hash equivalence
-- ☐ **9.4** — **Model: Sol High.** Ship per Phase 0.5's release model; all supported platforms;
+- ◐ **9.4 — IN PROGRESS** — **Model: Sol High.** Ship per Phase 0.5's release model; all supported platforms;
   use the Phase 9.0 identity and its dated
   web/GitHub/package-channel/preliminary-trademark screen;
-  smoke-test the exact published artifacts (`--version`, `--help`,
-  `self-test`, one deterministic JSON workflow, dependency inspection)
+  first build an unpublished immutable candidate bundle from `cli` and
+  smoke-test its exact archives (`--version`, `--help`, `self-test`, one
+  deterministic JSON workflow, dependency inspection). Publish no GitHub
+  prerelease. After 9.5–9.7 accept the final candidate, merge the tested work
+  to `main`, then tag and publish the independently versioned stable product
+  through the same archive gates
 - ☐ **9.5** — **Model: Sol High. Coverage acceptance** (PLAN §5.14) — archive replaced generic
   implementations in both validation engines; retain declarative configs,
   thin CI/policy glue and engine-specific residuals; classify exceptions
@@ -779,10 +783,12 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 9.4 — ship exact independent artifacts. Model: GPT-5.6 Sol — High.**
-Implement the final GUI/CLI release workflows and packaging helpers, then prove
-the exact supported-platform artifacts with version/help/self-test/JSON and
-dependency-inspection smoke gates before publication.
+**Phase 9.4 — finish exact independent artifact evidence. Model: GPT-5.6 Sol — High.**
+The separate GUI/CLI workflows, allowlisted CLI staging and exact-archive smoke
+are implemented locally. Commit on `cli` with `[cli candidate]` in the subject
+and push (manual dispatch is also available once the workflow exists on
+`main`); retain its commit SHA, run ID, checksums and four-platform result
+before marking this step done. Do not create a tag or GitHub prerelease.
 
 ```
 git diff --check

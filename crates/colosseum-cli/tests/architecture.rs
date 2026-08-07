@@ -130,6 +130,49 @@ fn cli_runner_adapter_does_not_pull_in_legacy_database_or_scheduler_code() {
     }
 }
 
+#[test]
+fn independent_release_lanes_are_complete_and_least_privileged() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    assert!(!root.join(".github/workflows/release.yml").exists());
+    let gui = fs::read_to_string(root.join(".github/workflows/release-gui.yml")).unwrap();
+    let cli = fs::read_to_string(root.join(".github/workflows/release-cli.yml")).unwrap();
+
+    assert!(gui.contains("'gui-v*'"));
+    assert!(!gui.contains("'cli-v*'"));
+    assert!(cli.contains("'cli-v*'"));
+    assert!(!cli.contains("'gui-v*'"));
+    assert!(cli.contains("workflow_dispatch:"));
+    assert!(cli.contains("[cli candidate]"));
+    assert!(cli.contains("CANDIDATE.json"));
+    assert!(cli.contains("Smoke-CliArchive.ps1"));
+    assert!(gui.contains("Smoke-GuiArchive.ps1"));
+
+    for workflow in [&gui, &cli] {
+        assert!(workflow.contains("permissions:\n  contents: read"));
+        assert_eq!(workflow.matches("contents: write").count(), 1);
+        for line in workflow.lines().filter(|line| line.contains("uses:")) {
+            if line.contains("./.github/workflows/") {
+                continue;
+            }
+            let revision = line
+                .split('@')
+                .nth(1)
+                .and_then(|value| value.split_whitespace().next())
+                .unwrap_or_default();
+            assert_eq!(
+                revision.len(),
+                40,
+                "release action is not pinned to a full commit: {line}"
+            );
+            assert!(
+                revision
+                    .chars()
+                    .all(|character| character.is_ascii_hexdigit())
+            );
+        }
+    }
+}
+
 fn source_files(directory: &std::path::Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for entry in fs::read_dir(directory).unwrap() {

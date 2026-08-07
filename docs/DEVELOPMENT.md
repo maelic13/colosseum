@@ -144,8 +144,28 @@ cargo run -p colosseum-release -- gui-v1.0.2
 
 Push/pull-request CI runs the hermetic workspace on Windows, Linux and macOS in
 debug and release profiles, and independently builds the headless CLI artifact.
-The existing `release.yml` remains the legacy GUI publication workflow until
-the product-specific publication workflows are implemented.
+Product release automation is split between `release-gui.yml` and
+`release-cli.yml`; only their final publication jobs receive write permission.
+
+### CLI candidate before merge
+
+Push the exact `cli` commit with `[cli candidate]` in its subject. This marker
+is needed before the workflow exists on `main`; afterward a manual dispatch of
+**Colosseum CLI candidate and release** is equivalent. Ordinary `cli` pushes
+skip the heavyweight jobs. A candidate creates no tag or GitHub Release. It builds
+Windows x64/Arm64, Linux x64 and macOS Arm64 archives, stages only the CLI,
+license, README and `docs/cli/`, then runs version/help/self-test/deterministic
+JSON smoke against each unpacked archive. The retained aggregate artifact is
+named `colosseum-cli-candidate-<full-commit-sha>` and contains checksums plus a
+candidate identity file.
+
+Before the final candidate, merge current `main` into `cli`. Any subsequent
+code, dependency, CLI documentation, packaging-helper or workflow change
+requires a new candidate. After acceptance, merge without squashing away the
+tested commit. Create `cli-v<version>` only when the accepted commit is
+reachable from `main`; the tag workflow rebuilds, smokes and publishes the
+stable artifacts. Tracker/evidence-only commits may follow the candidate when
+they cannot affect an archive input.
 
 ## CLI documentation
 

@@ -273,8 +273,20 @@ router proves that shared changes cannot skip either product.
 
 ## Release workflow design
 
+CLI acceptance is branch-first. A `cli` push whose commit subject contains
+`[cli candidate]` (or a manual dispatch after the workflow reaches `main`)
+creates four immutable, unpublished workflow archives plus
+`SHA256SUMS` and `CANDIDATE.json`; it does not create a tag or GitHub Release.
+The run ID, full commit SHA and checksums identify the exact candidate used by
+acceptance. The public stable lane becomes available only after that commit is
+reachable from `main`. This avoids a public prerelease while retaining exact
+cross-platform artifact evidence.
+
 ```mermaid
 flowchart TD
+    CANDIDATE["Request CLI candidate at exact commit"]
+    ACCEPT["Acceptance on exact workflow archives"]
+    MERGE["Merge tested commit to main"]
     TAG["Push gui-v* or cli-v* tag"]
     META["Validate product, SemVer, manifest, changelog, source commit"]
     TEST["Run/reuse required workspace gates on exact tag"]
@@ -284,6 +296,12 @@ flowchart TD
     HASH["Collect exact assets + SHA256SUMS"]
     RELEASE["Publish one product-scoped GitHub Release"]
 
+    CANDIDATE --> META
+    META --> CLI
+    CLI --> HASH
+    HASH --> ACCEPT
+    ACCEPT --> MERGE
+    MERGE --> TAG
     TAG --> META
     META --> TEST
     TEST --> ROUTE
@@ -299,7 +317,9 @@ Use two small entry workflows rather than one 500-line conditional workflow:
 - `release-gui.yml` owns GUI system dependencies, WiX, DEB/RPM/Arch, app bundle
   and DMG behavior migrated from the current `release.yml`;
 - `release-cli.yml` owns only headless builds/archives and therefore installs no
-  GUI or installer toolchain;
+  GUI or installer toolchain; an explicit candidate marker/manual dispatch
+  produces only an unpublished commit-addressed candidate, while `cli-v*`
+  produces a public release;
 - repository-owned release metadata/packaging helpers provide common version,
   filename, checksum and note extraction;
 - build jobs use read-only permissions; only the final publish job receives
@@ -315,6 +335,15 @@ update review rather than floating “latest” installation during a release.
 The release job checks out the immutable tag and must not modify source files or
 generated lock state. All artifacts for one release come from that same tag and
 validated product version.
+
+Before the final candidate, merge current `main` into `cli` and resolve/test
+there. Do not squash the accepted candidate away: its source commit must remain
+an ancestor of `main`. Any post-candidate change to Rust source, Cargo inputs,
+`README.md`, `docs/cli/`, release helpers or workflows invalidates acceptance.
+PLAN/GUIDE evidence-only changes are permitted when they cannot alter archive
+contents. The stable tag workflow verifies ancestry, rebuilds from the tagged
+commit, re-runs the exact-archive smoke matrix and publishes only after every
+platform succeeds.
 
 ### Published-artifact smoke tests
 
