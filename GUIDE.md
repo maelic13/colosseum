@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–8 are complete: independent fixed match/SPRT/calibration/SPSA workflows plus speed/scaling, book, statistics planning/replay/telemetry, durable position suites, tournaments, external parity and reasoned runner-gap decisions |
-| What is missing | Release artifacts and cross-platform/third-party release acceptance |
+| What exists | Phases 0–8 plus 9.0–9.4 are complete: the independent CLI workflows and documentation now have a checksum-verified unpublished four-platform candidate |
+| What is missing | Validation-engine coverage acceptance, third-party usability exercise and final release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows ☑ local through Phase 8 · Linux/macOS ☐ CI execution evidence pending — required CI is configured for debug/release on all three |
-| Next step | **Phase 9.4 — independent product release workflows and exact artifacts** |
+| Platform status | Windows/Linux/macOS ☑ required debug and release CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
+| Next step | **Phase 9.5 — validation-engine coverage acceptance** |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -732,7 +732,7 @@ model as well.
   drift. Review also connected the previously library-only run-file resolver to
   the real CLI with inheritance, unsetting, path origins and tested all-CLI
   normalized-config/hash equivalence
-- ◐ **9.4 — IN PROGRESS** — **Model: Sol High.** Ship per Phase 0.5's release model; all supported platforms;
+- ☑ **9.4 — DONE** — **Model: Sol High.** Ship per Phase 0.5's release model; all supported platforms;
   use the Phase 9.0 identity and its dated
   web/GitHub/package-channel/preliminary-trademark screen;
   first build an unpublished candidate bundle from `cli` and
@@ -740,7 +740,9 @@ model as well.
   deterministic JSON workflow, dependency inspection). Publish no GitHub
   prerelease. After 9.5–9.7 accept the final candidate, merge `cli` to `main`,
   then tag and publish the independently versioned stable product through the
-  same archive gates
+  same archive gates — candidate commit, workflow-run identity, four exact
+  archive checksums and green CI/smoke evidence are retained in
+  [`docs/architecture/phase-9.4-candidate.md`](docs/architecture/phase-9.4-candidate.md)
 - ☐ **9.5** — **Model: Sol High. Coverage acceptance** (PLAN §5.14) — archive replaced generic
   implementations in both validation engines; retain declarative configs,
   thin CI/policy glue and engine-specific residuals; classify exceptions
@@ -783,12 +785,12 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 9.4 — finish exact independent artifact evidence. Model: GPT-5.6 Sol — High.**
-The separate GUI/CLI workflows, allowlisted CLI staging and exact-archive smoke
-are implemented locally. Commit on `cli` with `[cli candidate]` in the subject
-and push (manual dispatch is also available once the workflow exists on
-`main`); retain its commit SHA, run ID, checksums and four-platform result
-before marking this step done. Do not create a tag or GitHub prerelease.
+**Phase 9.5 — validation-engine coverage acceptance. Model: GPT-5.6 Sol — High.**
+Audit the Rarog and Basilisk harness workflows against PLAN §S5.14. Archive
+generic scheduling/statistics/tuning/recovery implementations now covered by
+Colosseum CLI; retain declarative run files, thin project policy/CI invocation
+and engine-specific responsibilities. Classify every residual as an intentional
+engine policy or a generic CLI mechanism gap.
 
 ```
 git diff --check

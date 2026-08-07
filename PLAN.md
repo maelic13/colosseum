@@ -1948,6 +1948,14 @@ and hash equal the equivalent all-CLI invocation.
   stable source with `cli-v<version>`, and let the workflow rebuild, smoke and
   publish the final archives. Normal push/tag CI remains the test gate and is
   not duplicated inside the packaging workflow.
+
+**Accepted (9.4):** unpublished candidate `0.1.0` at commit
+`22aefa8a4374405f7cedbcf2d1baf09066f9ebe7` passed required debug/release CI and
+exact-archive smoke on the four supported build targets. Workflow run
+`31199592962` retained the checksum-verified aggregate without creating a tag
+or GitHub Release. The complete identity, archive hashes and acceptance record
+are in
+[`docs/architecture/phase-9.4-candidate.md`](docs/architecture/phase-9.4-candidate.md).
 - **(d) Release-candidate usability exercise.** A **third-party engine pair the maintainers did not
   write** — any two public UCI engines — driven by someone following only the
   published documentation, completing a fixed match, an SPRT and a short SPSA.
