@@ -3,6 +3,7 @@
 //! Logical processor numbering is identity only. It is never used to infer
 //! which processors share a physical core.
 
+#[cfg(any(windows, target_os = "linux", test))]
 use std::collections::BTreeSet;
 #[cfg(target_os = "linux")]
 use std::path::Path;
@@ -42,6 +43,7 @@ pub struct CpuTopology {
 }
 
 impl CpuTopology {
+    #[cfg(any(windows, target_os = "linux", test))]
     fn from_known(
         source: TopologySource,
         mut cores: Vec<PhysicalCore>,

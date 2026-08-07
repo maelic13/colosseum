@@ -1,5 +1,6 @@
 //! OS-native core-class and NUMA characteristics used by placement policy.
 
+#[cfg(any(windows, target_os = "linux", test))]
 use std::collections::{BTreeMap, BTreeSet};
 #[cfg(target_os = "linux")]
 use std::path::Path;
@@ -90,6 +91,7 @@ pub enum CharacteristicsError {
     UnsupportedPlatform(&'static str),
 }
 
+#[cfg(any(windows, target_os = "linux", test))]
 #[derive(Debug, Clone, Copy)]
 struct LogicalCharacteristics {
     core_class: CoreClass,
@@ -102,6 +104,7 @@ pub fn detect_cpu_characteristics(
     detect_platform(topology)
 }
 
+#[cfg(any(windows, target_os = "linux", test))]
 fn assemble(
     topology: &CpuTopology,
     source: CharacteristicsSource,

@@ -3,6 +3,7 @@
 //! Topology describes the machine. Availability describes the subset the
 //! operating system currently permits the calling process/thread to use.
 
+#[cfg(any(windows, target_os = "linux", test))]
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,7 @@ impl AllowedCpuSet {
         }
     }
 
+    #[cfg(any(windows, target_os = "linux", test))]
     fn known(
         topology: &CpuTopology,
         source: AllowedCpuSource,
@@ -195,7 +197,9 @@ pub(crate) mod windows {
     pub(crate) struct CpuSetEntry {
         pub(crate) id: u32,
         pub(crate) cpu: LogicalCpuId,
+        #[cfg(windows)]
         pub(crate) efficiency_class: u8,
+        #[cfg(windows)]
         pub(crate) numa_node_index: u8,
         pub(crate) allocated: bool,
         pub(crate) allocated_to_process: bool,
@@ -483,7 +487,9 @@ pub(crate) mod windows {
                 .map(|(id, cpu)| CpuSetEntry {
                     id: id as u32,
                     cpu,
+                    #[cfg(windows)]
                     efficiency_class: 0,
+                    #[cfg(windows)]
                     numa_node_index: 0,
                     allocated: false,
                     allocated_to_process: false,
