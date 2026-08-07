@@ -81,18 +81,17 @@ Given a tag, it must:
 
 1. accept only `gui-v<valid-semver>` or `cli-v<valid-semver>`;
 2. map the prefix to exactly one product package/workflow;
-3. require tag SemVer to equal that package's manifest version exactly,
-   including prerelease/build semantics allowed by the release policy;
+3. require tag SemVer to equal that package's manifest version exactly;
 4. require a matching release-note heading in the correct product changelog;
 5. reject a matching heading in only the other product's changelog;
 6. emit filesystem-safe artifact/version values rather than letting each shell
    script parse the tag independently;
 7. report whether the version is a prerelease.
 
-Release SemVer is `major.minor.patch` with an optional prerelease suffix. Build
-metadata (`+...`) is rejected for product tags and package versions because it
-does not define precedence consistently across GitHub and native package
-formats.
+Release SemVer is `major.minor.patch`; the GUI lane may also use a prerelease
+suffix when needed. The CLI lane publishes stable versions only. Build metadata
+(`+...`) is rejected for product tags and package versions because it does not
+define precedence consistently across GitHub and native package formats.
 
 The command is used locally, in CI and in both release workflows. Packaging
 tools that require numeric versions receive a validated platform projection
@@ -108,7 +107,6 @@ Examples:
 gui-v1.0.3
 gui-v1.1.0-rc.1
 cli-v0.1.0
-cli-v0.2.0-rc.1
 ```
 
 Tags are immutable and identify the exact source/lockfile used for all assets.
@@ -119,8 +117,9 @@ not publish an incomplete release first.
 
 The release workflow verifies that the tagged commit is reachable from the
 protected primary branch unless an explicitly documented emergency release
-procedure is invoked. Stable and prerelease status comes from the validated
-SemVer, not a manually inconsistent checkbox.
+procedure is invoked. GUI prerelease status comes from validated SemVer rather
+than a manually inconsistent checkbox; the CLI workflow rejects prerelease
+tags.
 
 Historic unscoped `v0.1.0`–`v1.0.2` releases remain immutable GUI history. They
 are not duplicated or retagged. The next GUI version begins the new namespace.
@@ -275,44 +274,41 @@ router proves that shared changes cannot skip either product.
 
 CLI acceptance is branch-first. A `cli` push whose commit subject contains
 `[cli candidate]` (or a manual dispatch after the workflow reaches `main`)
-creates four immutable, unpublished workflow archives plus
+creates four unpublished workflow archives plus
 `SHA256SUMS` and `CANDIDATE.json`; it does not create a tag or GitHub Release.
-The run ID, full commit SHA and checksums identify the exact candidate used by
-acceptance. The public stable lane becomes available only after that commit is
-reachable from `main`. This avoids a public prerelease while retaining exact
-cross-platform artifact evidence.
+The run ID, full commit SHA and checksums identify the candidate used by
+acceptance. After `cli` is merged, only a stable tag on `main` can publish.
+This avoids a public prerelease while retaining exact cross-platform artifact
+evidence.
 
 ```mermaid
 flowchart TD
     CANDIDATE["Request CLI candidate at exact commit"]
+    CMETA["Validate CLI version, docs and dependency boundary"]
+    CBUILD["Build, smoke and checksum CLI archives"]
     ACCEPT["Acceptance on exact workflow archives"]
     MERGE["Merge tested commit to main"]
     TAG["Push gui-v* or cli-v* tag"]
-    META["Validate product, SemVer, manifest, changelog, source commit"]
-    TEST["Run/reuse required workspace gates on exact tag"]
+    META["Validate product, version and release notes"]
     ROUTE{"Product"}
     GUI["GUI platform build + installers + GUI smoke"]
     CLI["CLI platform build + archive + headless smoke"]
-    HASH["Collect exact assets + SHA256SUMS"]
     RELEASE["Publish one product-scoped GitHub Release"]
 
-    CANDIDATE --> META
-    META --> CLI
-    CLI --> HASH
-    HASH --> ACCEPT
+    CANDIDATE --> CMETA
+    CMETA --> CBUILD
+    CBUILD --> ACCEPT
     ACCEPT --> MERGE
     MERGE --> TAG
     TAG --> META
-    META --> TEST
-    TEST --> ROUTE
+    META --> ROUTE
     ROUTE -->|gui| GUI
     ROUTE -->|cli| CLI
-    GUI --> HASH
-    CLI --> HASH
-    HASH --> RELEASE
+    GUI --> RELEASE
+    CLI --> RELEASE
 ```
 
-Use two small entry workflows rather than one 500-line conditional workflow:
+Use two product-specific workflows rather than one conditional workflow:
 
 - `release-gui.yml` owns GUI system dependencies, WiX, DEB/RPM/Arch, app bundle
   and DMG behavior migrated from the current `release.yml`;
@@ -327,23 +323,22 @@ Use two small entry workflows rather than one 500-line conditional workflow:
 - release jobs use explicit product package/binary selections, never ambiguous
   `cargo build --bin` resolution or root-version parsing.
 
-Cargo commands use the committed lockfile with `--locked`. Third-party actions,
-container images and packaging tools are pinned to reviewed immutable versions
-(action commit SHA with a version comment where practical), with automated
-update review rather than floating “latest” installation during a release.
+Cargo commands use the committed lockfile with `--locked`. Actions use their
+maintained major-version tags, the normal GitHub Actions convention, so the
+workflow remains readable and receives compatible fixes. Exact tool versions
+are pinned only when a package-format compatibility requirement demands it.
 
 The release job checks out the immutable tag and must not modify source files or
 generated lock state. All artifacts for one release come from that same tag and
 validated product version.
 
-Before the final candidate, merge current `main` into `cli` and resolve/test
-there. Do not squash the accepted candidate away: its source commit must remain
-an ancestor of `main`. Any post-candidate change to Rust source, Cargo inputs,
-`README.md`, `docs/cli/`, release helpers or workflows invalidates acceptance.
-PLAN/GUIDE evidence-only changes are permitted when they cannot alter archive
-contents. The stable tag workflow verifies ancestry, rebuilds from the tagged
-commit, re-runs the exact-archive smoke matrix and publishes only after every
-platform succeeds.
+Rerun the candidate after a change to CLI source, Cargo inputs, user
+documentation or packaging. After acceptance, merge `cli` to `main` using the
+normal project merge strategy and tag the resulting stable source. The tag
+workflow verifies that source is on `main`, rebuilds it, re-runs the
+exact-archive smoke matrix and publishes only after every platform succeeds.
+The ordinary CI workflow owns the complete cross-platform debug/release test
+matrix and runs independently on pushes and tags; packaging does not repeat it.
 
 ### Published-artifact smoke tests
 

@@ -735,12 +735,12 @@ model as well.
 - ◐ **9.4 — IN PROGRESS** — **Model: Sol High.** Ship per Phase 0.5's release model; all supported platforms;
   use the Phase 9.0 identity and its dated
   web/GitHub/package-channel/preliminary-trademark screen;
-  first build an unpublished immutable candidate bundle from `cli` and
+  first build an unpublished candidate bundle from `cli` and
   smoke-test its exact archives (`--version`, `--help`, `self-test`, one
   deterministic JSON workflow, dependency inspection). Publish no GitHub
-  prerelease. After 9.5–9.7 accept the final candidate, merge the tested work
-  to `main`, then tag and publish the independently versioned stable product
-  through the same archive gates
+  prerelease. After 9.5–9.7 accept the final candidate, merge `cli` to `main`,
+  then tag and publish the independently versioned stable product through the
+  same archive gates
 - ☐ **9.5** — **Model: Sol High. Coverage acceptance** (PLAN §5.14) — archive replaced generic
   implementations in both validation engines; retain declarative configs,
   thin CI/policy glue and engine-specific residuals; classify exceptions

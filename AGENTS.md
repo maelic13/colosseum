@@ -26,6 +26,10 @@ specification; `GUIDE.md` is the ordered implementation tracker.
 
 One numbered `GUIDE.md` item is the normal unit of work.
 
+Agents work locally only: create the required commits, but never push, fetch,
+create tags, releases or pull requests, or perform other remote operations.
+The maintainer owns every remote operation.
+
 Use the per-step model assignment in `PLAN.md` §S8, mirrored on the numbered
 `GUIDE.md` item. When asked what comes next, state both the step and its
 recommended model/effort. If a Terra step exposes a material design choice not

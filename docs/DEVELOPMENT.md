@@ -159,13 +159,12 @@ JSON smoke against each unpacked archive. The retained aggregate artifact is
 named `colosseum-cli-candidate-<full-commit-sha>` and contains checksums plus a
 candidate identity file.
 
-Before the final candidate, merge current `main` into `cli`. Any subsequent
-code, dependency, CLI documentation, packaging-helper or workflow change
-requires a new candidate. After acceptance, merge without squashing away the
-tested commit. Create `cli-v<version>` only when the accepted commit is
-reachable from `main`; the tag workflow rebuilds, smokes and publishes the
-stable artifacts. Tracker/evidence-only commits may follow the candidate when
-they cannot affect an archive input.
+Rerun the candidate after changing CLI code, dependencies, user documentation
+or packaging. After acceptance, merge `cli` to `main` using the repository's
+preferred merge strategy and tag the resulting stable source with
+`cli-v<version>`. The tag workflow rebuilds, smokes and publishes the final
+artifacts. The ordinary CI workflow remains responsible for the complete
+debug/release workspace test matrix; release packaging does not duplicate it.
 
 ## CLI documentation
 

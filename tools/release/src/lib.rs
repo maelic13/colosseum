@@ -36,6 +36,8 @@ pub enum MetadataError {
     Semver(#[from] semver::Error),
     #[error("release versions must not contain build metadata")]
     BuildMetadata,
+    #[error("Colosseum CLI publishes stable versions only")]
+    CliPrerelease,
     #[error("could not read {path}: {source}")]
     Read {
         path: String,
@@ -85,6 +87,9 @@ pub fn validate(root: &Path, tag: &str) -> Result<ReleaseMetadata, MetadataError
     if !version.build.is_empty() {
         return Err(MetadataError::BuildMetadata);
     }
+    if product.name == "cli" && !version.pre.is_empty() {
+        return Err(MetadataError::CliPrerelease);
+    }
     let actual = package_version(root, product)?;
     if actual != version.to_string() {
         return Err(MetadataError::VersionMismatch {
@@ -118,6 +123,9 @@ pub fn candidate(root: &Path, name: &str) -> Result<ReleaseMetadata, MetadataErr
     let version = Version::parse(&package_version(root, product)?)?;
     if !version.build.is_empty() {
         return Err(MetadataError::BuildMetadata);
+    }
+    if product.name == "cli" && !version.pre.is_empty() {
+        return Err(MetadataError::CliPrerelease);
     }
     let proposed_tag = format!("{}{}", product.tag_prefix, version);
     Ok(metadata(product, version, proposed_tag, "candidate"))
@@ -327,6 +335,10 @@ mod tests {
         assert!(matches!(
             validate(root.path(), "cli-v1.2.3+local"),
             Err(MetadataError::BuildMetadata)
+        ));
+        assert!(matches!(
+            validate(root.path(), "cli-v1.2.3-rc.1"),
+            Err(MetadataError::CliPrerelease)
         ));
     }
 

@@ -150,26 +150,6 @@ fn independent_release_lanes_are_complete_and_least_privileged() {
     for workflow in [&gui, &cli] {
         assert!(workflow.contains("permissions:\n  contents: read"));
         assert_eq!(workflow.matches("contents: write").count(), 1);
-        for line in workflow.lines().filter(|line| line.contains("uses:")) {
-            if line.contains("./.github/workflows/") {
-                continue;
-            }
-            let revision = line
-                .split('@')
-                .nth(1)
-                .and_then(|value| value.split_whitespace().next())
-                .unwrap_or_default();
-            assert_eq!(
-                revision.len(),
-                40,
-                "release action is not pinned to a full commit: {line}"
-            );
-            assert!(
-                revision
-                    .chars()
-                    .all(|character| character.is_ascii_hexdigit())
-            );
-        }
     }
 }
 

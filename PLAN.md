@@ -1942,16 +1942,12 @@ and hash equal the equivalent all-CLI invocation.
   its commit subject (or manually dispatch once the workflow already exists on
   `main`): `release-cli.yml` retains an unpublished candidate bundle identified
   by commit SHA and workflow-run ID, but creates no tag or GitHub prerelease.
-  Ordinary `cli` pushes leave the heavyweight candidate jobs skipped. Steps
-  9.5–9.7 consume those exact archives. Synchronize `main` into `cli` before the final candidate; any later
-  executable, dependency, user-documentation or packaging change invalidates
-  it and requires a new candidate. After acceptance, merge so the tested
-  candidate commit remains reachable from `main` (never squash it away), tag
-  the accepted stable source with `cli-v<version>`, and let the same build,
-  checksum and exact-archive smoke gates publish the stable release. A final
-  tracker/evidence-only commit may follow a candidate without invalidating it,
-  but must not change any archive input. The stable tag workflow independently
-  rebuilds and smokes the exact artifacts it publishes.
+  Ordinary `cli` pushes leave the candidate jobs skipped. Steps 9.5–9.7 use
+  those archives; rerun the candidate after any change that affects the CLI or
+  its package. After acceptance, merge `cli` to `main`, tag the resulting
+  stable source with `cli-v<version>`, and let the workflow rebuild, smoke and
+  publish the final archives. Normal push/tag CI remains the test gate and is
+  not duplicated inside the packaging workflow.
 - **(d) Release-candidate usability exercise.** A **third-party engine pair the maintainers did not
   write** — any two public UCI engines — driven by someone following only the
   published documentation, completing a fixed match, an SPRT and a short SPSA.

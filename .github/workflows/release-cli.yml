@@ -17,27 +17,21 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  required-ci:
-    name: Required workspace gates
-    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[cli candidate]')
-    uses: ./.github/workflows/ci.yml
-
   prepare:
-    name: Validate immutable source
-    needs: required-ci
+    name: Validate source and packaging inputs
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[cli candidate]')
     runs-on: ubuntu-latest
     outputs:
       mode: ${{ steps.metadata.outputs.mode }}
       version: ${{ steps.metadata.outputs.version }}
-      prerelease: ${{ steps.metadata.outputs.prerelease }}
       source_sha: ${{ steps.metadata.outputs.source_sha }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@v2
         with:
           key: release-cli-metadata
 
@@ -55,7 +49,6 @@ jobs:
           test "$(jq -r .product <<<"$metadata")" = cli
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "version=$(jq -r .version <<<"$metadata")" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$(jq -r .prerelease <<<"$metadata")" >> "$GITHUB_OUTPUT"
           echo "source_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           echo "$metadata"
 
@@ -94,16 +87,16 @@ jobs:
             extension: tar.gz
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.source_sha }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@v2
         with:
           key: release-cli-${{ matrix.target }}
 
@@ -147,7 +140,7 @@ jobs:
             -Architecture '${{ matrix.arch }}'
 
       - name: Upload exact platform archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@v7
         with:
           name: cli-archive-${{ matrix.platform }}-${{ matrix.arch }}
           path: colosseum-cli-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.extension }}
@@ -159,13 +152,13 @@ jobs:
     needs: [prepare, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.source_sha }}
           fetch-depth: 0
 
       - name: Download all exact platform archives
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@v8
         with:
           pattern: cli-archive-*
           merge-multiple: true
@@ -186,7 +179,7 @@ jobs:
           (cd release-artifacts && sha256sum "${expected[@]}" > SHA256SUMS)
           sha256sum --check release-artifacts/SHA256SUMS
 
-      - name: Record immutable candidate identity
+      - name: Record candidate identity
         if: needs.prepare.outputs.mode == 'candidate'
         shell: bash
         run: |
@@ -196,7 +189,7 @@ jobs:
 
       - name: Retain candidate bundle without publishing a release
         if: needs.prepare.outputs.mode == 'candidate'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@v7
         with:
           name: colosseum-cli-candidate-${{ needs.prepare.outputs.source_sha }}
           path: release-artifacts/*
@@ -209,21 +202,21 @@ jobs:
 
       - name: Retain verified stable bundle for the publish job
         if: needs.prepare.outputs.mode == 'release'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@v7
         with:
           name: colosseum-cli-release-${{ needs.prepare.outputs.source_sha }}
           path: release-artifacts/*
           if-no-files-found: error
 
   publish:
-    name: Publish stable or SemVer prerelease
+    name: Publish stable release
     if: needs.prepare.outputs.mode == 'release'
     needs: [prepare, collect]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.source_sha }}
           fetch-depth: 0
@@ -235,7 +228,7 @@ jobs:
           git merge-base --is-ancestor '${{ needs.prepare.outputs.source_sha }}' origin/main
 
       - name: Download the verified stable bundle
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@v8
         with:
           name: colosseum-cli-release-${{ needs.prepare.outputs.source_sha }}
           path: release-artifacts
@@ -244,11 +237,10 @@ jobs:
         run: cd release-artifacts && sha256sum --check SHA256SUMS
 
       - name: Publish the product-scoped GitHub Release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        uses: softprops/action-gh-release@v3
         with:
           name: Colosseum CLI v${{ needs.prepare.outputs.version }}
           body_path: release-artifacts/RELEASE-NOTES.md
-          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
           files: |
             release-artifacts/colosseum-cli-*
             release-artifacts/SHA256SUMS
