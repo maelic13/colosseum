@@ -2,81 +2,101 @@
 
 Date: 2026-08-07
 
-> **Acceptance reopened:** a post-acceptance documentation audit found that the
-> archive omitted `CHANGELOG-CLI.md` and staged the combined repository README,
-> whose local image and changelog links were absent from the package. The
-> executable and real-engine evidence below remains valid, but this candidate
-> must not be published. A new exact candidate is required after the packaging
-> correction; this record will be updated only after its archive gates pass.
+Colosseum CLI 0.1.0 candidate `823b398` is accepted for merge and stable
+publication. This record does not create a tag or GitHub Release; those remain
+maintainer-owned remote operations after this acceptance commit is pushed and
+merged.
 
-This record does not create a tag or GitHub Release; those remain
-maintainer-owned remote operations.
-
-## Superseded candidate
+## Final candidate
 
 | Field | Accepted value |
 |---|---|
-| Source commit | `f0e318555482cc9769eb0682d0ebf3141ce54916` |
-| Candidate workflow | `31209582676` |
-| Aggregate SHA-256 | `4ba416cd91c41bc7742bcc83fab2bc7ba4c51ef3a37457d6d85dd85069267582` |
+| Source commit | `823b398a273ae5631c24e32b4bbfec5b3b35749f` |
+| Candidate workflow | `31213773139` |
+| Downloaded aggregate SHA-256 | `84fb68c207bff63ccd1eb172061b6b079c1b782dc7c5092015a996b7787a908e` |
 | Product / version | `colosseum-cli` / `0.1.0` |
 
 The aggregate contained exactly `CANDIDATE.json`, `SHA256SUMS` and the four
-archives below.  Every downloaded archive matched `SHA256SUMS`; the workflow
-had already staged and smoked each exact archive independently.
+archives below. Its candidate identity names the accepted source and workflow,
+all four downloaded archives match `SHA256SUMS`, and the workflow staged and
+smoked each exact archive independently.
 
 | Platform archive | SHA-256 |
 |---|---|
-| `colosseum-cli-0.1.0-windows-x86_64.zip` | `b25f9eaed42da8f65eee8273c5177cd33e385ca4b5d5d60c5c386c27230aa45c` |
-| `colosseum-cli-0.1.0-windows-arm64.zip` | `c1eb7756df223268fb8865f6fb98d3b4bbe4389744c334103b29ccb2132adab9` |
-| `colosseum-cli-0.1.0-linux-x86_64.tar.gz` | `931fe2d056ad17a476c6e1ac807d9da4401797d9d3e41469bfa2a0840d125bf7` |
-| `colosseum-cli-0.1.0-macos-aarch64.tar.gz` | `21cd1a91d9619b9ac7066fce66812e808ad3ec4781c5f1f1ce4e8d47dfb314f0` |
+| `colosseum-cli-0.1.0-windows-x86_64.zip` | `af578287d966ab412d17438fa8fe5dff1c9fca6b3cb37f198cf1efd9480d15bc` |
+| `colosseum-cli-0.1.0-windows-arm64.zip` | `452c81295ef7eaa7c035bdc1dd0b22d0ad9087d159cd9b1677c933737eae9656` |
+| `colosseum-cli-0.1.0-linux-x86_64.tar.gz` | `ee83987d74b517c4214f90a54f326eab3e819a00040e6caed34594b85d1181fe` |
+| `colosseum-cli-0.1.0-macos-aarch64.tar.gz` | `53d67a81868293eb66616de168c0d8728e9012fd4da8784230871e3a3eb086ae` |
 
-The packaged README names CLI 0.1.0 as released, links the product-scoped tag
-and gives archive-first installation.  The tested executable hashes were
-`a0b26025bd4ee2cb96c8f6bfe9d5385bf0048dd984b2dd18a7c85ae5dd6f6d3d`
-for Windows x86-64 and
-`aee38483368fdf60f14eace766011716a18dd7d9333390186c9eef019472b543`
-for Linux x86-64.
+## Documentation package acceptance
 
-## Two-operating-system validation gates
+Every package has exactly the expected top-level binary, `README.md`,
+`CHANGELOG-CLI.md`, `LICENSE` and `docs/`. Each contains the same 24-file
+offline CLI guide. The concise CLI-only README and product changelog are
+identical across all four platforms:
 
-Rarog commit `8f35647630eb57839f0435e94b3c58858bd91711` and Basilisk commit
-`3cbf90ba5f7b6c7aab2c25e8066ba1417b273447` were each built for and run on
-Windows and Ubuntu WSL Linux.  The exact extracted candidate executable for
-that operating system drove every gate.  Linux builds came from clean
-`git archive` exports in temporary native-Linux directories; no engine or
-Colosseum manifest was introduced.
+| Packaged document | SHA-256 |
+|---|---|
+| `README.md` | `2c0755e6ead806666bd6ac17b95cb9d53bb7d23fb76b01dd0edefa8b3a3b2e57` |
+| `CHANGELOG-CLI.md` | `94643777c6878c5d25d05a40197bbe087a0e33bb614ece0577ac6f2a08960b08` |
 
-Each gate repeated the Phase 8.1 oracle conditions: same engine on both arms,
-depth 1, four pairs, seed 123, placement off and deliberately early draw
-adjudication.  An exit code of 4 is the required capped-inconclusive outcome,
-not a failure.
+Exact-archive smoke checks that every packaged local Markdown link resolves.
+The downloaded Windows x86-64 archive also passed a fresh local
+`--version`/`--help`/`self-test`/deterministic-JSON smoke, and the checker was
+confirmed to reject an injected missing-file link.
+
+## Executable continuity and validation gates
+
+The Linux x86-64 executable SHA-256 remains byte-for-byte identical to the
+previous engine-tested candidate:
+`aee38483368fdf60f14eace766011716a18dd7d9333390186c9eef019472b543`.
+Its Rarog and Basilisk gate evidence therefore carries forward unchanged.
+
+The Windows x86-64 executable rebuilt to SHA-256
+`03f3cd60df832866be20488ba85ab6584334868aaae07417628aa57b4bafe65d`.
+Although the source delta contains no CLI source, manifest, lockfile or
+dependency change, both short Windows gates were repeated with that exact
+extracted executable. Rarog source commit
+`8f35647630eb57839f0435e94b3c58858bd91711` was built from a clean archive;
+Basilisk remained at commit
+`3cbf90ba5f7b6c7aab2c25e8066ba1417b273447`.
+Their Windows executable SHA-256 values were respectively
+`cef8f2338d67f8482da8a3117f56f9dee85febaf1baff0071284a61e87c980fa`
+and `4f04eb60896b84cae9aa218b948a449a0b585797ef15e47b1b1a54eb37c87122`.
+
+Every gate uses the same engine on both arms, depth 1, four pairs, seed 123,
+placement off and deliberately early draw adjudication. Exit code 4 is the
+required capped-inconclusive outcome, not a failure.
 
 | Gate | Result SHA-256 | Accepted projection |
 |---|---|---|
-| Windows / Rarog | `0e79418ab909b14448e7247d47bc430fbdfbc2b9958cec069ce63cf09e13d9c2` | 8 draws, 4 pairs, `[0,0,4,0,0]`, adjudicated draws, zero faults, exit 4 |
-| Windows / Basilisk | `1ff65ba2300bab810f5493d7bb3cdccedc3dafaac611a802c36dfda969d5cb04` | same |
-| Linux / Rarog | `6b5930014d7e0c618ceb7ed170e2beaab22808afe5ab6bb8ba7ceaa390dd10bf` | same |
-| Linux / Basilisk | `1562555c26fd279f9b9c7aed24d73b5535e7ba39b1e5ef99ed0c9d3c0dabd947` | same |
+| Windows / Rarog, repeated | `4d543838abac61a920f8c1dadc2171c866ec49f97d5d50c43f332179e150c672` | 8 draws, 4 pairs, `[0,0,4,0,0]`, adjudicated draws, zero faults, exit 4 |
+| Windows / Basilisk, repeated | `d3169846f91eb6cf3a60ba18447a152a0f46f797beba92ab799d7f7354f92aab` | same |
+| Linux / Rarog, retained | `6b5930014d7e0c618ceb7ed170e2beaab22808afe5ab6bb8ba7ceaa390dd10bf` | same |
+| Linux / Basilisk, retained | `1562555c26fd279f9b9c7aed24d73b5535e7ba39b1e5ef99ed0c9d3c0dabd947` | same |
 
-This agrees exactly with Phase 8.1 on all shared fields: game and pair counts,
-colour reversal, W/D/L, termination, faults and pentanomial projection.
+This agrees exactly with Phase 8.1 on game and pair counts, colour reversal,
+W/D/L, termination, faults and pentanomial projection.
 
 ## Version and publication contract
 
 - `cargo run --locked -p colosseum-release -- cli-v0.1.0` accepts the stable
   product tag, package version, product-owned changelog and artifact stem.
-- `CHANGELOG-CLI.md` has an independently owned dated `0.1.0` section.
+- `CHANGELOG-CLI.md` has an independently owned dated `0.1.0` section and the
+  generated release notes link the release to its version-matched guide.
 - Generated product release notes have SHA-256
-  `d961c4768313381b3c094390fedbab9124a21d3a24052a4a726bbbd05ef8c645`.
+  `fda8180657b7e01da97b437f23bcebc861d0a65758142ebd0e90739b364e2f87`.
 - The tag workflow will rebuild, exact-archive smoke and publish the four CLI
   archives plus checksums only after the accepted source is on `main`.
-- The acceptance documentation added after the candidate is outside the CLI
-  package allowlist and changes neither executable nor packaged user files, so
-  it does not invalidate the candidate baseline.
+- This acceptance-only documentation is outside the CLI package allowlist and
+  changes neither executable nor packaged user files, so it does not invalidate
+  the candidate baseline.
 
-The candidate remains accepted as binary and real-engine evidence, but not as
-the final distributable package. Phase 9.7 is reopened until a corrected
-four-platform candidate passes exact-archive documentation and executable
-smoke. Do not merge or create `cli-v0.1.0` before that replacement is recorded.
+Candidate `f0e3185` remains superseded because its archive omitted the CLI
+changelog and used a combined README with broken packaged links. Candidate
+`823b398` closes that defect and is the sole accepted 0.1.0 baseline.
+
+Phase 9.7 and the implementation plan are complete. The remaining sequence is
+operational: push this acceptance commit, merge `cli` to `main`, create
+`cli-v0.1.0` at the merged stable source, push the tag, and confirm the stable
+release workflow succeeds.

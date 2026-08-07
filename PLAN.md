@@ -1991,20 +1991,18 @@ commands, identities, hashes and triage are in
   intentional project policy. Each engine also runs one real gate through the
   released artifact on at least two operating systems, agreeing with 8(a).
 
-**Prior evidence (9.7; final package acceptance reopened):** candidate
-`f0e318555482cc9769eb0682d0ebf3141ce54916` (workflow `31209582676`) passed
-exact-archive smoke for all four supported packages.  Its Windows and Linux
-executables each drove Rarog and Basilisk through the Phase 8.1 oracle gate;
-all four runs matched eight draws, four complete pairs, pentanomial
-`[0,0,4,0,0]`, adjudicated-draw termination, zero faults and the expected
-capped-inconclusive exit.  The independent `0.1.0` version, `cli-v0.1.0` tag
-contract and product-owned release notes validate. A later documentation audit
-found that the archive omitted `CHANGELOG-CLI.md` and staged the combined
-repository README with local links to files absent from the package. Its binary
-and engine evidence remains valid, but final acceptance now requires a new
-four-platform candidate whose CLI-specific README, changelog and offline guide
-pass exact-package link validation. Exact prior identities and hashes are
-retained in
+**Accepted (9.7):** corrected final candidate
+`823b398a273ae5631c24e32b4bbfec5b3b35749f` (workflow `31213773139`) passed
+checksums and exact-archive smoke for all four supported packages. Every archive
+contains the CLI-only README, product changelog and identical 24-file offline
+guide, with local links checked from the extracted package. The Linux
+executable is byte-identical to the prior engine-tested candidate; its Rarog
+and Basilisk gates carry forward. The rebuilt Windows executable repeated both
+gates, and all four accepted results match eight draws, four complete pairs,
+pentanomial `[0,0,4,0,0]`, adjudicated-draw termination, zero faults and the
+expected capped-inconclusive exit. The independent `0.1.0` version,
+`cli-v0.1.0` tag contract and product-owned release notes validate. Exact
+identities and hashes are retained in
 [`docs/architecture/phase-9.7-release-acceptance.md`](docs/architecture/phase-9.7-release-acceptance.md).
 
 ---
