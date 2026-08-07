@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "phase": "9.6",
+  "candidate": {
+    "product": "colosseum-cli",
+    "version": "0.1.0",
+    "source_commit": "f74e5e96a869910cffaedf5fbe476dc13ecf7c05",
+    "platform": "windows-x86_64",
+    "archive_sha256": "95f8c9174ca5ba799804f6854e87e147030daa1eaa1b12361fd31148f890cc9d",
+    "provenance": "local current-source package; a fresh four-platform CI candidate remains required before phase 9.7"
+  },
+  "engines": [
+    {
+      "role": "a",
+      "identity": "Stockfish development build",
+      "sha256": "c5d7dbd8842607df6508622c280b541512e637e5e2a54ca4321bf09552240422"
+    },
+    {
+      "role": "b",
+      "identity": "Stockfish 18 Windows x86-64 BMI2",
+      "sha256": "bf2d8bf60ac6f3ba58df08b1b0c5f4dec759b994d8f4532b07fe62986dc03288"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "fixed-match",
+      "status": "completed",
+      "games_completed": 2,
+      "result": "two max-move draws; zero faults"
+    },
+    {
+      "name": "sprt",
+      "status": "inconclusive",
+      "pairs_completed": 1,
+      "exit_code": 4,
+      "result": "cap reached; zero faults"
+    },
+    {
+      "name": "spsa",
+      "status": "completed",
+      "iterations_completed": 1,
+      "result": "two max-move draws; zero faults"
+    }
+  ]
+}

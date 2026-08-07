@@ -1966,6 +1966,18 @@ the missing externally selectable one-sided resignation policy; no generic
 mechanism exception remains. The complete mapping and verification record is
 in
 [`docs/architecture/phase-9.5-coverage.md`](docs/architecture/phase-9.5-coverage.md).
+
+**Accepted (9.6):** a clean-room Windows usability exercise drove two public
+UCI Stockfish binaries, supplied only as executable paths, through the
+published guides' fixed match, intentionally capped one-pair SPRT and
+one-iteration SPSA flows.  All game workflows completed with zero faults; the
+SPRT's exit-4 inconclusive result, missing-book warning and SPSA rail warning
+were clear and documented.  The current-source local archive is usability
+evidence only: commit `89d24a0` changed the CLI after the Phase 9.4 candidate,
+so a fresh four-platform CI candidate is mandatory before Phase 9.7.  Exact
+commands, identities, hashes and triage are in
+[`docs/architecture/phase-9.6-usability.md`](docs/architecture/phase-9.6-usability.md).
+
 - **(d) Release-candidate usability exercise.** A **third-party engine pair the maintainers did not
   write** — any two public UCI engines — driven by someone following only the
   published documentation, completing a fixed match, an SPRT and a short SPSA.

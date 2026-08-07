@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | Phases 0–8 plus 9.0–9.4 are complete: the independent CLI workflows and documentation now have a checksum-verified unpublished four-platform candidate |
-| What is missing | Validation-engine coverage acceptance, third-party usability exercise and final release acceptance |
+| What exists | Phases 0–8 plus 9.0–9.6 are complete: the independent CLI workflows and documentation have been coverage- and usability-accepted |
+| What is missing | A fresh four-platform candidate after the 9.5 CLI change, then final validation-engine release acceptance |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and release CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **Phase 9.5 — validation-engine coverage acceptance** |
+| Next step | **Phase 9.7 — final release acceptance** (after the maintainer reissues the candidate) |
 | Recommended model | **GPT-5.6 Sol — High** |
 
 ## Forward tracker
@@ -750,9 +750,12 @@ model as well.
   generic gap found (external one-sided resignation selection) is closed and
   no workflow is lost — evidence:
   [`docs/architecture/phase-9.5-coverage.md`](docs/architecture/phase-9.5-coverage.md)
-- ☐ **9.6** — **Model: Terra High. Release-candidate usability exercise:** a third-party engine pair
-  driven only by published docs completes fixed match, SPRT and short SPSA;
-  triage feedback before release without making a volunteer a permanent gate
+- ☑ **9.6 — DONE** — **Model: Terra High. Release-candidate usability exercise:** public third-party
+  UCI binaries, supplied only as executable paths, completed the published
+  fixed-match, capped-SPRT and short-SPSA workflows. The current-source local
+  package passed archive smoke; no usability defect was found. Its evidence and
+  the required fresh CI-candidate action are in
+  [`docs/architecture/phase-9.6-usability.md`](docs/architecture/phase-9.6-usability.md).
 - ☐ **9.7** — **EXIT / ACCEPTANCE · Model: Sol High.** Both validation engines run one real gate
   through the released artifact on ≥2 operating systems and agree with 8.1;
   independent CLI version/tag/artifact/release notes verified
@@ -789,11 +792,14 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 9.6 — release-candidate usability exercise. Model: GPT-5.6 Terra — High.**
-Have a third-party public UCI engine pair driven only by the published docs
-complete a fixed match, an SPRT and a deliberately short SPSA smoke. Record the
-exact candidate artifact, commands and feedback; triage usability defects
-without making a volunteer a permanent release gate.
+**Phase 9.7 — final release acceptance. Model: GPT-5.6 Sol — High.**
+First, the maintainer must reissue an unpublished four-platform candidate from
+the current `cli` source: push an intended commit whose subject includes
+`[cli candidate]`, wait for its archive checks, and retain the workflow-run
+identity. Then run one real validation-engine gate through that artifact on at
+least two operating systems, compare it with Phase 8.1, and verify the final
+independent version/tag/artifact/release notes before merging. Do not create
+the tag, release or remote operations from this workspace.
 
 ```
 git diff --check

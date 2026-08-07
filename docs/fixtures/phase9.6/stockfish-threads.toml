@@ -1,0 +1,9 @@
+# Short, deliberately non-promotional SPSA smoke vector for Phase 9.6.
+# The referenced Stockfish binary advertises this ordinary UCI spin option.
+
+[[parameters]]
+name = "Threads"
+initial = 1
+min = 1
+max = 4
+c_end = 0.5
