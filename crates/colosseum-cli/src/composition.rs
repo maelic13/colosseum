@@ -247,6 +247,9 @@ struct TournamentRunCommand {
     draw_score_cp: i32,
     #[arg(long)]
     no_resign_adjudication: bool,
+    /// Use only the losing engine's evaluations for resignation adjudication.
+    #[arg(long)]
+    one_sided_resign_adjudication: bool,
     #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..))]
     resign_moves: u32,
     #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(i32).range(1..))]
@@ -361,6 +364,9 @@ struct MatchConditions {
     /// Disable the default two-sided resignation adjudication.
     #[arg(long)]
     no_resign_adjudication: bool,
+    /// Use only the losing engine's evaluations for resignation adjudication.
+    #[arg(long)]
+    one_sided_resign_adjudication: bool,
     #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..))]
     resign_moves: u32,
     #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(i32).range(1..))]
@@ -637,6 +643,9 @@ struct SpsaConditions {
     /// Disable the default two-sided resignation adjudication.
     #[arg(long)]
     no_resign_adjudication: bool,
+    /// Use only the losing engine's evaluations for resignation adjudication.
+    #[arg(long)]
+    one_sided_resign_adjudication: bool,
     #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..))]
     resign_moves: u32,
     #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(i32).range(1..))]
@@ -2065,6 +2074,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
         resign: (!conditions.no_resign_adjudication).then_some(ResignAdjudication {
             move_count: conditions.resign_moves,
             score_cp: conditions.resign_score_cp,
+            two_sided: !conditions.one_sided_resign_adjudication,
         }),
     };
     let placement = match resolve_placement(&conditions.placement, conditions.headroom_cores) {
@@ -2754,6 +2764,7 @@ async fn run_tournament_command(
         resign: (!command.no_resign_adjudication).then_some(ResignAdjudication {
             move_count: command.resign_moves,
             score_cp: command.resign_score_cp,
+            two_sided: !command.one_sided_resign_adjudication,
         }),
     };
     let placement = match resolve_placement(&command.placement, command.headroom_cores) {
@@ -5811,6 +5822,7 @@ fn resolve_adjudication(command: &MatchConditions) -> AdjudicationConfig {
         resign: (!command.no_resign_adjudication).then_some(ResignAdjudication {
             move_count: command.resign_moves,
             score_cp: command.resign_score_cp,
+            two_sided: !command.one_sided_resign_adjudication,
         }),
     }
 }

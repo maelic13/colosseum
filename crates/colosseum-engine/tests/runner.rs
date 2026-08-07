@@ -88,6 +88,7 @@ async fn stockfish_self_play_one_game() {
             resign: Some(ResignAdjudication {
                 move_count: 4,
                 score_cp: 900,
+                two_sided: true,
             }),
         },
         ponder: false,
@@ -159,6 +160,7 @@ async fn game_pre_plays_opening_moves() {
             resign: Some(ResignAdjudication {
                 move_count: 3,
                 score_cp: 600,
+                two_sided: true,
             }),
         },
         ponder: false,
@@ -223,6 +225,7 @@ async fn game_starts_from_fen() {
             resign: Some(ResignAdjudication {
                 move_count: 3,
                 score_cp: 600,
+                two_sided: true,
             }),
         },
         ponder: false,

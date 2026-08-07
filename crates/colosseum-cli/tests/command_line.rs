@@ -1419,6 +1419,7 @@ fn fixed_match_resolves_default_and_disableable_adjudication() {
     assert_eq!(adjudication["draw"]["score_cp"], 10);
     assert_eq!(adjudication["resign"]["move_count"], 3);
     assert_eq!(adjudication["resign"]["score_cp"], 600);
+    assert_eq!(adjudication["resign"]["two_sided"], true);
     assert!(adjudication["max_moves"].is_null());
 
     let disabled_output = cli()
@@ -1443,6 +1444,26 @@ fn fixed_match_resolves_default_and_disableable_adjudication() {
     assert!(adjudication["draw"].is_null());
     assert!(adjudication["resign"].is_null());
     assert_eq!(adjudication["max_moves"], 75);
+
+    let one_sided_output = cli()
+        .args([
+            "match",
+            "--games",
+            "1",
+            "a",
+            "b",
+            "--one-sided-resign-adjudication",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(one_sided_output.status.success());
+    let one_sided: serde_json::Value = serde_json::from_slice(&one_sided_output.stdout).unwrap();
+    assert_eq!(
+        one_sided["resolved_configuration"]["adjudication"]["resign"]["two_sided"],
+        false
+    );
 }
 
 #[test]

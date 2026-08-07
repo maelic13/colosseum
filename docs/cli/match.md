@@ -67,8 +67,14 @@ settings. All settings are ordinary policy and can be changed or disabled:
 | Policy | Default | Controls |
 |---|---|---|
 | Draw | from move 40, 8 moves, ±10 cp | `--draw-move`, `--draw-moves`, `--draw-score-cp`, `--no-draw-adjudication` |
-| Resignation | 3 moves, ±600 cp, both engines agreeing | `--resign-moves`, `--resign-score-cp`, `--no-resign-adjudication` |
+| Resignation | 3 moves, ±600 cp, both engines agreeing | `--resign-moves`, `--resign-score-cp`, `--one-sided-resign-adjudication`, `--no-resign-adjudication` |
 | Maximum moves | disabled | `--max-moves N` |
+
+`--one-sided-resign-adjudication` reproduces harness policies that consult only
+the evaluations reported by the engine that would lose. It is less
+conservative when engines disagree and can bias comparisons between engines
+with differently scaled evaluations, so the two-sided default is preferred for
+new experiments.
 
 Natural mate and draw rules always apply. Tablebase-related UCI options can be
 forwarded through `--a-option` and `--b-option`; Colosseum does not inspect the

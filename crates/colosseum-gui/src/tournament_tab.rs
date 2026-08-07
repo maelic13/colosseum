@@ -329,6 +329,7 @@ impl TournamentForm {
                 resign: self.resign_on.then_some(ResignAdjudication {
                     move_count: self.resign_move_count.max(1),
                     score_cp: self.resign_score_cp.max(0),
+                    two_sided: true,
                 }),
             },
             rating_writeback: match self.elo_writeback {

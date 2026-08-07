@@ -25,6 +25,14 @@ pub struct ResignAdjudication {
     pub move_count: u32,
     /// Score magnitude in centipawns past which a side is considered lost.
     pub score_cp: i32,
+    /// Require both engines to report the decisive score, rather than only the
+    /// engine that would lose the game.
+    #[serde(default = "default_resign_two_sided")]
+    pub two_sided: bool,
+}
+
+const fn default_resign_two_sided() -> bool {
+    true
 }
 
 /// Full adjudication configuration for a tournament. `None` fields are disabled.
@@ -61,7 +69,7 @@ pub fn adjudicate(white_pov_cp: &[i32], config: &AdjudicationConfig) -> Option<A
         && resign.move_count > 0
     {
         let window = (resign.move_count as usize) * 2;
-        if plies >= window {
+        if resign.two_sided && plies >= window {
             let tail = &white_pov_cp[plies - window..];
             let threshold = resign.score_cp.abs();
             if tail.iter().all(|&v| v <= -threshold) {
@@ -73,6 +81,24 @@ pub fn adjudicate(white_pov_cp: &[i32], config: &AdjudicationConfig) -> Option<A
             }
             if tail.iter().all(|&v| v >= threshold) {
                 // Black is hopeless for the whole window.
+                return Some(Adjudication {
+                    result: GameResult::WhiteWin,
+                    termination: Termination::AdjudicatedResign,
+                });
+            }
+        } else if !resign.two_sided {
+            let threshold = resign.score_cp.abs();
+            if engine_reports_past_threshold(white_pov_cp, 0, resign.move_count as usize, |score| {
+                score <= -threshold
+            }) {
+                return Some(Adjudication {
+                    result: GameResult::BlackWin,
+                    termination: Termination::AdjudicatedResign,
+                });
+            }
+            if engine_reports_past_threshold(white_pov_cp, 1, resign.move_count as usize, |score| {
+                score >= threshold
+            }) {
                 return Some(Adjudication {
                     result: GameResult::WhiteWin,
                     termination: Termination::AdjudicatedResign,
@@ -112,6 +138,28 @@ pub fn adjudicate(white_pov_cp: &[i32], config: &AdjudicationConfig) -> Option<A
     None
 }
 
+fn engine_reports_past_threshold(
+    scores: &[i32],
+    ply_parity: usize,
+    required: usize,
+    predicate: impl Fn(i32) -> bool,
+) -> bool {
+    let mut matching = 0;
+    for (index, &score) in scores.iter().enumerate().rev() {
+        if index % 2 != ply_parity {
+            continue;
+        }
+        if !predicate(score) {
+            return false;
+        }
+        matching += 1;
+        if matching == required {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,6 +176,7 @@ mod tests {
             resign: Some(ResignAdjudication {
                 move_count: 2,
                 score_cp: 800,
+                two_sided: true,
             }),
             ..Default::default()
         };
@@ -148,6 +197,7 @@ mod tests {
             resign: Some(ResignAdjudication {
                 move_count: 2,
                 score_cp: 800,
+                two_sided: true,
             }),
             ..Default::default()
         };
@@ -162,11 +212,12 @@ mod tests {
     }
 
     #[test]
-    fn resign_requires_full_window_one_sided() {
+    fn two_sided_resign_requires_both_engines_for_full_window() {
         let cfg = AdjudicationConfig {
             resign: Some(ResignAdjudication {
                 move_count: 2,
                 score_cp: 800,
+                two_sided: true,
             }),
             ..Default::default()
         };
@@ -176,6 +227,29 @@ mod tests {
         // Too few plies for the window.
         let short = [-900, -1000];
         assert_eq!(adjudicate(&short, &cfg), None);
+    }
+
+    #[test]
+    fn one_sided_resign_uses_only_losing_engines_reports() {
+        let cfg = AdjudicationConfig {
+            resign: Some(ResignAdjudication {
+                move_count: 2,
+                score_cp: 800,
+                two_sided: false,
+            }),
+            ..Default::default()
+        };
+
+        // White's reports (indices 0 and 2) cross the threshold while Black
+        // disagrees. A two-sided rule would keep playing; one-sided resigns.
+        let scores = [-900, -50, -1000];
+        assert_eq!(
+            adjudicate(&scores, &cfg),
+            Some(Adjudication {
+                result: GameResult::BlackWin,
+                termination: Termination::AdjudicatedResign,
+            })
+        );
     }
 
     #[test]
@@ -241,6 +315,7 @@ mod tests {
             resign: Some(ResignAdjudication {
                 move_count: 1,
                 score_cp: 800,
+                two_sided: true,
             }),
             ..Default::default()
         };

@@ -123,6 +123,11 @@ disjoint arm allocations; use `--placement` with `--cores-per-engine` instead.
 If Hash itself is tuned, trusted memory-budget checks use its declared upper
 rail for both concurrent arms rather than the initial value.
 
+Resignation remains two-sided by default because SPSA compares perturbed arms
+of the same executable and differently extreme scores must not leak into the
+gradient. `--one-sided-resign-adjudication` is available only to reproduce an
+existing methodology deliberately; it is recorded in the run identity.
+
 `--ponder` is available when the tune uses a base/increment clock. It controls
 both perturbation arms, is off by default and is frozen into the resolved run
 identity. It is rejected with movetime, fixed nodes or fixed depth so

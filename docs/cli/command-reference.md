@@ -200,6 +200,9 @@ Options:
       --no-resign-adjudication
           Disable the default two-sided resignation adjudication
 
+      --one-sided-resign-adjudication
+          Use only the losing engine's evaluations for resignation adjudication
+
       --resign-moves <RESIGN_MOVES>
           [default: 3]
 
@@ -434,6 +437,9 @@ Options:
       --no-resign-adjudication
           Disable the default two-sided resignation adjudication
 
+      --one-sided-resign-adjudication
+          Use only the losing engine's evaluations for resignation adjudication
+
       --resign-moves <RESIGN_MOVES>
           [default: 3]
 
@@ -612,6 +618,9 @@ Options:
 
       --no-resign-adjudication
           Disable the default two-sided resignation adjudication
+
+      --one-sided-resign-adjudication
+          Use only the losing engine's evaluations for resignation adjudication
 
       --resign-moves <RESIGN_MOVES>
           [default: 3]
@@ -1018,6 +1027,9 @@ Options:
 
       --no-resign-adjudication
           Disable the default two-sided resignation adjudication
+
+      --one-sided-resign-adjudication
+          Use only the losing engine's evaluations for resignation adjudication
 
       --resign-moves <RESIGN_MOVES>
           [default: 3]
@@ -1862,6 +1874,9 @@ Options:
 
       --no-resign-adjudication
 
+
+      --one-sided-resign-adjudication
+          Use only the losing engine's evaluations for resignation adjudication
 
       --resign-moves <RESIGN_MOVES>
           [default: 3]
