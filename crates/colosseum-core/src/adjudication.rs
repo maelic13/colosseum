@@ -253,6 +253,13 @@ mod tests {
     }
 
     #[test]
+    fn legacy_resign_configuration_deserializes_as_two_sided() {
+        let resign: ResignAdjudication =
+            serde_json::from_str(r#"{"move_count":3,"score_cp":600}"#).unwrap();
+        assert!(resign.two_sided);
+    }
+
+    #[test]
     fn draw_adjudication_triggers() {
         let cfg = AdjudicationConfig {
             draw: Some(DrawAdjudication {

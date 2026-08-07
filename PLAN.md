@@ -1956,6 +1956,16 @@ exact-archive smoke on the four supported build targets. Workflow run
 or GitHub Release. The complete identity, archive hashes and acceptance record
 are in
 [`docs/architecture/phase-9.4-candidate.md`](docs/architecture/phase-9.4-candidate.md).
+
+**Accepted (9.5):** Rarog commit `8f35647` and Basilisk commit `3cbf90b`
+remove their duplicate runner, statistics, SPSA, affinity, recovery, NPS,
+datagen and tool-vendoring implementations. Both retain only declarative
+Colosseum profiles/tune vectors and explicitly classified engine-owned build,
+correctness, profiling and Texel responsibilities. The audit found and closed
+the missing externally selectable one-sided resignation policy; no generic
+mechanism exception remains. The complete mapping and verification record is
+in
+[`docs/architecture/phase-9.5-coverage.md`](docs/architecture/phase-9.5-coverage.md).
 - **(d) Release-candidate usability exercise.** A **third-party engine pair the maintainers did not
   write** — any two public UCI engines — driven by someone following only the
   published documentation, completing a fixed match, an SPRT and a short SPSA.

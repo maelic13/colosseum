@@ -743,9 +743,13 @@ model as well.
   same archive gates — candidate commit, workflow-run identity, four exact
   archive checksums and green CI/smoke evidence are retained in
   [`docs/architecture/phase-9.4-candidate.md`](docs/architecture/phase-9.4-candidate.md)
-- ☐ **9.5** — **Model: Sol High. Coverage acceptance** (PLAN §5.14) — archive replaced generic
-  implementations in both validation engines; retain declarative configs,
-  thin CI/policy glue and engine-specific residuals; classify exceptions
+- ☑ **9.5 — DONE** — **Model: Sol High. Coverage acceptance** (PLAN §5.14) —
+  Rarog `8f35647` and Basilisk `3cbf90b` archive replaced generic
+  implementations in Git history, retain validated declarative Colosseum
+  profiles/tune vectors and classified engine-specific residuals; the one
+  generic gap found (external one-sided resignation selection) is closed and
+  no workflow is lost — evidence:
+  [`docs/architecture/phase-9.5-coverage.md`](docs/architecture/phase-9.5-coverage.md)
 - ☐ **9.6** — **Model: Terra High. Release-candidate usability exercise:** a third-party engine pair
   driven only by published docs completes fixed match, SPRT and short SPSA;
   triage feedback before release without making a volunteer a permanent gate
@@ -785,12 +789,11 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 9.5 — validation-engine coverage acceptance. Model: GPT-5.6 Sol — High.**
-Audit the Rarog and Basilisk harness workflows against PLAN §S5.14. Archive
-generic scheduling/statistics/tuning/recovery implementations now covered by
-Colosseum CLI; retain declarative run files, thin project policy/CI invocation
-and engine-specific responsibilities. Classify every residual as an intentional
-engine policy or a generic CLI mechanism gap.
+**Phase 9.6 — release-candidate usability exercise. Model: GPT-5.6 Terra — High.**
+Have a third-party public UCI engine pair driven only by the published docs
+complete a fixed match, an SPRT and a deliberately short SPSA smoke. Record the
+exact candidate artifact, commands and feedback; triage usability defects
+without making a volunteer a permanent release gate.
 
 ```
 git diff --check
