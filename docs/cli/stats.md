@@ -87,6 +87,10 @@ Depth and nodes must be positive integers. `s`/`score` is the mover’s own
 score in centipawns, or `#N` / `#-N` for mate in `N`. Other comments and
 annotation tags are left untouched and ignored by telemetry analysis.
 
+An explicit zero is a report, not a missing field: a move commented
+`{s=18 d=0 t=1ms n=0}` counts towards depth, time and node coverage, because
+the writer omits a field it has no value for. Only an absent field is absent.
+
 Each engine receives an eligible post-opening move count, an annotated-move
 coverage fraction, and separate coverage/mean/median reports for score,
 mean absolute score, depth, elapsed seconds, nodes and implied NPS. A metric
@@ -95,6 +99,31 @@ converted to zero. Implied NPS requires nodes and positive elapsed time on the
 same move. A mate score counts towards score coverage but is deliberately left
 out of the centipawn values: it is a claim about distance to mate, not an
 evaluation on the same scale.
+
+## Pair identity in a Colosseum PGN
+
+The seven-tag roster says who played and how a game ended. It cannot say which
+colour-reversed pair a game belongs to, and that pair is the unit every paired
+statistic is computed over. Every game Colosseum writes therefore carries four
+more tags beside `OpeningPlyCount`:
+
+| Tag | Meaning |
+|---|---|
+| `GameNumber` | Harness game number in schedule order, counting from one |
+| `PairNumber` | The colour-reversed pair, or the tournament encounter, counting from one |
+| `PairGame` | Which colour assignment of that pair this is: `1`, or `2` for the same opening reversed |
+| `OpeningIndex` | Zero-based index into the resolved opening order; absent without a book |
+| `OpeningLabel` | The opening's label, `startpos` when no book supplied one |
+
+`stats` reads them back, so replaying a Colosseum PGN reports the same
+pentanomial vector as the checkpoint it came from. Without a subject the
+outcome is taken from the pair's first engine — the one that had White in
+assignment `1` — which is the perspective the checkpoint uses.
+
+A PGN that does not carry these tags is not paired by guesswork: the order
+games appear in is not evidence that two of them share an opening, so such a
+file falls back to labelled unpaired statistics. That includes exports from
+other runners, and a Colosseum export whose tags were stripped.
 
 Colosseum-generated PGNs record the non-standard `OpeningPlyCount` tag whenever
 the harness pre-plays book moves. Those plies are excluded. For PGNs without

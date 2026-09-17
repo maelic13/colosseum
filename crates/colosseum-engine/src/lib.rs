@@ -54,6 +54,8 @@ pub use openings::{
     OpeningAudit, OpeningError, OpeningSummary, ResolvedOpening, audit_opening_book, fen_after,
     is_chess960_fen, load_openings, load_openings_named, summarize,
 };
+#[cfg(feature = "runner")]
+pub use pgn::GamePairIdentity;
 pub use placement::{
     CpuPlacementError, CpuPlacementPlan, CpuPlacementPolicy, DEFAULT_AUTO_HEADROOM_PHYSICAL_CORES,
     EngineCpuPlacement, GameSlotCpuAllocation, PlacementAsymmetry, SlotAllocation,

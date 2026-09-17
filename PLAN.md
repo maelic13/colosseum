@@ -904,6 +904,28 @@ them falls back to unpaired statistics. Explicit zero fields (`d=0`, `n=0`)
 are reports and the telemetry parser accepts them; only unreported fields
 are omitted.
 
+**Implementation evidence (Phase 10.9b):** every written game carries
+`GameNumber`, `PairNumber`, `PairGame`, `OpeningIndex` where a book supplied
+one, and `OpeningLabel`, beside the seven-tag roster and `OpeningPlyCount`.
+`stats` on such a PGN takes each outcome from the pair's first engine — the one
+that had White in assignment 1 — which is the checkpoint's own perspective, so
+the two sources report the same pentanomial vector; a PGN without the tags is
+still never paired by the order its games appear in. `stats <run-dir>` keeps
+checkpoint authority for statistics and reads the directory's own `games.pgn`
+for telemetry, so an annotated export beside a checkpoint is no longer reported
+as no telemetry at all.
+
+**`stats_version` decision (Phase 10.9b), resolving the explicit-zero and
+`t=0ms` questions together:** accepting explicit `d=0`, `n=0` and `t=0ms`, and
+reconstructing pairs from a PGN that previously fell back to unpaired, all
+change what `stats` reports for an unchanged input — but only relative to
+unreleased builds. No published version reported the old definitions, so the
+statistics 0.1.0 ships are simply version 1 and the constant is not bumped.
+What was a real trap is fixed: `stats_version` was wired to `RNG_VERSION`, so
+any future bump would have claimed the random stream changed. `STATS_VERSION`
+is now its own constant in `colosseum-core`, and the SPSA schedule artifact
+keeps `RNG_VERSION` for the stream identity it actually records.
+
 **Success criteria:** a stub-engine match annotates every post-opening move;
 `stats` replay on that PGN reports 100% coverage for score, depth, time and
 nodes; a frozen annotated fixture in `tests/fixtures/` is parsed by the
@@ -1351,6 +1373,7 @@ run directory. PGN replay reproduces only information the PGN actually carries.
 A run directory is one evidence set: statistics come from its checkpoint and
 telemetry from its own `games.pgn`, so `stats <run-dir>` never reports
 telemetry as unavailable when the directory holds an annotated PGN.
+Implemented in Phase 10.9b together with the PGN pair identity above.
 
 Implemented Phase 6.5 walks that order explicitly and retains an attempt audit.
 Checkpoint generations are checksum-verified. Exact structured schedule number,

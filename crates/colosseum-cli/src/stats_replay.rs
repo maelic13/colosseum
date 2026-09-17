@@ -96,7 +96,7 @@ fn replay_directory(path: &Path, subject: Option<&str>) -> Result<StatsReplayRep
                     games,
                     paired_capable,
                     attempts,
-                    telemetry,
+                    directory_telemetry(path, telemetry),
                 ));
             }
             Ok(_) => attempts.push(ReplayAttempt {
@@ -117,6 +117,30 @@ fn replay_directory(path: &Path, subject: Option<&str>) -> Result<StatsReplayRep
         "no replayable source found in {}; attempted structured store, PGN, forensic log and console",
         path.display()
     ))
+}
+
+/// A run directory is one evidence set.
+///
+/// Statistics keep checkpoint authority, but the annotations live in the
+/// directory's own `games.pgn`, so reading the checkpoint is no reason to
+/// report telemetry as unavailable when the PGN beside it carries the moves.
+fn directory_telemetry(
+    directory: &Path,
+    from_source: SearchTelemetryReport,
+) -> SearchTelemetryReport {
+    if from_source.status == "available" {
+        return from_source;
+    }
+    let pgn = directory.join("games.pgn");
+    let Ok(text) = fs::read_to_string(&pgn) else {
+        return from_source;
+    };
+    let from_pgn = analyze_pgn(&text);
+    if from_pgn.status == "available" {
+        from_pgn
+    } else {
+        from_source
+    }
 }
 
 fn replay_file(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, String> {
@@ -163,12 +187,15 @@ fn read_source(
                 unavailable("structured source has no PGN move annotations"),
             )
         }),
-        "pgn-export" => Ok((
-            pgn_games(&text, subject),
-            subject.map_or_else(|| "White side".into(), |value| value.to_owned()),
-            false,
-            analyze_pgn(&text),
-        )),
+        "pgn-export" => {
+            let (games, paired_capable) = pgn_games(&text, subject);
+            let perspective = match (subject, paired_capable) {
+                (Some(value), _) => value.to_owned(),
+                (None, true) => "first engine of each pair".into(),
+                (None, false) => "White side".into(),
+            };
+            Ok((games, perspective, paired_capable, analyze_pgn(&text)))
+        }
         "forensic-log" => Ok((
             log_games(&text),
             "engine A".into(),
@@ -291,27 +318,70 @@ fn log_games(text: &str) -> Vec<RawGame> {
         .collect()
 }
 
-fn pgn_games(text: &str, subject: Option<&str>) -> Vec<RawGame> {
-    split_pgn(text)
+/// Read games from a PGN, using the schedule identity tags when they are there.
+///
+/// A Colosseum export names the pair each game belongs to and which colour
+/// assignment it is, so the pentanomial unit survives the round trip. Without
+/// a subject the outcome is taken from the pair's first engine — the one that
+/// had White in assignment 1 — which is the perspective the checkpoint uses,
+/// so the two sources agree. A PGN without the tags yields no identity and the
+/// caller falls back to labelled unpaired statistics.
+fn pgn_games(text: &str, subject: Option<&str>) -> (Vec<RawGame>, bool) {
+    let mut paired_capable = true;
+    let games = split_pgn(text)
         .into_iter()
         .filter_map(|game| {
             let result = pgn_tag(game, "Result")?;
             let white = pgn_tag(game, "White").unwrap_or_default();
             let black = pgn_tag(game, "Black").unwrap_or_default();
             let white_score = token_result(&result)?;
+            let identity = pgn_identity(game);
+            if identity.is_none() {
+                paired_capable = false;
+            }
             let outcome = match subject {
                 Some(name) if white == name => white_score,
                 Some(name) if black == name => invert(white_score),
                 Some(_) => return None,
-                None => white_score,
+                // Assignment 2 is the same opening with the colours reversed,
+                // so its White is the pair's second engine.
+                None => match identity.as_ref().map(|identity| identity.pair_game) {
+                    Some(2) => invert(white_score),
+                    _ => white_score,
+                },
             };
             Some(RawGame {
-                number: None,
-                opening: None,
+                number: identity.as_ref().map(|identity| identity.game_number),
+                opening: identity.as_ref().map(|identity| identity.opening.clone()),
                 outcome,
             })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let paired_capable = paired_capable && !games.is_empty();
+    (games, paired_capable)
+}
+
+/// The schedule identity a Colosseum export carries.
+struct PgnIdentity {
+    game_number: u32,
+    pair_game: u32,
+    opening: String,
+}
+
+fn pgn_identity(game: &str) -> Option<PgnIdentity> {
+    let game_number = pgn_tag(game, "GameNumber")?.parse().ok()?;
+    let pair_number: u32 = pgn_tag(game, "PairNumber")?.parse().ok()?;
+    let pair_game = pgn_tag(game, "PairGame")?.parse().ok()?;
+    // Both games of a pair must agree on their opening for the pair to be a
+    // pair at all, so the identity carries whichever the export named.
+    let opening = pgn_tag(game, "OpeningIndex")
+        .or_else(|| pgn_tag(game, "OpeningLabel"))
+        .unwrap_or_else(|| format!("pair {pair_number}"));
+    Some(PgnIdentity {
+        game_number,
+        pair_game,
+        opening,
+    })
 }
 
 fn split_pgn(text: &str) -> Vec<&str> {
@@ -479,13 +549,17 @@ mod tests {
     #[test]
     fn pgn_without_pair_identity_is_never_guessed_into_pairs() {
         let pgn = "[Event \"x\"]\n[White \"A\"]\n[Black \"B\"]\n[Result \"1-0\"]\n\n1-0\n\n[Event \"x\"]\n[White \"B\"]\n[Black \"A\"]\n[Result \"0-1\"]\n\n0-1\n";
-        let games = pgn_games(pgn, Some("A"));
+        let (games, paired_capable) = pgn_games(pgn, Some("A"));
+        assert!(
+            !paired_capable,
+            "a PGN without identity tags must not claim pairs"
+        );
         let report = build_report(
             "pgn-export",
             "x.pgn".into(),
             "A".into(),
             games,
-            false,
+            paired_capable,
             vec![],
             unavailable("fixture has no annotations"),
         );

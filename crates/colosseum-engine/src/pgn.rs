@@ -79,6 +79,27 @@ impl MoveAnnotation {
     }
 }
 
+/// What a written game needs to be placed back into its schedule without the
+/// run directory it came from.
+///
+/// The seven-tag roster says who played and how it ended; it cannot say which
+/// colour-reversed pair a game belongs to, and that is the unit every paired
+/// statistic is computed over. Carrying it in the export is what lets a PGN
+/// alone reproduce the pentanomial vector the checkpoint holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GamePairIdentity {
+    /// Harness game number in schedule order, counting from one.
+    pub game_number: u32,
+    /// The colour-reversed pair, or the tournament encounter, counting from one.
+    pub pair_number: u32,
+    /// Which colour assignment of that pair this game is: 1 or 2.
+    pub pair_game: u32,
+    /// Zero-based index into the resolved opening order; absent without a book.
+    pub opening_index: Option<usize>,
+    /// The opening's label, `startpos` when no book supplied one.
+    pub opening_label: String,
+}
+
 /// The tag data needed to render a game's PGN header.
 #[derive(Debug, Clone)]
 pub struct PgnTags {
@@ -95,6 +116,8 @@ pub struct PgnTags {
     pub fen: Option<String>,
     /// Pre-played opening half-moves, excluded from search telemetry.
     pub opening_plies: u32,
+    /// Schedule identity, for exports that can supply it.
+    pub identity: Option<GamePairIdentity>,
 }
 
 /// Render a complete PGN game (header + movetext + result token).
@@ -129,6 +152,15 @@ pub fn build_pgn(tags: &PgnTags, san_moves: &[String], annotations: &[MoveAnnota
     }
     if tags.opening_plies > 0 {
         tag("OpeningPlyCount", &tags.opening_plies.to_string());
+    }
+    if let Some(identity) = &tags.identity {
+        tag("GameNumber", &identity.game_number.to_string());
+        tag("PairNumber", &identity.pair_number.to_string());
+        tag("PairGame", &identity.pair_game.to_string());
+        if let Some(index) = identity.opening_index {
+            tag("OpeningIndex", &index.to_string());
+        }
+        tag("OpeningLabel", &identity.opening_label);
     }
 
     let (start_move, black_first) = fen_move_context(tags.fen.as_deref());
@@ -248,6 +280,7 @@ mod tests {
             time_control: "movetime/100ms".into(),
             termination: Some(Termination::Checkmate),
             fen: None,
+            identity: None,
             opening_plies: 2,
         };
         let pgn = build_pgn(&tags, &["e4".into(), "e5".into(), "Qh5".into()], &[]);
@@ -273,6 +306,7 @@ mod tests {
             time_control: String::new(),
             termination: None,
             fen: Some("rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2".into()),
+            identity: None,
             opening_plies: 0,
         };
         let pgn = build_pgn(&tags, &["Nc6".into(), "Bb5".into(), "a6".into()], &[]);
@@ -295,6 +329,7 @@ mod tests {
             time_control: String::new(),
             termination: None,
             fen: None,
+            identity: None,
             opening_plies: 0,
         };
         let pgn = build_pgn(&tags, &[], &[]);

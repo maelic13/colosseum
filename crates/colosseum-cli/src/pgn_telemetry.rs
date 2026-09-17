@@ -360,10 +360,10 @@ fn merge_comment(telemetry: &mut MoveTelemetry, comment: &str) {
 fn set_field(telemetry: &mut MoveTelemetry, key: &str, value: &str, bracketed: bool) {
     let key = key.to_ascii_lowercase();
     match key.as_str() {
+        // An engine that reports depth 0 reported it; the writer omits a field
+        // it has no value for, so a zero here is evidence, not a placeholder.
         "depth" | "d" => {
-            if let Ok(value) = value.parse::<u32>()
-                && value > 0
-            {
+            if let Ok(value) = value.parse::<u32>() {
                 telemetry.depth = Some(f64::from(value));
             }
         }
@@ -381,9 +381,7 @@ fn set_field(telemetry: &mut MoveTelemetry, key: &str, value: &str, bracketed: b
             }
         }
         "nodes" | "n" => {
-            if let Ok(value) = value.replace('_', "").parse::<u64>()
-                && value > 0
-            {
+            if let Ok(value) = value.replace('_', "").parse::<u64>() {
                 telemetry.nodes = Some(value as f64);
             }
         }

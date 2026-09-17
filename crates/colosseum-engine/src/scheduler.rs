@@ -1029,6 +1029,9 @@ fn build_game_spec(driver: &Driver, scheduled: &ScheduledGame) -> GameSpec {
         white_time_margin: TIMEOUT_TOLERANCE,
         black_time_margin: TIMEOUT_TOLERANCE,
         handshake_timeout: HANDSHAKE_TIMEOUT,
+        // The GUI schedules rounds, not colour-reversed pairs; Phase 11 gives
+        // it the harness scheduler and its identity with it.
+        identity: None,
     }
 }
 

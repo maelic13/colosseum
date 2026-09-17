@@ -255,6 +255,23 @@ pub async fn run_tournament(
                         "[Round \"1\"]",
                         &format!("[Round \"{}\"]", scheduled.round),
                         1,
+                    )
+                    // The one-game runner numbered this as its own first pair;
+                    // the tournament's pair is the encounter it belongs to.
+                    .replacen(
+                        "[GameNumber \"1\"]",
+                        &format!("[GameNumber \"{}\"]", scheduled.number),
+                        1,
+                    )
+                    .replacen(
+                        "[PairNumber \"1\"]",
+                        &format!("[PairNumber \"{}\"]", scheduled.encounter),
+                        1,
+                    )
+                    .replacen(
+                        "[PairGame \"1\"]",
+                        &format!("[PairGame \"{}\"]", scheduled.game_in_encounter),
+                        1,
                     );
                 Ok::<_, String>(TournamentGame {
                     number: scheduled.number,

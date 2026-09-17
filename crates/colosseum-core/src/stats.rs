@@ -7,6 +7,16 @@ use crate::standings::PairGameResult;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// The definition set every reported statistic is computed under.
+///
+/// It changes when a statistic a released version reported starts meaning
+/// something else, so two results taken months apart stay comparable. It is
+/// deliberately **not** [`crate::rng::RNG_VERSION`]: that identifies the random
+/// stream a schedule was drawn from, and the two answer different questions.
+/// Tying them together would force a claim that the stream changed whenever a
+/// reported figure was refined, and vice versa.
+pub const STATS_VERSION: u32 = 1;
+
 /// A rejected statistical request.
 ///
 /// Public statistics entry points use this type instead of encoding invalid

@@ -265,9 +265,35 @@ fn stats_replay_obeys_source_authority_and_never_pairs_pgn_by_guessing() {
     assert!(pgn.status.success());
     let pgn: serde_json::Value = serde_json::from_slice(&pgn.stdout).unwrap();
     assert_eq!(pgn["report"]["authority"], "pgn-export");
-    assert_eq!(pgn["report"]["pairing"], "unpaired");
-    assert_eq!(pgn["report"]["complete_pairs"], 0);
-    assert_eq!(pgn["report"]["unpaired_games"], 4);
+    // The export carries its own schedule identity, so falling back to it
+    // keeps the pairs rather than losing them with the checkpoint.
+    assert_eq!(pgn["report"]["pairing"], "paired");
+    assert_eq!(pgn["report"]["complete_pairs"], 2);
+    assert_eq!(pgn["report"]["unpaired_games"], 0);
+    assert_eq!(
+        pgn["report"]["pentanomial"],
+        serde_json::json!([0, 0, 2, 0, 0])
+    );
+
+    // Strip the identity and the pairs are gone, not guessed back from the
+    // order games happen to appear in.
+    let games = std::fs::read_to_string(run.join("games.pgn")).unwrap();
+    let stripped = games
+        .lines()
+        .filter(|line| {
+            !line.starts_with("[GameNumber ")
+                && !line.starts_with("[PairNumber ")
+                && !line.starts_with("[PairGame ")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(run.join("games.pgn"), stripped).unwrap();
+    let anonymous = cli().arg("stats").arg(&run).arg("--json").output().unwrap();
+    assert!(anonymous.status.success());
+    let anonymous: serde_json::Value = serde_json::from_slice(&anonymous.stdout).unwrap();
+    assert_eq!(anonymous["report"]["pairing"], "unpaired");
+    assert_eq!(anonymous["report"]["complete_pairs"], 0);
+    assert_eq!(anonymous["report"]["unpaired_games"], 4);
 }
 
 #[test]

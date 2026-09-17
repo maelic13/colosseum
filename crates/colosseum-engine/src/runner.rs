@@ -21,7 +21,9 @@ use shakmaty::zobrist::Zobrist64;
 use shakmaty::{CastlingMode, Chess, Color, EnPassantMode, Position};
 
 use crate::live::{EvalPoint, LiveGameHandle, SEARCH_LOG_CAP, SearchLine, to_white_pov};
-use crate::pgn::{AnnotationScore, MoveAnnotation, PgnTags, SearchAnnotation, build_pgn};
+use crate::pgn::{
+    AnnotationScore, GamePairIdentity, MoveAnnotation, PgnTags, SearchAnnotation, build_pgn,
+};
 
 /// Centipawn magnitude used to represent mate scores for adjudication.
 const ADJ_MATE_CP: i32 = 100_000;
@@ -156,6 +158,9 @@ pub struct GameSpec {
     pub white_time_margin: Duration,
     pub black_time_margin: Duration,
     pub handshake_timeout: Duration,
+    /// Schedule identity written into the exported game; `None` for callers
+    /// that do not schedule colour-reversed pairs.
+    pub identity: Option<GamePairIdentity>,
 }
 
 /// The outcome of a finished game.
@@ -1325,6 +1330,7 @@ fn render_pgn(
         termination: Some(termination),
         fen: spec.start_fen.clone(),
         opening_plies: spec.opening_moves.len() as u32,
+        identity: spec.identity.clone(),
     };
     build_pgn(&tags, san_moves, annotations)
 }

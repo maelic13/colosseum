@@ -181,7 +181,7 @@ struct FileLayer {
 pub fn built_in_defaults() -> Value {
     json!({
         "schema_version": 1,
-        "stats_version": colosseum_core::rng::RNG_VERSION
+        "stats_version": colosseum_core::STATS_VERSION
     })
 }
 

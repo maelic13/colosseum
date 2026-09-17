@@ -108,7 +108,7 @@ impl RunRecord {
         let now = unix_ms();
         Self {
             schema_version: RUN_RECORD_SCHEMA_VERSION,
-            stats_version: colosseum_core::rng::RNG_VERSION,
+            stats_version: colosseum_core::STATS_VERSION,
             product_version: env!("CARGO_PKG_VERSION").into(),
             command: command.into(),
             config_sha256: directory.config_sha256().into(),

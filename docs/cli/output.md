@@ -27,6 +27,17 @@ The command-specific `type` values include:
 Position-suite JSON follows the same one-document stdout rule and identifies
 its dry-run or suite report explicitly.
 
+Every game Colosseum writes carries its schedule identity in the PGN header:
+`GameNumber`, `PairNumber`, `PairGame`, `OpeningIndex` where a book supplied
+one, and `OpeningLabel`, beside the standard seven tags and `OpeningPlyCount`.
+They are what lets an exported PGN be replayed into the same pentanomial vector
+as the run directory it came from; see [statistics replay](stats.md).
+
+A run directory is one evidence set. `stats <run-dir>` takes its statistics
+from the checkpoint, which stays authoritative, and its search telemetry from
+the directory's own `games.pgn`, so telemetry is never reported unavailable
+when the annotated export is sitting beside the checkpoint.
+
 Human-readable mode is the default. Automation should select `--json` and use
 the process exit status as the primary success/failure signal.
 

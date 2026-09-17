@@ -17,8 +17,8 @@ use colosseum_core::{
 };
 use colosseum_engine::{
     ClockAccountingReport, CoreClass, CpuPlacementPolicy, EngineCpuPlacement, EngineFaultKind,
-    EngineGameSpec, GameFault, GameSide, GameSlotCpuAllocation, GameSpec, LiveGameState,
-    ResolvedOpening, SlotAllocation, allocate_game_slots, detect_allowed_cpu_set,
+    EngineGameSpec, GameFault, GamePairIdentity, GameSide, GameSlotCpuAllocation, GameSpec,
+    LiveGameState, ResolvedOpening, SlotAllocation, allocate_game_slots, detect_allowed_cpu_set,
     detect_cpu_characteristics, detect_cpu_topology, load_openings_named, plan_cpu_placement,
     run_game,
 };
@@ -855,6 +855,15 @@ async fn play_game(request: GameRequest) -> MatchGame {
         white_time_margin: Duration::from_millis(white_time_control.margin_ms),
         black_time_margin: Duration::from_millis(black_time_control.margin_ms),
         handshake_timeout: HANDSHAKE_TIMEOUT,
+        // Games are scheduled as colour-reversed pairs: the odd game of a pair
+        // is engine A as White, the even one the same opening reversed.
+        identity: Some(GamePairIdentity {
+            game_number: number,
+            pair_number: number.div_ceil(2),
+            pair_game: if a_is_white { 1 } else { 2 },
+            opening_index: opening_assignment.book_index,
+            opening_label: opening_assignment.label.clone(),
+        }),
     };
     let live = LiveGameState::new_handle(
         game_id,
