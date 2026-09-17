@@ -27,3 +27,18 @@ canonical EPD: a PGN opening is replayed and materialized as its resulting
 position. JSON records input/output hashes, seed, order, requested range and
 actual count. Existing output is refused unless `--force` is explicit; input
 and output must differ.
+
+
+## How a run consumes a book
+
+Every game-playing command takes book entries sequentially from `--book-start`
+in the resolved order. A schedule that needs more entries than remain is
+refused when the configuration is resolved, naming how many it needs, how many
+remain and the shortfall, so two segments of one book cannot silently replay
+the same openings. `--book-wrap` opts into modular reuse and is recorded with
+the run. `--dry-run` reports the exact index range a run will consume before it
+starts. Reuse is reported either way, because it narrows error bars
+misleadingly and should never be a surprise.
+
+`slice` is the usual answer to a shortfall: cut a larger book into shards, one
+per run, instead of restarting inside the same range.

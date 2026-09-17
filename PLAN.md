@@ -1281,6 +1281,20 @@ shortfall, so two segments of one book cannot silently replay openings;
 `--book-wrap` opts into modular reuse and is recorded. Dry-run reports the
 exact index range a run will consume.
 
+**Implementation evidence (Phase 10.8):** opening resolution takes the number
+of entries a schedule actually consumes — one per colour-reversed pair for
+`match`, `sprt`, `calibrate` and `spsa`, one per encounter for `tournament`,
+which plays every game of an encounter from the same opening — and refuses when
+that exceeds what remains, naming the requirement, the remainder and the
+shortfall and pointing at the four ways out. `--book-wrap` is the only way to
+reuse and is recorded in the resolved configuration; the reused fraction is
+reported either way. The resolved configuration and every dry run carry
+`first_index`, `last_index`, `scheduled_openings` and `wrap`, so a long
+schedule is checked against its book before it starts. The match documentation
+carries the S5.13 datagen recipe written against this policy: shard a book with
+`book slice`, size the shard to the pair count, advance `--book-start` by the
+range the previous shard consumed, and never rely on wraparound for a corpus.
+
 ### 5.10 Statistics replay — `colosseum-cli stats`
 
 Read a CLI run, a PGN, or a supported external result log and report the

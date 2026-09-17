@@ -181,8 +181,15 @@ pub enum OpeningPolicyReport {
         start_index: usize,
         plies: u32,
         available_openings: usize,
-        scheduled_pairs: u32,
-        reused_pair_assignments: u32,
+        /// Openings this schedule consumes: one per colour-reversed pair, or
+        /// one per tournament encounter.
+        scheduled_openings: u32,
+        /// The exact zero-based index range the run will consume, inclusive.
+        first_index: usize,
+        last_index: usize,
+        /// Modular reuse was explicitly opted into.
+        wrap: bool,
+        reused_openings: u32,
         reuse_fraction: f64,
     },
 }
@@ -266,10 +273,19 @@ impl MatchOpenings {
     }
 }
 
+/// Resolve the openings a schedule will consume.
+///
+/// `required` is how many book entries the schedule needs: one per
+/// colour-reversed pair for a match, SPRT, calibration or tune, and one per
+/// encounter for a tournament. Entries are consumed sequentially from
+/// `start_index` in the resolved order. A run that needs more than remain is
+/// refused rather than wrapping silently, because two segments of one book
+/// that quietly replay the same openings narrow the error bars of both.
 pub fn resolve_openings(
     book: Option<OpeningBook>,
     start_index: usize,
-    games: u32,
+    required: u32,
+    wrap: bool,
     master_seed: u64,
 ) -> Result<MatchOpenings, MatchError> {
     let Some(mut book) = book else {
@@ -291,16 +307,25 @@ pub fn resolve_openings(
             openings: entries.len(),
         });
     }
-    let scheduled_pairs = games.div_ceil(2);
-    let assigned = (0..scheduled_pairs)
-        .map(|pair| (start_index + pair as usize) % entries.len())
+    let remaining = entries.len() - start_index;
+    if !wrap && required as usize > remaining {
+        return Err(MatchError::BookExhausted {
+            start_index,
+            openings: entries.len(),
+            remaining,
+            required: required as usize,
+            shortfall: required as usize - remaining,
+        });
+    }
+    let assigned = (0..required)
+        .map(|index| (start_index + index as usize) % entries.len())
         .collect::<Vec<_>>();
     let unique = assigned.iter().copied().collect::<BTreeSet<_>>().len() as u32;
-    let reused_pair_assignments = scheduled_pairs.saturating_sub(unique);
-    let reuse_fraction = if scheduled_pairs == 0 {
+    let reused_openings = required.saturating_sub(unique);
+    let reuse_fraction = if required == 0 {
         0.0
     } else {
-        f64::from(reused_pair_assignments) / f64::from(scheduled_pairs)
+        f64::from(reused_openings) / f64::from(required)
     };
     let report = OpeningPolicyReport::Book {
         path: book.path.clone(),
@@ -309,8 +334,11 @@ pub fn resolve_openings(
         start_index,
         plies: book.plies,
         available_openings: entries.len(),
-        scheduled_pairs,
-        reused_pair_assignments,
+        scheduled_openings: required,
+        first_index: assigned.first().copied().unwrap_or(start_index),
+        last_index: assigned.last().copied().unwrap_or(start_index),
+        wrap,
+        reused_openings,
         reuse_fraction,
     };
     Ok(MatchOpenings { entries, report })
@@ -434,6 +462,16 @@ pub enum MatchError {
     Opening(String),
     #[error("opening start index {start_index} is outside a book with {openings} openings")]
     BookStartOutOfRange { start_index: usize, openings: usize },
+    #[error(
+        "this schedule needs {required} openings but only {remaining} remain from --book-start {start_index} in a book of {openings}; it is short by {shortfall}. Supply a larger book, lower --book-start, shorten the schedule, or pass --book-wrap to reuse openings deliberately"
+    )]
+    BookExhausted {
+        start_index: usize,
+        openings: usize,
+        remaining: usize,
+        required: usize,
+        shortfall: usize,
+    },
     #[error("durable match output failed: {0}")]
     Output(String),
     #[error("pair identity {0} cannot be represented as two game numbers")]

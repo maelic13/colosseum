@@ -167,9 +167,54 @@ run's `--seed`. If no seed is supplied, a master seed is generated and printed
 in structured output. `--book-start N` selects the zero-based first opening and
 `--book-plies N` controls how many PGN half-moves are pre-played. Each opening
 is assigned to a two-game colour-reversed pair; odd fixed-N matches may end with
-one final half-pair. Output records the assignment for every game and reports
-the fraction of scheduled pairs that reused an opening. Without `--book`, every
-game starts from startpos and output carries an opening-diversity warning.
+one final half-pair. Output records the assignment for every game. Without
+`--book`, every game starts from startpos and output carries an
+opening-diversity warning.
+
+Openings are consumed **sequentially from `--book-start`** in the resolved
+order, and a run that needs more than remain is refused at resolution time,
+naming the shortfall. That refusal is the point: running out of openings makes
+a run silently replay positions it has already played, which narrows its error
+bars without narrowing the uncertainty, and it lets two segments of one book
+replay each other. `--book-wrap` opts into modular reuse deliberately; it is
+recorded in the resolved configuration and the reused fraction is reported.
+
+`--dry-run` states the exact index range a run will consume — `first_index`,
+`last_index` and how many openings that is — before it consumes any of them, so
+a long schedule can be checked against its book without starting it. A
+tournament consumes one opening per encounter rather than one per pair, because
+every game of an encounter is played from the same opening.
+
+## Generating a self-play corpus
+
+There is no separate `datagen` command, because a fixed-node or fixed-depth
+self-play match already is one. The same executable plays both sides, every
+move carries its search evidence, and `games.pgn` is the corpus:
+
+```text
+colosseum-cli book slice ./master-book.epd ./shard-01.epd \
+  --start 0 --count 20000 --order random --seed 4242
+
+colosseum-cli match ./engine ./engine \
+  --games 40000 --a-nodes 20000 --b-nodes 20000 \
+  --book ./shard-01.epd --book-start 0 \
+  --concurrency 12 --placement auto --cores-per-engine 1 \
+  --seed 4242 --dir ./corpus/shard-01
+```
+
+The range policy is what makes this shardable. 40,000 games are 20,000
+colour-reversed pairs, so the shard must hold at least 20,000 openings; if it
+does not, the run refuses before playing instead of quietly replaying the start
+of the book into the corpus. To continue where a shard stopped, keep the same
+book and advance `--book-start` by the number of openings the previous run
+consumed, which its run record and dry run both state exactly. Never rely on
+wraparound for a corpus: duplicated openings become duplicated positions.
+
+Each shard is a self-contained run directory, so a shard can be stopped and
+resumed, and its `run-record.json` carries the seed, book hash and index range
+that produced it. Extract from `games.pgn`, whose per-move comments give score,
+depth, charged time and nodes; positions before the first engine move are
+marked `{book}` and counted by the `OpeningPlyCount` tag.
 
 Every live match writes a self-contained run directory. Without `--dir`, a
 unique path is created beneath `./colosseum-runs/`. `--dir PATH` selects a

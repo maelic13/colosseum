@@ -297,6 +297,10 @@ struct TournamentRunCommand {
     book_order: BookOrderArg,
     #[arg(long, default_value_t = 0)]
     book_start: usize,
+    /// Reuse openings from the start of the book once they run out, instead of
+    /// refusing a schedule the book cannot cover.
+    #[arg(long, requires = "book")]
+    book_wrap: bool,
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     book_plies: Option<u32>,
     #[arg(long)]
@@ -435,6 +439,10 @@ struct MatchConditions {
     /// Zero-based first opening after ordering.
     #[arg(long, default_value_t = 0)]
     book_start: usize,
+    /// Reuse openings from the start of the book once they run out, instead of
+    /// refusing a schedule the book cannot cover.
+    #[arg(long, requires = "book")]
+    book_wrap: bool,
     /// PGN half-moves to pre-play; EPD positions ignore this value.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     book_plies: Option<u32>,
@@ -706,6 +714,10 @@ struct SpsaConditions {
     book_order: BookOrderArg,
     #[arg(long, default_value_t = 0)]
     book_start: usize,
+    /// Reuse openings from the start of the book once they run out, instead of
+    /// refusing a schedule the book cannot cover.
+    #[arg(long, requires = "book")]
+    book_wrap: bool,
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     book_plies: Option<u32>,
     #[arg(long)]
@@ -1405,7 +1417,13 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool, cancellati
         }
     };
     let openings =
-        match match_runner::resolve_openings(book, command.book_start, games, master_seed) {
+        match match_runner::resolve_openings(
+            book,
+            command.book_start,
+            games.div_ceil(2),
+            command.book_wrap,
+            master_seed,
+        ) {
             Ok(openings) => openings,
             Err(error) => {
                 eprintln!("configuration error: {error}");
@@ -2180,8 +2198,13 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool, ca
     // This is the only book parse in one SPSA process session. The resolved
     // in-memory entries are reused by every iteration and game worker.
     let openings =
-        match match_runner::resolve_openings(book, conditions.book_start, total_games, master_seed)
-        {
+        match match_runner::resolve_openings(
+            book,
+            conditions.book_start,
+            total_games.div_ceil(2),
+            conditions.book_wrap,
+            master_seed,
+        ) {
             Ok(openings) => openings,
             Err(error) => {
                 eprintln!("configuration error: {error}");
@@ -2880,21 +2903,34 @@ async fn run_tournament_command(
         book.plies = command.book_plies.unwrap_or(8);
         book
     });
-    let games = match u32::try_from(plan.schedule.len()) {
-        Ok(games) => games,
+    // A tournament plays every game of one encounter from the same opening, so
+    // the schedule consumes one book entry per encounter rather than per pair.
+    let encounters = plan
+        .schedule
+        .iter()
+        .map(|game| game.encounter)
+        .collect::<BTreeSet<_>>()
+        .len();
+    let encounters = match u32::try_from(encounters) {
+        Ok(encounters) => encounters,
         Err(_) => {
             eprintln!("configuration error: tournament schedule is too large");
             return ExitCode::from(2);
         }
     };
-    let openings =
-        match match_runner::resolve_openings(book, command.book_start, games, master_seed) {
-            Ok(openings) => openings,
-            Err(error) => {
-                eprintln!("configuration error: {error}");
-                return ExitCode::from(2);
-            }
-        };
+    let openings = match match_runner::resolve_openings(
+        book,
+        command.book_start,
+        encounters,
+        command.book_wrap,
+        master_seed,
+    ) {
+        Ok(openings) => openings,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let current_directory = match std::env::current_dir() {
         Ok(directory) => directory,
         Err(error) => {
@@ -4912,8 +4948,14 @@ fn prepare_calibration(command: &CalibrationCommand) -> Result<PreparedCalibrati
         book
     });
     let openings =
-        match_runner::resolve_openings(book, conditions.book_start, design.games, master_seed)
-            .map_err(|error| error.to_string())?;
+        match_runner::resolve_openings(
+            book,
+            conditions.book_start,
+            design.games.div_ceil(2),
+            conditions.book_wrap,
+            master_seed,
+        )
+        .map_err(|error| error.to_string())?;
     let current_directory = std::env::current_dir().map_err(|error| error.to_string())?;
     let resolved = resolve_config(
         built_in_defaults(),
@@ -5177,7 +5219,13 @@ async fn run_match(
         book
     });
     let openings =
-        match match_runner::resolve_openings(book, command.book_start, games, master_seed) {
+        match match_runner::resolve_openings(
+            book,
+            command.book_start,
+            games.div_ceil(2),
+            command.book_wrap,
+            master_seed,
+        ) {
             Ok(openings) => openings,
             Err(error) => {
                 eprintln!("configuration error: {error}");

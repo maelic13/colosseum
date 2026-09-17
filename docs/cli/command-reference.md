@@ -274,6 +274,9 @@ Options:
 
           [default: 0]
 
+      --book-wrap
+          Reuse openings from the start of the book once they run out, instead of refusing a schedule the book cannot cover
+
       --book-plies <BOOK_PLIES>
           PGN half-moves to pre-play; EPD positions ignore this value
 
@@ -516,6 +519,9 @@ Options:
 
           [default: 0]
 
+      --book-wrap
+          Reuse openings from the start of the book once they run out, instead of refusing a schedule the book cannot cover
+
       --book-plies <BOOK_PLIES>
           PGN half-moves to pre-play; EPD positions ignore this value
 
@@ -687,6 +693,9 @@ Options:
 
       --book-start <BOOK_START>
           [default: 0]
+
+      --book-wrap
+          Reuse openings from the start of the book once they run out, instead of refusing a schedule the book cannot cover
 
       --book-plies <BOOK_PLIES>
 
@@ -1136,6 +1145,9 @@ Options:
           Zero-based first opening after ordering
 
           [default: 0]
+
+      --book-wrap
+          Reuse openings from the start of the book once they run out, instead of refusing a schedule the book cannot cover
 
       --book-plies <BOOK_PLIES>
           PGN half-moves to pre-play; EPD positions ignore this value
@@ -2045,6 +2057,9 @@ Options:
 
       --book-start <BOOK_START>
           [default: 0]
+
+      --book-wrap
+          Reuse openings from the start of the book once they run out, instead of refusing a schedule the book cannot cover
 
       --book-plies <BOOK_PLIES>
 

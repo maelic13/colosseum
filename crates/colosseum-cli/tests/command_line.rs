@@ -1596,6 +1596,7 @@ rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -\n",
             "42",
             "--max-engine-faults",
             "5",
+            "--book-wrap",
             "--json",
         ])
         .output()
@@ -1610,13 +1611,97 @@ rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -\n",
     assert_eq!(report["master_seed"], 42);
     assert_eq!(report["master_seed_generated"], false);
     assert_eq!(report["openings"]["mode"], "book");
-    assert_eq!(report["openings"]["scheduled_pairs"], 3);
-    assert_eq!(report["openings"]["reused_pair_assignments"], 1);
+    assert_eq!(report["openings"]["scheduled_openings"], 3);
+    assert_eq!(report["openings"]["wrap"], true);
+    assert_eq!(report["openings"]["reused_openings"], 1);
     assert_eq!(report["games"][0]["opening"]["book_index"], 0);
     assert_eq!(report["games"][1]["opening"]["book_index"], 0);
     assert_eq!(report["games"][2]["opening"]["book_index"], 1);
     assert_eq!(report["games"][3]["opening"]["book_index"], 1);
     assert_eq!(report["games"][4]["opening"]["book_index"], 0);
+}
+
+/// Silently replaying openings narrows the error bars of both segments, so a
+/// schedule the book cannot cover is refused unless reuse is asked for.
+#[test]
+fn a_schedule_longer_than_its_book_is_refused_and_names_the_shortfall() {
+    let root = tempfile::tempdir().unwrap();
+    let book = root.path().join("openings.epd");
+    std::fs::write(
+        &book,
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -\n\
+rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -\n\
+rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R b KQkq -\n\
+rnbqkb1r/pppppp1p/5np1/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -\n",
+    )
+    .unwrap();
+
+    let refused = cli()
+        .args(["match", "--games", "10", "a", "b"])
+        .arg("--book")
+        .arg(&book)
+        .args(["--dry-run", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(2));
+    let stderr = String::from_utf8(refused.stderr).unwrap();
+    assert!(stderr.contains("needs 5 openings"), "{stderr}");
+    assert!(stderr.contains("only 4 remain"), "{stderr}");
+    assert!(stderr.contains("short by 1"), "{stderr}");
+    assert!(stderr.contains("--book-wrap"), "{stderr}");
+
+    // The same refusal applies to a segment that starts partway in, so two
+    // halves of one book cannot quietly replay the same openings.
+    let segment = cli()
+        .args(["match", "--games", "6", "a", "b"])
+        .arg("--book")
+        .arg(&book)
+        .args(["--book-start", "2", "--dry-run", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(segment.status.code(), Some(2));
+    assert!(
+        String::from_utf8(segment.stderr)
+            .unwrap()
+            .contains("only 2 remain from --book-start 2")
+    );
+}
+
+/// The dry run states exactly which book entries a run will consume, before it
+/// consumes any of them.
+#[test]
+fn a_dry_run_reports_the_exact_book_index_range_it_will_consume() {
+    let root = tempfile::tempdir().unwrap();
+    let book = root.path().join("openings.epd");
+    std::fs::write(
+        &book,
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -\n\
+rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -\n\
+rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R b KQkq -\n\
+rnbqkb1r/pppppp1p/5np1/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -\n",
+    )
+    .unwrap();
+
+    let output = cli()
+        .args(["match", "--games", "6", "a", "b"])
+        .arg("--book")
+        .arg(&book)
+        .args(["--book-start", "1", "--dry-run", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let openings = &value["resolved_configuration"]["openings"];
+    assert_eq!(openings["available_openings"], 4);
+    assert_eq!(openings["scheduled_openings"], 3);
+    assert_eq!(openings["first_index"], 1);
+    assert_eq!(openings["last_index"], 3);
+    assert_eq!(openings["wrap"], false);
+    assert_eq!(openings["reused_openings"], 0);
 }
 
 #[test]
