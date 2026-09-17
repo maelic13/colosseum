@@ -196,12 +196,6 @@ impl ProgressSchedule {
         done.saturating_sub(self.resumed)
     }
 
-    /// Units left for this invocation to reach a cap.
-    #[must_use]
-    pub fn remaining_this_run(&self, total: u64) -> u64 {
-        total.saturating_sub(self.resumed)
-    }
-
     /// True when `done` units mean a block is due now. Records the emission,
     /// so a caller that asks is a caller that prints.
     pub fn due(&mut self, done: u64) -> bool {
@@ -250,19 +244,6 @@ pub fn rate_per_hour(units: u64, hours: f64) -> Option<f64> {
     (hours > 0.0 && units > 0).then(|| units as f64 / hours)
 }
 
-/// A linear estimate of the time left at the observed rate.
-#[must_use]
-pub fn linear_eta(done: u64, total: u64, elapsed: Duration) -> Option<Duration> {
-    if done == 0 || total <= done {
-        return None;
-    }
-    let per_unit = elapsed.as_secs_f64() / done as f64;
-    let remaining = per_unit * (total - done) as f64;
-    remaining
-        .is_finite()
-        .then(|| Duration::from_secs_f64(remaining.max(0.0)))
-}
-
 /// A signed value with an explicit sign, as an Elo estimate is read.
 #[must_use]
 pub fn signed(value: f64) -> String {
@@ -271,15 +252,47 @@ pub fn signed(value: f64) -> String {
     format!("{value:+.1}")
 }
 
-/// A point estimate with its two-sided interval.
+/// A point estimate with the half-width of its 95% interval.
+///
+/// An operator reads an Elo estimate as "this much, give or take that much",
+/// so the margin is what the block shows. The bounds are the same fact and
+/// are what the final report and the JSON carry.
 #[must_use]
-pub fn interval(point: f64, lower: f64, upper: f64) -> String {
-    format!(
-        "{} [{}, {}] (95%)",
-        signed(point),
-        signed(lower),
-        signed(upper)
-    )
+pub fn estimate(point: f64, lower: f64, upper: f64) -> String {
+    let margin = (upper - lower) / 2.0;
+    format!("{} +/- {margin:.1}", signed(point))
+}
+
+/// A count with its noun, so a block never reports "1 pairs".
+#[must_use]
+pub fn plural(count: u64, singular: &str) -> String {
+    if count == 1 {
+        format!("{count} {singular}")
+    } else {
+        format!("{count} {singular}s")
+    }
+}
+
+/// The rule between two blocks, so a long console reads as a sequence of
+/// reports rather than one wall of lines.
+pub const BLOCK_SEPARATOR: &str = "--------------------------------------------------";
+
+/// How long `remaining` more units take at the rate observed so far.
+///
+/// `done` counts only the units this invocation played, because a resumed run
+/// did not spend time on the ones it inherited.
+#[must_use]
+pub fn time_for_units(done: u64, elapsed: Duration, remaining: u64) -> Option<Duration> {
+    if done == 0 {
+        return None;
+    }
+    if remaining == 0 {
+        return Some(Duration::ZERO);
+    }
+    let per_unit = elapsed.as_secs_f64() / done as f64;
+    let left = per_unit * remaining as f64;
+    left.is_finite()
+        .then(|| Duration::from_secs_f64(left.max(0.0)))
 }
 
 #[cfg(test)]
@@ -364,23 +377,38 @@ mod tests {
     fn a_rate_never_claims_the_work_a_resume_inherited() {
         let schedule = ProgressSchedule::new(10, 5, 40);
         assert_eq!(schedule.units_since_start(52), 12);
-        assert_eq!(schedule.remaining_this_run(200), 160);
     }
 
     #[test]
-    fn an_eta_is_linear_and_absent_without_evidence() {
-        assert_eq!(
-            linear_eta(2, 10, Duration::from_secs(20)),
-            Some(Duration::from_secs(80))
-        );
-        assert_eq!(linear_eta(0, 10, Duration::from_secs(20)), None);
-        assert_eq!(linear_eta(10, 10, Duration::from_secs(20)), None);
+    fn a_count_agrees_with_its_noun() {
+        assert_eq!(plural(1, "pair"), "1 pair");
+        assert_eq!(plural(0, "pair"), "0 pairs");
+        assert_eq!(plural(42, "pair"), "42 pairs");
     }
 
     #[test]
     fn a_negative_zero_is_never_reported_as_one() {
         assert_eq!(signed(-0.0), "+0.0");
-        assert_eq!(interval(-0.0, -0.0, 0.0), "+0.0 [+0.0, +0.0] (95%)");
+        assert_eq!(estimate(-0.0, -0.0, 0.0), "+0.0 +/- 0.0");
+    }
+
+    #[test]
+    fn an_estimate_reads_as_a_value_and_a_margin() {
+        assert_eq!(estimate(35.72, 18.2, 53.24), "+35.7 +/- 17.5");
+        assert_eq!(estimate(-4.0, -20.0, 12.0), "-4.0 +/- 16.0");
+    }
+
+    #[test]
+    fn a_finished_run_has_no_time_left_and_an_idle_one_has_no_estimate() {
+        assert_eq!(
+            time_for_units(4, Duration::from_secs(40), 0),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(
+            time_for_units(4, Duration::from_secs(40), 6),
+            Some(Duration::from_secs(60))
+        );
+        assert_eq!(time_for_units(0, Duration::from_secs(40), 6), None);
     }
 
     #[test]

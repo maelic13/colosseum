@@ -60,15 +60,36 @@ boundary after the floor expires. A block is never printed for every committed
 unit, and neither flag is part of the hashed configuration, so changing either
 one does not stop a run directory resuming.
 
-Each block names the command, the units done against the cap, and the elapsed
-time, then the figures a decision needs. A sequential test reports its sample,
-both Elo models with 95% intervals and its LLR against the Wald bounds; a
-tournament reports the standings header with ratings and error bars; a tune
-reports its last mini-match, the current gain and perturbation scale, and the
-centres that are moving. Every block is appended to `run.log`, and the most
-recent one is retained in `run-record.json`, so
-[`status`](status.md) prints exactly what the console last showed and a closed
-console loses nothing.
+Each block names the command, the units done against the cap and the elapsed
+time, then the figures a decision needs, and a rule closes it:
+
+```text
+progress [sprt]: 105/200 pairs (52%), 8m41s elapsed
+  players         candidate vs. baseline
+  games           210
+  Elo             +193.1 +/- 45.0
+  nElo            +248.0 +/- 47.0
+  W/D/L           158/0/52
+  Ptnml           [0, 0, 52, 0, 53]
+  faults          engine 0/0, time losses 0/0
+  LLR             +2.96 in [-2.94, 2.94] (accept H1)
+  rate            724 pairs/hour
+  time remaining  0s
+--------------------------------------------------
+```
+
+An Elo estimate is a value and the half-width of its 95% interval; `Ptnml` is
+the pentanomial vector; `time remaining` extrapolates the rate observed so far
+and is `0s` once the run has stopped. A sequential test caps that estimate at
+the pairs its `--max-pairs` still allows, and takes the nearer of that and the
+pairs its LLR would need at the drift it has. A tournament reports the
+standings header with ratings and error bars; a tune reports its last
+mini-match, the current gain and perturbation scale, and the centres that are
+moving.
+
+Every block is appended to `run.log`, and the most recent one is retained in
+`run-record.json`, so [`status`](status.md) prints exactly what the console
+last showed and a closed console loses nothing.
 
 Human-readable mode is the default. Automation should select `--json` and use
 the process exit status as the primary success/failure signal.

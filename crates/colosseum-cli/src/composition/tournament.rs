@@ -917,7 +917,7 @@ pub(crate) fn tournament_progress_block(
                         standing.name,
                         standing.rating,
                         match standing.error_95 {
-                            Some(error) => format!(" ±{error:.1}"),
+                            Some(error) => format!(" +/- {error:.1}"),
                             None => " (fixed)".to_owned(),
                         },
                         standing.points,
@@ -935,13 +935,17 @@ pub(crate) fn tournament_progress_block(
     {
         block.field("rate", format!("{rate:.0} games/hour"));
     }
-    if let Some(eta) = progress::linear_eta(
-        schedule.units_since_start(done),
-        schedule.remaining_this_run(scheduled_games),
-        schedule.elapsed(),
-    ) {
-        block.field("ETA", progress::format_duration(eta.as_secs_f64()));
-    }
+    block.field(
+        "time remaining",
+        match progress::time_for_units(
+            schedule.units_since_start(done),
+            schedule.elapsed(),
+            scheduled_games.saturating_sub(done),
+        ) {
+            Some(left) => progress::format_duration(left.as_secs_f64()),
+            None => "unknown".to_owned(),
+        },
+    );
     block
 }
 

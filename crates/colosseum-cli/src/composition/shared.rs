@@ -454,6 +454,20 @@ pub(crate) fn configure_ponder(engine: &mut EngineLaunchSpec, ponder: bool) -> R
     Ok(())
 }
 
+/// The name a progress block calls an engine: its label when it has one, and
+/// the executable's file stem otherwise, which is what the PGN roster uses.
+pub(crate) fn engine_display_name(engine: &EngineLaunchSpec) -> String {
+    engine.label.clone().unwrap_or_else(|| {
+        engine
+            .executable
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("engine")
+            .to_owned()
+    })
+}
+
 /// The sample class to write for one game of a counted group.
 ///
 /// Saying that the runner abandoned this game is what lets a PGN replay leave
@@ -518,6 +532,7 @@ pub(crate) fn publish_progress(
 /// by its observer.
 pub(crate) fn show_progress(block: &ProgressBlock, directory: &RunDirectory) {
     eprint!("{}", block.render());
+    eprintln!("{}", progress::BLOCK_SEPARATOR);
     let mut line =
         serde_json::to_vec(&block.log_event()).expect("a progress block is serializable");
     line.push(b'\n');
@@ -593,32 +608,27 @@ impl PairedProgress {
         }
     }
 
-    /// The lines both commands share, in reading order.
+    /// The lines both commands share, in the order an operator reads them:
+    /// the size of the sample, what it is worth, then how it was reached.
     pub(crate) fn add_fields(&self, block: &mut ProgressBlock) {
-        block
-            .field("games", format!("{} scored", self.scored_games))
-            .field(
-                "W/D/L",
-                format!("{}/{}/{}", self.wins, self.draws, self.losses),
-            )
-            .field("pentanomial", format!("{:?}", self.vector.counts()));
+        block.field("games", self.scored_games.to_string());
         match pentanomial_statistics(&self.vector, Z95) {
             Ok(statistics) => {
                 block
                     .field(
-                        "nElo",
-                        progress::interval(
-                            statistics.normalized_elo.elo,
-                            statistics.normalized_elo.lower,
-                            statistics.normalized_elo.upper,
-                        ),
-                    )
-                    .field(
                         "Elo",
-                        progress::interval(
+                        progress::estimate(
                             statistics.logistic_elo.elo,
                             statistics.logistic_elo.lower,
                             statistics.logistic_elo.upper,
+                        ),
+                    )
+                    .field(
+                        "nElo",
+                        progress::estimate(
+                            statistics.normalized_elo.elo,
+                            statistics.normalized_elo.lower,
+                            statistics.normalized_elo.upper,
                         ),
                     );
             }
@@ -626,16 +636,22 @@ impl PairedProgress {
                 block.field("Elo", format!("unavailable: {error}"));
             }
         }
-        block.field(
-            "faults",
-            format!(
-                "engine {}/{}, time losses {}/{}",
-                self.faults.engine_a,
-                self.faults.engine_b,
-                self.faults.time_losses_a,
-                self.faults.time_losses_b
-            ),
-        );
+        block
+            .field(
+                "W/D/L",
+                format!("{}/{}/{}", self.wins, self.draws, self.losses),
+            )
+            .field("Ptnml", format!("{:?}", self.vector.counts()))
+            .field(
+                "faults",
+                format!(
+                    "engine {}/{}, time losses {}/{}",
+                    self.faults.engine_a,
+                    self.faults.engine_b,
+                    self.faults.time_losses_a,
+                    self.faults.time_losses_b
+                ),
+            );
     }
 }
 

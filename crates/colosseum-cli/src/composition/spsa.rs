@@ -1298,13 +1298,17 @@ pub(crate) fn spsa_progress_block(
         Some(total),
         schedule.elapsed(),
     );
-    if let Some(eta) = progress::linear_eta(
-        schedule.units_since_start(done),
-        schedule.remaining_this_run(total),
-        schedule.elapsed(),
-    ) {
-        block.field("ETA", progress::format_duration(eta.as_secs_f64()));
-    }
+    block.field(
+        "time remaining",
+        match progress::time_for_units(
+            schedule.units_since_start(done),
+            schedule.elapsed(),
+            total.saturating_sub(done),
+        ) {
+            Some(left) => progress::format_duration(left.as_secs_f64()),
+            None => "unknown".to_owned(),
+        },
+    );
     match &last {
         Some(iteration) => {
             let score = iteration.score;

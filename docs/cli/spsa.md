@@ -173,7 +173,8 @@ what is left, the last mini-match's pair score, the gain and perturbation scale
 that iteration used, and the three centres that moved most since the previous
 block. Those moves are measured as a fraction of each knob's own range, because
 ten units of a thousand-wide knob and ten units of a twenty-wide one are not
-the same fact.
+the same fact. The remaining time is a linear projection of the rate observed
+so far and reads `0s` once the horizon is reached.
 
 Use `--dir PATH` for an explicitly resumable run. Each checkpoint contains only
 whole completed iterations; a hard stop during a mini-match replays that entire

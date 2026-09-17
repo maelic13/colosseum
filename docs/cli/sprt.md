@@ -64,12 +64,30 @@ inventing a finite statistic.
 
 Progress is written to stderr every `--progress-every N` official pairs
 (default 10) and once more at termination. An SPRT block carries the whole
-decision: games and pairs committed, W/D/L, the pentanomial vector, normalized
-and logistic Elo with 95% intervals, the LLR against its exact Wald bounds,
-engine faults and time losses, pairs per hour, and the games still expected if
-the LLR keeps drifting at the rate it has. That last figure extrapolates the
-LLR the test already computed and is labelled accordingly: a sequential path is
-not a straight line, and it is capped at the games remaining to `--max-pairs`.
+decision: the two engines, games and pairs committed, logistic and normalized
+Elo each with the half-width of its 95% interval, W/D/L, the pentanomial
+vector, engine faults and time losses, the LLR against its exact Wald bounds,
+pairs per hour, and the time still expected. That last figure extrapolates the
+LLR the test already computed at its average drift per pair, never exceeds the
+pairs `--max-pairs` still allows, and is `0s` once the test has stopped; a
+sequential path is not a straight line, so read it as a projection.
+
+The closing report names the hypotheses as an interval, what was concluded and
+how long the invocation took:
+
+```text
+SPRT [0.00, 10.00] completed - H1 accepted: the gain is at least 10.00 normalized Elo
+official sample: 105 pairs; post-terminal: 1 pair
+model normalized: alpha 0.05, beta 0.05, cap 200 pairs
+LLR 2.960096 in [-2.944439, 2.944439]
+terminal pair: 105; invalid pair: none
+artifacts: ./colosseum-runs/sprt-...
+Finished match
+Total Time: 8m41s
+```
+
+`--json` replaces that report with the single JSON document; progress blocks
+stay on standard error either way.
 
 Run artifacts use the common layout. The checkpoint stores official and
 post-terminal pairs separately, `games.pgn` labels both classes in a

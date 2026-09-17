@@ -160,6 +160,11 @@ pub(crate) async fn run_calibration(
     }
     let progress = match_runner::MatchProgress::default();
     let resumed_pairs = PairedProgress::from_games(&completed_games).pairs.into();
+    let players = format!(
+        "{} vs. {}",
+        engine_display_name(&prepared.engine_a),
+        engine_display_name(&prepared.engine_b)
+    );
     let request = match_runner::FixedMatchRequest {
         engine_a: prepared.engine_a,
         engine_b: prepared.engine_b,
@@ -199,14 +204,15 @@ pub(crate) async fn run_calibration(
         tokio::select! {
             result = &mut calibration_future => break result,
             _ = poll.tick() => {
-                let block = calibration_progress_block(&observer, &schedule, pairs_planned);
+                let block =
+                    calibration_progress_block(&observer, &schedule, &players, pairs_planned);
                 if schedule.due(block.done) {
                     publish_progress(&block, &directory, &mut recorder);
                 }
             }
         }
     };
-    let final_block = calibration_progress_block(&observer, &schedule, pairs_planned);
+    let final_block = calibration_progress_block(&observer, &schedule, &players, pairs_planned);
     if schedule.needs_final(final_block.done) {
         schedule.mark(final_block.done);
         publish_progress(&final_block, &directory, &mut recorder);
@@ -459,6 +465,7 @@ pub(crate) fn prepare_calibration(
 pub(crate) fn calibration_progress_block(
     observer: &DurableMatchOutput,
     schedule: &ProgressSchedule,
+    players: &str,
     pairs_planned: u64,
 ) -> ProgressBlock {
     let sample = observer
@@ -474,19 +481,24 @@ pub(crate) fn calibration_progress_block(
         Some(pairs_planned),
         schedule.elapsed(),
     );
+    block.field("players", players);
     sample.add_fields(&mut block);
     if let Some(rate) =
         progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
     {
         block.field("rate", format!("{rate:.0} pairs/hour"));
     }
-    if let Some(eta) = progress::linear_eta(
-        schedule.units_since_start(done),
-        schedule.remaining_this_run(pairs_planned),
-        schedule.elapsed(),
-    ) {
-        block.field("ETA", progress::format_duration(eta.as_secs_f64()));
-    }
+    block.field(
+        "time remaining",
+        match progress::time_for_units(
+            schedule.units_since_start(done),
+            schedule.elapsed(),
+            pairs_planned.saturating_sub(done),
+        ) {
+            Some(left) => progress::format_duration(left.as_secs_f64()),
+            None => "unknown".to_owned(),
+        },
+    );
     block
 }
 

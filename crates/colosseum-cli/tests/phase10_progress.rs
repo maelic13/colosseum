@@ -36,6 +36,7 @@ fn blocks(text: &str) -> Vec<String> {
         if line.starts_with("progress [") {
             blocks.push(format!("{line}\n"));
         } else if line.starts_with("  ")
+            && !line.trim().is_empty()
             && let Some(block) = blocks.last_mut()
         {
             block.push_str(line);
@@ -109,9 +110,27 @@ fn a_match_prints_a_block_on_every_unit_boundary_it_crosses() {
         last.starts_with("progress [match]: 8/8 games (100%),"),
         "{last}"
     );
-    for field in ["score", "W/D/L", "Elo", "faults", "rate"] {
+    for field in [
+        "players",
+        "score",
+        "W/D/L",
+        "Elo",
+        "faults",
+        "rate",
+        "time remaining",
+    ] {
         assert!(last.contains(field), "{field} missing from:\n{last}");
     }
+    // A finished run has nothing left to wait for.
+    assert!(last.contains("time remaining  0s"), "{last}");
+    // One rule between blocks, and one before whatever follows them.
+    assert_eq!(
+        text.lines()
+            .filter(|line| !line.is_empty() && line.chars().all(|c| c == '-'))
+            .count(),
+        blocks.len(),
+        "{text}"
+    );
 }
 
 /// The floor is the only thing the clock does: it withholds blocks, and the
@@ -292,7 +311,7 @@ fn an_sprt_block_carries_the_sample_both_models_and_the_llr() {
         .arg(&book)
         .arg("--dir")
         .arg(&run)
-        .arg("--json")
+        // Human mode, because the closing report is what this test reads.
         .output()
         .unwrap();
     // Twenty pairs without a boundary is a capped inconclusive result.
@@ -304,15 +323,16 @@ fn an_sprt_block_carries_the_sample_both_models_and_the_llr() {
         "{last}"
     );
     for field in [
+        "players",
         "games",
-        "W/D/L",
-        "pentanomial",
-        "nElo",
         "Elo",
-        "LLR",
+        "nElo",
+        "W/D/L",
+        "Ptnml",
         "faults",
+        "LLR",
         "rate",
-        "expected remaining",
+        "time remaining",
     ] {
         assert!(last.contains(field), "{field} missing from:\n{last}");
     }
@@ -320,7 +340,23 @@ fn an_sprt_block_carries_the_sample_both_models_and_the_llr() {
     // against its exact Wald bounds.
     assert!(last.contains("[0, 0, 10, 0, 10]"), "{last}");
     assert!(last.contains("in [-2.94, 2.94]"), "{last}");
-    assert!(last.contains("(95%)"), "{last}");
+    // Both estimates read as a value and a margin.
+    assert!(last.contains("Elo") && last.contains("+/-"), "{last}");
+    assert!(
+        last.contains("colosseum-cli vs. colosseum-uci-fixture"),
+        "{last}"
+    );
+
+    // The closing report names the hypotheses it tested, what it concluded,
+    // and how long it took.
+    let report = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        report.contains("SPRT [0.00, 10.00] inconclusive - the 20 pairs cap was reached"),
+        "{report}"
+    );
+    assert!(report.contains("official sample: 20 pairs"), "{report}");
+    assert!(report.contains("Finished match"), "{report}");
+    assert!(report.contains("Total Time: "), "{report}");
 }
 
 /// A tournament reports who is ahead, with the error bars its own rating step
@@ -372,7 +408,7 @@ fn a_tournament_block_names_the_standings_header() {
         "{last}"
     );
     assert!(last.contains("standings"), "{last}");
-    assert!(last.contains('±'), "no error bar in:\n{last}");
+    assert!(last.contains("+/- "), "no error bar in:\n{last}");
     assert!(last.contains("1. "), "no ranked row in:\n{last}");
 }
 
@@ -428,6 +464,7 @@ fn a_tune_block_names_its_iteration_gain_and_moving_centres() {
     assert!(last.contains("gain a "), "{last}");
     assert!(last.contains("perturbation scale c "), "{last}");
     assert!(last.contains("largest moves"), "{last}");
+    assert!(last.contains("time remaining"), "{last}");
     assert!(last.contains("Hash "), "the knob is named in:\n{last}");
 }
 
@@ -470,7 +507,14 @@ fn a_calibration_block_reports_its_paired_sample() {
         last.starts_with("progress [calibrate]: 4/4 pairs (100%),"),
         "{last}"
     );
-    for field in ["games", "W/D/L", "pentanomial", "faults"] {
+    for field in [
+        "players",
+        "games",
+        "W/D/L",
+        "Ptnml",
+        "faults",
+        "time remaining",
+    ] {
         assert!(last.contains(field), "{field} missing from:\n{last}");
     }
     assert!(last.contains("[0, 0, 4, 0, 0]"), "{last}");

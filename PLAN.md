@@ -2443,7 +2443,12 @@ games" procedure at 10.10, once, on the final state.
   not the polling is what bounds how close two blocks may be. A resumed run
   counts from the units it inherited, so no rate or ETA claims time it did not
   spend, and a final block that would repeat the last boundary block is not
-  printed twice. Neither flag reaches the resolved configuration, so an
+  printed twice. A block reads as the operator's own summary: who is playing,
+  the sample size, each Elo estimate as a value and the half-width of its 95%
+  interval, W/D/L, `Ptnml`, faults, the LLR against its bounds, the rate and
+  the time remaining, closed by a rule. The closing SPRT report states the
+  hypotheses as an interval, names what was accepted rather than only which
+  hypothesis it was, and ends with the invocation's total time. Neither flag reaches the resolved configuration, so an
   existing run directory resumes whatever it is told to report. Machine mode
   prints blocks too, and the tests that read "a quiet run says nothing on
   standard error" now read "nothing but progress".

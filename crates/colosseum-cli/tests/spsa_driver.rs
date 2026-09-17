@@ -6,11 +6,15 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 /// A durable run reports its progress on standard error, so "quiet" means
-/// nothing there but progress blocks: no warning, no diagnostic, no error.
+/// nothing there but progress blocks and the rules between them: no warning,
+/// no diagnostic, no error.
 fn only_progress(output: &std::process::Output) -> bool {
-    String::from_utf8_lossy(&output.stderr)
-        .lines()
-        .all(|line| line.is_empty() || line.starts_with("progress [") || line.starts_with("  "))
+    String::from_utf8_lossy(&output.stderr).lines().all(|line| {
+        line.is_empty()
+            || line.starts_with("progress [")
+            || line.starts_with("  ")
+            || line.chars().all(|character| character == '-')
+    })
 }
 
 fn cli() -> Command {

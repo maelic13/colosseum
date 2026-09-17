@@ -534,6 +534,11 @@ pub(crate) async fn run_sprt(
     }
     let openings_report = openings.report().clone();
     let resumed_pairs = checkpoint.official_pairs.len() as u64;
+    let players = format!(
+        "{} vs. {}",
+        engine_display_name(&engine_a),
+        engine_display_name(&engine_b)
+    );
     let request = sprt_runner::PairScheduleRequest {
         settings: match_runner::PairGameSettings {
             engine_a,
@@ -560,14 +565,14 @@ pub(crate) async fn run_sprt(
         tokio::select! {
             result = &mut schedule_future => break result,
             _ = poll.tick() => {
-                let block = sprt_progress_block(&observer, &progress, design);
+                let block = sprt_progress_block(&observer, &progress, design, &players, false);
                 if progress.due(block.done) {
                     publish_progress(&block, &directory, &mut recorder);
                 }
             }
         }
     };
-    let final_block = sprt_progress_block(&observer, &progress, design);
+    let final_block = sprt_progress_block(&observer, &progress, design, &players, true);
     if progress.needs_final(final_block.done) {
         progress.mark(final_block.done);
         publish_progress(&final_block, &directory, &mut recorder);
@@ -621,7 +626,7 @@ pub(crate) async fn run_sprt(
                     report,
                 });
             } else {
-                print_sprt(&report, &directory.paths().root);
+                print_sprt(&report, &directory.paths().root, progress.elapsed());
             }
             ExitCode::from(sprt_exit_code(status))
         }
@@ -680,6 +685,8 @@ pub(crate) fn sprt_progress_block(
     observer: &DurableSprtOutput,
     progress: &ProgressSchedule,
     design: SprtDesign,
+    players: &str,
+    terminal: bool,
 ) -> ProgressBlock {
     let (sample, post_terminal) = observer
         .checkpoint
@@ -699,11 +706,15 @@ pub(crate) fn sprt_progress_block(
         Some(u64::from(design.max_pairs)),
         progress.elapsed(),
     );
+    block.field("players", players);
     sample.add_fields(&mut block);
     if post_terminal > 0 {
         block.field(
             "post-terminal",
-            format!("{post_terminal} pairs kept as evidence the sample excludes"),
+            format!(
+                "{} kept as evidence the sample excludes",
+                progress::plural(post_terminal as u64, "pair")
+            ),
         );
     }
     let parameters = design.parameters;
@@ -741,17 +752,28 @@ pub(crate) fn sprt_progress_block(
     {
         block.field("rate", format!("{rate:.0} pairs/hour"));
     }
+    // A test that has stopped has nothing left to run, whatever the cap says.
+    // Otherwise the estimate is the pairs the LLR would need at its current
+    // drift, and never more than the pairs the cap still allows.
+    let to_cap = u64::from(design.max_pairs).saturating_sub(done);
+    let remaining = if terminal {
+        0
+    } else {
+        statistics
+            .as_ref()
+            .ok()
+            .and_then(pairs_to_bound)
+            .map_or(to_cap, |pairs| pairs.min(to_cap))
+    };
     block.field(
-        "expected remaining",
-        match statistics.as_ref().ok().and_then(pairs_to_bound) {
-            Some(pairs) => {
-                let capped = pairs.min(u64::from(design.max_pairs).saturating_sub(done));
-                format!("{} games at the current drift", capped * 2)
-            }
-            None => format!(
-                "{} games to the cap; no drift to extrapolate yet",
-                u64::from(design.max_pairs).saturating_sub(done) * 2
-            ),
+        "time remaining",
+        match progress::time_for_units(
+            progress.units_since_start(done),
+            progress.elapsed(),
+            remaining,
+        ) {
+            Some(left) => progress::format_duration(left.as_secs_f64()),
+            None => "unknown".to_owned(),
         },
     );
     block
@@ -891,7 +913,46 @@ impl sprt_runner::PairObserver for DurableSprtOutput {
     }
 }
 
-pub(crate) fn print_sprt(report: &sprt_runner::SprtReport, run_directory: &Path) {
+/// The Elo model as a reader names it rather than as the enum spells it.
+fn elo_model_name(model: EloModel) -> &'static str {
+    match model {
+        EloModel::Normalized => "normalized",
+        EloModel::Logistic => "logistic",
+    }
+}
+
+/// The verdict in a sentence, naming what was accepted rather than only which
+/// hypothesis it was.
+fn sprt_verdict(report: &sprt_runner::SprtReport) -> String {
+    let parameters = report.design.parameters;
+    let model = format!("{} Elo", elo_model_name(parameters.model));
+    match report.status {
+        sprt_runner::SprtStatus::H1 => format!(
+            "completed - H1 accepted: the gain is at least {:.2} {model}",
+            parameters.elo1
+        ),
+        sprt_runner::SprtStatus::H0 => format!(
+            "completed - H0 accepted: the gain is no more than {:.2} {model}",
+            parameters.elo0
+        ),
+        sprt_runner::SprtStatus::Inconclusive => format!(
+            "inconclusive - the {} cap was reached without a boundary",
+            progress::plural(u64::from(report.design.max_pairs), "pair")
+        ),
+        sprt_runner::SprtStatus::Cancelled => {
+            "cancelled - stopped cleanly before a boundary or the cap".to_owned()
+        }
+        sprt_runner::SprtStatus::Invalid => {
+            "invalid - the engine or time fault policy was exceeded".to_owned()
+        }
+    }
+}
+
+pub(crate) fn print_sprt(
+    report: &sprt_runner::SprtReport,
+    run_directory: &Path,
+    elapsed: Duration,
+) {
     if let Some(apply) = &report.apply {
         println!(
             "SPSA apply: {} ({:?})",
@@ -900,24 +961,27 @@ pub(crate) fn print_sprt(report: &sprt_runner::SprtReport, run_directory: &Path)
         );
     }
     println!(
-        "SPRT {:?}: {} official pairs, {} post-terminal pairs",
-        report.status,
-        report.schedule.official_pairs.len(),
-        report.schedule.post_terminal_pairs.len()
-    );
-    println!(
-        "model {:?}: H0 {} / H1 {}, alpha {}, beta {}, cap {} pairs",
-        report.design.parameters.model,
+        "SPRT [{:.2}, {:.2}] {}",
         report.design.parameters.elo0,
         report.design.parameters.elo1,
+        sprt_verdict(report)
+    );
+    println!(
+        "official sample: {}; post-terminal: {}",
+        progress::plural(report.schedule.official_pairs.len() as u64, "pair"),
+        progress::plural(report.schedule.post_terminal_pairs.len() as u64, "pair")
+    );
+    println!(
+        "model {}: alpha {}, beta {}, cap {}",
+        elo_model_name(report.design.parameters.model),
         report.design.parameters.alpha,
         report.design.parameters.beta,
-        report.design.max_pairs
+        progress::plural(u64::from(report.design.max_pairs), "pair")
     );
     if let Some(statistics) = report.schedule.statistics {
         println!(
-            "LLR {:.6}; bounds [{:.6}, {:.6}]; decision {:?}",
-            statistics.llr, statistics.lower, statistics.upper, statistics.decision
+            "LLR {:.6} in [{:.6}, {:.6}]",
+            statistics.llr, statistics.lower, statistics.upper
         );
     } else {
         println!("LLR unavailable: official sample is still statistically degenerate");
@@ -934,4 +998,9 @@ pub(crate) fn print_sprt(report: &sprt_runner::SprtReport, run_directory: &Path)
             .map_or_else(|| "none".into(), |value| value.to_string())
     );
     println!("artifacts: {}", run_directory.display());
+    println!("Finished match");
+    println!(
+        "Total Time: {}",
+        progress::format_duration(elapsed.as_secs_f64())
+    );
 }

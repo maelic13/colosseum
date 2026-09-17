@@ -303,6 +303,11 @@ pub(crate) async fn run_match(
     }
     let progress = match_runner::MatchProgress::default();
     let resumed_games = completed_games.len();
+    let players = format!(
+        "{} vs. {}",
+        engine_display_name(&engine_a),
+        engine_display_name(&engine_b)
+    );
     let request = match_runner::FixedMatchRequest {
         engine_a,
         engine_b,
@@ -341,14 +346,14 @@ pub(crate) async fn run_match(
         tokio::select! {
             result = &mut match_future => break result,
             _ = poll.tick() => {
-                let block = match_progress_block(&observer, &schedule, games);
+                let block = match_progress_block(&observer, &schedule, &players, games);
                 if schedule.due(block.done) {
                     publish_progress(&block, &directory, &mut recorder);
                 }
             }
         }
     };
-    let final_block = match_progress_block(&observer, &schedule, games);
+    let final_block = match_progress_block(&observer, &schedule, &players, games);
     if schedule.needs_final(final_block.done) {
         schedule.mark(final_block.done);
         publish_progress(&final_block, &directory, &mut recorder);
@@ -406,6 +411,7 @@ pub(crate) async fn run_match(
 pub(crate) fn match_progress_block(
     observer: &DurableMatchOutput,
     schedule: &ProgressSchedule,
+    players: &str,
     total: u32,
 ) -> ProgressBlock {
     let (sample, done) = observer
@@ -420,6 +426,7 @@ pub(crate) fn match_progress_block(
         Some(u64::from(total)),
         schedule.elapsed(),
     );
+    block.field("players", players);
     let points = f64::from(sample.wins) + 0.5 * f64::from(sample.draws);
     if sample.scored_games > 0 {
         block.field(
@@ -438,9 +445,9 @@ pub(crate) fn match_progress_block(
         format!("{}/{}/{}", sample.wins, sample.draws, sample.losses),
     );
     match elo_with_error(sample.wins, sample.draws, sample.losses, Z95) {
-        Ok(estimate) => block.field(
+        Ok(value) => block.field(
             "Elo",
-            progress::interval(estimate.elo, estimate.lower, estimate.upper),
+            progress::estimate(value.elo, value.lower, value.upper),
         ),
         Err(error) => block.field("Elo", format!("unavailable: {error}")),
     };
@@ -459,6 +466,17 @@ pub(crate) fn match_progress_block(
     {
         block.field("rate", format!("{rate:.0} games/hour"));
     }
+    block.field(
+        "time remaining",
+        match progress::time_for_units(
+            schedule.units_since_start(done),
+            schedule.elapsed(),
+            u64::from(total).saturating_sub(done),
+        ) {
+            Some(left) => progress::format_duration(left.as_secs_f64()),
+            None => "unknown".to_owned(),
+        },
+    );
     block
 }
 
