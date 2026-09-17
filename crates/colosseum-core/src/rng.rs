@@ -42,7 +42,9 @@ pub fn derive_stream_seed(master_seed: u64, stream_name: &str) -> Result<[u8; 32
 
 /// ChaCha12 with a 64-bit block counter and zero 64-bit stream id.
 /// Sampling methods are part of RNG version 1 and cannot be replaced by
-/// dependency convenience methods without changing `stats_version`.
+/// dependency convenience methods without changing [`RNG_VERSION`]. That is
+/// not the statistics version: these methods decide how the numbers are
+/// drawn, not how any reported figure is defined.
 #[derive(Debug, Clone)]
 pub struct NamedRng {
     key: [u32; 8],

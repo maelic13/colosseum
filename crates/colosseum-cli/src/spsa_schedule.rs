@@ -6,10 +6,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use colosseum_application::{SpsaPreflightError, VerifiedSpsaSchedule};
-use colosseum_core::SpsaScheduleArtifact;
+use colosseum_core::{SPSA_SCHEDULE_SCHEMA_VERSION, SpsaError, SpsaScheduleArtifact};
+use serde_json::Value;
 use thiserror::Error;
 
 use crate::RunDirectory;
+use crate::versioned_artifact::require_schema_version;
 
 pub const SPSA_SCHEDULE_FILE: &str = "spsa-schedule.json";
 static SCHEDULE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -70,13 +72,32 @@ pub fn persist_and_verify_spsa_schedule(
         path: path.clone(),
         source,
     })?;
-    let written =
-        serde_json::from_slice(&bytes).map_err(|source| SpsaScheduleStoreError::Json {
+    let written = parse_schedule(&bytes, &path)?;
+    VerifiedSpsaSchedule::verify_written(expected, written).map_err(Into::into)
+}
+
+/// Read a stored schedule, naming an unreadable schema version before any
+/// field of that version can be reported instead.
+fn parse_schedule(
+    bytes: &[u8],
+    path: &Path,
+) -> Result<SpsaScheduleArtifact, SpsaScheduleStoreError> {
+    let document: Value =
+        serde_json::from_slice(bytes).map_err(|source| SpsaScheduleStoreError::Json {
             operation: "parse written schedule",
-            path: path.clone(),
+            path: path.to_owned(),
             source,
         })?;
-    VerifiedSpsaSchedule::verify_written(expected, written).map_err(Into::into)
+    require_schema_version(&document, SPSA_SCHEDULE_SCHEMA_VERSION).map_err(|version| {
+        SpsaScheduleStoreError::Preflight(SpsaPreflightError::from(
+            SpsaError::UnsupportedArtifactSchema { version },
+        ))
+    })?;
+    serde_json::from_value(document).map_err(|source| SpsaScheduleStoreError::Json {
+        operation: "parse written schedule",
+        path: path.to_owned(),
+        source,
+    })
 }
 
 /// Read and verify an existing schedule without creating or replacing files.
@@ -92,18 +113,13 @@ pub fn read_and_verify_spsa_schedule(
         path: path.clone(),
         source,
     })?;
-    let written =
-        serde_json::from_slice(&bytes).map_err(|source| SpsaScheduleStoreError::Json {
-            operation: "parse written schedule",
-            path,
-            source,
-        })?;
+    let written = parse_schedule(&bytes, &path)?;
     VerifiedSpsaSchedule::verify_written(expected, written).map_err(Into::into)
 }
 
 #[derive(Debug, Error)]
 pub enum SpsaScheduleStoreError {
-    #[error("SPSA schedule preflight failed: {0}")]
+    #[error("{0}")]
     Preflight(#[from] SpsaPreflightError),
     #[error("could not {operation} at {path}: {source}")]
     Io {

@@ -845,7 +845,20 @@ impl DurableTournamentOutput {
             .open(self.directory.paths().root.join("games.pgn"))
             .map_err(|error| error.to_string())?;
         for game in &checkpoint.games {
-            pgn.write_all(game.pgn.as_bytes())
+            // A scorable game needs no class: an untagged game is part of the
+            // sample, so the export of a run without faults is unchanged.
+            let rendered = if game.scorable {
+                game.pgn.clone()
+            } else {
+                format!(
+                    "{}\n",
+                    with_header_tags(
+                        game.pgn.trim_end(),
+                        &[("ColosseumSample", UNSCORABLE_SAMPLE)],
+                    )
+                )
+            };
+            pgn.write_all(rendered.as_bytes())
                 .and_then(|()| pgn.write_all(b"\n"))
                 .map_err(|error| error.to_string())?;
         }

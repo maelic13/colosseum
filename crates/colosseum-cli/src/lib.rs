@@ -21,6 +21,7 @@ pub mod run_record;
 pub mod spsa_schedule;
 pub mod spsa_tune;
 pub mod stats_replay;
+pub mod versioned_artifact;
 
 pub use composition::{command_spec, run};
 
@@ -41,3 +42,4 @@ pub use spsa_schedule::{
     read_and_verify_spsa_schedule,
 };
 pub use spsa_tune::{SpsaTuneFileError, load_spsa_tune};
+pub use versioned_artifact::{declared_schema_version, require_schema_version};

@@ -2386,6 +2386,29 @@ games" procedure at 10.10, once, on the final state.
   SPSA schedule and result files instead of a raw unknown-field error.
   Items (k) to (o) precede (j).
 
+  **Implementation evidence (Phase 10.9e):** the abandoned game was the one
+  game every driver already refused to score and no writer said so. It now
+  carries `[ColosseumSample "unscorable"]` from `match` and `calibrate`, from
+  `tournament`, and per game inside an SPRT or SPSA pair, where a class that
+  describes the group cannot describe one abandoned member of it. The class
+  is per game deliberately: an infrastructure fault is a fact about that
+  game, not about the pair it was scheduled in. The replay reports what it
+  left out — `excluded_games` with an `excluded_by_sample` breakdown — rather
+  than dropping it silently, and the structured reader counts its own
+  unscorable games the same way, so a run directory and its PGN agree on the
+  exclusions as well as on the sample. A gauntlet whose third engine does not
+  exist plays one encounter out and abandons the first game of the next, which
+  is a run with exactly one aborted game and no timing dependence.
+
+  Both versioned SPSA artifacts deny unknown fields, and deserializing before
+  asking for the version made the second rule answer for the first: a stale
+  file was reported as "unknown field `stats_version`" and the version that
+  renamed the field was never named. Reading `schema_version` on its own,
+  before the fields, keeps the refusal reachable for the stored schedule and
+  for a tune result offered to `sprt --apply`. `SPSA_PLAN_SCHEMA_VERSION` is 2,
+  which 10.9d should have bumped with the field it renamed, and the `rng.rs`
+  sampling comment no longer ties the draws to `stats_version`.
+
   **Implementation evidence (Phase 10.9d):** all four defects were the same
   mistake — the identity was written and the reader guessed anyway. `stats`
   now groups games by `PairNumber` together with the unit its `PairGame`

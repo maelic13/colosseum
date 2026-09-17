@@ -8,7 +8,10 @@ use thiserror::Error;
 
 use crate::{SpsaRunSettings, SpsaRunSettingsError, SpsaTune, SpsaTuneAuditError};
 
-pub const SPSA_PLAN_SCHEMA_VERSION: u32 = 1;
+/// Version 2 names the random-stream version in `rng_version`. Version 1
+/// called the same value `stats_version`, which claimed the statistics
+/// definition had changed whenever only the draws had.
+pub const SPSA_PLAN_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SpsaTimingInput {

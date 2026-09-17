@@ -33,8 +33,9 @@ its dry-run or suite report explicitly.
 Every game Colosseum writes carries its schedule identity in the PGN header:
 `GameNumber`, `PairNumber`, `PairGame`, `OpeningIndex` where a book supplied
 one, and `OpeningLabel`, beside the standard seven tags and `OpeningPlyCount`.
-A run that keeps games it did not count also marks each one with
-`ColosseumSample`. Together they are what lets an exported PGN be replayed into
+A game the run recorded but did not count — one abandoned on an infrastructure
+fault, or a pair played after a sequential test had already concluded — also
+carries `ColosseumSample`. Together they are what lets an exported PGN be replayed into
 the same pentanomial vector as the run directory it came from; see
 [statistics replay](stats.md).
 

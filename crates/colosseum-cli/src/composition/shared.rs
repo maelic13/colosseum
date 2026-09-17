@@ -457,6 +457,14 @@ pub(crate) fn configure_ponder(engine: &mut EngineLaunchSpec, ponder: bool) -> R
     Ok(())
 }
 
+/// The sample class to write for one game of a counted group.
+///
+/// Saying that the runner abandoned this game is what lets a PGN replay leave
+/// it out of the sample, exactly as the checkpoint beside it already does.
+pub(crate) fn sample_class(scorable: bool, counted: &'static str) -> &'static str {
+    if scorable { counted } else { UNSCORABLE_SAMPLE }
+}
+
 /// Add tags to a rendered game's header.
 ///
 /// Some facts about a game are only known after it was played: whether its

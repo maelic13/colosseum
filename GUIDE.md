@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | **Phases 0–9 are complete, and 10.1–10.9d with them.** Candidate `823b398` passed four-platform archive smoke and exact-artifact Rarog/Basilisk gates on Windows and WSL Linux; every first-release correction has landed since |
+| What exists | **Phases 0–9 are complete, and 10.1–10.9e with them.** Candidate `823b398` passed four-platform archive smoke and exact-artifact Rarog/Basilisk gates on Windows and WSL Linux; every first-release correction has landed since |
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9e** unscorable games in the PGN, then **10.10 — EXIT**, which needs a real machine and the maintainer |
+| Next step | **10.10 — EXIT**, the release acceptance repeat, which needs a real machine and the maintainer |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -841,7 +841,7 @@ model as well.
   from `stats_version` to the RNG version it holds; regression test per
   item and a run-dir-versus-PGN equality test on a boundary-crossing SPRT
   at concurrency above one — PLAN §Phase 10(n)
-- ☐ **10.9e** — **Model: Terra High.** Unscorable games tagged
+- ☑ **10.9e — DONE** — **Model: Terra High.** Unscorable games tagged
   `ColosseumSample "unscorable"` and excluded by the replay with a count;
   run-dir-versus-PGN equality test on a run with one aborted game; `rng.rs`
   doc comment corrected; versioned schema refusal kept reachable for old

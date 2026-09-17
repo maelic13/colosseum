@@ -1269,7 +1269,10 @@ impl DurableSpsaOutput {
                         tagged = with_header_tags(
                             game.pgn.trim_end(),
                             &[
-                                ("ColosseumSample", "official"),
+                                (
+                                    "ColosseumSample",
+                                    sample_class(game.scorable, OFFICIAL_SAMPLE),
+                                ),
                                 ("ColosseumSpsaIteration", &iteration.iteration.to_string()),
                             ],
                         )
@@ -1287,7 +1290,7 @@ impl DurableSpsaOutput {
                         tagged = with_header_tags(
                             game.pgn.trim_end(),
                             &[
-                                ("ColosseumSample", "invalid"),
+                                ("ColosseumSample", sample_class(game.scorable, "invalid")),
                                 ("ColosseumSpsaIteration", &iteration.iteration.to_string()),
                             ],
                         )

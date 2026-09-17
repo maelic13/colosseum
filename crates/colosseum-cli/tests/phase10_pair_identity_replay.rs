@@ -376,7 +376,7 @@ fn a_boundary_crossing_sprt_reports_its_official_sample_from_its_pgn() {
             .any(|warning| warning
                 .as_str()
                 .unwrap_or_default()
-                .contains("not part of the official sample")),
+                .contains("excluded from the official sample")),
         "{pgn}"
     );
 }
@@ -474,7 +474,7 @@ fn spsa_games_name_their_iteration_and_sample_class() {
     assert!(!output.status.success());
     let message = String::from_utf8_lossy(&output.stderr);
     assert!(
-        message.contains("none of them belong to the official sample"),
+        message.contains("nothing that belongs to the official sample"),
         "{message}"
     );
 }

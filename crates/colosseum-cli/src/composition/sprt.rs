@@ -105,7 +105,24 @@ pub(crate) fn load_spsa_apply(
             source_result.display()
         )
     })?;
-    let mut source: SpsaApplySource = serde_json::from_slice(&bytes).map_err(|error| {
+    let document: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
+        format!(
+            "cannot parse SPSA result {}: {error}",
+            source_result.display()
+        )
+    })?;
+    // The result denies unknown fields, so a version whose fields moved would
+    // otherwise be reported as a field rather than as the version it is.
+    if let Some(tuned) = document.get("tuned_result") {
+        require_schema_version(tuned, SPSA_TUNE_RESULT_SCHEMA_VERSION).map_err(|version| {
+            format!(
+                "cannot read SPSA result {}: {}",
+                source_result.display(),
+                SpsaTuneResultError::UnsupportedResultSchema { version }
+            )
+        })?;
+    }
+    let mut source: SpsaApplySource = serde_json::from_value(document).map_err(|error| {
         format!(
             "cannot parse SPSA result {}: {error}",
             source_result.display()
@@ -716,13 +733,15 @@ impl DurableSprtOutput {
             .open(self.directory.paths().root.join("games.pgn"))
             .map_err(|error| error.to_string())?;
         for (class, pairs) in [
-            ("official", &checkpoint.official_pairs),
+            (OFFICIAL_SAMPLE, &checkpoint.official_pairs),
             ("post-terminal", &checkpoint.post_terminal_pairs),
         ] {
             for pair in pairs {
                 for game in [&pair.first, &pair.second] {
-                    let tagged =
-                        with_header_tags(game.pgn.trim_end(), &[("ColosseumSample", class)]);
+                    let tagged = with_header_tags(
+                        game.pgn.trim_end(),
+                        &[("ColosseumSample", sample_class(game.scorable, class))],
+                    );
                     writeln!(file, "{tagged}\n").map_err(|error| error.to_string())?;
                 }
             }

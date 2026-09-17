@@ -24,6 +24,12 @@ final structured report, and `failed-games/` retains UCI stdout/stderr traffic
 for abnormal games. A resumed match schedules only game numbers absent from the
 verified checkpoint and retains deterministic report order.
 
+A game the harness abandoned on an infrastructure fault — an engine that never
+spawned, a processor-affinity call the operating system refused — is still
+written to `games.pgn` and the checkpoint, because the abandoned game is the
+evidence for the abort. It is marked `ColosseumSample "unscorable"` and no
+statistic counts it; see [statistics replay](stats.md).
+
 SPRT checkpoints store complete official and post-terminal pairs in separate
 arrays. Only the official prefix enters statistics. Its PGN labels both sample
 classes, while the run record and final result retain the explicit model,

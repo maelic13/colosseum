@@ -32,13 +32,13 @@ use colosseum_application::{
     FixedPlanObjective, FixedPlanReport, FixedPlanRequest, InspectEngine, MeasureNps,
     NpsExperimentDesign, NpsExperimentParticipant, NpsExperimentReport, NpsHashPolicy, NpsReport,
     NpsRequest, NpsScalingInput, NpsScalingReport, NpsStatePolicy, PlanTournament,
-    RuntimeParticipant, SprtBundle, SprtDesign, SprtLengthPlanReport, SprtLengthPlanRequest,
-    SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaCommittedUpdate, SpsaEstimator,
-    SpsaEstimatorPolicy, SpsaGateHashStatus, SpsaPlanReport, SpsaRunSettings, SpsaStatusReport,
-    SpsaTimingInput, SpsaTuneAudit, SpsaTuneResult, SpsaTuneWarning, SpsaTuningState,
-    TournamentDesign, TournamentFixedRating, TournamentParticipant, TournamentPlan,
-    UciOptionSchema, UciOptionValue, classify_calibration, diagnose_spsa, plan_fixed,
-    plan_sprt_length, plan_spsa, scaling_hash_mb, summarize_nps_scaling,
+    RuntimeParticipant, SPSA_TUNE_RESULT_SCHEMA_VERSION, SprtBundle, SprtDesign,
+    SprtLengthPlanReport, SprtLengthPlanRequest, SprtParameters, SpsaBoundTune, SpsaCenterSample,
+    SpsaCommittedUpdate, SpsaEstimator, SpsaEstimatorPolicy, SpsaGateHashStatus, SpsaPlanReport,
+    SpsaRunSettings, SpsaStatusReport, SpsaTimingInput, SpsaTuneAudit, SpsaTuneResult,
+    SpsaTuneResultError, SpsaTuneWarning, SpsaTuningState, TournamentDesign, TournamentFixedRating,
+    TournamentParticipant, TournamentPlan, UciOptionSchema, UciOptionValue, classify_calibration,
+    diagnose_spsa, plan_fixed, plan_sprt_length, plan_spsa, scaling_hash_mb, summarize_nps_scaling,
 };
 use colosseum_core::{
     AdjudicationConfig, DrawAdjudication, EloModel, GameResult, OpeningBook, OpeningFormat,
@@ -56,6 +56,12 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::cancellation::{Cancellation, DEFAULT_STOP_GRACE_SECONDS};
+
+// The sample classes a written game may carry are the reader's vocabulary:
+// naming them once is what keeps a writer from drifting from the replay that
+// honours it.
+use crate::stats_replay::{OFFICIAL_SAMPLE, UNSCORABLE_SAMPLE};
+use crate::versioned_artifact::require_schema_version;
 
 mod book;
 mod calibrate;

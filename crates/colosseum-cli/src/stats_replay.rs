@@ -11,6 +11,19 @@ use crate::pgn_telemetry::{SearchTelemetryReport, analyze_pgn, unavailable};
 
 const Z95: f64 = 1.959_963_984_540_054;
 
+/// The `ColosseumSample` class of a game a run recorded but cannot score.
+///
+/// The runner abandons a game on an infrastructure fault — an engine that
+/// never spawned, an affinity call the operating system refused — and still
+/// writes it, because the abandoned game is the evidence for the abort. It
+/// carries a result only because the report and PGN shapes require one, and
+/// every driver leaves it out of its own statistics. A replay that scored it
+/// would report a larger sample than the run ever had.
+pub const UNSCORABLE_SAMPLE: &str = "unscorable";
+
+/// The `ColosseumSample` class of a game that counts.
+pub const OFFICIAL_SAMPLE: &str = "official";
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ReplayAttempt {
     pub authority: &'static str,
@@ -38,9 +51,55 @@ pub struct StatsReplayReport {
     pub paired_statistics: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub paired_statistics_unavailable: Option<String>,
+    /// Games this source recorded that its own run did not count.
+    pub excluded_games: u32,
+    /// Those games by the sample class that excluded them.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub excluded_by_sample: BTreeMap<String, u32>,
     pub attempts: Vec<ReplayAttempt>,
     pub warnings: Vec<String>,
     pub telemetry: SearchTelemetryReport,
+}
+
+/// Games a source recorded outside its own official sample, counted by the
+/// class that excluded them.
+///
+/// A replay that silently dropped them would report a smaller sample than the
+/// file holds with nothing to explain the difference.
+#[derive(Debug, Clone, Default)]
+struct ExcludedGames(BTreeMap<String, u32>);
+
+impl ExcludedGames {
+    fn record(&mut self, class: &str) {
+        *self.0.entry(class.to_ascii_lowercase()).or_default() += 1;
+    }
+
+    fn total(&self) -> u32 {
+        self.0.values().sum()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// "1 unscorable game", "2 unscorable and 6 post-terminal games".
+    fn summary(&self) -> String {
+        let parts = self
+            .0
+            .iter()
+            .map(|(class, count)| format!("{count} {class}"))
+            .collect::<Vec<_>>();
+        let counted = match parts.split_last() {
+            Some((last, [])) => last.clone(),
+            Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+            None => "0".to_owned(),
+        };
+        if self.total() == 1 {
+            format!("{counted} game")
+        } else {
+            format!("{counted} games")
+        }
+    }
 }
 
 /// Where a game sits in the schedule: which pair, and which colour assignment
@@ -121,7 +180,7 @@ fn replay_directory(path: &Path, subject: Option<&str>) -> Result<StatsReplayRep
                 authority,
                 path: candidate,
                 accepted: false,
-                detail: empty_detail(source.excluded),
+                detail: empty_detail(&source.excluded),
             }),
             Err(error) => attempts.push(ReplayAttempt {
                 authority,
@@ -141,13 +200,14 @@ fn replay_directory(path: &Path, subject: Option<&str>) -> Result<StatsReplayRep
 ///
 /// "No games" and "games the run itself did not count" are different facts,
 /// and a reader looking at a file full of games deserves the second one.
-fn empty_detail(excluded: u32) -> String {
-    if excluded > 0 {
-        format!(
-            "records {excluded} games but none of them belong to the official sample; the run marked them post-terminal or invalidated"
-        )
-    } else {
+fn empty_detail(excluded: &ExcludedGames) -> String {
+    if excluded.is_empty() {
         "contains no scored games".to_owned()
+    } else {
+        format!(
+            "contains {} and nothing that belongs to the official sample",
+            excluded.summary()
+        )
     }
 }
 
@@ -187,7 +247,7 @@ fn replay_file(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, 
         return Err(format!(
             "{} {}",
             path.display(),
-            empty_detail(source.excluded)
+            empty_detail(&source.excluded)
         ));
     }
     let attempts = vec![ReplayAttempt {
@@ -206,7 +266,7 @@ struct SourceGames {
     paired_capable: bool,
     /// Games the source recorded but did not count towards its official
     /// sample, so a reader can see they were left out rather than lost.
-    excluded: u32,
+    excluded: ExcludedGames,
     telemetry: SearchTelemetryReport,
 }
 
@@ -218,11 +278,11 @@ fn read_source(
     let text = fs::read_to_string(path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     match authority {
-        "structured-run-store" => structured_games(&text).map(|games| SourceGames {
+        "structured-run-store" => structured_games(&text).map(|(games, excluded)| SourceGames {
             games,
             perspective: "engine A".into(),
             paired_capable: true,
-            excluded: 0,
+            excluded,
             telemetry: unavailable("structured source has no PGN move annotations"),
         }),
         "pgn-export" => {
@@ -244,20 +304,20 @@ fn read_source(
             games: log_games(&text),
             perspective: "engine A".into(),
             paired_capable: true,
-            excluded: 0,
+            excluded: ExcludedGames::default(),
             telemetry: unavailable("forensic log has no PGN move annotations"),
         }),
         _ => Ok(SourceGames {
             games: result_tokens(&text),
             perspective: "White side (console tokens)".into(),
             paired_capable: false,
-            excluded: 0,
+            excluded: ExcludedGames::default(),
             telemetry: unavailable("console source has no PGN move annotations"),
         }),
     }
 }
 
-fn structured_games(text: &str) -> Result<Vec<RawGame>, String> {
+fn structured_games(text: &str) -> Result<(Vec<RawGame>, ExcludedGames), String> {
     let mut value: Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
     if value.get("payload").is_some() {
         let payload = value
@@ -279,40 +339,37 @@ fn structured_games(text: &str) -> Result<Vec<RawGame>, String> {
         }
         value = payload;
     }
-    let mut candidates = Vec::<Vec<RawGame>>::new();
+    let mut candidates = Vec::<(Vec<RawGame>, ExcludedGames)>::new();
     collect_structured_candidates(&value, &mut candidates);
     candidates
         .into_iter()
-        .max_by_key(Vec::len)
+        .max_by_key(|(games, _)| games.len())
         .ok_or_else(|| "structured document contains no game array".into())
 }
 
-fn collect_structured_candidates(value: &Value, output: &mut Vec<Vec<RawGame>>) {
+fn collect_structured_candidates(value: &Value, output: &mut Vec<(Vec<RawGame>, ExcludedGames)>) {
     match value {
         Value::Object(object) => {
             for (key, child) in object {
                 if key == "official_pairs"
                     && let Some(pairs) = child.as_array()
                 {
-                    let games = pairs
-                        .iter()
-                        .flat_map(|pair| [pair.get("first"), pair.get("second")])
-                        .flatten()
-                        .filter_map(parse_structured_game)
-                        .collect::<Vec<_>>();
-                    if !games.is_empty() {
-                        output.push(games);
+                    let candidate = structured_candidate(
+                        pairs
+                            .iter()
+                            .flat_map(|pair| [pair.get("first"), pair.get("second")])
+                            .flatten(),
+                    );
+                    if !candidate.0.is_empty() {
+                        output.push(candidate);
                     }
                 }
                 if key == "games"
                     && let Some(games) = child.as_array()
                 {
-                    let games = games
-                        .iter()
-                        .filter_map(parse_structured_game)
-                        .collect::<Vec<_>>();
-                    if !games.is_empty() {
-                        output.push(games);
+                    let candidate = structured_candidate(games.iter());
+                    if !candidate.0.is_empty() {
+                        output.push(candidate);
                     }
                 }
                 collect_structured_candidates(child, output);
@@ -327,7 +384,31 @@ fn collect_structured_candidates(value: &Value, output: &mut Vec<Vec<RawGame>>) 
     }
 }
 
+/// Read one array of structured games, counting what it cannot score.
+///
+/// A driver records the game it abandoned on an infrastructure fault and then
+/// leaves it out of its own statistics. The replay does the same, and says how
+/// many it left out so the count agrees with the run's own PGN.
+fn structured_candidate<'a>(
+    values: impl Iterator<Item = &'a Value>,
+) -> (Vec<RawGame>, ExcludedGames) {
+    let mut games = Vec::new();
+    let mut excluded = ExcludedGames::default();
+    for value in values {
+        if value.get("scorable").and_then(Value::as_bool) == Some(false) {
+            excluded.record(UNSCORABLE_SAMPLE);
+            continue;
+        }
+        if let Some(game) = parse_structured_game(value) {
+            games.push(game);
+        }
+    }
+    (games, excluded)
+}
+
 fn parse_structured_game(value: &Value) -> Option<RawGame> {
+    // The forensic log reads games one event at a time and has no array to
+    // count exclusions against, so the guard stays here as well.
     if value.get("scorable").and_then(Value::as_bool) == Some(false) {
         return None;
     }
@@ -404,20 +485,21 @@ fn log_games(text: &str) -> Vec<RawGame> {
 /// had White in assignment 1 — which is the perspective the checkpoint uses,
 /// so the two sources agree. A PGN without the tags yields no identity and the
 /// caller falls back to labelled unpaired statistics.
-fn pgn_games(text: &str, subject: Option<&str>) -> (Vec<RawGame>, bool, u32) {
+fn pgn_games(text: &str, subject: Option<&str>) -> (Vec<RawGame>, bool, ExcludedGames) {
     let mut paired_capable = true;
-    let mut excluded = 0_u32;
+    let mut excluded = ExcludedGames::default();
     let games = split_pgn(text)
         .into_iter()
         .filter_map(|game| {
             // A run's own export keeps the games it played but did not count:
-            // the pairs an SPRT finished after its boundary, and the games of
-            // an invalidated SPSA iteration. The official sample excludes them
-            // exactly as the checkpoint does.
-            if pgn_tag(game, "ColosseumSample")
-                .is_some_and(|class| !class.eq_ignore_ascii_case("official"))
+            // a game abandoned on an infrastructure fault, the pairs an SPRT
+            // finished after its boundary, and the games of an invalidated
+            // SPSA iteration. The official sample excludes them exactly as the
+            // checkpoint does.
+            if let Some(class) = pgn_tag(game, "ColosseumSample")
+                .filter(|class| !class.eq_ignore_ascii_case(OFFICIAL_SAMPLE))
             {
-                excluded += 1;
+                excluded.record(&class);
                 return None;
             }
             let result = pgn_tag(game, "Result")?;
@@ -609,9 +691,15 @@ fn build_report(
     });
     let games_count = games.len() as u32;
     let mut warnings = Vec::new();
-    if excluded > 0 {
+    if !excluded.is_empty() {
+        let (verb, pronoun) = if excluded.total() == 1 {
+            ("was", "it")
+        } else {
+            ("were", "them")
+        };
         warnings.push(format!(
-            "{excluded} recorded games are not part of the official sample and were excluded; the run played them as post-terminal or invalidated evidence"
+            "{} {verb} excluded from the official sample; the run recorded {pronoun} without scoring {pronoun}",
+            excluded.summary()
         ));
     }
     if sample.unpaired_games() > 0 {
@@ -642,6 +730,8 @@ fn build_report(
         unpaired_games: sample.unpaired_games(),
         paired_statistics,
         paired_statistics_unavailable: unavailable,
+        excluded_games: excluded.total(),
+        excluded_by_sample: excluded.0,
         attempts,
         warnings,
         telemetry,
@@ -656,7 +746,7 @@ mod tests {
     fn pgn_without_pair_identity_is_never_guessed_into_pairs() {
         let pgn = "[Event \"x\"]\n[White \"A\"]\n[Black \"B\"]\n[Result \"1-0\"]\n\n1-0\n\n[Event \"x\"]\n[White \"B\"]\n[Black \"A\"]\n[Result \"0-1\"]\n\n0-1\n";
         let (games, paired_capable, excluded) = pgn_games(pgn, Some("A"));
-        assert_eq!(excluded, 0);
+        assert!(excluded.is_empty());
         assert!(
             !paired_capable,
             "a PGN without identity tags must not claim pairs"

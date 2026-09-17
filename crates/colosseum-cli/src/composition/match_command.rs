@@ -409,7 +409,17 @@ impl DurableMatchOutput {
             .open(self.directory.paths().root.join("games.pgn"))
             .map_err(|error| error.to_string())?;
         for game in games.iter() {
-            writeln!(file, "{}", game.pgn.trim_end()).map_err(|error| error.to_string())?;
+            // A scorable game needs no class: an untagged game is part of the
+            // sample, so a match export stays exactly what it was.
+            let rendered = if game.scorable {
+                game.pgn.trim_end().to_owned()
+            } else {
+                with_header_tags(
+                    game.pgn.trim_end(),
+                    &[("ColosseumSample", UNSCORABLE_SAMPLE)],
+                )
+            };
+            writeln!(file, "{rendered}").map_err(|error| error.to_string())?;
             writeln!(file).map_err(|error| error.to_string())?;
         }
         file.sync_all().map_err(|error| error.to_string())

@@ -126,21 +126,27 @@ White in assignment `1` — which is the perspective the checkpoint uses.
 ## Games a run kept but did not count
 
 A run's own `games.pgn` holds every game it played. Some of those games are
-deliberately outside its official sample: the pairs an SPRT was still playing
-in its other slots when it crossed a boundary, and the games of an SPSA
-iteration an engine fault invalidated. They are kept because they are evidence,
-and they are marked so no reader has to guess:
+deliberately outside its official sample: a game the harness abandoned on an
+infrastructure fault, the pairs an SPRT was still playing in its other slots
+when it crossed a boundary, and the games of an SPSA iteration an engine fault
+invalidated. They are kept because they are evidence, and they are marked so no
+reader has to guess:
 
 | Tag | Values |
 |---|---|
-| `ColosseumSample` | `official`, `post-terminal` (played after an SPRT boundary), `invalid` (an invalidated SPSA iteration) |
+| `ColosseumSample` | `official`, `unscorable` (abandoned on an infrastructure fault), `post-terminal` (played after an SPRT boundary), `invalid` (an invalidated SPSA iteration) |
 | `ColosseumSpsaIteration` | Zero-based SPSA iteration the game belongs to |
+
+An abandoned game carries a result only because the PGN shape requires one;
+nobody may score it, and no run ever did. `unscorable` is per game, so it is
+what a game of an otherwise counted pair carries.
 
 `stats` counts only `official` games, so `stats <pgn>` reports the same pair
 count and the same pentanomial vector as `stats <run-dir>` for the same run. It
-also warns how many games it left out. A file in which nothing is official —
-the export of a single invalidated SPSA iteration, for example — is refused
-with that reason rather than replayed as statistics. A game with no
+reports how many games it left out in `excluded_games`, broken down by class in
+`excluded_by_sample`, and warns about them in text. A file in which nothing is
+official — the export of a single invalidated SPSA iteration, for example — is
+refused with that reason rather than replayed as statistics. A game with no
 `ColosseumSample` tag is official, so a PGN from any other source is unaffected.
 
 A PGN that does not carry these tags is not paired by guesswork: the order
