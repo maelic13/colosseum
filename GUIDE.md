@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.10 — EXIT**, the release acceptance repeat; it needs a real machine and the maintainer |
+| Next step | **10.9d** pair-identity replay defects, then **10.10 — EXIT**, which needs a real machine and the maintainer |
 | Recommended model | **Sol High** for 10.9a–10.9c and 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -833,6 +833,14 @@ model as well.
   idempotent `--stop-after-iteration` on resume, one bounded stop grace
   period per interrupt, `--anchor` with `--fixed` refused at resolution and
   dry-run with exit 2 — PLAN §Phase 10(m)
+- ☐ **10.9d** — **Model: Sol High.** Pair-identity replay defects: `stats`
+  pairs by `PairNumber`/`PairGame` tags (any `--games-per-pair`);
+  post-terminal SPRT pairs and invalid SPSA iterations carry a PGN tag the
+  replay excludes from the official vector; tournament games carry the
+  encounter's real `OpeningIndex`; SPSA schedule artifact field renamed
+  from `stats_version` to the RNG version it holds; regression test per
+  item and a run-dir-versus-PGN equality test on a boundary-crossing SPRT
+  at concurrency above one — PLAN §Phase 10(n)
 - ☐ **10.10 — EXIT** — **Model: Sol High.** Release acceptance repeat:
   regenerate the command reference, update `CHANGELOG-CLI.md` under 0.1.0,
   Phase 4B oracle replay and Phase 8.1 parity matrix on the corrected source,
