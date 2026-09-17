@@ -18,8 +18,8 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.10 — EXIT**, the release acceptance repeat; it needs a real machine and the maintainer |
-| Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
+| Next step | **10.9a** shared game slots, then 10.9b and 10.9c; 10.10 follows and needs a real machine and the maintainer |
+| Recommended model | **Sol High** for 10.9a–10.9c and 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
 
@@ -813,6 +813,26 @@ model as well.
   per command with no behaviour change (generated command reference
   byte-identical, tests unchanged); Chess960 recorded as a non-goal and
   refused with a clear message — PLAN §S4, §Phase 10(i)
+- ☐ **10.9a** — **Model: Sol High.** Shared game slots: `--cores-per-game N`
+  (default 1) pins both engines of a ponder-off game to one core set;
+  `--cores-per-engine N` keeps the disjoint allocation and is the only mode
+  accepted with `--ponder`; pool arithmetic per mode; mode and allocations
+  in run record and dry-run; fixtures assert 15 shared and 7 disjoint
+  one-thread slots on a 16-core single-class host; `cpu-topology.md` and
+  `match.md` updated — PLAN §5.2, §Phase 10(k)
+- ☐ **10.9b** — **Model: Sol High.** Pair identity in every written PGN game
+  (game number, pair number, opening index and label, colour assignment);
+  `stats <pgn>` reconstructs pairs and the pentanomial vector from the tags
+  and agrees with the checkpoint; `stats <run-dir>` reads its own
+  `games.pgn` for telemetry; parser accepts explicit `d=0`/`n=0`; annotated
+  fixture regenerated; `stats.md` and `output.md` updated — PLAN §5.4b,
+  §5.10, §Phase 10(l)
+- ☐ **10.9c** — **Model: Sol High.** Review defects with regression tests:
+  late-interrupt verdicts for `match` (`match_runner.rs` completion guard)
+  and `sprt` (`sprt_runner.rs` cap verdict), `suite` cancelled exit code,
+  idempotent `--stop-after-iteration` on resume, one bounded stop grace
+  period per interrupt, `--anchor` with `--fixed` refused at resolution and
+  dry-run with exit 2 — PLAN §Phase 10(m)
 - ☐ **10.10 — EXIT** — **Model: Sol High.** Release acceptance repeat:
   regenerate the command reference, update `CHANGELOG-CLI.md` under 0.1.0,
   Phase 4B oracle replay and Phase 8.1 parity matrix on the corrected source,

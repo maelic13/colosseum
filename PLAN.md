@@ -634,6 +634,17 @@ right" is not a criterion.
   reject `game-slots × 2 × cores-per-engine` requests larger than the selected
   pool. This allocation is independent of whichever UCI option controls the
   engine's internal worker count.
+- **Shared game slots.** Without `--ponder` only one engine of a game
+  searches at any moment; the other waits on a pipe. The default allocation
+  for such games is therefore one core set per *game*, shared by both engine
+  processes (`--cores-per-game N`, default 1), so a 16-core host runs 15
+  one-thread games at once rather than 7. This is the model the validation
+  projects null-calibrated for years. `--cores-per-engine N` selects the
+  disjoint per-engine allocation instead; it is mandatory with `--ponder`,
+  because a pondering engine searches on its opponent's time, and a shared
+  request with `--ponder` is refused. The chosen mode, the pool arithmetic
+  (`game-slots × cores-per-game` or `game-slots × 2 × cores-per-engine`) and
+  every allocation are in the run record and the dry-run output.
 - Placement knows nothing about any particular processor. It reads what the
   operating system reports: physical cores and SMT siblings, core class
   (Windows CPU Set efficiency class, Linux `cpu_capacity`), NUMA node and the
@@ -871,6 +882,15 @@ book moves carry `{book}` and the `OpeningPlyCount` tag remains. The `stats`
 telemetry parser reads this form in addition to the existing ones and gains
 score coverage and mean absolute score, so `stats` on a Colosseum PGN reports
 full coverage. The writer form is versioned in the run record.
+
+**Pair identity.** Every Colosseum-written game carries tags that identify it
+without the checkpoint: the harness game number, the pair number, the
+opening index and label, and which colour assignment of the pair it is.
+`stats` on a Colosseum PGN reconstructs complete pairs from those tags and
+reports the same pentanomial vector as the checkpoint; only a PGN without
+them falls back to unpaired statistics. Explicit zero fields (`d=0`, `n=0`)
+are reports and the telemetry parser accepts them; only unreported fields
+are omitted.
 
 **Success criteria:** a stub-engine match annotates every post-opening move;
 `stats` replay on that PGN reports 100% coverage for score, depth, time and
@@ -1316,6 +1336,9 @@ rather than guessing pairs.
 is the portable game export; logs are forensic evidence; console output is
 observational only. Every live number must be reproducible from the structured
 run directory. PGN replay reproduces only information the PGN actually carries.
+A run directory is one evidence set: statistics come from its checkpoint and
+telemetry from its own `games.pgn`, so `stats <run-dir>` never reports
+telemetry as unavailable when the directory holds an annotated PGN.
 
 Implemented Phase 6.5 walks that order explicitly and retains an attempt audit.
 Checkpoint generations are checksum-verified. Exact structured schedule number,
@@ -1632,7 +1655,7 @@ Every identifier is covered below; ranges are inclusive.
 | 7 | 7.1 | 7.2–7.3 |
 | 8 | — | 8.1–8.3 |
 | 9 | 9.2–9.3, 9.6 | 9.0–9.1, 9.4–9.5, 9.7 |
-| 10 | 10.1, 10.4, 10.7–10.9 | 10.2–10.3, 10.5–10.6, 10.10 |
+| 10 | 10.1, 10.4, 10.7–10.9 | 10.2–10.3, 10.5–10.6, 10.9a–10.9c, 10.10 |
 | 11 | 11.4 | 11.1–11.3 |
 
 ### Phase 0 — Current-state analysis and target architecture
@@ -2283,6 +2306,29 @@ games" procedure at 10.10, once, on the final state.
   generated command reference and unchanged tests. Record Chess960 as a
   non-goal in S4 and the compatibility page; a Chess960 FEN or option request
   is refused with a clear message.
+- **(k) Shared game slots** per the revised S5.2: `--cores-per-game` as the
+  default allocation without `--ponder`, `--cores-per-engine` as the explicit
+  disjoint alternative and the only one accepted with `--ponder`, pool
+  arithmetic per mode, mode and allocations in run record and dry-run,
+  fixtures asserting 15 shared one-thread slots on a 16-core single-class
+  host and 7 disjoint ones, user documentation. Found when a validation
+  project's one-thread gate at concurrency 14 was refused on 16 cores.
+- **(l) Pair identity in PGN and run-directory telemetry** per the revised
+  S5.4b and S5.10: identity tags on every written game, `stats <pgn>`
+  reconstructing pairs and the pentanomial vector from them, `stats
+  <run-dir>` reading its own `games.pgn` for telemetry, explicit zero fields
+  accepted by the parser, the annotated fixture regenerated. Found when
+  `stats` on a live run directory reported telemetry unavailable and `stats`
+  on its PGN lost pair identity.
+- **(m) Review defects**, each with a regression test: a match or SPRT
+  interrupted while its last unit is being joined must report its completed
+  or cap-reached verdict, not `cancelled`; `suite` must exit with the
+  cancelled code when it writes `cancelled`; `--stop-after-iteration N` must
+  be idempotent on resume against the cumulative iteration count; the stop
+  grace period is one bounded period from the interrupt, not restarted per
+  commit; `--anchor` together with `--fixed` on the same participant is a
+  configuration refusal (exit 2) at resolution and in dry-run. Items (k) to
+  (m) precede (j).
 - **(j) Release acceptance repeat.** Regenerate the command reference, update
   `CHANGELOG-CLI.md` under 0.1.0, run the Phase 4B oracle replay and the
   Phase 8.1 parity matrix on the corrected source, repeat the short third-party
