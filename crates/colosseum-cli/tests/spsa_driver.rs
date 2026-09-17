@@ -425,10 +425,7 @@ fn stop_after_iteration_stops_on_a_boundary_and_leaves_the_horizon_alone() {
     assert_eq!(record["workflow"]["settings"]["iterations"], 4);
     assert_eq!(record["workflow"]["stop_after_iteration"], 2);
     // A clean stop still produces an on-demand gate candidate.
-    assert_eq!(
-        value["report"]["tuned_result"]["estimator"]["iteration"],
-        1
-    );
+    assert_eq!(value["report"]["tuned_result"]["estimator"]["iteration"], 1);
 
     let status = cli()
         .args(["status"])

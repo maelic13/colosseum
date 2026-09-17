@@ -1014,9 +1014,7 @@ pub enum SpsaTuneResultError {
     NonFiniteEstimate { name: String },
     #[error("SPSA has no completed iteration to take a final centre vector from")]
     NoCompletedIteration,
-    #[error(
-        "SPSA result claims {completed} completed iterations against a horizon of {horizon}"
-    )]
+    #[error("SPSA result claims {completed} completed iterations against a horizon of {horizon}")]
     InvalidCompletedIterations { completed: u32, horizon: u32 },
     #[error(
         "SPSA final-centre result names iteration {iteration} after {completed} completed iterations"

@@ -487,7 +487,7 @@ mod tests {
             Some(6)
         );
         assert!(
-            plan.schedule.chunks_exact(2).all(|games| {
+            plan.schedule.as_chunks::<2>().0.iter().all(|games| {
                 games[0].white == games[1].black && games[0].black == games[1].white
             })
         );

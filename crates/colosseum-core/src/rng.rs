@@ -62,8 +62,8 @@ impl NamedRng {
     #[must_use]
     pub fn from_stream_seed(seed: [u8; 32]) -> Self {
         let mut key = [0_u32; 8];
-        for (word, bytes) in key.iter_mut().zip(seed.chunks_exact(4)) {
-            *word = u32::from_le_bytes(bytes.try_into().expect("four-byte chunk"));
+        for (word, bytes) in key.iter_mut().zip(seed.as_chunks::<4>().0) {
+            *word = u32::from_le_bytes(*bytes);
         }
         Self {
             key,

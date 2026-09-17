@@ -23,17 +23,17 @@ use colosseum_application::{
     CalibrationBinaries, CalibrationDesign, CalibrationInterval, CalibrationStatus, CheckEngine,
     CompareNps, CompletePair, ComplianceReport, ComplianceStatus, DEFAULT_CALIBRATION_CONFIDENCE,
     DEFAULT_CALIBRATION_GAMES, DEFAULT_CALIBRATION_TOLERANCE_NELO,
-    DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS, EngineInspection, EngineLaunchSpec, FixedPlanObjective, FixedPlanReport, FixedPlanRequest,
-    InspectEngine, MeasureNps, NpsExperimentDesign, NpsExperimentParticipant, NpsExperimentReport,
-    NpsHashPolicy, NpsReport, NpsRequest, NpsScalingInput, NpsScalingReport, NpsStatePolicy,
-    PlanTournament, RuntimeParticipant, SprtBundle, SprtDesign, SprtLengthPlanReport,
-    SprtLengthPlanRequest, SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaCommittedUpdate,
-    SpsaEstimator, SpsaEstimatorPolicy, SpsaGateHashStatus, SpsaPlanReport, SpsaRunSettings,
-    SpsaStatusReport, SpsaTimingInput,
-    SpsaTuneAudit, SpsaTuneResult, SpsaTuneWarning, SpsaTuningState, TournamentDesign,
-    TournamentFixedRating, TournamentParticipant, TournamentPlan, UciOptionSchema, UciOptionValue,
-    classify_calibration,
-    diagnose_spsa, plan_fixed, plan_sprt_length, plan_spsa, scaling_hash_mb, summarize_nps_scaling,
+    DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS, EngineInspection, EngineLaunchSpec,
+    FixedPlanObjective, FixedPlanReport, FixedPlanRequest, InspectEngine, MeasureNps,
+    NpsExperimentDesign, NpsExperimentParticipant, NpsExperimentReport, NpsHashPolicy, NpsReport,
+    NpsRequest, NpsScalingInput, NpsScalingReport, NpsStatePolicy, PlanTournament,
+    RuntimeParticipant, SprtBundle, SprtDesign, SprtLengthPlanReport, SprtLengthPlanRequest,
+    SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaCommittedUpdate, SpsaEstimator,
+    SpsaEstimatorPolicy, SpsaGateHashStatus, SpsaPlanReport, SpsaRunSettings, SpsaStatusReport,
+    SpsaTimingInput, SpsaTuneAudit, SpsaTuneResult, SpsaTuneWarning, SpsaTuningState,
+    TournamentDesign, TournamentFixedRating, TournamentParticipant, TournamentPlan,
+    UciOptionSchema, UciOptionValue, classify_calibration, diagnose_spsa, plan_fixed,
+    plan_sprt_length, plan_spsa, scaling_hash_mb, summarize_nps_scaling,
 };
 use colosseum_core::{
     AdjudicationConfig, DrawAdjudication, EloModel, GameResult, OpeningBook, OpeningFormat,
@@ -88,7 +88,12 @@ struct Cli {
     /// Internal: request the clean stop after this many committed units, so
     /// the interrupt path can be exercised deterministically. Not a public
     /// interface; a console interrupt is how a user stops a run.
-    #[arg(long = "__stop-after-units", global = true, hide = true, value_name = "UNITS")]
+    #[arg(
+        long = "__stop-after-units",
+        global = true,
+        hide = true,
+        value_name = "UNITS"
+    )]
     stop_after_units: Option<u64>,
 
     #[command(subcommand)]
@@ -1080,7 +1085,9 @@ pub async fn run() -> ExitCode {
             }
         }
         Command::Nps(command) => run_nps(*command, cli.json, cli.dry_run).await,
-        Command::Calibrate(command) => run_calibration(*command, cli.json, cli.dry_run, cancellation).await,
+        Command::Calibrate(command) => {
+            run_calibration(*command, cli.json, cli.dry_run, cancellation).await
+        }
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
         Command::Book(_) if cli.dry_run => unsupported_dry_run("book"),
         Command::Book(command) => run_book(command.action, cli.json),
@@ -1219,7 +1226,12 @@ fn load_spsa_apply(
     Ok((tuned, original, Some(record)))
 }
 
-async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool, cancellation: Cancellation) -> ExitCode {
+async fn run_sprt(
+    command: SprtCommand,
+    machine: bool,
+    dry_run: bool,
+    cancellation: Cancellation,
+) -> ExitCode {
     let design = match resolve_sprt_design(&command) {
         Ok(design) => design,
         Err(error) => {
@@ -1416,20 +1428,19 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool, cancellati
             return ExitCode::from(2);
         }
     };
-    let openings =
-        match match_runner::resolve_openings(
-            book,
-            command.book_start,
-            games.div_ceil(2),
-            command.book_wrap,
-            master_seed,
-        ) {
-            Ok(openings) => openings,
-            Err(error) => {
-                eprintln!("configuration error: {error}");
-                return ExitCode::from(2);
-            }
-        };
+    let openings = match match_runner::resolve_openings(
+        book,
+        command.book_start,
+        games.div_ceil(2),
+        command.book_wrap,
+        master_seed,
+    ) {
+        Ok(openings) => openings,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let current_directory = match std::env::current_dir() {
         Ok(directory) => directory,
         Err(error) => {
@@ -1998,7 +2009,12 @@ fn print_spsa_status(report: &SpsaStatusOutput, run_directory: &Path) {
     println!("snapshot: {}", run_directory.display());
 }
 
-async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool, cancellation: Cancellation) -> ExitCode {
+async fn run_spsa_command(
+    command: SpsaCommand,
+    machine: bool,
+    dry_run: bool,
+    cancellation: Cancellation,
+) -> ExitCode {
     let conditions = &command.conditions;
     let stored_schedule_inputs = match conditions
         .run_directory
@@ -2140,11 +2156,13 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool, ca
             move_count: conditions.draw_moves,
             score_cp: conditions.draw_score_cp,
         }),
-        resign: conditions.resign_adjudication.then_some(ResignAdjudication {
-            move_count: conditions.resign_moves,
-            score_cp: conditions.resign_score_cp,
-            two_sided: !conditions.one_sided_resign_adjudication,
-        }),
+        resign: conditions
+            .resign_adjudication
+            .then_some(ResignAdjudication {
+                move_count: conditions.resign_moves,
+                score_cp: conditions.resign_score_cp,
+                two_sided: !conditions.one_sided_resign_adjudication,
+            }),
     };
     let placement = match resolve_placement(&conditions.placement, conditions.headroom_cores) {
         Ok(placement) => placement,
@@ -2197,20 +2215,19 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool, ca
     });
     // This is the only book parse in one SPSA process session. The resolved
     // in-memory entries are reused by every iteration and game worker.
-    let openings =
-        match match_runner::resolve_openings(
-            book,
-            conditions.book_start,
-            total_games.div_ceil(2),
-            conditions.book_wrap,
-            master_seed,
-        ) {
-            Ok(openings) => openings,
-            Err(error) => {
-                eprintln!("configuration error: {error}");
-                return ExitCode::from(2);
-            }
-        };
+    let openings = match match_runner::resolve_openings(
+        book,
+        conditions.book_start,
+        total_games.div_ceil(2),
+        conditions.book_wrap,
+        master_seed,
+    ) {
+        Ok(openings) => openings,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let end_specs = tune
         .parameters
         .iter()
@@ -2818,14 +2835,13 @@ async fn run_tournament_command(
         }
         None => None,
     };
-    let fixed_ratings =
-        match parse_fixed_ratings(&command.fixed_ratings, plan.participants.len()) {
-            Ok(fixed) => fixed,
-            Err(error) => {
-                eprintln!("configuration error: {error}");
-                return ExitCode::from(2);
-            }
-        };
+    let fixed_ratings = match parse_fixed_ratings(&command.fixed_ratings, plan.participants.len()) {
+        Ok(fixed) => fixed,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let time_control = match resolve_time_control(
         "tournament",
         command.movetime_ms,
@@ -4947,15 +4963,14 @@ fn prepare_calibration(command: &CalibrationCommand) -> Result<PreparedCalibrati
         book.plies = conditions.book_plies.unwrap_or(8);
         book
     });
-    let openings =
-        match_runner::resolve_openings(
-            book,
-            conditions.book_start,
-            design.games.div_ceil(2),
-            conditions.book_wrap,
-            master_seed,
-        )
-        .map_err(|error| error.to_string())?;
+    let openings = match_runner::resolve_openings(
+        book,
+        conditions.book_start,
+        design.games.div_ceil(2),
+        conditions.book_wrap,
+        master_seed,
+    )
+    .map_err(|error| error.to_string())?;
     let current_directory = std::env::current_dir().map_err(|error| error.to_string())?;
     let resolved = resolve_config(
         built_in_defaults(),
@@ -5031,10 +5046,7 @@ fn calibration_sample(
         return Err("calibration did not retain every requested game".into());
     }
     let mut sample = PentanomialVector::default();
-    for pair in report.games.chunks_exact(2) {
-        let [first, second] = pair else {
-            unreachable!("chunks_exact(2) always has pairs")
-        };
+    for [first, second] in report.games.as_chunks::<2>().0 {
         if !first.scorable || !second.scorable {
             return Err("calibration cannot compute an interval from a non-scorable game".into());
         }
@@ -5218,20 +5230,19 @@ async fn run_match(
         book.plies = command.book_plies.unwrap_or(8);
         book
     });
-    let openings =
-        match match_runner::resolve_openings(
-            book,
-            command.book_start,
-            games.div_ceil(2),
-            command.book_wrap,
-            master_seed,
-        ) {
-            Ok(openings) => openings,
-            Err(error) => {
-                eprintln!("configuration error: {error}");
-                return ExitCode::from(2);
-            }
-        };
+    let openings = match match_runner::resolve_openings(
+        book,
+        command.book_start,
+        games.div_ceil(2),
+        command.book_wrap,
+        master_seed,
+    ) {
+        Ok(openings) => openings,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let current_directory = match std::env::current_dir() {
         Ok(directory) => directory,
         Err(error) => {
@@ -5411,9 +5422,7 @@ async fn run_match(
             }
             let (run_status, exit_code) = match report.status {
                 match_runner::MatchStatus::Completed => (RunStatus::Completed, 0),
-                match_runner::MatchStatus::Cancelled => {
-                    (RunStatus::Cancelled, CANCELLED_EXIT_CODE)
-                }
+                match_runner::MatchStatus::Cancelled => (RunStatus::Cancelled, CANCELLED_EXIT_CODE),
                 match_runner::MatchStatus::Invalid => (RunStatus::Invalid, 1),
                 match_runner::MatchStatus::InfrastructureError => (RunStatus::Aborted, 3),
             };
@@ -5451,9 +5460,7 @@ fn read_stored_seed(root: &Path) -> Option<(u64, bool)> {
     ))
 }
 
-fn read_stored_spsa_inputs(
-    root: &Path,
-) -> Result<(SpsaRunSettings, f64, Option<u32>), String> {
+fn read_stored_spsa_inputs(root: &Path) -> Result<(SpsaRunSettings, f64, Option<u32>), String> {
     let path = root.join("resolved-config.json");
     let bytes = fs::read(&path).map_err(|error| {
         format!(
@@ -6245,9 +6252,9 @@ fn print_spsa(report: &SpsaReport, run_directory: &Path) {
     }
     if let Some(result) = &report.tuned_result {
         match &result.estimator {
-            SpsaEstimator::FinalCenter { iteration } => println!(
-                "tuned vector: rounded centre vector after iteration {iteration}"
-            ),
+            SpsaEstimator::FinalCenter { iteration } => {
+                println!("tuned vector: rounded centre vector after iteration {iteration}")
+            }
             SpsaEstimator::TailWindowMean(window) => println!(
                 "tuned vector: rounded mean of {} sample(s) from final {}% window",
                 window.samples_used, window.percent

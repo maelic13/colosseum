@@ -155,7 +155,7 @@ pub async fn run_tournament(
         request.anchor,
         &request.fixed_ratings,
     )
-        .map_err(|error| TournamentRunError::InvalidCheckpoint(error.to_string()))?;
+    .map_err(|error| TournamentRunError::InvalidCheckpoint(error.to_string()))?;
     let mut seen = BTreeSet::new();
     for game in &request.completed_games {
         if !seen.insert(game.number) {
@@ -328,7 +328,7 @@ pub async fn run_tournament(
         request.anchor,
         &request.fixed_ratings,
     )
-        .map_err(|error| TournamentRunError::Results(error.to_string()))?;
+    .map_err(|error| TournamentRunError::Results(error.to_string()))?;
     Ok(TournamentReport {
         status,
         plan: request.plan,

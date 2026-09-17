@@ -18,24 +18,20 @@ fn cli() -> Command {
 fn stub_match(directory: &Path, book: Option<&Path>) -> serde_json::Value {
     let binary = Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
     let mut command = cli();
-    command
-        .arg("match")
-        .arg(binary)
-        .arg(binary)
-        .args([
-            "--games",
-            "2",
-            "--a-engine-arg=__uci-stub",
-            "--a-engine-arg=--sleep-ms=5",
-            "--b-engine-arg=__uci-stub",
-            "--b-engine-arg=--sleep-ms=5",
-            "--a-movetime-ms",
-            "50",
-            "--b-movetime-ms",
-            "50",
-            "--max-moves",
-            "8",
-        ]);
+    command.arg("match").arg(binary).arg(binary).args([
+        "--games",
+        "2",
+        "--a-engine-arg=__uci-stub",
+        "--a-engine-arg=--sleep-ms=5",
+        "--b-engine-arg=__uci-stub",
+        "--b-engine-arg=--sleep-ms=5",
+        "--a-movetime-ms",
+        "50",
+        "--b-movetime-ms",
+        "50",
+        "--max-moves",
+        "8",
+    ]);
     if let Some(book) = book {
         command.arg("--book").arg(book).args(["--book-plies", "4"]);
     }
@@ -66,7 +62,10 @@ fn a_stub_match_annotates_every_post_opening_move_and_marks_book_moves() {
         .filter(|body| *body != "book")
     {
         for field in ["s=", "d=", "t=", "n="] {
-            assert!(comment.contains(field), "{field} missing from {{{comment}}}");
+            assert!(
+                comment.contains(field),
+                "{field} missing from {{{comment}}}"
+            );
         }
         assert!(comment.contains("ms"), "{{{comment}}} has no time unit");
     }
@@ -78,12 +77,7 @@ fn stats_replay_of_an_annotated_match_reports_full_coverage() {
     stub_match(&root.path().join("run"), None);
     let pgn = root.path().join("run/games.pgn");
 
-    let output = cli()
-        .arg("stats")
-        .arg(&pgn)
-        .arg("--json")
-        .output()
-        .unwrap();
+    let output = cli().arg("stats").arg(&pgn).arg("--json").output().unwrap();
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let engines = value["report"]["telemetry"]["engines"].as_array().unwrap();
     assert!(!engines.is_empty(), "{value}");
@@ -178,7 +172,11 @@ fn the_workspace_pgn_reader_still_reads_the_frozen_fixture_as_openings() {
     assert_eq!(summary.count, 2);
     // Comments never leak into the replayed opening line.
     assert!(
-        !summary.first_label.clone().unwrap_or_default().contains('{'),
+        !summary
+            .first_label
+            .clone()
+            .unwrap_or_default()
+            .contains('{'),
         "{summary:?}"
     );
 }

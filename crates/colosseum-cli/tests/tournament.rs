@@ -175,7 +175,10 @@ fn a_fixed_field_pins_its_members_and_estimates_only_the_newcomer() {
     for (name, rating) in [("Alpha", 2400.0), ("Beta", 2200.5)] {
         assert_eq!(row(name)["fixed"], true, "{name}");
         assert_eq!(row(name)["rating"], rating, "{name}");
-        assert!(row(name)["error_95"].is_null(), "{name} reported an interval");
+        assert!(
+            row(name)["error_95"].is_null(),
+            "{name} reported an interval"
+        );
     }
     let gamma = row("Gamma");
     assert_eq!(gamma["fixed"], false);
@@ -201,7 +204,6 @@ fn a_fixed_field_pins_its_members_and_estimates_only_the_newcomer() {
     let record: serde_json::Value =
         serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
     assert_eq!(record["workflow"]["fixed_ratings"][0]["rating"], 2400.0);
-
 }
 
 #[test]
@@ -234,7 +236,9 @@ fn the_single_anchor_stays_the_degenerate_fixed_field() {
     let output = tournament_command(&run, 0).output().unwrap();
     assert!(output.status.success());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let fixed = value["report"]["results"]["fixed_ratings"].as_array().unwrap();
+    let fixed = value["report"]["results"]["fixed_ratings"]
+        .as_array()
+        .unwrap();
     assert_eq!(fixed.len(), 1, "{fixed:?}");
     assert_eq!(fixed[0]["rating"], 1_500.0);
     assert_eq!(

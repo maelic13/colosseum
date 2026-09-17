@@ -392,7 +392,7 @@ fn console_sample(console: &str, engine: &str, opponent: &str) -> (PentanomialVe
     assert_eq!(games.len() % 2, 0, "console has an incomplete pair");
     let mut sample = PentanomialVector::default();
     let mut wdl = [0_u32; 3];
-    for pair in games.chunks_exact(2) {
+    for pair in games.as_chunks::<2>().0 {
         assert_eq!(pair[0].white, pair[1].black, "pair did not swap White");
         assert_eq!(pair[0].black, pair[1].white, "pair did not swap Black");
         let first = console_result_for(engine, opponent, &pair[0]);
@@ -1037,7 +1037,7 @@ fn phase_4b_ordered_fastchess_stream_has_the_same_terminal_pair() {
     let mut wdl = [0_u32; 3];
     let mut observed_terminal = None;
     let mut terminal_result = None;
-    for (index, pair) in games.chunks_exact(2).enumerate() {
+    for (index, pair) in games.as_chunks::<2>().0.iter().enumerate() {
         assert_eq!(pair[0].white, pair[1].black, "pair did not swap White");
         assert_eq!(pair[0].black, pair[1].white, "pair did not swap Black");
         let first = console_result_for("Rarog", "Stockfish", &pair[0]);

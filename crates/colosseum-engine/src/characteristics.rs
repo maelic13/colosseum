@@ -145,7 +145,9 @@ pub(crate) fn last_level_cache_domains(
     let mut best: BTreeMap<LogicalCpuId, (u8, &BTreeSet<LogicalCpuId>)> = BTreeMap::new();
     for report in reports {
         for cpu in &report.shared_cpus {
-            let entry = best.entry(*cpu).or_insert((report.level, &report.shared_cpus));
+            let entry = best
+                .entry(*cpu)
+                .or_insert((report.level, &report.shared_cpus));
             if report.level > entry.0 {
                 *entry = (report.level, &report.shared_cpus);
             }
@@ -167,7 +169,10 @@ pub(crate) fn last_level_cache_domains(
         };
         for cpu in members {
             // Only the CPUs whose own last level is this one adopt the domain.
-            if best.get(&cpu).is_some_and(|(cpu_level, _)| *cpu_level == level) {
+            if best
+                .get(&cpu)
+                .is_some_and(|(cpu_level, _)| *cpu_level == level)
+            {
                 assigned.insert(cpu, identity);
             }
         }
@@ -269,8 +274,7 @@ mod windows_cache {
 
     use windows_sys::Win32::System::SystemInformation::{
         CACHE_RELATIONSHIP, CacheData, CacheUnified, GROUP_AFFINITY,
-        GetLogicalProcessorInformationEx, RelationCache,
-        SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+        GetLogicalProcessorInformationEx, RelationCache, SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
     };
 
     use super::*;
@@ -305,7 +309,10 @@ mod windows_cache {
         parse_buffer(buffer.as_ptr().cast(), returned as usize)
     }
 
-    fn parse_buffer(bytes: *const u8, length: usize) -> Result<Vec<CacheReport>, CharacteristicsError> {
+    fn parse_buffer(
+        bytes: *const u8,
+        length: usize,
+    ) -> Result<Vec<CacheReport>, CharacteristicsError> {
         let mut offset = 0;
         let mut reports = Vec::new();
         while offset < length {
@@ -472,7 +479,10 @@ mod linux {
     /// Read every `cpuN/cache/index*` entry the kernel exports. The last level
     /// is whichever level is highest here, typically `index3` on parts with an
     /// L3; a host that exports no cache directory yields no reports at all.
-    fn cache_reports(root: &Path, cpus: &[LogicalCpuId]) -> Result<Vec<CacheReport>, CharacteristicsError> {
+    fn cache_reports(
+        root: &Path,
+        cpus: &[LogicalCpuId],
+    ) -> Result<Vec<CacheReport>, CharacteristicsError> {
         let mut reports = Vec::new();
         for cpu in cpus {
             let cache_root = root.join(format!("cpu{}", cpu.number)).join("cache");
@@ -705,10 +715,7 @@ mod tests {
             shared_cpus: cpus(&[0, 1, 2, 3]),
         }];
         let domains = last_level_cache_domains(&reports);
-        assert_eq!(
-            domains.values().copied().collect::<BTreeSet<_>>().len(),
-            1
-        );
+        assert_eq!(domains.values().copied().collect::<BTreeSet<_>>().len(), 1);
     }
 
     #[cfg(any(windows, target_os = "linux"))]

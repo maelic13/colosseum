@@ -110,7 +110,10 @@ fn a_fixed_match_stops_cleanly_and_resumes_to_the_uninterrupted_result() {
         "a clean stop should keep the games already played and launch no more, got {played}"
     );
     assert_eq!(record(&run)["status"], "cancelled");
-    assert!(run.join("checkpoint.json").is_file(), "no checkpoint written");
+    assert!(
+        run.join("checkpoint.json").is_file(),
+        "no checkpoint written"
+    );
     assert_eq!(status_of(&run), "cancelled");
 
     let mut command = cli();
@@ -144,7 +147,17 @@ fn an_sprt_stops_cleanly_without_claiming_a_verdict_and_resumes() {
     stub_pair(&mut command);
     let expected = json(
         command
-            .args(["--preset", "gainer", "--max-pairs", "4", "--max-engine-faults", "1000", "--max-time-losses", "1000", "--book"])
+            .args([
+                "--preset",
+                "gainer",
+                "--max-pairs",
+                "4",
+                "--max-engine-faults",
+                "1000",
+                "--max-time-losses",
+                "1000",
+                "--book",
+            ])
             .arg(&book)
             .arg("--dir")
             .arg(&uninterrupted)
@@ -161,7 +174,17 @@ fn an_sprt_stops_cleanly_without_claiming_a_verdict_and_resumes() {
         .arg(engine());
     stub_pair(&mut command);
     let stopped = command
-        .args(["--preset", "gainer", "--max-pairs", "4", "--max-engine-faults", "1000", "--max-time-losses", "1000", "--book"])
+        .args([
+            "--preset",
+            "gainer",
+            "--max-pairs",
+            "4",
+            "--max-engine-faults",
+            "1000",
+            "--max-time-losses",
+            "1000",
+            "--book",
+        ])
         .arg(&book)
         .arg("--dir")
         .arg(&run)
@@ -180,7 +203,17 @@ fn an_sprt_stops_cleanly_without_claiming_a_verdict_and_resumes() {
     stub_pair(&mut command);
     let resumed = json(
         command
-            .args(["--preset", "gainer", "--max-pairs", "4", "--max-engine-faults", "1000", "--max-time-losses", "1000", "--book"])
+            .args([
+                "--preset",
+                "gainer",
+                "--max-pairs",
+                "4",
+                "--max-engine-faults",
+                "1000",
+                "--max-time-losses",
+                "1000",
+                "--book",
+            ])
             .arg(&book)
             .arg("--dir")
             .arg(&run)
@@ -263,7 +296,10 @@ fn a_tournament_stops_cleanly_and_resumes_to_the_uninterrupted_standings() {
 
     let run = root.path().join("stopped");
     let mut command = arguments(&run);
-    let stopped = command.args(["--__stop-after-units", "2"]).output().unwrap();
+    let stopped = command
+        .args(["--__stop-after-units", "2"])
+        .output()
+        .unwrap();
     assert_eq!(stopped.status.code(), Some(CANCELLED));
     let stopped = json(stopped);
     assert_eq!(stopped["report"]["status"], "cancelled");
@@ -305,10 +341,16 @@ fn a_position_suite_stops_cleanly_and_resumes_without_repeating_a_position() {
 
     let run = root.path().join("stopped");
     let mut command = arguments(&run);
-    let stopped = command.args(["--__stop-after-units", "2"]).output().unwrap();
+    let stopped = command
+        .args(["--__stop-after-units", "2"])
+        .output()
+        .unwrap();
     let stopped_value = json(stopped);
     let searched = stopped_value["report"]["results"].as_array().unwrap().len();
-    assert!(searched < 4, "the suite did not stop early: {stopped_value}");
+    assert!(
+        searched < 4,
+        "the suite did not stop early: {stopped_value}"
+    );
     assert_eq!(record(&run)["status"], "cancelled");
     assert_eq!(status_of(&run), "cancelled");
 
@@ -368,7 +410,10 @@ fn an_spsa_tune_stops_cleanly_between_iterations_and_resumes_the_schedule() {
 
     let run = root.path().join("stopped");
     let mut command = arguments(&run);
-    let stopped = command.args(["--__stop-after-units", "2"]).output().unwrap();
+    let stopped = command
+        .args(["--__stop-after-units", "2"])
+        .output()
+        .unwrap();
     assert_eq!(stopped.status.code(), Some(CANCELLED));
     let stopped = json(stopped);
     assert_eq!(stopped["report"]["driver"]["status"], "cancelled");
@@ -385,8 +430,7 @@ fn an_spsa_tune_stops_cleanly_between_iterations_and_resumes_the_schedule() {
     let resumed = json(arguments(&run).output().unwrap());
     assert_eq!(resumed["report"]["driver"]["status"], "completed");
     assert_eq!(
-        resumed["report"]["driver"]["final_centers"],
-        expected["report"]["driver"]["final_centers"],
+        resumed["report"]["driver"]["final_centers"], expected["report"]["driver"]["final_centers"],
         "a resumed tune must land where the uninterrupted one did"
     );
     assert_eq!(

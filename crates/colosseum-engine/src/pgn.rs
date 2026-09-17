@@ -102,11 +102,7 @@ pub struct PgnTags {
 /// `annotations` is parallel to `san_moves`; a shorter list simply leaves the
 /// remaining moves uncommented, so a caller with no evidence passes `&[]`.
 #[must_use]
-pub fn build_pgn(
-    tags: &PgnTags,
-    san_moves: &[String],
-    annotations: &[MoveAnnotation],
-) -> String {
+pub fn build_pgn(tags: &PgnTags, san_moves: &[String], annotations: &[MoveAnnotation]) -> String {
     let mut out = String::new();
     let mut tag = |key: &str, value: &str| {
         // Escape backslashes and quotes per the PGN spec.
@@ -186,7 +182,11 @@ fn movetext(
             tokens.push(format!("{move_no}..."));
         }
         tokens.push(san.clone());
-        if let Some(comment) = annotations.get(ply).copied().and_then(MoveAnnotation::render) {
+        if let Some(comment) = annotations
+            .get(ply)
+            .copied()
+            .and_then(MoveAnnotation::render)
+        {
             tokens.push(comment);
         }
         if !white_to_move {
