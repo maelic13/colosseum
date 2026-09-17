@@ -440,27 +440,10 @@ pub(crate) fn match_progress_block(
     } else {
         block.field("score", "no scored games yet");
     }
-    block.field(
-        "W/D/L",
-        format!("{}/{}/{}", sample.wins, sample.draws, sample.losses),
-    );
-    match elo_with_error(sample.wins, sample.draws, sample.losses, Z95) {
-        Ok(value) => block.field(
-            "Elo",
-            progress::estimate(value.elo, value.lower, value.upper),
-        ),
-        Err(error) => block.field("Elo", format!("unavailable: {error}")),
-    };
-    block.field(
-        "faults",
-        format!(
-            "engine {}/{}, time losses {}/{}",
-            sample.faults.engine_a,
-            sample.faults.engine_b,
-            sample.faults.time_losses_a,
-            sample.faults.time_losses_b
-        ),
-    );
+    // A fixed match plays colour-reversed pairs on one opening, exactly as a
+    // sequential test does, so it has the same paired estimates and reports
+    // them the same way.
+    sample.add_fields(&mut block);
     if let Some(rate) =
         progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
     {
@@ -595,6 +578,25 @@ pub(crate) fn print_fixed_match(report: &match_runner::FixedMatchReport) {
             score.name, score.wins, score.losses, score.draws
         );
     }
+    let sample = PairedProgress::from_games(&report.games);
+    match pentanomial_statistics(&sample.vector, Z95) {
+        Ok(statistics) => println!(
+            "Elo {}; nElo {} over {}",
+            progress::estimate(
+                statistics.logistic_elo.elo,
+                statistics.logistic_elo.lower,
+                statistics.logistic_elo.upper
+            ),
+            progress::estimate(
+                statistics.normalized_elo.elo,
+                statistics.normalized_elo.lower,
+                statistics.normalized_elo.upper
+            ),
+            progress::plural(u64::from(sample.pairs), "complete pair")
+        ),
+        Err(error) => println!("Elo and nElo unavailable: {error}"),
+    }
+    println!("Ptnml: {:?}", sample.vector.counts());
     println!(
         "faults: A {} ({} time), B {} ({} time), infrastructure {}",
         report.faults.engine_a,

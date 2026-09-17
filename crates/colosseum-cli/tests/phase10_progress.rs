@@ -604,6 +604,9 @@ fn a_match_report_summarises_abnormal_games_instead_of_listing_them() {
         .output()
         .unwrap();
     let report = String::from_utf8_lossy(&output.stdout).into_owned();
+    // A fixed match is pair-scheduled, so its report carries both estimates.
+    assert!(report.contains("nElo"), "{report}");
+    assert!(report.contains("Ptnml: "), "{report}");
     assert!(
         report.contains("abnormal games: illegal move 4"),
         "{report}"

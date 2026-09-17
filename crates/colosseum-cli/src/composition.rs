@@ -44,8 +44,8 @@ use colosseum_core::{
     AdjudicationConfig, DrawAdjudication, EloModel, GameResult, OpeningBook, OpeningFormat,
     OpeningOrder, PairGameResult, ParticipantId, PentanomialSprtResult, PentanomialVector,
     ResignAdjudication, SprtDecision, SpsaDerivedKnob, SpsaEndSpec, SpsaIteration,
-    SpsaScheduleArtifact, Termination, TimeControl, elo_with_error, fixed_n_achieved_resolution,
-    pentanomial_sprt, pentanomial_statistics, round_half_away_from_zero,
+    SpsaScheduleArtifact, Termination, TimeControl, fixed_n_achieved_resolution, pentanomial_sprt,
+    pentanomial_statistics, round_half_away_from_zero,
 };
 use colosseum_engine::{
     CpuPlacementPlan, CpuPlacementPolicy, SlotAllocation, audit_opening_book,

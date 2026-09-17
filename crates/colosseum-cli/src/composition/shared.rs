@@ -611,7 +611,17 @@ impl PairedProgress {
     /// The lines both commands share, in the order an operator reads them:
     /// the size of the sample, what it is worth, then how it was reached.
     pub(crate) fn add_fields(&self, block: &mut ProgressBlock) {
-        block.field("games", self.scored_games.to_string());
+        // A run that counts games has the game count in its headline already;
+        // what it does not say is how many of them are complete pairs, which
+        // is what every figure below is computed over.
+        match block.unit {
+            ProgressUnit::Games => {
+                block.field("pairs", format!("{} complete", self.pairs));
+            }
+            _ => {
+                block.field("games", self.scored_games.to_string());
+            }
+        }
         match pentanomial_statistics(&self.vector, Z95) {
             Ok(statistics) => {
                 block
