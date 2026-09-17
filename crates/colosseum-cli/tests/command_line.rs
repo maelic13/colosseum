@@ -1908,6 +1908,39 @@ fn capabilities_text_is_human_readable() {
     assert!(output.stderr.is_empty());
 }
 
+/// Run an executable this process has just written, tolerating `ETXTBSY`.
+///
+/// Linux refuses to `execve` a file that any process still holds open for
+/// writing. `cargo test` runs these tests on threads of one process, so a
+/// thread that spawns a child while another thread is copying inherits that
+/// copy's write descriptor and keeps the file busy until it execs. Our own
+/// copy is complete and closed before we get here; the descriptor keeping it
+/// busy belongs to someone else and is gone within moments.
+///
+/// So this waits the condition out rather than treating it as a failure, and
+/// gives up loudly if it never clears. Only tests that execute a file they
+/// just wrote need it — an engine a user points us at is not being written by
+/// us, and `ETXTBSY` there is a real spawn fault to report.
+fn run_freshly_copied(command: impl Fn() -> Command) -> std::process::Output {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut attempts = 0_u32;
+    loop {
+        attempts += 1;
+        match command().output() {
+            Ok(output) => return output,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(error) => {
+                panic!("could not run the copied executable after {attempts} attempts: {error}")
+            }
+        }
+    }
+}
+
 #[test]
 fn copied_executable_passes_headless_self_test_in_isolated_directory() {
     let root = tempfile::tempdir().unwrap();
@@ -1925,11 +1958,13 @@ fn copied_executable_passes_headless_self_test_in_isolated_directory() {
         permissions.set_mode(0o755);
         std::fs::set_permissions(&copied, permissions).unwrap();
     }
-    let output = Command::new(&copied)
-        .args(["self-test", "--json"])
-        .current_dir(root.path())
-        .output()
-        .unwrap();
+    let output = run_freshly_copied(|| {
+        let mut command = Command::new(&copied);
+        command
+            .args(["self-test", "--json"])
+            .current_dir(root.path());
+        command
+    });
     assert!(
         output.status.success(),
         "{}",
