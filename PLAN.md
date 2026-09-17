@@ -2374,7 +2374,17 @@ games" procedure at 10.10, once, on the final state.
   checkpoint's for a run that crossed a boundary at concurrency above one;
   tournament games carry the encounter's real `OpeningIndex`; the SPSA
   schedule artifact's `stats_version` field is renamed to what it holds
-  (the RNG version). Items (k) to (n) precede (j).
+  (the RNG version).
+- **(o) Unscorable games in the PGN**, found by review of (n): a game the
+  runner aborted for an infrastructure fault is still written to `games.pgn`
+  with a result and identity tags but no `ColosseumSample` tag, so a PGN
+  replay scores it while the checkpoint does not. Tag it `unscorable`, let
+  the replay exclude it and report the count, and cover it with a
+  run-directory-versus-PGN equality test on a run with one aborted game.
+  Also correct the `rng.rs` doc comment that still ties sampling to
+  `stats_version`, and keep the versioned schema refusal reachable for old
+  SPSA schedule and result files instead of a raw unknown-field error.
+  Items (k) to (o) precede (j).
 
   **Implementation evidence (Phase 10.9d):** all four defects were the same
   mistake — the identity was written and the reader guessed anyway. `stats`
