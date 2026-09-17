@@ -115,6 +115,10 @@ pub enum EngineArgsError {
     DuplicateCore { group: u16, number: u32 },
     #[error("logical CPU list must not be empty")]
     EmptyCoreList,
+    #[error(
+        "{name}={value} asks for Chess960; Colosseum plays standard chess only and refuses the request rather than attempting a variant it cannot score correctly"
+    )]
+    Chess960Requested { name: String, value: String },
 }
 
 fn unique_pairs(
@@ -127,6 +131,15 @@ fn unique_pairs(
             return Err(EngineArgsError::MissingEquals { kind });
         };
         validate_name(name, kind)?;
+        if kind.contains("option")
+            && colosseum_core::is_chess960_option(name)
+            && colosseum_core::is_uci_true(value)
+        {
+            return Err(EngineArgsError::Chess960Requested {
+                name: name.to_owned(),
+                value: value.to_owned(),
+            });
+        }
         if output.insert(name.to_owned(), value.to_owned()).is_some() {
             return Err(EngineArgsError::Duplicate {
                 kind,

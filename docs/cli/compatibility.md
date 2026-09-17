@@ -33,7 +33,13 @@ used the value as intended.
 
 - Protocol lines are limited to 64 KiB excluding newline. Oversized lines are
   protocol faults rather than unbounded memory input.
-- Standard chess is the supported ruleset. Chess960 is not silently attempted.
+- Standard chess is the supported ruleset. Chess960 is a non-goal, not a
+  missing feature: a `UCI_Chess960` request is refused, and a position whose
+  castling field uses the Shredder/X-FEN file letters is rejected as unusable
+  rather than reinterpreted as standard castling. Castling in Chess960 is
+  encoded as king-onto-rook, which a standard reader scores as a different
+  move, so forwarding the option would produce games that look scored and are
+  not. Switching the option off is an ordinary forwarded option.
 - Colosseum does not probe Syzygy itself. An engine may use its ordinary
   advertised tablebase options; those options remain engine-owned.
 - The CLI ships no opening book or engine. Books are optional EPD/PGN inputs.

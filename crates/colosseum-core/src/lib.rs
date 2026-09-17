@@ -31,7 +31,8 @@ pub use export::{ExportRow, crosstable_csv, standings_csv};
 pub use game::{GameResult, GameStats, Pairing, Termination};
 pub use ids::{EngineId, GameId, PairId, ParticipantId, RunId, TournamentId, UnitId};
 pub use options::{
-    UciOption, UciOptionValue, is_hash_option, is_tablebase_option, is_thread_option,
+    UciOption, UciOptionValue, is_chess960_option, is_hash_option, is_tablebase_option,
+    is_thread_option, is_uci_true,
 };
 pub use pairing::{gauntlet, generate_schedule, round_robin};
 pub use rating::{ml_ratings, ml_ratings_anchored, performance_rating, rating_error};

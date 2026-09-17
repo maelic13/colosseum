@@ -415,6 +415,16 @@ suites tied to a custom move generator or search command stay with the engine.
 Non-chess variants and Chess960 are out of scope: the harness plays standard
 chess only and refuses a Chess960 request rather than attempting it.
 
+**Implementation evidence (Phase 10.9):** every path that sets a UCI option
+refuses `UCI_Chess960` (and its common spellings) when set true, naming the
+non-goal; setting it false stays an ordinary forwarded option. A position whose
+castling field uses the Shredder/X-FEN file letters is rejected by the shared
+FEN validator, so a book names it among its rejected indices and a suite
+records it as malformed instead of searching it. `composition.rs` is now the
+parser, the dispatch and the resolvers more than one command needs, with one
+module per command beside it; the split changed no behaviour, the generated
+command reference is byte-identical and no test changed.
+
 ---
 
 ## S5. Tool specifications and success criteria

@@ -386,9 +386,33 @@ pub fn summarize(book: &OpeningBook) -> Result<OpeningSummary, OpeningError> {
     })
 }
 
+/// True when a FEN's castling field uses the Shredder/X-FEN file letters that
+/// encode Chess960 castling rights.
+///
+/// The harness plays standard chess only, and a shuffled start position is
+/// otherwise indistinguishable from an ordinary one. This is the encoding that
+/// says so explicitly, so it is the one place a Chess960 position can be
+/// refused instead of silently misread.
+#[must_use]
+pub fn is_chess960_fen(fen: &str) -> bool {
+    let Some(castling) = fen.split_whitespace().nth(2) else {
+        return false;
+    };
+    castling != "-"
+        && castling
+            .chars()
+            .any(|right| matches!(right, 'a'..='h' | 'A'..='H') && !matches!(right, 'k' | 'K'))
+}
+
 /// Validate a starting FEN, returning a usable [`Chess`] position.
+///
+/// A Chess960 castling encoding yields `None`: it is refused rather than
+/// reinterpreted as standard castling.
 #[must_use]
 pub fn position_from_fen(fen: &str) -> Option<Chess> {
+    if is_chess960_fen(fen) {
+        return None;
+    }
     fen.parse::<Fen>()
         .ok()
         .and_then(|f| f.into_position(CastlingMode::Standard).ok())

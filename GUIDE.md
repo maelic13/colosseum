@@ -18,8 +18,8 @@ numbers, internal naming or method argumentation.
 | What is missing | **Phase 10** first-release corrections (release-latest handling, adjudication off, class-aware placement, PGN annotations, final-theta estimator, graceful stop, fixed rating field, book range policy, command split), then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and release CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9** split `composition.rs` and record Chess960 as a non-goal |
-| Recommended model | **Terra High** for 10.7 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
+| Next step | **10.10 — EXIT**, the release acceptance repeat; it needs a real machine and the maintainer |
+| Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
 
@@ -809,7 +809,7 @@ model as well.
   that needs more entries than remain from `--book-start`, `--book-wrap`
   opt-in recorded, dry-run reports the index range; datagen recipe written in
   the match documentation against it — PLAN §5.9, §5.13, §Phase 10(h)
-- ☐ **10.9** — **Model: Terra High.** Split `composition.rs` into one module
+- ☑ **10.9 — DONE** — **Model: Terra High.** Split `composition.rs` into one module
   per command with no behaviour change (generated command reference
   byte-identical, tests unchanged); Chess960 recorded as a non-goal and
   refused with a clear message — PLAN §S4, §Phase 10(i)

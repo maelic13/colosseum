@@ -13,7 +13,7 @@ development machine is Windows.
 | `colosseum-uci` | UCI protocol + engine process management (spawn, handshake, search) |
 | `colosseum-engine` | Tournament scheduler/driver, game runner, SQLite store, PGN/openings, incident forensics and OS topology/affinity adapters |
 | `colosseum-gui` | eframe GUI composition root plus GUI-owned library/config/path adapters |
-| `colosseum-cli` | Independent headless composition root; ordinary UCI executables only |
+| `colosseum-cli` | Independent headless composition root; ordinary UCI executables only. `composition.rs` holds the parser, dispatch and shared resolvers, with one module per command in `composition/` |
 
 Commands: `cargo check --workspace --tests`, `cargo clippy --workspace`,
 `cargo test --workspace --all-targets`; run the GUI with
