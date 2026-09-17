@@ -581,7 +581,10 @@ Options:
           Complete games in each pair-atomic mini-match
 
       --final-window-percent <FINAL_WINDOW_PERCENT>
-          Percent of the fixed horizon averaged into the tuned result
+          Average this percent of the fixed horizon instead of taking the final centre vector, which is the default estimator
+
+      --stop-after-iteration <STOP_AFTER_ITERATION>
+          Stop cleanly after this many completed iterations without changing the stored horizon; the run can be resumed from its own directory
 
       --movetime-ms <MOVETIME_MS>
 

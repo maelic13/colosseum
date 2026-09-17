@@ -38,9 +38,10 @@ pub use pair_commit::{CompletePair, PairCommitError, PairCommitQueue};
 pub use ports::*;
 pub use sprt::{SprtBundle, SprtDesign, SprtDesignError, SprtParameters};
 pub use spsa::{
-    DEFAULT_SPSA_FINAL_WINDOW_PERCENT, DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS,
+    DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS,
     SPSA_TUNE_RESULT_SCHEMA_VERSION, SpsaBoundParameter, SpsaBoundTune, SpsaCenterSample,
-    SpsaCommittedUpdate, SpsaDriverPolicyError, SpsaFinalWindow, SpsaGateHashStatus,
+    SpsaCommittedUpdate, SpsaDriverPolicyError, SpsaEstimator, SpsaEstimatorPolicy,
+    SpsaFinalWindow, SpsaGateHashStatus,
     SpsaGateIdentity, SpsaInvalidUpdate, SpsaIterationTransition, SpsaLiveSpin, SpsaMiniMatchScore,
     SpsaPreflightError, SpsaResultParameter, SpsaRunSettings, SpsaRunSettingsError, SpsaTune,
     SpsaTuneAudit, SpsaTuneAuditError, SpsaTuneError, SpsaTuneParameter, SpsaTuneResult,

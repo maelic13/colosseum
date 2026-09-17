@@ -90,18 +90,33 @@ Short histories say `insufficient-history`; they do not manufacture a trend.
 Every signal explains that it can arise from the objective, noise, gain,
 clipping, host variation or an unsuitable range. None is a causal or
 convergence claim, and the command never advises continuing or abandoning a
-tune. Once the frozen final window has begun, JSON status also exposes the same
-partial candidate-vector policy used at completion; earlier snapshots explain
-why no candidate exists.
+tune. JSON status also exposes the same candidate-vector policy used at
+completion, so whichever estimator the run selected is the one you see mid-run
+as well; a snapshot that cannot yet produce a candidate explains why.
 
-On successful completion, the tuned vector is the half-away-from-zero rounded
-mean of the final 10% of completed centre vectors. `--final-window-percent`
-changes that percentage from 1 through 100. The sample count is rounded up, so
-every valid horizon contributes at least one centre; the percentage and exact
-zero-based window are frozen in the configuration and result. Completion writes
-the same vector as `tuned-options.txt` (ready-to-paste UCI `setoption` lines),
-`tuned-options.json` (the versioned machine artifact), and
+The tuned vector is the half-away-from-zero rounded **final centre vector**:
+the centre after the last completed iteration. No checkpoint is selected after
+the fact, so the vector you gate is the vector the tune actually arrived at.
+
+`--final-window-percent N` selects the optional alternative: the mean of the
+centres over the final `N` percent of the fixed horizon, from 1 through 100.
+The sample count is rounded up, so every valid horizon contributes at least one
+centre. Whichever estimator is in force is frozen in the resolved configuration
+exactly as the default is, and the result names it and the exact window, so a
+stored vector always says how it was produced. The result schema version
+identifies the estimator set a reader can expect.
+
+Completion writes the vector as `tuned-options.txt` (ready-to-paste UCI
+`setoption` lines), `tuned-options.json` (the versioned machine artifact), and
 `tuned-options.toml` (an `[engine.options]` run-file fragment).
+
+`--stop-after-iteration N` asks for a clean stop once `N` iterations are
+committed. The stop lands on an iteration boundary, so nothing partial is
+discarded; the run writes its checkpoint, is recorded as `cancelled`, exits
+with code `6`, and still emits a gate candidate from what it completed. The
+stored horizon is untouched: resuming the same `--dir` continues towards the
+original number of iterations. Use it to take a look at a long tune, or to
+stop one at a planned point without pretending it finished.
 
 One floating-point centre vector is retained throughout the run. For each
 iteration Colosseum derives deterministic plus/minus integer option vectors,
@@ -150,7 +165,7 @@ mini-match on resume and cannot advance the gain schedule. Resume requires the
 same resolved configuration, tune contents, engine path, schedule, book and
 conditions. The stored iterations, games-per-iteration and `r_end` are
 authoritative on resume, so repeating different values cannot silently change
-the gain schedule. The stored final-window percentage is authoritative as well.
+the gain schedule. The stored estimator is authoritative as well.
 Logs append, PGN is rebuilt from committed evidence, and
 `run-record.json` publishes each durable iteration after its checkpoint.
 

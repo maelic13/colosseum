@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **Phase 10** first-release corrections (release-latest handling, adjudication off, class-aware placement, PGN annotations, final-theta estimator, graceful stop, fixed rating field, book range policy, command split), then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and release CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.5** SPSA final-centre estimator and staged stop, then 10.6 onward in order |
+| Next step | **10.6** graceful stop for every durable command, then 10.7 onward in order |
 | Recommended model | **Sol High** for 10.5 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -791,7 +791,7 @@ model as well.
   `{s= d= t= n=}` from every game-playing command, `{book}` on pre-played
   moves, score added to the telemetry parser and `stats`, frozen annotated
   fixture, writer form versioned in the run record — PLAN §5.4b, §Phase 10(d)
-- ☐ **10.5** — **Model: Sol High.** SPSA estimator: final centre vector
+- ☑ **10.5 — DONE** — **Model: Sol High.** SPSA estimator: final centre vector
   rounded is the default, tail-window mean optional and recorded, result
   schema version bumped, `spsa status` follows the same policy;
   `--stop-after-iteration N` clean stop at an iteration boundary without

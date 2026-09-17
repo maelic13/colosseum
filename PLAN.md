@@ -1034,6 +1034,20 @@ parser and the openings PGN reader.
   final window begins so the Phase-5.9 read-only adapter can expose the same
   calculation mid-run without inventing a second rule.
 
+  **Implementation evidence (Phase 10.5):** the default estimator is the
+  half-away-from-zero rounded centre vector after the last completed iteration,
+  so no checkpoint is chosen after the fact. `--final-window-percent N` selects
+  the optional tail-window mean; whichever is in force is frozen in the
+  resolved configuration and named in the result together with its exact
+  window, and the result schema version is 2. `spsa status` reuses the same
+  policy, so the default estimator exposes an on-demand candidate from the
+  first committed iteration rather than only once a window begins.
+  `--stop-after-iteration N` stops on a committed iteration boundary, writes
+  the checkpoint, records `cancelled`, exits with code 6 and still emits a gate
+  candidate; the stored horizon is untouched, so the same run directory resumes
+  towards it. The stop request is an invocation fact in the run record, not
+  part of the resolved configuration that a resume compares.
+
 **Success criteria**
 
 - Schedule property tests: `c[N-1] == c_end`,
@@ -1342,7 +1356,8 @@ or silent pooling of incomparable work.
   Ctrl-C is the hard kill. Units not yet committed are replayed on resume; for
   SPSA that is the whole current mini-match, which is accepted.
   `spsa --stop-after-iteration N` requests the same clean stop at an
-  iteration boundary without changing the stored horizon.
+  iteration boundary without changing the stored horizon. The documented
+  cancelled exit code is 6.
 - `colosseum-cli status <run-directory>` reads an atomic snapshot without
   mutation and reports command type/state, owning-process liveness where
   detectable, last durable checkpoint, completed/running/pending/failed units,

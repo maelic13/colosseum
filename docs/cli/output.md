@@ -39,3 +39,8 @@ codes.
 For `sprt`, exit `0` is H1, `1` is H0, `4` is capped inconclusive and `5` is an
 invalid experiment. Configuration refusal remains `2` and infrastructure,
 runtime or persistence error remains `3`.
+
+Exit `6` means a durable run stopped cleanly on request instead of reaching its
+terminal state. Its run record is `cancelled`, its checkpoint is written, and
+the same run directory resumes towards the stored horizon. A clean stop is not
+a failure and not a statistical conclusion.

@@ -17,6 +17,11 @@ The workflow owns a recorder guard. Completing, cancelling or invalidating the
 run writes the explicit terminal state. If ownership ends without one, the
 guard records `aborted` and an anomaly, preserving even zero-sample attempts.
 
+`cancelled` means the run stopped cleanly on request at a committed boundary
+rather than reaching its terminal state. Its checkpoint is written, its exit
+code is `6`, and the same run directory resumes towards the stored horizon. It
+is neither a failure nor a statistical conclusion.
+
 `colosseum-cli status <run-dir>` is common to all workflow types. It only reads
 `run-record.json`; it never resumes, repairs, checkpoints or changes the run.
 Use `--json` for the common single-document machine output.
@@ -32,3 +37,4 @@ Run-record schema history:
 |---:|---|
 | 1 | Common identity, lifecycle, host, sample and anomalies |
 | 2 | Added required command-specific `workflow` evidence so the statistical model and experimental conditions are stored in the record itself |
+| 3 | Added the last-level cache domain to every engine CPU placement, the versioned game-record annotation writer, and the SPSA estimator that produced a tuned vector |

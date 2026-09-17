@@ -23,13 +23,13 @@ use colosseum_application::{
     CalibrationBinaries, CalibrationDesign, CalibrationInterval, CalibrationStatus, CheckEngine,
     CompareNps, CompletePair, ComplianceReport, ComplianceStatus, DEFAULT_CALIBRATION_CONFIDENCE,
     DEFAULT_CALIBRATION_GAMES, DEFAULT_CALIBRATION_TOLERANCE_NELO,
-    DEFAULT_SPSA_FINAL_WINDOW_PERCENT, DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS,
-    EngineInspection, EngineLaunchSpec, FixedPlanObjective, FixedPlanReport, FixedPlanRequest,
+    DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS, EngineInspection, EngineLaunchSpec, FixedPlanObjective, FixedPlanReport, FixedPlanRequest,
     InspectEngine, MeasureNps, NpsExperimentDesign, NpsExperimentParticipant, NpsExperimentReport,
     NpsHashPolicy, NpsReport, NpsRequest, NpsScalingInput, NpsScalingReport, NpsStatePolicy,
     PlanTournament, RuntimeParticipant, SprtBundle, SprtDesign, SprtLengthPlanReport,
     SprtLengthPlanRequest, SprtParameters, SpsaBoundTune, SpsaCenterSample, SpsaCommittedUpdate,
-    SpsaGateHashStatus, SpsaPlanReport, SpsaRunSettings, SpsaStatusReport, SpsaTimingInput,
+    SpsaEstimator, SpsaEstimatorPolicy, SpsaGateHashStatus, SpsaPlanReport, SpsaRunSettings,
+    SpsaStatusReport, SpsaTimingInput,
     SpsaTuneAudit, SpsaTuneResult, SpsaTuneWarning, SpsaTuningState, TournamentDesign,
     TournamentParticipant, TournamentPlan, UciOptionSchema, UciOptionValue, classify_calibration,
     diagnose_spsa, plan_fixed, plan_sprt_length, plan_spsa, scaling_hash_mb, summarize_nps_scaling,
@@ -48,6 +48,10 @@ use colosseum_uci::{AffinityUciSessionFactory, UciSessionFactory};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+
+/// A durable run that stopped cleanly on request rather than reaching its
+/// terminal state. Its run directory resumes; nothing about it is a failure.
+pub const CANCELLED_EXIT_CODE: u8 = 6;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -515,9 +519,14 @@ struct SpsaCommand {
     /// Complete games in each pair-atomic mini-match.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     games_per_iteration: Option<u32>,
-    /// Percent of the fixed horizon averaged into the tuned result.
+    /// Average this percent of the fixed horizon instead of taking the final
+    /// centre vector, which is the default estimator.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=100))]
     final_window_percent: Option<u32>,
+    /// Stop cleanly after this many completed iterations without changing the
+    /// stored horizon; the run can be resumed from its own directory.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    stop_after_iteration: Option<u32>,
 
     #[command(flatten)]
     conditions: SpsaConditions,
@@ -1733,7 +1742,9 @@ fn print_spsa_plan(report: &SpsaPlanReport) {
 #[derive(Debug, Deserialize)]
 struct StoredSpsaWorkflow {
     settings: SpsaRunSettings,
-    final_window_percent: u32,
+    /// Absent means the default final-centre estimator.
+    #[serde(default)]
+    final_window_percent: Option<u32>,
     bound_tune: SpsaBoundTune,
     engine_sha256: String,
     schedule: SpsaScheduleArtifact,
@@ -1873,7 +1884,7 @@ fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
             workflow.engine_sha256,
             &workflow.schedule,
             workflow.settings,
-            workflow.final_window_percent,
+            spsa_estimator_policy(workflow.final_window_percent),
             &centers,
         ) {
             Ok(result) => (Some(result), None),
@@ -1962,8 +1973,11 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
         stored_schedule_inputs
     {
         eprintln!(
-            "resuming the stored SPSA horizon: {} iterations, {} games per iteration, r_end {}, final window {}%",
-            stored.iterations, stored.games_per_iteration, stored_r_end, stored_window
+            "resuming the stored SPSA horizon: {} iterations, {} games per iteration, r_end {}, estimator {}",
+            stored.iterations,
+            stored.games_per_iteration,
+            stored_r_end,
+            describe_spsa_estimator(stored_window)
         );
         (
             stored.iterations,
@@ -1982,11 +1996,10 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
                 .games_per_iteration
                 .unwrap_or(DEFAULT_SPSA_GAMES_PER_ITERATION),
             r_end,
-            command
-                .final_window_percent
-                .unwrap_or(DEFAULT_SPSA_FINAL_WINDOW_PERCENT),
+            command.final_window_percent,
         )
     };
+    let estimator = spsa_estimator_policy(final_window_percent);
     let settings = match SpsaRunSettings::new(iterations, games_per_iteration) {
         Ok(settings) => settings,
         Err(error) => {
@@ -2349,6 +2362,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
     };
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "spsa",
+        "stop_after_iteration": command.stop_after_iteration,
         "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
         "settings": settings,
         "r_end": r_end,
@@ -2408,6 +2422,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
         },
         execution: execution.clone(),
         checkpoint,
+        stop_after_iteration: command.stop_after_iteration,
         progress: progress.clone(),
         observer: Some(observer.clone()),
     };
@@ -2437,7 +2452,10 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
         }
     };
     let status = driver.status;
-    let tuned_result = if status == spsa_driver::SpsaStatus::Completed {
+    let tuned_result = if matches!(
+        status,
+        spsa_driver::SpsaStatus::Completed | spsa_driver::SpsaStatus::Cancelled
+    ) {
         let history = driver
             .completed_iterations
             .iter()
@@ -2450,7 +2468,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
             engine_sha256.clone(),
             &expected_schedule,
             settings,
-            final_window_percent,
+            estimator,
             &history,
         ) {
             Ok(result) => Some(result),
@@ -2492,6 +2510,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
     }
     match status {
         spsa_driver::SpsaStatus::Completed => ExitCode::SUCCESS,
+        spsa_driver::SpsaStatus::Cancelled => ExitCode::from(CANCELLED_EXIT_CODE),
         spsa_driver::SpsaStatus::Invalid => ExitCode::from(5),
     }
 }
@@ -5264,7 +5283,9 @@ fn read_stored_seed(root: &Path) -> Option<(u64, bool)> {
     ))
 }
 
-fn read_stored_spsa_inputs(root: &Path) -> Result<(SpsaRunSettings, f64, u32), String> {
+fn read_stored_spsa_inputs(
+    root: &Path,
+) -> Result<(SpsaRunSettings, f64, Option<u32>), String> {
     let path = root.join("resolved-config.json");
     let bytes = fs::read(&path).map_err(|error| {
         format!(
@@ -5298,12 +5319,17 @@ fn read_stored_spsa_inputs(root: &Path) -> Result<(SpsaRunSettings, f64, u32), S
         .get("r_end")
         .and_then(Value::as_f64)
         .ok_or_else(|| "stored SPSA r_end is missing or invalid".to_owned())?;
-    let final_window_percent = value
-        .get("final_window_percent")
-        .and_then(Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())
-        .filter(|value| (1..=100).contains(value))
-        .ok_or_else(|| "stored SPSA final-window percent is missing or invalid".to_owned())?;
+    // An absent or null percent is the default final-centre estimator.
+    let final_window_percent = match value.get("final_window_percent") {
+        None | Some(Value::Null) => None,
+        Some(stored) => Some(
+            stored
+                .as_u64()
+                .and_then(|value| u32::try_from(value).ok())
+                .filter(|value| (1..=100).contains(value))
+                .ok_or_else(|| "stored SPSA final-window percent is invalid".to_owned())?,
+        ),
+    };
     let settings =
         SpsaRunSettings::new(iterations, games_per_iteration).map_err(|error| error.to_string())?;
     Ok((settings, r_end, final_window_percent))
@@ -5741,6 +5767,7 @@ impl DurableSpsaOutput {
         }))?;
         let status = match report.driver.status {
             spsa_driver::SpsaStatus::Completed => RunStatus::Completed,
+            spsa_driver::SpsaStatus::Cancelled => RunStatus::Cancelled,
             spsa_driver::SpsaStatus::Invalid => RunStatus::Invalid,
         };
         let recorder = self
@@ -5821,6 +5848,21 @@ fn resolve_placement(value: &str, headroom_cores: usize) -> Result<CpuPlacementP
         explicit => parse_cpu_list(explicit)
             .map(|cpus| CpuPlacementPolicy::Explicit { cpus })
             .map_err(|error| error.to_string()),
+    }
+}
+
+/// An absent percent means the default: the final completed centre vector.
+fn spsa_estimator_policy(final_window_percent: Option<u32>) -> SpsaEstimatorPolicy {
+    match final_window_percent {
+        Some(percent) => SpsaEstimatorPolicy::TailWindowMean { percent },
+        None => SpsaEstimatorPolicy::FinalCenter,
+    }
+}
+
+fn describe_spsa_estimator(final_window_percent: Option<u32>) -> String {
+    match final_window_percent {
+        Some(percent) => format!("mean of the final {percent}% window"),
+        None => "final centre vector".to_owned(),
     }
 }
 
@@ -6034,14 +6076,19 @@ fn print_spsa(report: &SpsaReport, run_directory: &Path) {
         println!("{}: {:.6}", parameter.parameter.name, center);
     }
     if let Some(result) = &report.tuned_result {
-        println!(
-            "tuned vector: rounded mean of {} sample(s) from final {}% window",
-            result.window.samples_used, result.window.percent
-        );
+        match &result.estimator {
+            SpsaEstimator::FinalCenter { iteration } => println!(
+                "tuned vector: rounded centre vector after iteration {iteration}"
+            ),
+            SpsaEstimator::TailWindowMean(window) => println!(
+                "tuned vector: rounded mean of {} sample(s) from final {}% window",
+                window.samples_used, window.percent
+            ),
+        }
         for parameter in &result.parameters {
             println!(
-                "setoption name {} value {}  (mean {:.6})",
-                parameter.name, parameter.tuned, parameter.mean
+                "setoption name {} value {}  (estimate {:.6})",
+                parameter.name, parameter.tuned, parameter.estimate
             );
         }
     }

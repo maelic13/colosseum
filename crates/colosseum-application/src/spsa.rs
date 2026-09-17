@@ -13,8 +13,9 @@ use crate::{EngineInspection, UciOptionSchema};
 
 pub const DEFAULT_SPSA_ITERATIONS: u32 = 5_000;
 pub const DEFAULT_SPSA_GAMES_PER_ITERATION: u32 = 32;
-pub const DEFAULT_SPSA_FINAL_WINDOW_PERCENT: u32 = 10;
-pub const SPSA_TUNE_RESULT_SCHEMA_VERSION: u32 = 1;
+/// Version 2 records which estimator produced the vector: the final centre
+/// (the default) or the optional tail-window mean.
+pub const SPSA_TUNE_RESULT_SCHEMA_VERSION: u32 = 2;
 
 /// Resolved run-wide SPSA sizing. The defaults are useful production values,
 /// not minimums: short development or synthetic runs may use one iteration
@@ -433,10 +434,32 @@ pub struct SpsaFinalWindow {
 pub struct SpsaResultParameter {
     pub name: String,
     pub original: i64,
-    pub mean: f64,
+    /// The unrounded value the estimator produced, before the UCI integer.
+    pub estimate: f64,
     pub tuned: i64,
     pub min: i64,
     pub max: i64,
+}
+
+/// Which estimator a caller asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpsaEstimatorPolicy {
+    /// The centre vector after the last completed iteration. This is the
+    /// default: no checkpoint is selected after the fact.
+    FinalCenter,
+    /// The mean of the centres over the final `percent` of the fixed horizon.
+    TailWindowMean { percent: u32 },
+}
+
+/// Which estimator actually produced a stored vector.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum SpsaEstimator {
+    FinalCenter {
+        /// Zero-based iteration whose centre vector this is.
+        iteration: u32,
+    },
+    TailWindowMean(SpsaFinalWindow),
 }
 
 /// Stable machine-readable result consumed directly by `sprt --apply`.
@@ -448,7 +471,10 @@ pub struct SpsaTuneResult {
     pub stats_version: u32,
     pub engine_sha256: String,
     pub settings: SpsaRunSettings,
-    pub window: SpsaFinalWindow,
+    pub estimator: SpsaEstimator,
+    /// Iterations committed when the vector was produced. It equals the
+    /// horizon for a completed tune and is smaller for an on-demand candidate.
+    pub completed_iterations: u32,
     pub parameters: Vec<SpsaResultParameter>,
 }
 
@@ -590,22 +616,26 @@ impl SpsaBoundTune {
         Ok(SpsaTuneAudit { warnings })
     }
 
-    /// Produce the gate vector from the configured final portion of the fixed
-    /// tune horizon. Partial history is accepted only after that frozen window
-    /// has begun, allowing a later read-only mid-run command to reuse policy.
+    /// Produce the gate vector under the requested estimator.
+    ///
+    /// The default estimator is the centre vector after the last completed
+    /// iteration, so no checkpoint is selected after the fact. The optional
+    /// tail-window mean accepts partial history only once its frozen window
+    /// has begun, which lets the read-only mid-run command reuse this policy
+    /// rather than invent a second one.
     pub fn result_from_centers(
         &self,
         engine_sha256: String,
         schedule: &SpsaScheduleArtifact,
         settings: SpsaRunSettings,
-        final_window_percent: u32,
+        estimator: SpsaEstimatorPolicy,
         history: &[SpsaCenterSample],
     ) -> Result<SpsaTuneResult, SpsaTuneResultError> {
         settings.validate()?;
-        if !(1..=100).contains(&final_window_percent) {
-            return Err(SpsaTuneResultError::InvalidWindowPercent {
-                percent: final_window_percent,
-            });
+        if let SpsaEstimatorPolicy::TailWindowMean { percent } = estimator
+            && !(1..=100).contains(&percent)
+        {
+            return Err(SpsaTuneResultError::InvalidWindowPercent { percent });
         }
         if schedule.schedule.iterations() != settings.iterations {
             return Err(SpsaTuneResultError::ScheduleHorizonMismatch {
@@ -616,11 +646,6 @@ impl SpsaBoundTune {
         if history.len() > settings.iterations as usize {
             return Err(SpsaTuneResultError::HistoryBeyondHorizon);
         }
-        let planned_samples = u32::try_from(
-            (u64::from(settings.iterations) * u64::from(final_window_percent)).div_ceil(100),
-        )
-        .expect("a percentage of a u32 horizon fits in u32");
-        let start_iteration = settings.iterations - planned_samples;
         for (index, sample) in history.iter().enumerate() {
             let expected_iteration =
                 u32::try_from(index).map_err(|_| SpsaTuneResultError::HistoryBeyondHorizon)?;
@@ -638,16 +663,50 @@ impl SpsaBoundTune {
                 });
             }
         }
-        let selected = history
-            .iter()
-            .filter(|sample| sample.iteration >= start_iteration)
-            .collect::<Vec<_>>();
-        if selected.is_empty() {
-            return Err(SpsaTuneResultError::FinalWindowNotReached {
-                start_iteration,
-                completed_iterations: history.len() as u32,
-            });
-        }
+        let completed_iterations =
+            u32::try_from(history.len()).map_err(|_| SpsaTuneResultError::HistoryBeyondHorizon)?;
+        let (selected, recorded) = match estimator {
+            SpsaEstimatorPolicy::FinalCenter => {
+                let last = history
+                    .last()
+                    .ok_or(SpsaTuneResultError::NoCompletedIteration)?;
+                (
+                    vec![last],
+                    SpsaEstimator::FinalCenter {
+                        iteration: last.iteration,
+                    },
+                )
+            }
+            SpsaEstimatorPolicy::TailWindowMean { percent } => {
+                let planned_samples = u32::try_from(
+                    (u64::from(settings.iterations) * u64::from(percent)).div_ceil(100),
+                )
+                .expect("a percentage of a u32 horizon fits in u32");
+                let start_iteration = settings.iterations - planned_samples;
+                let selected = history
+                    .iter()
+                    .filter(|sample| sample.iteration >= start_iteration)
+                    .collect::<Vec<_>>();
+                if selected.is_empty() {
+                    return Err(SpsaTuneResultError::FinalWindowNotReached {
+                        start_iteration,
+                        completed_iterations,
+                    });
+                }
+                let samples_used = selected.len() as u32;
+                (
+                    selected,
+                    SpsaEstimator::TailWindowMean(SpsaFinalWindow {
+                        percent,
+                        planned_iterations: settings.iterations,
+                        start_iteration,
+                        end_iteration_exclusive: settings.iterations,
+                        planned_samples,
+                        samples_used,
+                    }),
+                )
+            }
+        };
         let parameters = self
             .parameters
             .iter()
@@ -668,17 +727,17 @@ impl SpsaBoundTune {
                     }
                     sum += value;
                 }
-                let mean = sum / selected.len() as f64;
-                if !mean.is_finite() {
-                    return Err(SpsaTuneResultError::NonFiniteMean {
+                let estimate = sum / selected.len() as f64;
+                if !estimate.is_finite() {
+                    return Err(SpsaTuneResultError::NonFiniteEstimate {
                         name: bound.parameter.name.clone(),
                     });
                 }
                 Ok(SpsaResultParameter {
                     name: bound.parameter.name.clone(),
                     original: bound.parameter.initial,
-                    mean,
-                    tuned: round_half_away_from_zero(mean)?,
+                    estimate,
+                    tuned: round_half_away_from_zero(estimate)?,
                     min: bound.parameter.min,
                     max: bound.parameter.max,
                 })
@@ -690,14 +749,8 @@ impl SpsaBoundTune {
             stats_version: schedule.stats_version,
             engine_sha256,
             settings,
-            window: SpsaFinalWindow {
-                percent: final_window_percent,
-                planned_iterations: settings.iterations,
-                start_iteration,
-                end_iteration_exclusive: settings.iterations,
-                planned_samples,
-                samples_used: selected.len() as u32,
-            },
+            estimator: recorded,
+            completed_iterations,
             parameters,
         };
         result.validate()?;
@@ -752,24 +805,42 @@ impl SpsaTuneResult {
         {
             return Err(SpsaTuneResultError::InvalidExecutableHash);
         }
-        if !(1..=100).contains(&self.window.percent) {
-            return Err(SpsaTuneResultError::InvalidWindowPercent {
-                percent: self.window.percent,
+        if self.completed_iterations == 0 || self.completed_iterations > self.settings.iterations {
+            return Err(SpsaTuneResultError::InvalidCompletedIterations {
+                completed: self.completed_iterations,
+                horizon: self.settings.iterations,
             });
         }
-        let planned_samples = u32::try_from(
-            (u64::from(self.settings.iterations) * u64::from(self.window.percent)).div_ceil(100),
-        )
-        .expect("a percentage of a u32 horizon fits in u32");
-        let expected_start = self.settings.iterations - planned_samples;
-        if self.window.planned_iterations != self.settings.iterations
-            || self.window.start_iteration != expected_start
-            || self.window.end_iteration_exclusive != self.settings.iterations
-            || self.window.planned_samples != planned_samples
-            || self.window.samples_used == 0
-            || self.window.samples_used > planned_samples
-        {
-            return Err(SpsaTuneResultError::InvalidWindow);
+        match &self.estimator {
+            SpsaEstimator::FinalCenter { iteration } => {
+                if *iteration != self.completed_iterations - 1 {
+                    return Err(SpsaTuneResultError::InvalidFinalCenterIteration {
+                        iteration: *iteration,
+                        completed: self.completed_iterations,
+                    });
+                }
+            }
+            SpsaEstimator::TailWindowMean(window) => {
+                if !(1..=100).contains(&window.percent) {
+                    return Err(SpsaTuneResultError::InvalidWindowPercent {
+                        percent: window.percent,
+                    });
+                }
+                let planned_samples = u32::try_from(
+                    (u64::from(self.settings.iterations) * u64::from(window.percent)).div_ceil(100),
+                )
+                .expect("a percentage of a u32 horizon fits in u32");
+                let expected_start = self.settings.iterations - planned_samples;
+                if window.planned_iterations != self.settings.iterations
+                    || window.start_iteration != expected_start
+                    || window.end_iteration_exclusive != self.settings.iterations
+                    || window.planned_samples != planned_samples
+                    || window.samples_used == 0
+                    || window.samples_used > planned_samples
+                {
+                    return Err(SpsaTuneResultError::InvalidWindow);
+                }
+            }
         }
         if self.parameters.is_empty() {
             return Err(SpsaTuneResultError::EmptyParameters);
@@ -786,9 +857,9 @@ impl SpsaTuneResult {
                 || parameter.original > parameter.max
                 || parameter.tuned < parameter.min
                 || parameter.tuned > parameter.max
-                || !parameter.mean.is_finite()
-                || parameter.mean < parameter.min as f64
-                || parameter.mean > parameter.max as f64
+                || !parameter.estimate.is_finite()
+                || parameter.estimate < parameter.min as f64
+                || parameter.estimate > parameter.max as f64
             {
                 return Err(SpsaTuneResultError::InvalidResultParameter {
                     name: parameter.name.clone(),
@@ -939,8 +1010,18 @@ pub enum SpsaTuneResultError {
         name: String,
         value: f64,
     },
-    #[error("SPSA final-window mean for {name:?} is not finite")]
-    NonFiniteMean { name: String },
+    #[error("SPSA estimate for {name:?} is not finite")]
+    NonFiniteEstimate { name: String },
+    #[error("SPSA has no completed iteration to take a final centre vector from")]
+    NoCompletedIteration,
+    #[error(
+        "SPSA result claims {completed} completed iterations against a horizon of {horizon}"
+    )]
+    InvalidCompletedIterations { completed: u32, horizon: u32 },
+    #[error(
+        "SPSA final-centre result names iteration {iteration} after {completed} completed iterations"
+    )]
+    InvalidFinalCenterIteration { iteration: u32, completed: u32 },
     #[error("unsupported SPSA tune-result schema version {version}")]
     UnsupportedResultSchema { version: u32 },
     #[error("unsupported SPSA schedule schema version {version}")]
@@ -1323,13 +1404,28 @@ mod tests {
                 centers: vec![16.0],
             })
             .collect::<Vec<_>>();
+        let window = SpsaEstimatorPolicy::TailWindowMean { percent: 30 };
         assert!(matches!(
-            bound.result_from_centers("0".repeat(64), &schedule, settings, 30, &history),
+            bound.result_from_centers("0".repeat(64), &schedule, settings, window, &history),
             Err(SpsaTuneResultError::FinalWindowNotReached {
                 start_iteration: 7,
                 completed_iterations: 7,
             })
         ));
+        // The default estimator needs no window and is available from the
+        // first completed iteration.
+        let early = bound
+            .result_from_centers(
+                "0".repeat(64),
+                &schedule,
+                settings,
+                SpsaEstimatorPolicy::FinalCenter,
+                &history,
+            )
+            .unwrap();
+        assert_eq!(early.estimator, SpsaEstimator::FinalCenter { iteration: 6 });
+        assert_eq!(early.completed_iterations, 7);
+
         for (iteration, center) in [(7, 10.0), (8, 11.0), (9, 13.5)] {
             history.push(SpsaCenterSample {
                 iteration,
@@ -1337,13 +1433,46 @@ mod tests {
             });
         }
         let result = bound
-            .result_from_centers("0".repeat(64), &schedule, settings, 30, &history)
+            .result_from_centers("0".repeat(64), &schedule, settings, window, &history)
             .unwrap();
-        assert_eq!(result.window.start_iteration, 7);
-        assert_eq!(result.window.planned_samples, 3);
-        assert_eq!(result.window.samples_used, 3);
-        assert_eq!(result.parameters[0].mean, 11.5);
+        let SpsaEstimator::TailWindowMean(recorded) = &result.estimator else {
+            panic!("expected a tail-window mean, got {:?}", result.estimator);
+        };
+        assert_eq!(recorded.start_iteration, 7);
+        assert_eq!(recorded.planned_samples, 3);
+        assert_eq!(recorded.samples_used, 3);
+        assert_eq!(result.parameters[0].estimate, 11.5);
         assert_eq!(result.parameters[0].tuned, 12);
+
+        // The default takes the last completed centre, not the window mean.
+        let final_center = bound
+            .result_from_centers(
+                "0".repeat(64),
+                &schedule,
+                settings,
+                SpsaEstimatorPolicy::FinalCenter,
+                &history,
+            )
+            .unwrap();
+        assert_eq!(
+            final_center.estimator,
+            SpsaEstimator::FinalCenter { iteration: 9 }
+        );
+        assert_eq!(final_center.parameters[0].estimate, 13.5);
+        assert_eq!(final_center.parameters[0].tuned, 14);
+        assert_eq!(final_center.schema_version, SPSA_TUNE_RESULT_SCHEMA_VERSION);
+
+        // Nothing committed yet is a refusal, never a vector from thin air.
+        assert!(matches!(
+            bound.result_from_centers(
+                "0".repeat(64),
+                &schedule,
+                settings,
+                SpsaEstimatorPolicy::FinalCenter,
+                &[],
+            ),
+            Err(SpsaTuneResultError::NoCompletedIteration)
+        ));
         assert_eq!(
             result
                 .verify_gate_identity("0".repeat(64), false)

@@ -26,6 +26,9 @@ use crate::match_runner::{
 #[serde(rename_all = "kebab-case")]
 pub enum SpsaStatus {
     Completed,
+    /// Stopped cleanly at an iteration boundary. The stored horizon is
+    /// untouched, so the same run directory resumes where it left off.
+    Cancelled,
     Invalid,
 }
 
@@ -83,6 +86,9 @@ pub struct SpsaDriverRequest {
     pub execution: MatchExecutionPlan,
     pub checkpoint: SpsaCheckpoint,
     pub progress: SpsaProgress,
+    /// Stop cleanly once this many iterations are committed. This is a request
+    /// about this invocation, never a change to the stored horizon.
+    pub stop_after_iteration: Option<u32>,
     pub observer: Option<Arc<dyn SpsaObserver>>,
 }
 
@@ -224,6 +230,20 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
             .progress
             .completed_iterations
             .store(state.completed_iterations(), Ordering::Relaxed);
+        // A staged stop lands on a committed boundary, so nothing partial is
+        // replayed and the horizon in the checkpoint is unchanged.
+        if request
+            .stop_after_iteration
+            .is_some_and(|limit| state.completed_iterations() >= limit)
+        {
+            return Ok(SpsaDriverReport {
+                status: SpsaStatus::Cancelled,
+                settings: request.settings,
+                completed_iterations,
+                invalid_iteration: None,
+                final_centers: state.centers().to_vec(),
+            });
+        }
     }
 
     Ok(SpsaDriverReport {

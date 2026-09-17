@@ -315,6 +315,151 @@ fn spsa_resource_plan_uses_the_tuned_hash_rail_and_rejects_ambiguous_direct_core
     );
 }
 
+/// Several iterations, so a staged stop has a boundary to land on and a tail
+/// window has more than one sample.
+fn multi_iteration_command(
+    tune: &std::path::Path,
+    run: &std::path::Path,
+    iterations: &str,
+) -> Command {
+    let mut command = cli();
+    command
+        .arg("spsa")
+        .arg(env!("CARGO_BIN_EXE_colosseum-cli"))
+        .arg("--engine-arg=__uci-stub")
+        .arg("--tune")
+        .arg(tune)
+        .args([
+            "--r-end",
+            "0.002",
+            "--iterations",
+            iterations,
+            "--games-per-iteration",
+            "2",
+            "--depth",
+            "1",
+            "--max-moves",
+            "2",
+            "--seed",
+            "7",
+            "--dir",
+        ])
+        .arg(run);
+    command
+}
+
+#[test]
+fn the_default_estimator_is_the_final_centre_and_the_tail_window_is_opt_in() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = write_tune(root.path());
+
+    let default_run = root.path().join("default");
+    let default_output = multi_iteration_command(&tune, &default_run, "4")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(
+        default_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&default_output.stderr)
+    );
+    let default: Value = serde_json::from_slice(&default_output.stdout).unwrap();
+    let estimator = &default["report"]["tuned_result"]["estimator"];
+    assert_eq!(estimator["kind"], "final-center");
+    assert_eq!(estimator["iteration"], 3);
+    assert_eq!(default["report"]["tuned_result"]["completed_iterations"], 4);
+    assert_eq!(default["report"]["tuned_result"]["schema_version"], 2);
+
+    let window_run = root.path().join("window");
+    let window_output = multi_iteration_command(&tune, &window_run, "4")
+        .args(["--final-window-percent", "50", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        window_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&window_output.stderr)
+    );
+    let window: Value = serde_json::from_slice(&window_output.stdout).unwrap();
+    let estimator = &window["report"]["tuned_result"]["estimator"];
+    assert_eq!(estimator["kind"], "tail-window-mean");
+    assert_eq!(estimator["percent"], 50);
+    assert_eq!(estimator["samples_used"], 2);
+    // The selected estimator is frozen into the run record exactly as the
+    // default is, so a reader knows which one produced the vector.
+    let record: Value =
+        serde_json::from_slice(&std::fs::read(window_run.join("run-record.json")).unwrap())
+            .unwrap();
+    assert_eq!(record["workflow"]["final_window_percent"], 50);
+    let default_record: Value =
+        serde_json::from_slice(&std::fs::read(default_run.join("run-record.json")).unwrap())
+            .unwrap();
+    assert!(default_record["workflow"]["final_window_percent"].is_null());
+}
+
+#[test]
+fn stop_after_iteration_stops_on_a_boundary_and_leaves_the_horizon_alone() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = write_tune(root.path());
+    let run = root.path().join("run");
+
+    let stopped = multi_iteration_command(&tune, &run, "4")
+        .args(["--stop-after-iteration", "2", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(stopped.status.code(), Some(6));
+    let value: Value = serde_json::from_slice(&stopped.stdout).unwrap();
+    assert_eq!(value["report"]["driver"]["status"], "cancelled");
+    assert_eq!(
+        value["report"]["driver"]["completed_iterations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    // The stored horizon is untouched by the stop request.
+    assert_eq!(value["report"]["driver"]["settings"]["iterations"], 4);
+    let record: Value =
+        serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
+    assert_eq!(record["status"], "cancelled");
+    assert_eq!(record["workflow"]["settings"]["iterations"], 4);
+    assert_eq!(record["workflow"]["stop_after_iteration"], 2);
+    // A clean stop still produces an on-demand gate candidate.
+    assert_eq!(
+        value["report"]["tuned_result"]["estimator"]["iteration"],
+        1
+    );
+
+    let status = cli()
+        .args(["status"])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["record"]["status"], "cancelled");
+
+    // Resuming the same directory continues to the stored horizon.
+    let resumed = multi_iteration_command(&tune, &run, "4")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(
+        resumed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
+    assert_eq!(resumed["report"]["driver"]["status"], "completed");
+    assert_eq!(
+        resumed["report"]["driver"]["completed_iterations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+}
+
 #[test]
 fn complete_mini_match_is_one_durable_gradient_commit() {
     let root = tempfile::tempdir().unwrap();
@@ -358,7 +503,14 @@ fn complete_mini_match_is_one_durable_gradient_commit() {
     ] {
         assert!(run.join(artifact).is_file(), "missing {artifact}");
     }
-    assert_eq!(value["report"]["tuned_result"]["window"]["percent"], 10);
+    // Without --final-window-percent the default estimator is the final
+    // completed centre vector, not an average over a tail window.
+    assert_eq!(
+        value["report"]["tuned_result"]["estimator"]["kind"],
+        "final-center"
+    );
+    assert_eq!(value["report"]["tuned_result"]["estimator"]["iteration"], 0);
+    assert_eq!(value["report"]["tuned_result"]["completed_iterations"], 1);
     assert_eq!(
         value["report"]["tuned_result"]["parameters"][0]["tuned"],
         16
