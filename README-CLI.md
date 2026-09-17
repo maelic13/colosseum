@@ -11,7 +11,7 @@ custom build command or source-tree integration.
 ## Start here
 
 Download the archive for your platform from the
-[Colosseum releases page](https://github.com/maelic13/colosseum/releases),
+[Colosseum CLI release list](https://github.com/maelic13/colosseum/releases?q=tag%3Acli-v),
 extract it, and check the installation:
 
 ```text

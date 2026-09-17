@@ -40,8 +40,9 @@ interrupted tournament.
 
 Download the current GUI from the
 [Colosseum 1.0.2 release](https://github.com/maelic13/colosseum/releases/tag/v1.0.2).
-Future GUI releases use `gui-v…` tags; the complete history is on the
-[releases page](https://github.com/maelic13/colosseum/releases).
+Future GUI releases use `gui-v…` tags; the complete GUI history is on the
+[GUI release list](https://github.com/maelic13/colosseum/releases?q=tag%3Agui-v)
+and the legacy `v…` tags above it.
 
 ### Windows
 
@@ -138,9 +139,9 @@ explicit path or be resumed there.
 
 Start with the concise [CLI overview](README-CLI.md) or go directly to the
 [complete CLI guide](docs/cli/README.md). Consult the
-[CLI changelog](CHANGELOG-CLI.md) for release history. Portable archives and
-independently versioned `cli-v…` releases are available on the
-[releases page](https://github.com/maelic13/colosseum/releases).
+[CLI changelog](CHANGELOG-CLI.md) for release history. Portable archives from
+every independently versioned `cli-v…` release are on the
+[CLI release list](https://github.com/maelic13/colosseum/releases?q=tag%3Acli-v).
 
 ---
 

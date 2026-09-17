@@ -154,6 +154,62 @@ fn independent_release_lanes_are_complete_and_least_privileged() {
     }
 }
 
+#[test]
+fn repository_latest_release_is_owned_by_the_gui_product_lane() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let gui = fs::read_to_string(root.join(".github/workflows/release-gui.yml")).unwrap();
+    let cli = fs::read_to_string(root.join(".github/workflows/release-cli.yml")).unwrap();
+
+    // GitHub keeps exactly one repository-wide "latest" release. Leaving it to
+    // chance lets a CLI tag displace the GUI download the front page offers.
+    assert!(
+        cli.contains("\n          make_latest: false\n"),
+        "CLI release lane must never claim the repository-wide latest release"
+    );
+    assert!(
+        gui.contains(
+            "\n          make_latest: ${{ needs.validate.outputs.prerelease == 'true' && 'false' || 'true' }}\n"
+        ),
+        "GUI release lane must claim latest for a stable release and never for a prerelease"
+    );
+    for workflow in [&gui, &cli] {
+        assert_eq!(workflow.matches("make_latest:").count(), 1);
+    }
+}
+
+#[test]
+fn user_facing_documentation_links_product_tag_lists_not_repository_latest() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut documents = vec![
+        root.join("README.md"),
+        root.join("README-CLI.md"),
+        root.join("CHANGELOG.md"),
+        root.join("CHANGELOG-CLI.md"),
+        root.join("CHANGELOG-GUI.md"),
+    ];
+    documents.extend(
+        fs::read_dir(root.join("docs/cli"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path()),
+    );
+
+    for document in documents {
+        let text = fs::read_to_string(&document).unwrap();
+        assert!(
+            !text.contains("/releases/latest"),
+            "{} links the repository-wide latest release",
+            document.display()
+        );
+        // An unfiltered release list mixes both products; product pages link a
+        // tag-filtered list instead.
+        assert!(
+            !text.contains("colosseum/releases)") && !text.contains("colosseum/releases>"),
+            "{} links the unscoped repository release list",
+            document.display()
+        );
+    }
+}
+
 fn source_files(directory: &std::path::Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for entry in fs::read_dir(directory).unwrap() {

@@ -130,8 +130,12 @@ not use it as a product update contract:
 - the GUI updater lists releases and selects the highest compatible stable
   `gui-v` tag, with a legacy `v` fallback only for versions through 1.0.2;
 - any future CLI updater selects only `cli-v` tags;
-- README download links lead to explicit product releases/release lists rather
-  than `/releases/latest`;
+- both release workflows set `make_latest` explicitly rather than leaving the
+  repository-wide flag to publication order: the GUI lane claims it for a
+  stable release and never for a prerelease, the CLI lane never claims it, and
+  the CLI architecture test asserts both;
+- README download links lead to explicit product releases/tag-filtered release
+  lists rather than `/releases/latest` or the unscoped release list;
 - prereleases are ignored by stable update checks unless the user opts into a
   prerelease channel.
 

@@ -241,6 +241,10 @@ jobs:
         with:
           name: Colosseum CLI v${{ needs.prepare.outputs.version }}
           body_path: release-artifacts/RELEASE-NOTES.md
+          # GitHub keeps one repository-wide "latest" release for both products.
+          # The CLI never claims it, so a CLI tag cannot displace the GUI
+          # download the repository front page offers.
+          make_latest: false
           files: |
             release-artifacts/colosseum-cli-*
             release-artifacts/SHA256SUMS

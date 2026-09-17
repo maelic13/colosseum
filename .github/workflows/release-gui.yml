@@ -499,6 +499,9 @@ jobs:
           name: Colosseum GUI v${{ needs.validate.outputs.version }}
           body_path: release-artifacts/RELEASE-NOTES.md
           prerelease: ${{ needs.validate.outputs.prerelease == 'true' }}
+          # GitHub keeps one repository-wide "latest" release for both products.
+          # A stable GUI release claims it; a GUI prerelease never does.
+          make_latest: ${{ needs.validate.outputs.prerelease == 'true' && 'false' || 'true' }}
           files: |
             release-artifacts/colosseum-*
             release-artifacts/SHA256SUMS
