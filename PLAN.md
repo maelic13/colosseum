@@ -2350,6 +2350,15 @@ games" procedure at 10.10, once, on the final state.
   fixtures asserting 15 shared one-thread slots on a 16-core single-class
   host and 7 disjoint ones, user documentation. Found when a validation
   project's one-thread gate at concurrency 14 was refused on 16 cores.
+  **Verified live 2026-09-17** on the 16-core, two-cache-domain host: a
+  14-slot match sampled every second showed all 28 engine processes on 14
+  distinct physical cores (masks `0x3` through `0xC000000`, cores 0–13) from
+  four seconds after launch, core 14 spare and core 15 the headroom; a
+  process is unpinned only for the sub-second window between spawn and the
+  verified apply, before its handshake. A one-thread engine pinned to a
+  core floats between that core's SMT siblings, so a system monitor shows
+  every logical CPU active at about 45% utilisation; that is the expected
+  picture, not a placement failure.
 - **(l) Pair identity in PGN and run-directory telemetry** per the revised
   S5.4b and S5.10: identity tags on every written game, `stats <pgn>`
   reconstructing pairs and the pentanomial vector from them, `stats
@@ -2384,7 +2393,25 @@ games" procedure at 10.10, once, on the final state.
   Also correct the `rng.rs` doc comment that still ties sampling to
   `stats_version`, and keep the versioned schema refusal reachable for old
   SPSA schedule and result files instead of a raw unknown-field error.
-  Items (k) to (o) precede (j).
+- **(p) Progress reports.** A long run must tell the operator where it
+  stands without spamming the console. Every durable command prints one
+  progress block on standard error at the resolved interval (default 60
+  seconds, `--progress-interval-secs`, plus a final block at termination),
+  never more often than the interval and never on every commit. The block
+  carries what a decision needs: for `sprt` and `calibrate`, games and
+  pairs done, W/D/L and the pentanomial vector, the point estimate with its
+  95% interval in the run's Elo model (both models for SPRT), LLR against
+  its bounds, fault and time-loss counts, pairs per hour and, for SPRT, the
+  expected remaining games at the current drift; for `match`, score, Elo
+  with interval and rate; for `spsa`, iteration and percentage, elapsed and
+  a linear ETA, the last mini-match pair score, the current gain and
+  perturbation scale, and the three centres that moved most in absolute
+  range units since the previous report; for `tournament`, games done, the
+  current standings header with ratings and error bars, rate and ETA. The
+  same block is what `status` prints for the run. The append-only `run.log`
+  records every block so a console can be closed and the trajectory
+  recovered. Found when a maintainer stopped a real SPRT because the console
+  showed only pair counts. Items (k) to (p) precede (j).
 
   **Implementation evidence (Phase 10.9e):** the abandoned game was the one
   game every driver already refused to score and no writer said so. It now

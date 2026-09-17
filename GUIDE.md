@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.10 — EXIT**, the release acceptance repeat, which needs a real machine and the maintainer |
+| Next step | **10.9f** progress reports, then **10.10 — EXIT**, which needs a real machine and the maintainer |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -846,6 +846,17 @@ model as well.
   run-dir-versus-PGN equality test on a run with one aborted game; `rng.rs`
   doc comment corrected; versioned schema refusal kept reachable for old
   SPSA schedule and result files — PLAN §Phase 10(o)
+- ☐ **10.9f** — **Model: Terra High.** Progress reports on stderr at the
+  resolved interval and at termination, never per commit: `sprt` and
+  `calibrate` show games, pairs, W/D/L, pentanomial, Elo and nElo with 95%
+  intervals, LLR against bounds, faults, pairs per hour and expected
+  remaining games; `match` shows score, Elo with interval and rate; `spsa`
+  shows iteration and percentage, elapsed and ETA, last mini-match score,
+  current gain and perturbation scale, and the three centres that moved
+  most since the previous report; `tournament` shows games, standings
+  header, rate and ETA; `status` prints the same block; every block is
+  appended to `run.log`; tests assert the block content and the interval
+  — PLAN §Phase 10(p)
 - ☐ **10.10 — EXIT** — **Model: Sol High.** Release acceptance repeat:
   regenerate the command reference, update `CHANGELOG-CLI.md` under 0.1.0,
   Phase 4B oracle replay and Phase 8.1 parity matrix on the corrected source,
