@@ -237,23 +237,26 @@ struct TournamentRunCommand {
     #[arg(long)]
     ponder: bool,
 
+    /// Adjudicate a draw once both engines agree; off unless requested.
     #[arg(long)]
-    no_draw_adjudication: bool,
-    #[arg(long, default_value_t = 40, value_parser = clap::value_parser!(u32).range(1..))]
+    draw_adjudication: bool,
+    #[arg(long, default_value_t = 40, value_parser = clap::value_parser!(u32).range(1..), requires = "draw_adjudication")]
     draw_move: u32,
-    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..))]
+    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..), requires = "draw_adjudication")]
     draw_moves: u32,
-    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(i32).range(0..))]
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(i32).range(0..), requires = "draw_adjudication")]
     draw_score_cp: i32,
+    /// Adjudicate a resignation once both engines agree; off unless requested.
     #[arg(long)]
-    no_resign_adjudication: bool,
+    resign_adjudication: bool,
     /// Use only the losing engine's evaluations for resignation adjudication.
-    #[arg(long)]
+    #[arg(long, requires = "resign_adjudication")]
     one_sided_resign_adjudication: bool,
-    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..))]
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..), requires = "resign_adjudication")]
     resign_moves: u32,
-    #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(i32).range(1..))]
+    #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(i32).range(1..), requires = "resign_adjudication")]
     resign_score_cp: i32,
+    /// Draw after this many full moves; omitted means no maximum-move cap.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     max_moves: Option<u32>,
 
@@ -351,25 +354,25 @@ struct MatchConditions {
     #[arg(long)]
     ponder: bool,
 
-    /// Disable the default conservative draw adjudication.
+    /// Adjudicate a draw once both engines agree; off unless requested.
     #[arg(long)]
-    no_draw_adjudication: bool,
-    #[arg(long, default_value_t = 40, value_parser = clap::value_parser!(u32).range(1..))]
+    draw_adjudication: bool,
+    #[arg(long, default_value_t = 40, value_parser = clap::value_parser!(u32).range(1..), requires = "draw_adjudication")]
     draw_move: u32,
-    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..))]
+    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..), requires = "draw_adjudication")]
     draw_moves: u32,
-    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(i32).range(0..))]
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(i32).range(0..), requires = "draw_adjudication")]
     draw_score_cp: i32,
 
-    /// Disable the default two-sided resignation adjudication.
+    /// Adjudicate a resignation once both engines agree; off unless requested.
     #[arg(long)]
-    no_resign_adjudication: bool,
+    resign_adjudication: bool,
     /// Use only the losing engine's evaluations for resignation adjudication.
-    #[arg(long)]
+    #[arg(long, requires = "resign_adjudication")]
     one_sided_resign_adjudication: bool,
-    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..))]
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..), requires = "resign_adjudication")]
     resign_moves: u32,
-    #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(i32).range(1..))]
+    #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(i32).range(1..), requires = "resign_adjudication")]
     resign_score_cp: i32,
 
     /// Draw after this many full moves; omitted means no maximum-move cap.
@@ -631,25 +634,26 @@ struct SpsaConditions {
     #[arg(long)]
     ponder: bool,
 
-    /// Disable the default conservative draw adjudication.
+    /// Adjudicate a draw once both engines agree; off unless requested.
     #[arg(long)]
-    no_draw_adjudication: bool,
-    #[arg(long, default_value_t = 40, value_parser = clap::value_parser!(u32).range(1..))]
+    draw_adjudication: bool,
+    #[arg(long, default_value_t = 40, value_parser = clap::value_parser!(u32).range(1..), requires = "draw_adjudication")]
     draw_move: u32,
-    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..))]
+    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..), requires = "draw_adjudication")]
     draw_moves: u32,
-    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(i32).range(0..))]
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(i32).range(0..), requires = "draw_adjudication")]
     draw_score_cp: i32,
-    /// Disable the default two-sided resignation adjudication.
+    /// Adjudicate a resignation once both engines agree; off unless requested.
     #[arg(long)]
-    no_resign_adjudication: bool,
+    resign_adjudication: bool,
     /// Use only the losing engine's evaluations for resignation adjudication.
-    #[arg(long)]
+    #[arg(long, requires = "resign_adjudication")]
     one_sided_resign_adjudication: bool,
-    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..))]
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..), requires = "resign_adjudication")]
     resign_moves: u32,
-    #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(i32).range(1..))]
+    #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(i32).range(1..), requires = "resign_adjudication")]
     resign_score_cp: i32,
+    /// Draw after this many full moves; omitted means no maximum-move cap.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     max_moves: Option<u32>,
 
@@ -2066,12 +2070,12 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
     }
     let adjudication = AdjudicationConfig {
         max_moves: conditions.max_moves,
-        draw: (!conditions.no_draw_adjudication).then_some(DrawAdjudication {
+        draw: conditions.draw_adjudication.then_some(DrawAdjudication {
             min_ply: conditions.draw_move.saturating_mul(2),
             move_count: conditions.draw_moves,
             score_cp: conditions.draw_score_cp,
         }),
-        resign: (!conditions.no_resign_adjudication).then_some(ResignAdjudication {
+        resign: conditions.resign_adjudication.then_some(ResignAdjudication {
             move_count: conditions.resign_moves,
             score_cp: conditions.resign_score_cp,
             two_sided: !conditions.one_sided_resign_adjudication,
@@ -2756,12 +2760,12 @@ async fn run_tournament_command(
     }
     let adjudication = AdjudicationConfig {
         max_moves: command.max_moves,
-        draw: (!command.no_draw_adjudication).then_some(DrawAdjudication {
+        draw: command.draw_adjudication.then_some(DrawAdjudication {
             min_ply: command.draw_move.saturating_mul(2),
             move_count: command.draw_moves,
             score_cp: command.draw_score_cp,
         }),
-        resign: (!command.no_resign_adjudication).then_some(ResignAdjudication {
+        resign: command.resign_adjudication.then_some(ResignAdjudication {
             move_count: command.resign_moves,
             score_cp: command.resign_score_cp,
             two_sided: !command.one_sided_resign_adjudication,
@@ -5814,12 +5818,12 @@ fn resolve_placement(value: &str, headroom_cores: usize) -> Result<CpuPlacementP
 fn resolve_adjudication(command: &MatchConditions) -> AdjudicationConfig {
     AdjudicationConfig {
         max_moves: command.max_moves,
-        draw: (!command.no_draw_adjudication).then_some(DrawAdjudication {
+        draw: command.draw_adjudication.then_some(DrawAdjudication {
             min_ply: command.draw_move.saturating_mul(2),
             move_count: command.draw_moves,
             score_cp: command.draw_score_cp,
         }),
-        resign: (!command.no_resign_adjudication).then_some(ResignAdjudication {
+        resign: command.resign_adjudication.then_some(ResignAdjudication {
             move_count: command.resign_moves,
             score_cp: command.resign_score_cp,
             two_sided: !command.one_sided_resign_adjudication,

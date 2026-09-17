@@ -47,9 +47,9 @@ colosseum-cli tournament run \
 
 The time-control choices are `--movetime-ms`, `--base-ms` with optional
 `--increment-ms`, `--nodes`, or `--depth`; when omitted the default is
-`3+0.03`. Draw, two-sided resignation and maximum-move adjudication use the
-same controls and conservative defaults as fixed matches. The opening book is
-optional. Its order, start, PGN ply count and seed have the same meaning as in
+`3+0.03`. Draw, resignation and maximum-move adjudication are off unless
+requested and use the same enabling flags, parameters and refusals as fixed
+matches. The opening book is optional. Its order, start, PGN ply count and seed have the same meaning as in
 the match runner.
 
 `--ponder` enables and records UCI pondering for every participant. It is off

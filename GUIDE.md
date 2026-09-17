@@ -18,8 +18,8 @@ numbers, internal naming or method argumentation.
 | What is missing | **Phase 10** first-release corrections (release-latest handling, adjudication off, class-aware placement, PGN annotations, final-theta estimator, graceful stop, fixed rating field, book range policy, command split), then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and release CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.2** adjudication off by default, then 10.3 onward in order |
-| Recommended model | **Sol High** for 10.2 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
+| Next step | **10.3** class-aware CPU placement, then 10.4 onward in order |
+| Recommended model | **Sol High** for 10.3 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
 
@@ -773,7 +773,7 @@ model as well.
   stable release and false for a prerelease; the architecture test asserts
   both; README and product docs link to product tag lists, never
   `/releases/latest` — PLAN §Phase 10(a)
-- ☐ **10.2** — **Model: Sol High.** Adjudication off by default in `match`,
+- ☑ **10.2 — DONE** — **Model: Sol High.** Adjudication off by default in `match`,
   `sprt`, `calibrate`, `spsa` and `tournament`; explicit enabling flags carry
   their parameters; `--no-*` flags removed; `--one-sided-resign-adjudication`
   requires resignation enabled; run files, config hashing, dry-run, fixtures,

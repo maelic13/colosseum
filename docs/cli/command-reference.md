@@ -185,8 +185,8 @@ Options:
       --ponder
           Let engines think on the opponent's clock through the UCI ponder protocol
 
-      --no-draw-adjudication
-          Disable the default conservative draw adjudication
+      --draw-adjudication
+          Adjudicate a draw once both engines agree; off unless requested
 
       --draw-move <DRAW_MOVE>
           [default: 40]
@@ -197,8 +197,8 @@ Options:
       --draw-score-cp <DRAW_SCORE_CP>
           [default: 10]
 
-      --no-resign-adjudication
-          Disable the default two-sided resignation adjudication
+      --resign-adjudication
+          Adjudicate a resignation once both engines agree; off unless requested
 
       --one-sided-resign-adjudication
           Use only the losing engine's evaluations for resignation adjudication
@@ -422,8 +422,8 @@ Options:
       --ponder
           Let engines think on the opponent's clock through the UCI ponder protocol
 
-      --no-draw-adjudication
-          Disable the default conservative draw adjudication
+      --draw-adjudication
+          Adjudicate a draw once both engines agree; off unless requested
 
       --draw-move <DRAW_MOVE>
           [default: 40]
@@ -434,8 +434,8 @@ Options:
       --draw-score-cp <DRAW_SCORE_CP>
           [default: 10]
 
-      --no-resign-adjudication
-          Disable the default two-sided resignation adjudication
+      --resign-adjudication
+          Adjudicate a resignation once both engines agree; off unless requested
 
       --one-sided-resign-adjudication
           Use only the losing engine's evaluations for resignation adjudication
@@ -604,8 +604,8 @@ Options:
       --ponder
           Let both perturbation arms think on the opponent's clock
 
-      --no-draw-adjudication
-          Disable the default conservative draw adjudication
+      --draw-adjudication
+          Adjudicate a draw once both engines agree; off unless requested
 
       --draw-move <DRAW_MOVE>
           [default: 40]
@@ -616,8 +616,8 @@ Options:
       --draw-score-cp <DRAW_SCORE_CP>
           [default: 10]
 
-      --no-resign-adjudication
-          Disable the default two-sided resignation adjudication
+      --resign-adjudication
+          Adjudicate a resignation once both engines agree; off unless requested
 
       --one-sided-resign-adjudication
           Use only the losing engine's evaluations for resignation adjudication
@@ -629,7 +629,7 @@ Options:
           [default: 600]
 
       --max-moves <MAX_MOVES>
-
+          Draw after this many full moves; omitted means no maximum-move cap
 
       --concurrency <CONCURRENCY>
           Number of games allowed to run at once
@@ -1013,8 +1013,8 @@ Options:
       --ponder
           Let engines think on the opponent's clock through the UCI ponder protocol
 
-      --no-draw-adjudication
-          Disable the default conservative draw adjudication
+      --draw-adjudication
+          Adjudicate a draw once both engines agree; off unless requested
 
       --draw-move <DRAW_MOVE>
           [default: 40]
@@ -1025,8 +1025,8 @@ Options:
       --draw-score-cp <DRAW_SCORE_CP>
           [default: 10]
 
-      --no-resign-adjudication
-          Disable the default two-sided resignation adjudication
+      --resign-adjudication
+          Adjudicate a resignation once both engines agree; off unless requested
 
       --one-sided-resign-adjudication
           Use only the losing engine's evaluations for resignation adjudication
@@ -1860,8 +1860,8 @@ Options:
       --ponder
           Let engines think on the opponent's clock through the UCI ponder protocol
 
-      --no-draw-adjudication
-
+      --draw-adjudication
+          Adjudicate a draw once both engines agree; off unless requested
 
       --draw-move <DRAW_MOVE>
           [default: 40]
@@ -1872,8 +1872,8 @@ Options:
       --draw-score-cp <DRAW_SCORE_CP>
           [default: 10]
 
-      --no-resign-adjudication
-
+      --resign-adjudication
+          Adjudicate a resignation once both engines agree; off unless requested
 
       --one-sided-resign-adjudication
           Use only the losing engine's evaluations for resignation adjudication
@@ -1885,7 +1885,7 @@ Options:
           [default: 600]
 
       --max-moves <MAX_MOVES>
-
+          Draw after this many full moves; omitted means no maximum-move cap
 
       --concurrency <CONCURRENCY>
           Number of games allowed to run at once

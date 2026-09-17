@@ -706,7 +706,19 @@ is pipeline evidence, not a full tolerance measurement. See
 - **Clock accounting per S5.4a**, explicit and recorded.
 - **Adjudication:** off by default (S3 Tier B). Draw, resign and max-moves are
   each individually enableable with explicit parameters; enabling one is part
-  of the resolved configuration and run identity. Arbitrary engine tablebase UCI options may
+  of the resolved configuration and run identity.
+
+  **Implementation evidence (Phase 10.2):** `--draw-adjudication` and
+  `--resign-adjudication` enable their rule on `match`, `sprt`, `calibrate`,
+  `spsa` and `tournament run`; the former `--no-*` flags are gone rather than
+  retained as no-ops. Every parameter (`--draw-move`, `--draw-moves`,
+  `--draw-score-cp`, `--resign-moves`, `--resign-score-cp`) and the
+  `--one-sided-resign-adjudication` modifier requires its enabling flag, so a
+  parameter supplied alone is a visible refusal instead of a silently ignored
+  setting. Resolved configuration, its SHA-256, the run record, dry-run output
+  and the resume comparison all carry the three null rules by default. The
+  user documentation names common public-framework settings for users who want
+  throughput. Arbitrary engine tablebase UCI options may
   be forwarded; harness-side tablebase adjudication is deferred to Phase 8
   because it requires a new probing dependency and is not necessary for a
   trustworthy SPRT.

@@ -61,20 +61,49 @@ version, both margins, measured monotonic resolution and per-side charged-time
 sample count/minimum/median/maximum. These figures intentionally do not claim
 to separate engine work from scheduler or pipe latency inside the interval.
 
-Draw and resignation adjudication are enabled by default with conservative
-settings. All settings are ordinary policy and can be changed or disabled:
+Adjudication is off. Games are played out under the rules of chess unless you
+ask for a rule, because every adjudication rule ends games the engines would
+otherwise have had to convert, and conversion is part of what a strength
+measurement measures. Each rule is enabled by its own flag and carries its own
+parameters:
 
-| Policy | Default | Controls |
+| Policy | Enable with | Parameters and defaults |
 |---|---|---|
-| Draw | from move 40, 8 moves, ±10 cp | `--draw-move`, `--draw-moves`, `--draw-score-cp`, `--no-draw-adjudication` |
-| Resignation | 3 moves, ±600 cp, both engines agreeing | `--resign-moves`, `--resign-score-cp`, `--one-sided-resign-adjudication`, `--no-resign-adjudication` |
-| Maximum moves | disabled | `--max-moves N` |
+| Draw | `--draw-adjudication` | `--draw-move 40`, `--draw-moves 8`, `--draw-score-cp 10` |
+| Resignation | `--resign-adjudication` | `--resign-moves 3`, `--resign-score-cp 600`, two-sided unless `--one-sided-resign-adjudication` |
+| Maximum moves | `--max-moves N` | none; omitting the flag leaves the cap off |
 
-`--one-sided-resign-adjudication` reproduces harness policies that consult only
-the evaluations reported by the engine that would lose. It is less
-conservative when engines disagree and can bias comparisons between engines
-with differently scaled evaluations, so the two-sided default is preferred for
-new experiments.
+A parameter without its enabling flag is refused rather than silently ignored,
+so `--resign-score-cp 900` alone is an error and never a run that resigned at
+600. Enabling a rule is part of the resolved configuration, the run identity
+and the resume comparison.
+
+The shipped parameters are conservative on purpose: a draw needs agreement
+within ±10 cp for 8 consecutive moves and never before move 40, because early
+evaluations agree by coincidence rather than because a position is drawn.
+Resignation is two-sided because a one-sided rule adjudicates on the losing
+side's own evaluation alone, which is a measurable asymmetry whenever the two
+sides score differently — most sharply in SPSA, where both arms are the same
+binary. `--one-sided-resign-adjudication` exists to reproduce a harness policy
+deliberately and requires `--resign-adjudication`.
+
+Throughput is the reason to enable these rules, and it is a legitimate one.
+Settings in common use elsewhere, for users who want to match them:
+
+```text
+# Approximately the usual fastchess/cutechess draw and resign policy
+--draw-adjudication --draw-move 40 --draw-moves 8 --draw-score-cp 10 --resign-adjudication --resign-moves 3 --resign-score-cp 600
+
+# Fishtest-style: resignation off, draws adjudicated late and tightly
+--draw-adjudication --draw-move 40 --draw-moves 8 --draw-score-cp 10
+
+# A one-sided resign rule, as some older harnesses apply it
+--resign-adjudication --resign-moves 3 --resign-score-cp 600 --one-sided-resign-adjudication
+```
+
+Whatever you choose, keep tuning and gating conditions identical: a tuner
+optimising under different game-termination rules than the gate measures is
+optimising a different objective.
 
 Natural mate and draw rules always apply. Tablebase-related UCI options can be
 forwarded through `--a-option` and `--b-option`; Colosseum does not inspect the

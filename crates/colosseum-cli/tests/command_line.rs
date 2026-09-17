@@ -794,7 +794,6 @@ fn calibration_persists_a_degenerate_identical_binary_run_as_inconclusive() {
             "--b-engine-arg=__uci-stub",
             "--max-moves",
             "2",
-            "--no-resign-adjudication",
             "--dir",
         ])
         .arg(&run)
@@ -1406,7 +1405,7 @@ fn fixed_match_rejects_ambiguous_or_incomplete_time_controls() {
 }
 
 #[test]
-fn fixed_match_resolves_default_and_disableable_adjudication() {
+fn fixed_match_leaves_adjudication_off_until_it_is_requested() {
     let default_output = cli()
         .args(["match", "--games", "1", "a", "b", "--dry-run", "--json"])
         .output()
@@ -1414,23 +1413,19 @@ fn fixed_match_resolves_default_and_disableable_adjudication() {
     assert!(default_output.status.success());
     let default: serde_json::Value = serde_json::from_slice(&default_output.stdout).unwrap();
     let adjudication = &default["resolved_configuration"]["adjudication"];
-    assert_eq!(adjudication["draw"]["min_ply"], 80);
-    assert_eq!(adjudication["draw"]["move_count"], 8);
-    assert_eq!(adjudication["draw"]["score_cp"], 10);
-    assert_eq!(adjudication["resign"]["move_count"], 3);
-    assert_eq!(adjudication["resign"]["score_cp"], 600);
-    assert_eq!(adjudication["resign"]["two_sided"], true);
+    assert!(adjudication["draw"].is_null());
+    assert!(adjudication["resign"].is_null());
     assert!(adjudication["max_moves"].is_null());
 
-    let disabled_output = cli()
+    let enabled_output = cli()
         .args([
             "match",
             "--games",
             "1",
             "a",
             "b",
-            "--no-draw-adjudication",
-            "--no-resign-adjudication",
+            "--draw-adjudication",
+            "--resign-adjudication",
             "--max-moves",
             "75",
             "--dry-run",
@@ -1438,11 +1433,15 @@ fn fixed_match_resolves_default_and_disableable_adjudication() {
         ])
         .output()
         .unwrap();
-    assert!(disabled_output.status.success());
-    let disabled: serde_json::Value = serde_json::from_slice(&disabled_output.stdout).unwrap();
-    let adjudication = &disabled["resolved_configuration"]["adjudication"];
-    assert!(adjudication["draw"].is_null());
-    assert!(adjudication["resign"].is_null());
+    assert!(enabled_output.status.success());
+    let enabled: serde_json::Value = serde_json::from_slice(&enabled_output.stdout).unwrap();
+    let adjudication = &enabled["resolved_configuration"]["adjudication"];
+    assert_eq!(adjudication["draw"]["min_ply"], 80);
+    assert_eq!(adjudication["draw"]["move_count"], 8);
+    assert_eq!(adjudication["draw"]["score_cp"], 10);
+    assert_eq!(adjudication["resign"]["move_count"], 3);
+    assert_eq!(adjudication["resign"]["score_cp"], 600);
+    assert_eq!(adjudication["resign"]["two_sided"], true);
     assert_eq!(adjudication["max_moves"], 75);
 
     let one_sided_output = cli()
@@ -1452,6 +1451,7 @@ fn fixed_match_resolves_default_and_disableable_adjudication() {
             "1",
             "a",
             "b",
+            "--resign-adjudication",
             "--one-sided-resign-adjudication",
             "--dry-run",
             "--json",
@@ -1464,6 +1464,35 @@ fn fixed_match_resolves_default_and_disableable_adjudication() {
         one_sided["resolved_configuration"]["adjudication"]["resign"]["two_sided"],
         false
     );
+}
+
+/// An adjudication parameter without its enabling flag is a visible refusal,
+/// never a silently ignored setting.
+#[test]
+fn adjudication_parameters_require_their_enabling_flag() {
+    for (command, arguments) in [
+        ("match", vec!["--draw-move", "30"]),
+        ("match", vec!["--draw-moves", "4"]),
+        ("match", vec!["--draw-score-cp", "5"]),
+        ("match", vec!["--resign-moves", "4"]),
+        ("match", vec!["--resign-score-cp", "900"]),
+        ("match", vec!["--one-sided-resign-adjudication"]),
+    ] {
+        let mut invocation = cli();
+        invocation.args([command, "--games", "1", "a", "b"]);
+        invocation.args(&arguments);
+        invocation.args(["--dry-run", "--json"]);
+        let output = invocation.output().unwrap();
+        assert!(
+            !output.status.success(),
+            "{command} {arguments:?} was accepted without its enabling flag"
+        );
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            stderr.contains("adjudication"),
+            "{command} {arguments:?} refusal does not name the missing enabling flag: {stderr}"
+        );
+    }
 }
 
 #[test]

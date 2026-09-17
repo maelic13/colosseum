@@ -41,8 +41,6 @@ fn calibration(run: &Path, tolerance_nelo: f64) -> Command {
             "--b-engine-arg=--sleep-ms=50",
             "--max-moves",
             "2",
-            "--no-draw-adjudication",
-            "--no-resign-adjudication",
             "--concurrency",
             "1",
             "--placement",
