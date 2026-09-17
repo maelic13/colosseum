@@ -412,10 +412,10 @@ fn a_tournament_block_names_the_standings_header() {
     assert!(last.contains("1. "), "no ranked row in:\n{last}");
 }
 
-/// A tune reports what the last mini-match said, how hard the schedule is
-/// pushing, and which centres are moving.
+/// A tune's console block reports where it stands and what has moved; its
+/// per-iteration trajectory is recorded rather than printed.
 #[test]
-fn a_tune_block_names_its_iteration_gain_and_moving_centres() {
+fn a_tune_block_reports_progress_and_records_its_trajectory() {
     let root = tempfile::tempdir().unwrap();
     let tune = root.path().join("tune.toml");
     std::fs::write(
@@ -434,7 +434,7 @@ fn a_tune_block_names_its_iteration_gain_and_moving_centres() {
             "--r-end",
             "0.002",
             "--iterations",
-            "2",
+            "4",
             "--games-per-iteration",
             "2",
             "--depth",
@@ -444,28 +444,78 @@ fn a_tune_block_names_its_iteration_gain_and_moving_centres() {
             "--seed",
             "7",
             "--progress-every",
-            "1",
+            "2",
             "--progress-min-secs",
             "1",
             "--dir",
         ])
         .arg(&run)
-        .arg("--json")
         .output()
         .unwrap();
     assert!(output.status.success(), "{}", stderr(&output));
     let text = stderr(&output);
     let last = blocks(&text).pop().expect("a final block");
     assert!(
-        last.starts_with("progress [spsa]: 2/2 iterations (100%),"),
+        last.starts_with("progress [spsa]: 4/4 iterations (100%),"),
         "{last}"
     );
-    assert!(last.contains("last mini-match"), "{last}");
-    assert!(last.contains("gain a "), "{last}");
-    assert!(last.contains("perturbation scale c "), "{last}");
-    assert!(last.contains("largest moves"), "{last}");
-    assert!(last.contains("time remaining"), "{last}");
+    for field in [
+        "time remaining",
+        "faults",
+        "at a rail",
+        "moved most since start",
+    ] {
+        assert!(last.contains(field), "{field} missing from:\n{last}");
+    }
     assert!(last.contains("Hash "), "the knob is named in:\n{last}");
+    // The trajectory is not on the console.
+    for absent in ["last mini-match", "perturbation scale", "schedule"] {
+        assert!(!last.contains(absent), "{absent} was printed:\n{last}");
+    }
+
+    // It is in the log, under the same block.
+    let log = std::fs::read_to_string(run.join("run.log")).unwrap();
+    let recorded = log
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .rfind(|event| event["event"] == "progress")
+        .expect("a recorded block");
+    let detail = recorded["progress"]["detail"].as_array().unwrap();
+    let labels = detail
+        .iter()
+        .map(|field| field["label"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labels,
+        ["last mini-match", "schedule", "moved most"],
+        "{recorded}"
+    );
+    assert!(
+        detail[1]["value"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("perturbation scale c"),
+        "{recorded}"
+    );
+
+    // And `spsa status` prints it.
+    let status = cli().args(["spsa", "status"]).arg(&run).output().unwrap();
+    assert!(status.status.success(), "{}", stderr(&status));
+    let shown = String::from_utf8_lossy(&status.stdout).into_owned();
+    for line in ["last mini-match:", "schedule:", "moved most:"] {
+        assert!(shown.contains(line), "{line} missing from:\n{shown}");
+    }
+
+    // The final report is one table and a footer, with no per-parameter list.
+    let report = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(report.contains("SPSA completed"), "{report}");
+    assert!(
+        report.contains("parameter  initial  tuned  estimate  delta"),
+        "{report}"
+    );
+    assert!(report.contains("estimator: "), "{report}");
+    assert!(report.contains("centres at a rail: "), "{report}");
+    assert!(!report.contains("setoption name"), "{report}");
 }
 
 /// A calibration reports the paired sample it is measuring.
@@ -518,4 +568,49 @@ fn a_calibration_block_reports_its_paired_sample() {
         assert!(last.contains(field), "{field} missing from:\n{last}");
     }
     assert!(last.contains("[0, 0, 4, 0, 0]"), "{last}");
+    // A degenerate sample has no estimate in either model, and the block says
+    // so for both rather than dropping a line a reader looks for.
+    assert_eq!(last.matches("unavailable:").count(), 2, "{last}");
+    assert!(last.contains("nElo"), "{last}");
+}
+
+/// A final report counts the games that ended badly; it never lists them.
+#[test]
+fn a_match_report_summarises_abnormal_games_instead_of_listing_them() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("run");
+    // The stub runs out of canned moves and forfeits, so every game is
+    // abnormal and the old per-game list would have been four lines long.
+    let output = cli()
+        .arg("match")
+        .arg(engine())
+        .arg(engine())
+        .args([
+            "--games",
+            "4",
+            "--a-engine-arg=__uci-stub",
+            "--b-engine-arg=__uci-stub",
+            "--a-movetime-ms",
+            "10",
+            "--b-movetime-ms",
+            "10",
+            "--max-engine-faults",
+            "99",
+            "--max-time-losses",
+            "99",
+            "--dir",
+        ])
+        .arg(&run)
+        .output()
+        .unwrap();
+    let report = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(
+        report.contains("abnormal games: illegal move 4"),
+        "{report}"
+    );
+    assert!(!report.contains("game 1:"), "{report}");
+    assert!(!report.contains("game 4:"), "{report}");
+    // Every result is still in the export beside it.
+    let pgn = std::fs::read_to_string(run.join("games.pgn")).unwrap();
+    assert_eq!(pgn.matches("[Result ").count(), 4, "{pgn}");
 }

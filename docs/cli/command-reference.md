@@ -727,7 +727,7 @@ Options:
       --progress-every <PROGRESS_EVERY>
           Committed iterations between progress blocks on standard error
 
-          [default: 1]
+          [default: 10]
 
       --progress-min-secs <PROGRESS_MIN_SECS>
           Shortest time between two progress blocks. A run whose iterations finish faster than this coalesces them instead of flooding the console

@@ -36,7 +36,10 @@ not published one yet says so. See the
 SPSA tunes additionally support `colosseum-cli spsa status <run-dir>`. That
 command reads the checksum-verified checkpoint generation and extends the
 common lifecycle view with trajectory, thirds, ETA and explicitly heuristic
-per-knob observations. It likewise never repairs or mutates the run.
+per-knob observations. It ends with the last committed iteration's own
+trajectory — its mini-match score, the gain and perturbation scale it used and
+what moved in it — which the progress blocks record but deliberately do not
+print. It likewise never repairs or mutates the run.
 
 Run-record schema history:
 

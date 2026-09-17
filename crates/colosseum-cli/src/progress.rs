@@ -59,6 +59,15 @@ pub struct ProgressBlock {
     pub total: Option<u64>,
     pub elapsed_seconds: f64,
     pub fields: Vec<ProgressField>,
+    /// Lines the block records but does not print.
+    ///
+    /// A console has to stay readable, and some of what a run knows is only
+    /// useful afterwards: one iteration's mini-match, the gain and
+    /// perturbation scale it used, what moved since the previous block. The
+    /// trajectory belongs in `run.log` and in the command's own status view,
+    /// not in every block on the terminal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub detail: Vec<ProgressField>,
 }
 
 impl ProgressBlock {
@@ -77,12 +86,22 @@ impl ProgressBlock {
             total,
             elapsed_seconds: elapsed.as_secs_f64(),
             fields: Vec::new(),
+            detail: Vec::new(),
         }
     }
 
-    /// Add one labelled line.
+    /// Add one labelled line to the printed block.
     pub fn field(&mut self, label: impl Into<String>, value: impl Into<String>) -> &mut Self {
         self.fields.push(ProgressField {
+            label: label.into(),
+            value: value.into(),
+        });
+        self
+    }
+
+    /// Add one labelled line that is recorded but not printed.
+    pub fn detail(&mut self, label: impl Into<String>, value: impl Into<String>) -> &mut Self {
+        self.detail.push(ProgressField {
             label: label.into(),
             value: value.into(),
         });
@@ -377,6 +396,25 @@ mod tests {
     fn a_rate_never_claims_the_work_a_resume_inherited() {
         let schedule = ProgressSchedule::new(10, 5, 40);
         assert_eq!(schedule.units_since_start(52), 12);
+    }
+
+    #[test]
+    fn a_detail_line_is_recorded_but_never_printed() {
+        let mut block = ProgressBlock::new(
+            "spsa",
+            ProgressUnit::Iterations,
+            2,
+            Some(4),
+            Duration::from_secs(1),
+        );
+        block
+            .field("faults", "engine 0/0")
+            .detail("gain", "a 0.0031");
+        assert_eq!(
+            block.render(),
+            "progress [spsa]: 2/4 iterations (50%), 1s elapsed\n  faults  engine 0/0\n"
+        );
+        assert_eq!(block.log_event()["progress"]["detail"][0]["label"], "gain");
     }
 
     #[test]

@@ -603,18 +603,33 @@ pub(crate) fn print_fixed_match(report: &match_runner::FixedMatchReport) {
         report.faults.time_losses_b,
         report.faults.infrastructure
     );
-    for game in &report.games {
-        let error = game
-            .error
-            .as_deref()
-            .map_or_else(String::new, |error| format!(" — {error}"));
-        println!(
-            "game {}: {:?} white, {} ({:?}){}",
-            game.number,
-            game.white,
-            game.result.pgn(),
-            game.termination,
-            error
-        );
+    println!("abnormal games: {}", abnormal_games(&report.games));
+}
+
+/// How many games ended badly and in which way.
+///
+/// The per-game list this replaces printed one line for every game a run
+/// played, which buries the report it belongs to and says nothing a reader
+/// cannot get better elsewhere: `games.pgn` has every result, `run.log` has
+/// every event, and `failed-games/` has the UCI traffic of each abnormal one.
+pub(crate) fn abnormal_games(games: &[match_runner::MatchGame]) -> String {
+    let mut counts = BTreeMap::<&'static str, u32>::new();
+    for game in games.iter().filter(|game| game.fault.is_some()) {
+        let kind = match game.termination {
+            Termination::TimeForfeit => "time forfeit",
+            Termination::EngineCrash => "engine crash",
+            Termination::IllegalMove => "illegal move",
+            Termination::Aborted => "aborted",
+            _ => "other fault",
+        };
+        *counts.entry(kind).or_default() += 1;
     }
+    if counts.is_empty() {
+        return "none".to_owned();
+    }
+    counts
+        .into_iter()
+        .map(|(kind, count)| format!("{kind} {count}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }

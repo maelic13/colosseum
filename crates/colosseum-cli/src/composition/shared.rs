@@ -633,7 +633,12 @@ impl PairedProgress {
                     );
             }
             Err(error) => {
-                block.field("Elo", format!("unavailable: {error}"));
+                // Both models come from the one estimator, so both are absent
+                // together. Saying so twice keeps the block's shape stable
+                // instead of dropping a line a reader is looking for.
+                block
+                    .field("Elo", format!("unavailable: {error}"))
+                    .field("nElo", format!("unavailable: {error}"));
             }
         }
         block

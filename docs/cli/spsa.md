@@ -167,14 +167,48 @@ schedule without launching the engine; live UCI-schema validation consequently
 occurs only when the actual run starts.
 
 Progress is written to stderr every `--progress-every N` committed iterations
-(default 1) and once more at termination. A tune block names the iteration and
-how far through the horizon it is, the elapsed time and a linear estimate of
-what is left, the last mini-match's pair score, the gain and perturbation scale
-that iteration used, and the three centres that moved most since the previous
-block. Those moves are measured as a fraction of each knob's own range, because
-ten units of a thousand-wide knob and ten units of a twenty-wide one are not
-the same fact. The remaining time is a linear projection of the rate observed
-so far and reads `0s` once the horizon is reached.
+(default 10) and once more at termination:
+
+```text
+progress [spsa]: 400/2000 iterations (20%), 41m12s elapsed
+  time remaining          2h44m
+  faults                  engine 0/0, time losses 0/0
+  at a rail               none
+  moved most since start  Hash +0.1840, Threads -0.0625, MoveOverhead +0.0090
+```
+
+The remaining time is a linear projection of the rate observed so far and
+reads `0s` once the horizon is reached. Movement is measured as a fraction of
+each knob's own range, because ten units of a thousand-wide knob and ten units
+of a twenty-wide one are not the same fact, and it is measured from where the
+tune began: a knob that has travelled is one the search is pushing, and that
+is the only trajectory signal worth acting on mid-run.
+
+The per-iteration trajectory — the last mini-match's pair score, the gain and
+perturbation scale that iteration used, and what moved since the previous
+block — is recorded in `run.log` and printed by `spsa status`, not by every
+block on the console.
+
+The final report is one table in tune-file order:
+
+```text
+SPSA completed
+parameter     initial  tuned  estimate  delta    range
+Hash               16    204  203.6412   +188  1..1024
+Threads             4      3    3.4410     -1    1..16
+estimator: rounded centre vector after iteration 1999
+iterations: 2000 of 2000 committed; games: 64000
+faults: engine 0/0, time losses 0/0
+centres at a rail: none
+artifacts: ./colosseum-runs/spsa-...
+```
+
+`estimate` is the unrounded value the estimator produced and `tuned` is the
+integer a UCI engine is given; `delta` is that integer against the tune file's
+`initial`, and `range` is the knob's own bounds, so a value that has reached
+one is visible. `centres at a rail` names every knob whose tuned value sits on
+a bound, where the gradient was one-sided. The paste-ready forms remain the
+three `tuned-options` artifacts below.
 
 Use `--dir PATH` for an explicitly resumable run. Each checkpoint contains only
 whole completed iterations; a hard stop during a mini-match replays that entire

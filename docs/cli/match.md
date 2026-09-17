@@ -243,7 +243,10 @@ Progress is written to stderr every `--progress-every N` games, and once more
 at the end; a match block reports the score, the Elo estimate with its 95%
 interval, faults and the rate. See the
 [output contract](output.md) for the shared rules. The
-final human report names the artifact directory. In `--json` mode stdout still
+final human report names the artifact directory, the two engines' scores, the
+fault counts and how many games ended abnormally and in which way. It does not
+list the games: `games.pgn` holds every result, `run.log` every event, and
+`failed-games/` the UCI traffic of each abnormal game. In `--json` mode stdout still
 contains exactly one JSON document; it includes `run_directory`, while progress
 and diagnostics remain confined to stderr.
 

@@ -83,13 +83,19 @@ the pentanomial vector; `time remaining` extrapolates the rate observed so far
 and is `0s` once the run has stopped. A sequential test caps that estimate at
 the pairs its `--max-pairs` still allows, and takes the nearer of that and the
 pairs its LLR would need at the drift it has. A tournament reports the
-standings header with ratings and error bars; a tune reports its last
-mini-match, the current gain and perturbation scale, and the centres that are
-moving.
+standings header with ratings and error bars; a tune reports its faults, the
+centres sitting on a rail and the knobs it has moved furthest since it began.
 
-Every block is appended to `run.log`, and the most recent one is retained in
+A block may also carry lines it records without printing: a tune's per
+iteration trajectory is one of them, because a console that shows it every
+block is a console nobody reads. Every block, printed lines and recorded
+lines alike, is appended to `run.log`, and the most recent one is retained in
 `run-record.json`, so [`status`](status.md) prints exactly what the console
 last showed and a closed console loses nothing.
+
+A final report never lists a run's games one by one. It says how many ended
+abnormally and in which way; `games.pgn` holds every result, `run.log` every
+event, and `failed-games/` the UCI traffic of each abnormal game.
 
 Human-readable mode is the default. Automation should select `--json` and use
 the process exit status as the primary success/failure signal.

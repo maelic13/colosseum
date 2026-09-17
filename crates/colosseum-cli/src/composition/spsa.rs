@@ -217,7 +217,7 @@ pub(crate) struct SpsaConditions {
     #[arg(long, requires = "run_directory")]
     pub(crate) restart: bool,
     /// Committed iterations between progress blocks on standard error.
-    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(1..))]
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) progress_every: u64,
     /// Shortest time between two progress blocks. A run whose iterations
     /// finish faster than this coalesces them instead of flooding the console.
@@ -503,10 +503,23 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
         });
     } else {
         print_spsa_status(&output, run_directory);
+        // The trajectory the console deliberately does not print every block.
+        if let Some(iteration) = checkpoint.completed_iterations.last() {
+            for (label, value) in spsa_iteration_detail(
+                iteration,
+                SpsaCentreTracker::new(&workflow.schedule.knobs, &iteration.centers_before)
+                    .moves_since_start(&iteration.centers_after),
+                "in this iteration",
+            ) {
+                println!("{label}: {value}");
+            }
+        }
     }
     ExitCode::SUCCESS
 }
 
+/// The lifecycle view. The caller adds the last iteration's trajectory after
+/// it, from the checkpoint it already verified.
 pub(crate) fn print_spsa_status(report: &SpsaStatusOutput, run_directory: &Path) {
     println!(
         "SPSA {:?}: {}/{} iterations ({:.2}%)",
@@ -1215,10 +1228,19 @@ pub(crate) fn read_stored_spsa_inputs(
 /// thousand-wide knob and ten units of a twenty-wide one are different facts.
 /// Range units make the three largest moves the three that matter.
 pub(crate) struct SpsaCentreTracker {
-    /// Knob name and the width of its range, in schedule order.
-    knobs: Vec<(String, f64)>,
+    /// Knob name, the width of its range and its rails, in schedule order.
+    knobs: Vec<SpsaKnobRange>,
+    /// The centres the tune started from.
+    initial: Vec<f64>,
     /// The centres at the previous published block.
     previous: Vec<f64>,
+}
+
+struct SpsaKnobRange {
+    name: String,
+    min: i64,
+    max: i64,
+    width: f64,
 }
 
 impl SpsaCentreTracker {
@@ -1226,24 +1248,43 @@ impl SpsaCentreTracker {
         Self {
             knobs: knobs
                 .iter()
-                .map(|knob| (knob.name.clone(), (knob.max - knob.min) as f64))
+                .map(|knob| SpsaKnobRange {
+                    name: knob.name.clone(),
+                    min: knob.min,
+                    max: knob.max,
+                    width: (knob.max - knob.min) as f64,
+                })
                 .collect(),
+            initial: initial_centers.to_vec(),
             previous: initial_centers.to_vec(),
         }
     }
 
-    /// The three largest moves since the previous block, largest first.
-    pub(crate) fn largest_moves(&self, centers: &[f64]) -> Option<String> {
-        if centers.len() != self.knobs.len() || self.previous.len() != self.knobs.len() {
+    /// The three largest moves since the tune began, largest first.
+    ///
+    /// This is the one trajectory signal a reader can act on while the run is
+    /// going: a knob that has travelled a long way is being pushed, and one
+    /// that has not is either right or dead.
+    pub(crate) fn moves_since_start(&self, centers: &[f64]) -> Option<String> {
+        self.largest(&self.initial, centers)
+    }
+
+    /// The three largest moves since the previous published block.
+    pub(crate) fn moves_since_last_block(&self, centers: &[f64]) -> Option<String> {
+        self.largest(&self.previous, centers)
+    }
+
+    fn largest(&self, baseline: &[f64], centers: &[f64]) -> Option<String> {
+        if centers.len() != self.knobs.len() || baseline.len() != self.knobs.len() {
             return None;
         }
         let mut moves = self
             .knobs
             .iter()
             .zip(centers)
-            .zip(&self.previous)
-            .filter(|(((_, range), _), _)| *range > 0.0)
-            .map(|(((name, range), center), previous)| (name.clone(), (center - previous) / range))
+            .zip(baseline)
+            .filter(|((knob, _), _)| knob.width > 0.0)
+            .map(|((knob, center), baseline)| (knob.name.clone(), (center - baseline) / knob.width))
             .collect::<Vec<_>>();
         moves.sort_by(|left, right| {
             right
@@ -1262,6 +1303,34 @@ impl SpsaCentreTracker {
         })
     }
 
+    /// Knobs whose centre now rounds onto one of its own rails, which is where
+    /// the gradient becomes one-sided.
+    pub(crate) fn at_a_rail(&self, centers: &[f64]) -> String {
+        if centers.len() != self.knobs.len() {
+            return "unknown".to_owned();
+        }
+        let railed = self
+            .knobs
+            .iter()
+            .zip(centers)
+            .filter_map(|(knob, center)| {
+                let rounded = round_half_away_from_zero(*center).ok()?;
+                if rounded <= knob.min {
+                    Some(format!("{} at {}", knob.name, knob.min))
+                } else if rounded >= knob.max {
+                    Some(format!("{} at {}", knob.name, knob.max))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if railed.is_empty() {
+            "none".to_owned()
+        } else {
+            railed.join(", ")
+        }
+    }
+
     /// Take the centres a published block reported as the new baseline.
     pub(crate) fn remember(&mut self, centers: &[f64]) {
         if centers.len() == self.knobs.len() {
@@ -1270,26 +1339,84 @@ impl SpsaCentreTracker {
     }
 }
 
-/// What a tune tells the operator: how far through the horizon it is, what the
-/// last mini-match said, how hard the schedule is still pushing, and which
-/// centres are actually moving.
+/// Every engine fault a tune has committed, across every iteration it kept.
+pub(crate) fn spsa_faults(checkpoint: &spsa_driver::SpsaCheckpoint) -> MatchFaultCounts {
+    let mut faults = MatchFaultCounts::default();
+    let pairs = checkpoint
+        .completed_iterations
+        .iter()
+        .flat_map(|iteration| &iteration.pairs)
+        .chain(
+            checkpoint
+                .invalid_iteration
+                .iter()
+                .flat_map(|iteration| &iteration.pairs),
+        );
+    for pair in pairs {
+        for game in [&pair.first, &pair.second] {
+            record_fault(&mut faults, game.white, game.fault.as_ref());
+        }
+    }
+    faults
+}
+
+/// What one committed iteration says about the search: the mini-match it
+/// played, the gain and perturbation scale it used, and what moved.
+///
+/// This is the trajectory. It is recorded rather than printed, because a
+/// console that shows it every block is a console nobody reads; `run.log` and
+/// `spsa status` are where it is wanted.
+pub(crate) fn spsa_iteration_detail(
+    iteration: &spsa_driver::SpsaCommittedIteration,
+    moves: Option<String>,
+    moves_span: &str,
+) -> Vec<(String, String)> {
+    let score = iteration.score;
+    vec![
+        (
+            "last mini-match".to_owned(),
+            format!(
+                "iteration {}: {:+} (plus {} / draws {} / minus {})",
+                iteration.iteration,
+                score.difference,
+                score.plus_wins,
+                score.draws,
+                score.plus_losses
+            ),
+        ),
+        (
+            "schedule".to_owned(),
+            coefficient_summary(&iteration.prepared),
+        ),
+        (
+            "moved most".to_owned(),
+            match moves {
+                Some(moves) => format!("{moves} (range units {moves_span})"),
+                None => "none recorded yet".to_owned(),
+            },
+        ),
+    ]
+}
+
+/// What a tune tells the operator while it runs: how far through the horizon
+/// it is, how long is left, whether anything is faulting, which centres have
+/// hit a rail, and which knobs the search has actually moved.
 pub(crate) fn spsa_progress_block(
     observer: &DurableSpsaOutput,
     schedule: &ProgressSchedule,
     settings: SpsaRunSettings,
     centres: &SpsaCentreTracker,
 ) -> ProgressBlock {
-    let last = observer.checkpoint.lock().ok().and_then(|checkpoint| {
-        checkpoint
-            .completed_iterations
-            .last()
-            .cloned()
-            .map(|iteration| (checkpoint.completed_iterations.len() as u64, iteration))
-    });
-    let (done, last) = match last {
-        Some((done, iteration)) => (done, Some(iteration)),
-        None => (0, None),
-    };
+    let (done, last, faults) = observer.checkpoint.lock().map_or_else(
+        |_| (0, None, MatchFaultCounts::default()),
+        |checkpoint| {
+            (
+                checkpoint.completed_iterations.len() as u64,
+                checkpoint.completed_iterations.last().cloned(),
+                spsa_faults(&checkpoint),
+            )
+        },
+    );
     let total = u64::from(settings.iterations);
     let mut block = ProgressBlock::new(
         "spsa",
@@ -1298,43 +1425,45 @@ pub(crate) fn spsa_progress_block(
         Some(total),
         schedule.elapsed(),
     );
-    block.field(
-        "time remaining",
-        match progress::time_for_units(
-            schedule.units_since_start(done),
-            schedule.elapsed(),
-            total.saturating_sub(done),
-        ) {
-            Some(left) => progress::format_duration(left.as_secs_f64()),
-            None => "unknown".to_owned(),
-        },
-    );
+    block
+        .field(
+            "time remaining",
+            match progress::time_for_units(
+                schedule.units_since_start(done),
+                schedule.elapsed(),
+                total.saturating_sub(done),
+            ) {
+                Some(left) => progress::format_duration(left.as_secs_f64()),
+                None => "unknown".to_owned(),
+            },
+        )
+        .field(
+            "faults",
+            format!(
+                "engine {}/{}, time losses {}/{}",
+                faults.engine_a, faults.engine_b, faults.time_losses_a, faults.time_losses_b
+            ),
+        );
     match &last {
         Some(iteration) => {
-            let score = iteration.score;
             block
+                .field("at a rail", centres.at_a_rail(&iteration.centers_after))
                 .field(
-                    "last mini-match",
-                    format!(
-                        "iteration {}: {:+} (plus {} / draws {} / minus {})",
-                        iteration.iteration,
-                        score.difference,
-                        score.plus_wins,
-                        score.draws,
-                        score.plus_losses
-                    ),
-                )
-                .field("schedule", coefficient_summary(&iteration.prepared));
-            match centres.largest_moves(&iteration.centers_after) {
-                Some(moves) => block.field(
-                    "largest moves",
-                    format!("{moves} (range units since the previous block)"),
-                ),
-                None => block.field("largest moves", "none recorded yet"),
-            };
+                    "moved most since start",
+                    centres
+                        .moves_since_start(&iteration.centers_after)
+                        .unwrap_or_else(|| "nothing yet".to_owned()),
+                );
+            for (label, value) in spsa_iteration_detail(
+                iteration,
+                centres.moves_since_last_block(&iteration.centers_after),
+                "since the previous block",
+            ) {
+                block.detail(label, value);
+            }
         }
         None => {
-            block.field("last mini-match", "no iteration has committed yet");
+            block.field("at a rail", "no iteration has committed yet");
         }
     }
     block
@@ -1633,47 +1762,209 @@ pub(crate) fn describe_spsa_estimator(final_window_percent: Option<u32>) -> Stri
     }
 }
 
-pub(crate) fn print_spsa(report: &SpsaReport, run_directory: &Path) {
-    println!(
-        "SPSA {:?}: {}/{} complete iterations ({} games each)",
-        report.driver.status,
-        report.driver.completed_iterations.len(),
-        report.driver.settings.iterations,
-        report.driver.settings.games_per_iteration
-    );
-    for (parameter, center) in report
+/// One row of the result table, already rendered.
+struct SpsaResultRow {
+    parameter: String,
+    initial: String,
+    tuned: String,
+    estimate: String,
+    delta: String,
+    range: String,
+}
+
+/// The result as a table in tune-file order.
+///
+/// The per-parameter prose this replaces said each value twice, once
+/// unrounded and once as a `setoption` line, and neither form let a reader
+/// compare a knob against where it started or against its own range. The
+/// paste-ready forms are the `tuned-options.*` artifacts, which is where a
+/// reader who wants to copy values should go.
+fn spsa_result_rows(report: &SpsaReport) -> Vec<SpsaResultRow> {
+    report
         .bound_tune
         .parameters
         .iter()
-        .zip(&report.driver.final_centers)
-    {
-        println!("{}: {:.6}", parameter.parameter.name, center);
-    }
-    if let Some(result) = &report.tuned_result {
-        match &result.estimator {
-            SpsaEstimator::FinalCenter { iteration } => {
-                println!("tuned vector: rounded centre vector after iteration {iteration}")
+        .enumerate()
+        .map(|(index, bound)| {
+            let parameter = &bound.parameter;
+            let tuned = report
+                .tuned_result
+                .as_ref()
+                .and_then(|result| result.parameters.get(index))
+                .map(|tuned| tuned.tuned);
+            let estimate = report
+                .tuned_result
+                .as_ref()
+                .and_then(|result| result.parameters.get(index))
+                .map(|tuned| tuned.estimate)
+                .or_else(|| report.driver.final_centers.get(index).copied());
+            SpsaResultRow {
+                parameter: parameter.name.clone(),
+                initial: parameter.initial.to_string(),
+                tuned: tuned.map_or_else(|| "-".to_owned(), |value| value.to_string()),
+                estimate: estimate.map_or_else(|| "-".to_owned(), |value| format!("{value:.4}")),
+                delta: tuned.map_or_else(
+                    || "-".to_owned(),
+                    |value| format!("{:+}", value - parameter.initial),
+                ),
+                range: format!("{}..{}", parameter.min, parameter.max),
             }
-            SpsaEstimator::TailWindowMean(window) => println!(
-                "tuned vector: rounded mean of {} sample(s) from final {}% window",
-                window.samples_used, window.percent
-            ),
-        }
-        for parameter in &result.parameters {
-            println!(
-                "setoption name {} value {}  (estimate {:.6})",
-                parameter.name, parameter.tuned, parameter.estimate
-            );
-        }
+        })
+        .collect()
+}
+
+/// Knobs whose tuned value sits on one of its own rails, where the gradient
+/// was one-sided and the result is a boundary rather than an optimum.
+fn spsa_railed_parameters(report: &SpsaReport) -> String {
+    let railed = report
+        .bound_tune
+        .parameters
+        .iter()
+        .enumerate()
+        .filter_map(|(index, bound)| {
+            let parameter = &bound.parameter;
+            let value = report
+                .tuned_result
+                .as_ref()
+                .and_then(|result| result.parameters.get(index))
+                .map(|tuned| tuned.tuned)
+                .or_else(|| {
+                    report
+                        .driver
+                        .final_centers
+                        .get(index)
+                        .copied()
+                        .and_then(|center| round_half_away_from_zero(center).ok())
+                })?;
+            if value <= parameter.min {
+                Some(format!("{} at {}", parameter.name, parameter.min))
+            } else if value >= parameter.max {
+                Some(format!("{} at {}", parameter.name, parameter.max))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    if railed.is_empty() {
+        "none".to_owned()
+    } else {
+        railed.join(", ")
     }
-    if let Some(invalid) = &report.driver.invalid_iteration {
+}
+
+pub(crate) fn print_spsa(report: &SpsaReport, run_directory: &Path) {
+    println!("SPSA {}", spsa_verdict(report.driver.status));
+
+    let rows = spsa_result_rows(report);
+    let headers = [
+        "parameter",
+        "initial",
+        "tuned",
+        "estimate",
+        "delta",
+        "range",
+    ];
+    let columns: Vec<Vec<&str>> = vec![
+        rows.iter().map(|row| row.parameter.as_str()).collect(),
+        rows.iter().map(|row| row.initial.as_str()).collect(),
+        rows.iter().map(|row| row.tuned.as_str()).collect(),
+        rows.iter().map(|row| row.estimate.as_str()).collect(),
+        rows.iter().map(|row| row.delta.as_str()).collect(),
+        rows.iter().map(|row| row.range.as_str()).collect(),
+    ];
+    let widths = headers
+        .iter()
+        .zip(&columns)
+        .map(|(header, column)| {
+            column
+                .iter()
+                .map(|value| value.chars().count())
+                .chain(std::iter::once(header.chars().count()))
+                .max()
+                .unwrap_or(0)
+        })
+        .collect::<Vec<_>>();
+    let render = |cells: &[&str]| -> String {
+        cells
+            .iter()
+            .zip(&widths)
+            .enumerate()
+            .map(|(index, (cell, width))| {
+                // The name reads left to right; every number reads right to
+                // left, so a column of them lines up on its digits.
+                if index == 0 {
+                    format!("{cell:<width$}")
+                } else {
+                    format!("{cell:>width$}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("  ")
+            .trim_end()
+            .to_owned()
+    };
+    println!("{}", render(&headers));
+    for row in &rows {
         println!(
-            "iteration {} invalid: {} engine faults; no gradient applied",
-            invalid.iteration,
-            invalid.faults.engine_a + invalid.faults.engine_b
+            "{}",
+            render(&[
+                &row.parameter,
+                &row.initial,
+                &row.tuned,
+                &row.estimate,
+                &row.delta,
+                &row.range,
+            ])
         );
     }
+
+    println!(
+        "estimator: {}",
+        match report.tuned_result.as_ref().map(|result| &result.estimator) {
+            Some(SpsaEstimator::FinalCenter { iteration }) =>
+                format!("rounded centre vector after iteration {iteration}"),
+            Some(SpsaEstimator::TailWindowMean(window)) => format!(
+                "rounded mean of {} from the final {}% window",
+                progress::plural(u64::from(window.samples_used), "sample"),
+                window.percent
+            ),
+            None => "none: this tune produced no vector".to_owned(),
+        }
+    );
+    let committed = report.driver.completed_iterations.len();
+    println!(
+        "iterations: {} of {} committed; games: {}",
+        committed,
+        report.driver.settings.iterations,
+        committed as u64 * u64::from(report.driver.settings.games_per_iteration)
+    );
+    let faults = spsa_faults(&spsa_driver::SpsaCheckpoint {
+        completed_iterations: report.driver.completed_iterations.clone(),
+        invalid_iteration: report.driver.invalid_iteration.clone(),
+    });
+    println!(
+        "faults: engine {}/{}, time losses {}/{}",
+        faults.engine_a, faults.engine_b, faults.time_losses_a, faults.time_losses_b
+    );
+    if let Some(invalid) = &report.driver.invalid_iteration {
+        println!(
+            "iteration {} invalid: {}; no gradient applied",
+            invalid.iteration, invalid.reason
+        );
+    }
+    println!("centres at a rail: {}", spsa_railed_parameters(report));
     println!("artifacts: {}", run_directory.display());
+}
+
+/// The run's outcome in the words a reader uses for it.
+fn spsa_verdict(status: spsa_driver::SpsaStatus) -> &'static str {
+    match status {
+        spsa_driver::SpsaStatus::Completed => "completed",
+        spsa_driver::SpsaStatus::Cancelled => {
+            "cancelled - stopped cleanly at an iteration boundary"
+        }
+        spsa_driver::SpsaStatus::Invalid => "invalid - an engine fault invalidated a mini-match",
+    }
 }
 
 pub(crate) fn print_spsa_tune_warning(warning: &SpsaTuneWarning) {
