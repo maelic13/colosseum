@@ -34,3 +34,26 @@ the frozen final-window vector: `tuned-options.txt`, `tuned-options.json` and
 `tuned-options.toml`. The main `result.json` retains the source launch, tune
 conditions, schedule/version metadata, original values, floating means and
 rounded tuned values so it can feed `sprt --apply` without editing.
+
+## Stopping a run
+
+Interrupting a long run is a supported operation. Press Ctrl-C once and the run
+stops launching new work, gives the games already in flight up to
+`--stop-grace-secs` seconds (30 by default) to finish on their own, writes its
+checkpoint, records itself `cancelled` and exits with code `6`. Press Ctrl-C
+again and the games in flight are abandoned immediately instead of waiting.
+
+Either way the run is recoverable, and every command stops the same way:
+`match`, `sprt`, `calibrate`, `spsa`, `tournament run` and `suite` share one
+cancellation path rather than each inventing its own. Work already committed to
+the checkpoint is kept; work that had not been committed is simply replayed
+when you resume the same `--dir`. For SPSA that means the mini-match in flight
+is replayed as a whole, which is what keeps a gain schedule from advancing on a
+partial iteration.
+
+A cancelled run is not a failure and not a statistical conclusion. An SPRT that
+stopped before reaching a boundary or its cap reports `cancelled` rather than
+`inconclusive`, because it never sampled far enough to say anything; a
+calibration that stopped short of its fixed sample reports that instead of
+classifying a partial interval. `spsa --stop-after-iteration N` asks for the
+same clean stop at a planned point rather than at an interrupt.

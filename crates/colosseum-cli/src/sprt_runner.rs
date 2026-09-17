@@ -13,6 +13,7 @@ use colosseum_core::{
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::cancellation::Cancellation;
 use crate::match_runner::{
     ConfiguredTimeControl, FaultPolicy, MatchError, MatchExecutionPlan, MatchFaultCounts,
     MatchGame, MatchSide, OpeningPolicyReport, PairGameSettings, play_pair, record_fault,
@@ -31,11 +32,15 @@ pub struct PairScheduleRequest {
     pub fault_policy: FaultPolicy,
     /// Durable pairs must be the contiguous official prefix `1..=N`.
     pub completed_pairs: Vec<CompletePair<MatchGame>>,
+    pub cancellation: Cancellation,
     pub observer: Option<Arc<dyn PairObserver>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PairScheduleReport {
+    /// The schedule stopped cleanly on request rather than at a boundary or
+    /// its cap, so the verdict is inconclusive by construction.
+    pub cancelled: bool,
     pub max_pairs: u32,
     pub official_pairs: Vec<CompletePair<MatchGame>>,
     pub post_terminal_pairs: Vec<CompletePair<MatchGame>>,
@@ -52,6 +57,9 @@ pub enum SprtStatus {
     H1,
     H0,
     Inconclusive,
+    /// Stopped cleanly on request before a boundary or the cap. This is not a
+    /// statistical conclusion; the pairs already committed are kept.
+    Cancelled,
     Invalid,
 }
 
@@ -91,6 +99,9 @@ impl PairScheduleReport {
         match self.statistics.map(|statistics| statistics.decision) {
             Some(SprtDecision::AcceptH1) => SprtStatus::H1,
             Some(SprtDecision::AcceptH0) => SprtStatus::H0,
+            // A boundary already crossed is still the verdict; only a run that
+            // reached no boundary reports the stop instead of a conclusion.
+            Some(SprtDecision::Continue) | None if self.cancelled => SprtStatus::Cancelled,
             Some(SprtDecision::Continue) | None => SprtStatus::Inconclusive,
         }
     }
@@ -113,10 +124,14 @@ pub async fn run_pair_schedule(
     let mut workers = tokio::task::JoinSet::new();
     let mut next_to_schedule = next_pair_id;
 
-    while (!accumulator.stopped() && next_to_schedule <= request.design.max_pairs)
+    let mut cancelled = false;
+    while (!accumulator.stopped()
+        && !request.cancellation.stopping()
+        && next_to_schedule <= request.design.max_pairs)
         || !workers.is_empty()
     {
         while !accumulator.stopped()
+            && !request.cancellation.stopping()
             && next_to_schedule <= request.design.max_pairs
             && workers.len() < request.execution.concurrency
         {
@@ -128,7 +143,15 @@ pub async fn run_pair_schedule(
             let settings = request.settings.clone();
             workers.spawn(async move { play_pair(pair_id, &slot, settings).await });
         }
-        let Some(joined) = workers.join_next().await else {
+        let joined = tokio::select! {
+            joined = workers.join_next() => joined,
+            () = request.cancellation.abandon() => {
+                workers.abort_all();
+                cancelled = true;
+                break;
+            }
+        };
+        let Some(joined) = joined else {
             break;
         };
         let pair = joined.map_err(|error| PairScheduleError::Worker(error.to_string()))??;
@@ -141,6 +164,7 @@ pub async fn run_pair_schedule(
                             .map_err(PairScheduleError::Output)?;
                     }
                     official_pairs.push(released);
+                    request.cancellation.record_committed_unit();
                 }
                 PairDisposition::PostTerminal => {
                     if let Some(observer) = &request.observer {
@@ -154,6 +178,7 @@ pub async fn run_pair_schedule(
         }
     }
     Ok(PairScheduleReport {
+        cancelled: cancelled || request.cancellation.stopping(),
         max_pairs: request.design.max_pairs,
         official_pairs,
         post_terminal_pairs,

@@ -11,6 +11,7 @@ mod suite_driver;
 mod tournament_driver;
 mod uci_stub;
 
+pub mod cancellation;
 pub mod config;
 pub mod engine_args;
 pub mod master_seed;
@@ -23,6 +24,9 @@ pub mod stats_replay;
 
 pub use composition::{command_spec, run};
 
+pub use cancellation::{
+    Cancellation, CancelStage, DEFAULT_STOP_GRACE_SECONDS, InterruptListener,
+};
 pub use config::{ConfigError, ResolvedConfig, ValueOrigin, built_in_defaults, resolve_config};
 pub use engine_args::{EngineArgs, EngineArgsError, parse_cpu_list};
 pub use master_seed::{

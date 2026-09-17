@@ -17,6 +17,7 @@ use colosseum_engine::GameFault;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::cancellation::Cancellation;
 use crate::match_runner::{
     MatchError, MatchExecutionPlan, MatchFaultCounts, MatchGame, MatchSide, PairGameSettings,
     play_pair, record_fault,
@@ -89,6 +90,7 @@ pub struct SpsaDriverRequest {
     /// Stop cleanly once this many iterations are committed. This is a request
     /// about this invocation, never a change to the stored horizon.
     pub stop_after_iteration: Option<u32>,
+    pub cancellation: Cancellation,
     pub observer: Option<Arc<dyn SpsaObserver>>,
 }
 
@@ -163,6 +165,17 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
         let mut game_settings = request.game_settings.clone();
         game_settings.engine_a = plus;
         game_settings.engine_b = minus;
+        // An interrupt between iterations stops before committing the engines
+        // to another complete mini-match.
+        if request.cancellation.stopping() {
+            return Ok(SpsaDriverReport {
+                status: SpsaStatus::Cancelled,
+                settings: request.settings,
+                completed_iterations,
+                invalid_iteration: None,
+                final_centers: state.centers().to_vec(),
+            });
+        }
         let pairs = play_mini_match(
             iteration,
             request.settings,
@@ -226,15 +239,19 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
                 .map_err(SpsaDriverError::Output)?;
         }
         completed_iterations.push(committed);
+        request.cancellation.record_committed_unit();
         request
             .progress
             .completed_iterations
             .store(state.completed_iterations(), Ordering::Relaxed);
         // A staged stop lands on a committed boundary, so nothing partial is
-        // replayed and the horizon in the checkpoint is unchanged.
-        if request
-            .stop_after_iteration
-            .is_some_and(|limit| state.completed_iterations() >= limit)
+        // replayed and the horizon in the checkpoint is unchanged. An
+        // interrupt takes the same path: the current mini-match is the only
+        // work replayed on resume, which the durable-run contract accepts.
+        if request.cancellation.stopping()
+            || request
+                .stop_after_iteration
+                .is_some_and(|limit| state.completed_iterations() >= limit)
         {
             return Ok(SpsaDriverReport {
                 status: SpsaStatus::Cancelled,

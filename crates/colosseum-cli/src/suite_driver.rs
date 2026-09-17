@@ -16,8 +16,8 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    EngineArgs, OfficialSample, RunDirectory, RunRecorder, RunStatus, built_in_defaults,
-    resolve_config,
+    Cancellation, EngineArgs, OfficialSample, RunDirectory, RunRecorder, RunStatus,
+    built_in_defaults, resolve_config,
 };
 
 #[derive(Debug, Args)]
@@ -89,9 +89,18 @@ struct DurableSuiteProgress {
     directory: Arc<RunDirectory>,
     checkpoint: Mutex<SuiteCheckpoint>,
     recorder: Arc<Mutex<Option<RunRecorder>>>,
+    cancellation: Cancellation,
 }
 
 impl SuiteProgress for DurableSuiteProgress {
+    fn stop_requested(&self) -> bool {
+        self.cancellation.stopping()
+    }
+
+    fn committed_unit(&self) {
+        self.cancellation.record_committed_unit();
+    }
+
     fn commit(&self, result: &SuitePositionResult) -> PortFuture<'_, Result<(), ApplicationError>> {
         let result = result.clone();
         Box::pin(async move {
@@ -130,8 +139,13 @@ impl SuiteProgress for DurableSuiteProgress {
     }
 }
 
-pub async fn run(command: SuiteCommand, machine: bool, dry_run: bool) -> ExitCode {
-    match prepare_and_run(command, machine, dry_run).await {
+pub async fn run(
+    command: SuiteCommand,
+    machine: bool,
+    dry_run: bool,
+    cancellation: Cancellation,
+) -> ExitCode {
+    match prepare_and_run(command, machine, dry_run, cancellation).await {
         Ok(code) => code,
         Err((code, message)) => {
             eprintln!("{message}");
@@ -144,6 +158,7 @@ async fn prepare_and_run(
     command: SuiteCommand,
     machine: bool,
     dry_run: bool,
+    cancellation: Cancellation,
 ) -> Result<ExitCode, (ExitCode, String)> {
     let limit = search_limit(&command).map_err(configuration)?;
     let deadline_ms = command
@@ -297,6 +312,7 @@ async fn prepare_and_run(
         directory: Arc::clone(&directory),
         checkpoint: Mutex::new(checkpoint),
         recorder: Arc::clone(&recorder),
+        cancellation: cancellation.clone(),
     };
     let report = RunSuite::execute(
         &AffinityUciSessionFactory::new(apply_affinity),
@@ -319,8 +335,13 @@ async fn prepare_and_run(
         .map_err(configuration)?;
     write_result(&directory.paths().root.join("result.json"), &report)
         .map_err(|error| infrastructure_error("write suite result", error))?;
+    // A suite that stopped short of its own position set was interrupted;
+    // the positions it did search are committed and resume finishes the rest.
+    let cancelled = report.results.len() < report.total_entries as usize;
     let final_status = if report.malformed > 0 {
         RunStatus::Invalid
+    } else if cancelled {
+        RunStatus::Cancelled
     } else {
         RunStatus::Completed
     };

@@ -1371,6 +1371,25 @@ a truncation attempt on the log fails; a state file corrupted mid-write is
 detected and the previous state used; status against a live run is non-blocking,
 read-only and consistent with the last committed checkpoint.
 
+**Implementation evidence (Phase 10.6):** one `Cancellation` handle is created
+per invocation, listens for the console control event on Windows and `SIGINT`
+elsewhere, and is threaded through the match, SPRT, tournament, SPSA and suite
+drivers. Each driver stops launching new units, selects on a bounded grace
+period (`--stop-grace-secs`, default 30) and aborts the work still in flight
+when it expires or a second interrupt arrives; `kill_on_drop` reaps the engine
+processes. The run writes its checkpoint, records `RunStatus::Cancelled` and
+exits with code 6, which `status` reports. A stop is never dressed as a
+conclusion: an SPRT that reached no boundary reports `cancelled` rather than
+`inconclusive`, and a calibration that stopped short of its fixed sample says
+so instead of classifying a partial interval. The suite asks its progress port
+whether to stop, so the application layer stays runtime-neutral. A committed
+unit budget is a second trigger for the same path, which is what makes the
+interrupt behaviour testable: a console interrupt cannot be delivered portably
+to one child process on Windows, so the shared clean-stop suite drives the
+identical path through a hidden `__stop-after-units` option and asserts, for
+each of the six durable commands, that the run stopped, checkpointed, recorded
+`cancelled`, exited 6 and resumed to the uninterrupted statistics.
+
 ---
 
 ### 5.12 Position suites — `colosseum-cli suite`

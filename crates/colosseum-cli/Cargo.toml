@@ -33,7 +33,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.150", features = ["float_roundtrip"] }
 sha2 = "0.10.9"
 thiserror = "2.0.18"
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-std", "io-util", "time"] }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-std", "io-util", "signal", "sync", "time"] }
 toml = "1.0.6"
 tempfile = "3.27.0"
 

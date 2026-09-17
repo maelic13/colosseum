@@ -121,6 +121,17 @@ pub enum SuiteError {
 
 pub trait SuiteProgress: Send + Sync {
     fn commit(&self, result: &SuitePositionResult) -> PortFuture<'_, Result<(), ApplicationError>>;
+
+    /// True once the driver has been asked to stop starting new searches.
+    ///
+    /// Asking the adapter keeps the cancellation mechanism outside this layer:
+    /// the use case knows only that it may stop at a committed position.
+    fn stop_requested(&self) -> bool {
+        false
+    }
+
+    /// Tell the adapter one more position is durably committed.
+    fn committed_unit(&self) {}
 }
 
 pub struct RunSuite;
@@ -212,6 +223,12 @@ impl RunSuite {
                         };
                         progress.commit(&result).await?;
                         completed.insert(result.index, result);
+                        progress.committed_unit();
+                        // Every position is committed before the check, so a
+                        // stop never loses a search that already finished.
+                        if progress.stop_requested() {
+                            break;
+                        }
                     }
                     Ok(())
                 }

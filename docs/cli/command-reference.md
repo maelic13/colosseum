@@ -43,6 +43,11 @@ Options:
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
 
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -69,6 +74,11 @@ Options:
 
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
   -h, --help
           Print help
@@ -115,6 +125,11 @@ Options:
 
       --a-env <KEY=VALUE>
 
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
       --a-option <NAME=VALUE>
 
@@ -323,6 +338,11 @@ Options:
           Named starting design; every field remains overridable
 
           [possible values: gainer, simplify]
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
       --model <MODEL>
           Elo parameterization used by both hypotheses and the LLR
@@ -556,6 +576,11 @@ Options:
       --cwd <CWD>
 
 
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
+
       --env <KEY=VALUE>
 
 
@@ -723,6 +748,11 @@ Options:
 
           [default: 1]
 
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
+
       --compare-iterations <COMPARISON_HORIZONS>
           Compare cost and first/final gain values at another horizon; repeatable
 
@@ -762,6 +792,11 @@ Options:
 
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
   -h, --help
           Print help
@@ -805,6 +840,11 @@ Options:
 
       --option <NAME=VALUE>
           UCI option as NAME=VALUE; repeat for multiple options
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
       --button <NAME>
           Trigger a UCI button option by name; repeat for multiple buttons
@@ -942,6 +982,11 @@ Options:
 
       --a-engine-arg <A_ARGUMENTS>
 
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
       --a-cwd <A_CWD>
 
@@ -1138,6 +1183,11 @@ Options:
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
 
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
+
   -h, --help
           Print help
 ```
@@ -1180,6 +1230,11 @@ Options:
 
       --option <NAME=VALUE>
           UCI option as NAME=VALUE; repeat for multiple options
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
       --button <NAME>
           Trigger a UCI button option by name; repeat for multiple buttons
@@ -1230,6 +1285,11 @@ Options:
       --option <NAME=VALUE>
           UCI option as NAME=VALUE; repeat for multiple options
 
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
+
       --button <NAME>
           Trigger a UCI button option by name; repeat for multiple buttons
 
@@ -1266,6 +1326,11 @@ Options:
 
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
   -h, --help
           Print help
@@ -1322,6 +1387,11 @@ Options:
           [default: sequential]
           [possible values: sequential, random]
 
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
+
       --seed <SEED>
           Master seed used by random order
 
@@ -1368,6 +1438,11 @@ Options:
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
 
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
+
   -h, --help
           Print help
 ```
@@ -1405,6 +1480,11 @@ Options:
 
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
   -h, --help
           Print help
@@ -1444,6 +1524,11 @@ Options:
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
 
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
+
   -h, --help
           Print help
 ```
@@ -1479,6 +1564,11 @@ Options:
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
 
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
+
   -h, --help
           Print help
 ```
@@ -1507,6 +1597,11 @@ Options:
 
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
   -h, --help
           Print help
@@ -1546,6 +1641,11 @@ Options:
 
       --power <POWER>
           [default: 0.8]
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
       --distribution <DISTRIBUTION>
           Five comma-separated pentanomial probabilities summing to one
@@ -1591,6 +1691,11 @@ Options:
 
       --beta <BETA>
           [default: 0.05]
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
       --distribution <DISTRIBUTION>
           Five comma-separated assumed true pentanomial probabilities
@@ -1649,6 +1754,11 @@ Options:
 
       --option <NAME=VALUE>
           UCI option as NAME=VALUE; repeat for multiple options
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
       --button <NAME>
           Trigger a UCI button option by name; repeat for multiple buttons
@@ -1711,6 +1821,11 @@ Options:
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
 
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
+
   -h, --help
           Print help
 ```
@@ -1757,6 +1872,11 @@ Options:
           Games per encounter, alternating colours
 
           [default: 2]
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
       --rating <RATINGS>
           Initial rating aligned with each --engine; defaults to 1500
@@ -1807,6 +1927,11 @@ Options:
           Games per encounter, alternating colours
 
           [default: 2]
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
       --rating <RATINGS>
           Initial rating aligned with each --engine; defaults to 1500
@@ -1986,6 +2111,11 @@ Options:
 
           [default: 2]
 
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
+
       --rating <RATINGS>
           Initial rating aligned with each --engine; defaults to 1500
 
@@ -2012,6 +2142,11 @@ Options:
 
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
   -h, --help
           Print help
@@ -2040,6 +2175,11 @@ Options:
 
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
   -h, --help
           Print help

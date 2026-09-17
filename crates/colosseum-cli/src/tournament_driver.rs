@@ -11,6 +11,7 @@ use colosseum_engine::{ClockAccountingReport, GameFault};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::cancellation::Cancellation;
 use crate::match_runner::{
     ConfiguredTimeControl, FaultPolicy, FixedMatchRequest, MatchExecutionPlan, MatchOpenings,
     MatchProgress, OpeningAssignment, run_fixed_match,
@@ -20,6 +21,9 @@ use crate::match_runner::{
 #[serde(rename_all = "kebab-case")]
 pub enum TournamentRunStatus {
     Completed,
+    /// Stopped cleanly on request with games left unplayed. Standings cover
+    /// the games actually played and the run directory resumes.
+    Cancelled,
     Invalid,
     InfrastructureError,
 }
@@ -96,6 +100,7 @@ pub struct TournamentRunRequest {
     pub openings: MatchOpenings,
     pub max_engine_faults: Option<u32>,
     pub completed_games: Vec<TournamentGame>,
+    pub cancellation: Cancellation,
     pub observer: Option<Arc<dyn TournamentObserver>>,
 }
 
@@ -170,8 +175,10 @@ pub async fn run_tournament(
     let mut games = request.completed_games;
     let mut workers = tokio::task::JoinSet::new();
     let mut infrastructure_error = false;
-    while !pending.is_empty() || !workers.is_empty() {
+    let mut cancelled = false;
+    while (!pending.is_empty() && !request.cancellation.stopping()) || !workers.is_empty() {
         while !infrastructure_error
+            && !request.cancellation.stopping()
             && !pending.is_empty()
             && workers.len() < request.execution.concurrency
         {
@@ -217,6 +224,9 @@ pub async fn run_tournament(
                     openings,
                     completed_games: Vec::new(),
                     progress: MatchProgress::default(),
+                    // The outer schedule owns the stop; a single game either
+                    // finishes or is abandoned with the rest.
+                    cancellation: Cancellation::inactive(),
                     observer: None,
                 })
                 .await
@@ -256,7 +266,15 @@ pub async fn run_tournament(
                 })
             });
         }
-        let Some(joined) = workers.join_next().await else {
+        let joined = tokio::select! {
+            joined = workers.join_next() => joined,
+            () = request.cancellation.abandon() => {
+                workers.abort_all();
+                cancelled = true;
+                break;
+            }
+        };
+        let Some(joined) = joined else {
             break;
         };
         let game = joined
@@ -268,6 +286,7 @@ pub async fn run_tournament(
                 .game_completed(&game)
                 .map_err(TournamentRunError::Output)?;
         }
+        request.cancellation.record_committed_unit();
         games.push(game);
     }
     games.sort_by_key(|game| game.number);
@@ -286,6 +305,8 @@ pub async fn run_tournament(
         .is_some_and(|limit| engine_faults > limit)
     {
         TournamentRunStatus::Invalid
+    } else if cancelled || request.cancellation.stopping() {
+        TournamentRunStatus::Cancelled
     } else {
         TournamentRunStatus::Completed
     };

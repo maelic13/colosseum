@@ -18,8 +18,8 @@ numbers, internal naming or method argumentation.
 | What is missing | **Phase 10** first-release corrections (release-latest handling, adjudication off, class-aware placement, PGN annotations, final-theta estimator, graceful stop, fixed rating field, book range policy, command split), then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and release CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.6** graceful stop for every durable command, then 10.7 onward in order |
-| Recommended model | **Sol High** for 10.5 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
+| Next step | **10.7** fixed rating field on `tournament run`, then 10.8 onward in order |
+| Recommended model | **Terra High** for 10.7 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
 
@@ -796,7 +796,7 @@ model as well.
   schema version bumped, `spsa status` follows the same policy;
   `--stop-after-iteration N` clean stop at an iteration boundary without
   changing the stored horizon — PLAN §5.5, §Phase 10(e)
-- ☐ **10.6** — **Model: Sol High.** Graceful stop for every durable command:
+- ☑ **10.6 — DONE** — **Model: Sol High.** Graceful stop for every durable command:
   one cancellation path through the drivers, bounded grace for in-flight
   games, checkpoint, `cancelled` run status, documented exit code, `status`
   shows it; shared kill/resume suite gains a clean-stop case per command with

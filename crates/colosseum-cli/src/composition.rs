@@ -49,6 +49,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use crate::cancellation::{Cancellation, DEFAULT_STOP_GRACE_SECONDS};
+
 /// A durable run that stopped cleanly on request rather than reaching its
 /// terminal state. Its run directory resumes; nothing about it is a failure.
 pub const CANCELLED_EXIT_CODE: u8 = 6;
@@ -76,6 +78,17 @@ struct Cli {
     /// Remove one inherited run-file option before applying CLI arguments.
     #[arg(long, global = true, value_name = "LONG_NAME", requires = "run_file")]
     unset_run_option: Vec<String>,
+
+    /// Seconds a game in flight may take to finish after an interrupt asks a
+    /// durable run to stop; a second interrupt abandons it at once.
+    #[arg(long, global = true, default_value_t = DEFAULT_STOP_GRACE_SECONDS, value_name = "SECONDS")]
+    stop_grace_secs: u64,
+
+    /// Internal: request the clean stop after this many committed units, so
+    /// the interrupt path can be exercised deterministically. Not a public
+    /// interface; a console interrupt is how a user stops a run.
+    #[arg(long = "__stop-after-units", global = true, hide = true, value_name = "UNITS")]
+    stop_after_units: Option<u64>,
 
     #[command(subcommand)]
     command: Command,
@@ -1023,11 +1036,18 @@ pub async fn run() -> ExitCode {
     };
     let cli = Cli::parse_from(arguments);
     let _run_file_controls = (&cli.run_file, &cli.unset_run_option);
+    // One handle, one listener, one cancellation path for whichever durable
+    // command this invocation turns out to be.
+    let mut cancellation = Cancellation::new(Duration::from_secs(cli.stop_grace_secs));
+    if let Some(units) = cli.stop_after_units {
+        cancellation = cancellation.with_unit_budget(units);
+    }
+    let _interrupts = cancellation.listen_for_interrupts();
     match cli.command {
         Command::Capabilities if cli.dry_run => unsupported_dry_run("capabilities"),
         Command::Capabilities => run_capabilities(cli.json),
-        Command::Match(command) => run_match(*command, cli.json, cli.dry_run).await,
-        Command::Sprt(command) => run_sprt(*command, cli.json, cli.dry_run).await,
+        Command::Match(command) => run_match(*command, cli.json, cli.dry_run, cancellation).await,
+        Command::Sprt(command) => run_sprt(*command, cli.json, cli.dry_run, cancellation).await,
         Command::Spsa(command) => {
             let mut command = *command;
             match command.action.take() {
@@ -1039,22 +1059,24 @@ pub async fn run() -> ExitCode {
                 Some(SpsaAction::Status { run_directory }) => {
                     run_spsa_status(&run_directory, cli.json)
                 }
-                None => run_spsa_command(command, cli.json, cli.dry_run).await,
+                None => run_spsa_command(command, cli.json, cli.dry_run, cancellation).await,
             }
         }
         Command::Nps(command) => run_nps(*command, cli.json, cli.dry_run).await,
-        Command::Calibrate(command) => run_calibration(*command, cli.json, cli.dry_run).await,
+        Command::Calibrate(command) => run_calibration(*command, cli.json, cli.dry_run, cancellation).await,
         Command::Engine(command) => run_engine(command.command, cli.json, cli.dry_run).await,
         Command::Book(_) if cli.dry_run => unsupported_dry_run("book"),
         Command::Book(command) => run_book(command.action, cli.json),
         Command::Stats(_) if cli.dry_run => unsupported_dry_run("stats"),
         Command::Stats(command) => run_stats(command, cli.json),
-        Command::Suite(command) => suite_driver::run(*command, cli.json, cli.dry_run).await,
+        Command::Suite(command) => {
+            suite_driver::run(*command, cli.json, cli.dry_run, cancellation).await
+        }
         Command::Tournament(command) => match command.action {
             TournamentAction::Plan(_) if cli.dry_run => unsupported_dry_run("tournament plan"),
             TournamentAction::Plan(command) => run_tournament_plan(command, None, cli.json),
             TournamentAction::Run(command) => {
-                run_tournament_command(*command, cli.json, cli.dry_run).await
+                run_tournament_command(*command, cli.json, cli.dry_run, cancellation).await
             }
         },
         Command::Gauntlet(_) if cli.dry_run => unsupported_dry_run("gauntlet"),
@@ -1180,7 +1202,7 @@ fn load_spsa_apply(
     Ok((tuned, original, Some(record)))
 }
 
-async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCode {
+async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool, cancellation: Cancellation) -> ExitCode {
     let design = match resolve_sprt_design(&command) {
         Ok(design) => design,
         Err(error) => {
@@ -1528,6 +1550,7 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCod
         design,
         fault_policy,
         completed_pairs: checkpoint.official_pairs,
+        cancellation: cancellation.clone(),
         observer: Some(observer.clone()),
     };
     let schedule_future = sprt_runner::run_pair_schedule(request);
@@ -1582,6 +1605,7 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCod
                 sprt_runner::SprtStatus::H1
                 | sprt_runner::SprtStatus::H0
                 | sprt_runner::SprtStatus::Inconclusive => RunStatus::Completed,
+                sprt_runner::SprtStatus::Cancelled => RunStatus::Cancelled,
                 sprt_runner::SprtStatus::Invalid => RunStatus::Invalid,
             };
             if let Err(error) = recorder.finish(run_status) {
@@ -1611,6 +1635,7 @@ fn sprt_exit_code(status: sprt_runner::SprtStatus) -> u8 {
         sprt_runner::SprtStatus::H0 => 1,
         sprt_runner::SprtStatus::Inconclusive => 4,
         sprt_runner::SprtStatus::Invalid => 5,
+        sprt_runner::SprtStatus::Cancelled => CANCELLED_EXIT_CODE,
     }
 }
 
@@ -1950,7 +1975,7 @@ fn print_spsa_status(report: &SpsaStatusOutput, run_directory: &Path) {
     println!("snapshot: {}", run_directory.display());
 }
 
-async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) -> ExitCode {
+async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool, cancellation: Cancellation) -> ExitCode {
     let conditions = &command.conditions;
     let stored_schedule_inputs = match conditions
         .run_directory
@@ -2424,6 +2449,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
         checkpoint,
         stop_after_iteration: command.stop_after_iteration,
         progress: progress.clone(),
+        cancellation: cancellation.clone(),
         observer: Some(observer.clone()),
     };
     let driver_future = spsa_driver::run_spsa(driver_request);
@@ -2658,6 +2684,7 @@ async fn run_tournament_command(
     command: TournamentRunCommand,
     machine: bool,
     dry_run: bool,
+    cancellation: Cancellation,
 ) -> ExitCode {
     if !command.labels.is_empty() && command.labels.len() != command.plan.engines.len() {
         eprintln!(
@@ -2988,6 +3015,7 @@ async fn run_tournament_command(
     let request = tournament_driver::TournamentRunRequest {
         plan,
         anchor,
+        cancellation: cancellation.clone(),
         time_control,
         adjudication,
         ponder: command.ponder,
@@ -3017,6 +3045,9 @@ async fn run_tournament_command(
             }
             let (run_status, exit_code) = match report.status {
                 tournament_driver::TournamentRunStatus::Completed => (RunStatus::Completed, 0),
+                tournament_driver::TournamentRunStatus::Cancelled => {
+                    (RunStatus::Cancelled, CANCELLED_EXIT_CODE)
+                }
                 tournament_driver::TournamentRunStatus::Invalid => (RunStatus::Invalid, 1),
                 tournament_driver::TournamentRunStatus::InfrastructureError => {
                     (RunStatus::Aborted, 3)
@@ -4502,7 +4533,12 @@ struct PreparedCalibration {
     resolved: crate::ResolvedConfig,
 }
 
-async fn run_calibration(command: CalibrationCommand, machine: bool, dry_run: bool) -> ExitCode {
+async fn run_calibration(
+    command: CalibrationCommand,
+    machine: bool,
+    dry_run: bool,
+    cancellation: Cancellation,
+) -> ExitCode {
     let prepared = match prepare_calibration(&command) {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -4610,6 +4646,7 @@ async fn run_calibration(command: CalibrationCommand, machine: bool, dry_run: bo
         openings: prepared.openings,
         completed_games,
         progress: progress.clone(),
+        cancellation: cancellation.clone(),
         observer: Some(observer.clone()),
     };
     if !machine {
@@ -4644,6 +4681,14 @@ async fn run_calibration(command: CalibrationCommand, machine: bool, dry_run: bo
             return ExitCode::from(3);
         }
         match_runner::MatchStatus::Invalid => (CalibrationStatus::Invalid, None, None, 5),
+        // A calibration measures a fixed sample; stopping short of it has no
+        // interval to classify, so it reports the stop rather than a verdict.
+        match_runner::MatchStatus::Cancelled => (
+            CalibrationStatus::Inconclusive,
+            None,
+            Some("the calibration stopped cleanly before its fixed sample was complete".to_owned()),
+            CANCELLED_EXIT_CODE,
+        ),
         match_runner::MatchStatus::Completed => {
             let (interval, unavailable) = match calibration_interval(&fixed_match, prepared.design)
             {
@@ -4687,6 +4732,8 @@ async fn run_calibration(command: CalibrationCommand, machine: bool, dry_run: bo
     }
     let run_status = if status == CalibrationStatus::Invalid {
         RunStatus::Invalid
+    } else if report.fixed_match.status == match_runner::MatchStatus::Cancelled {
+        RunStatus::Cancelled
     } else {
         RunStatus::Completed
     };
@@ -4920,7 +4967,12 @@ fn calibration_exit_code(status: CalibrationStatus) -> u8 {
     }
 }
 
-async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitCode {
+async fn run_match(
+    command: MatchCommand,
+    machine: bool,
+    dry_run: bool,
+    cancellation: Cancellation,
+) -> ExitCode {
     let MatchCommand {
         games,
         engine_a: engine_a_path,
@@ -5200,6 +5252,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
         openings,
         completed_games,
         progress: progress.clone(),
+        cancellation: cancellation.clone(),
         observer: Some(observer.clone()),
     };
     if !machine {
@@ -5246,6 +5299,9 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
             }
             let (run_status, exit_code) = match report.status {
                 match_runner::MatchStatus::Completed => (RunStatus::Completed, 0),
+                match_runner::MatchStatus::Cancelled => {
+                    (RunStatus::Cancelled, CANCELLED_EXIT_CODE)
+                }
                 match_runner::MatchStatus::Invalid => (RunStatus::Invalid, 1),
                 match_runner::MatchStatus::InfrastructureError => (RunStatus::Aborted, 3),
             };

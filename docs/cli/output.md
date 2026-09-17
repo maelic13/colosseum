@@ -41,6 +41,9 @@ invalid experiment. Configuration refusal remains `2` and infrastructure,
 runtime or persistence error remains `3`.
 
 Exit `6` means a durable run stopped cleanly on request instead of reaching its
-terminal state. Its run record is `cancelled`, its checkpoint is written, and
-the same run directory resumes towards the stored horizon. A clean stop is not
-a failure and not a statistical conclusion.
+terminal state — an interrupt, or `spsa --stop-after-iteration`. Its run record
+is `cancelled`, its checkpoint is written, and the same run directory resumes
+where it stopped. A clean stop is not a failure and not a statistical
+conclusion: an SPRT that stopped before a boundary or its cap reports
+`cancelled` rather than `inconclusive`. See
+[run directories](run-directories.md) for how stopping works.

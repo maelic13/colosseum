@@ -25,6 +25,8 @@ use colosseum_uci::SpawnOptions;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::cancellation::Cancellation;
+
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const DEFAULT_BASE_MS: u64 = 3_000;
@@ -107,6 +109,9 @@ pub struct MatchGame {
 #[serde(rename_all = "kebab-case")]
 pub enum MatchStatus {
     Completed,
+    /// Stopped cleanly on request before every requested game was played. The
+    /// games already scored are kept and the run directory resumes.
+    Cancelled,
     Invalid,
     InfrastructureError,
 }
@@ -345,6 +350,7 @@ pub struct FixedMatchRequest {
     pub openings: MatchOpenings,
     pub completed_games: Vec<MatchGame>,
     pub progress: MatchProgress,
+    pub cancellation: Cancellation,
     pub observer: Option<Arc<dyn MatchObserver>>,
 }
 
@@ -615,6 +621,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         openings,
         completed_games,
         progress,
+        cancellation,
         observer,
     } = request;
     if games == 0 {
@@ -664,8 +671,12 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
     for game in &report.games {
         progress.record(game);
     }
-    while !pending.is_empty() || !workers.is_empty() {
-        while !pending.is_empty() && workers.len() < execution.concurrency {
+    let mut cancelled = false;
+    while (!pending.is_empty() && !cancellation.stopping()) || !workers.is_empty() {
+        while !pending.is_empty()
+            && !cancellation.stopping()
+            && workers.len() < execution.concurrency
+        {
             let number = pending.pop_front().expect("pending is not empty");
             let slot = &execution.slots[(number as usize - 1) % execution.slots.len()];
             let mut engine_a = engine_a.clone();
@@ -685,7 +696,17 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
                 opening_assignment,
             }));
         }
-        let Some(joined) = workers.join_next().await else {
+        // One cancellation path: stop launching, then give the games in flight
+        // their bounded grace before abandoning them.
+        let joined = tokio::select! {
+            joined = workers.join_next() => joined,
+            () = cancellation.abandon() => {
+                workers.abort_all();
+                cancelled = true;
+                break;
+            }
+        };
+        let Some(joined) = joined else {
             break;
         };
         let game = joined.map_err(|error| MatchError::Worker(error.to_string()))?;
@@ -694,6 +715,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         }
         progress.record(&game);
         report.games.push(game);
+        cancellation.record_committed_unit();
     }
     report.games.sort_by_key(|game| game.number);
     for game in report.games.clone() {
@@ -715,6 +737,12 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         || report.faults.time_total() > fault_policy.max_time_losses
     {
         report.status = MatchStatus::Invalid;
+    } else if cancelled || cancellation.stopping() || report.games.len() < games as usize {
+        // A stop is only a stop when work is actually left; an interrupt that
+        // arrives after the last game still reports a completed match.
+        if cancellation.stopping() {
+            report.status = MatchStatus::Cancelled;
+        }
     }
     Ok(report)
 }
