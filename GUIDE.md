@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | **Phases 0–9 are complete.** Final candidate `f0e3185` passed four-platform archive smoke and exact-artifact Rarog/Basilisk gates on Windows and WSL Linux |
-| What is missing | No implementation step; maintainer-owned push, merge, `cli-v0.1.0` tag and stable workflow confirmation remain |
+| What exists | **Phases 0–9 are complete.** Final candidate `823b398` passed four-platform archive smoke and exact-artifact Rarog/Basilisk gates on Windows and WSL Linux |
+| What is missing | **Phase 10** first-release corrections (release-latest handling, adjudication off, class-aware placement, PGN annotations, final-theta estimator, graceful stop, fixed rating field, book range policy, command split), then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and release CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | Push acceptance, merge `cli` to `main`, then create and push `cli-v0.1.0` |
-| Recommended model | No implementation model required; use **Sol High** only if release verification finds a defect |
+| Next step | **10.1** release-latest handling, then 10.2 onward in order |
+| Recommended model | **Terra High** for 10.1; **Sol High** from 10.2 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
 
@@ -766,6 +766,83 @@ model as well.
   release-note validation passed — evidence:
   [`docs/architecture/phase-9.7-release-acceptance.md`](docs/architecture/phase-9.7-release-acceptance.md)
 
+### Phase 10 — First-release corrections (before `cli-v0.1.0`)
+
+- ☐ **10.1** — **Model: Terra High.** Product-latest release handling: CLI
+  release workflow sets `make_latest: false`, GUI workflow sets it true for a
+  stable release and false for a prerelease; the architecture test asserts
+  both; README and product docs link to product tag lists, never
+  `/releases/latest` — PLAN §Phase 10(a)
+- ☐ **10.2** — **Model: Sol High.** Adjudication off by default in `match`,
+  `sprt`, `calibrate`, `spsa` and `tournament`; explicit enabling flags carry
+  their parameters; `--no-*` flags removed; `--one-sided-resign-adjudication`
+  requires resignation enabled; run files, config hashing, dry-run, fixtures,
+  acceptance tests and user docs updated; docs name common public-framework
+  settings — PLAN §S3 Tier B, §5.4, §Phase 10(b)
+- ☐ **10.3** — **Model: Sol High.** Class-aware CPU placement: headroom one
+  physical core with siblings; highest-performance class only when classes
+  differ; last-level cache domains detected (Windows `RelationCache`, Linux
+  `cache/index3/shared_cpu_list`) and slots kept inside one domain and node;
+  refusal naming the topology when OS evidence is insufficient;
+  `capabilities` reports class, NUMA and cache domains; fixtures for hybrid,
+  dual-domain, homogeneous SMT and no-SMT hosts assert pool and slots — PLAN
+  §5.2, §Phase 10(c)
+- ☐ **10.4** — **Model: Terra High.** Per-move PGN annotations
+  `{s= d= t= n=}` from every game-playing command, `{book}` on pre-played
+  moves, score added to the telemetry parser and `stats`, frozen annotated
+  fixture, writer form versioned in the run record — PLAN §5.4b, §Phase 10(d)
+- ☐ **10.5** — **Model: Sol High.** SPSA estimator: final centre vector
+  rounded is the default, tail-window mean optional and recorded, result
+  schema version bumped, `spsa status` follows the same policy;
+  `--stop-after-iteration N` clean stop at an iteration boundary without
+  changing the stored horizon — PLAN §5.5, §Phase 10(e)
+- ☐ **10.6** — **Model: Sol High.** Graceful stop for every durable command:
+  one cancellation path through the drivers, bounded grace for in-flight
+  games, checkpoint, `cancelled` run status, documented exit code, `status`
+  shows it; shared kill/resume suite gains a clean-stop case per command with
+  resumed statistics equal to an uninterrupted run — PLAN §5.11, §Phase 10(f)
+- ☐ **10.7** — **Model: Terra High.** Fixed rating field on `tournament run`:
+  repeatable `--fixed <index>:<rating>` using the core anchored ML rating
+  with an anchor set; pinned participants carry no error bar; fixed ratings
+  retained as run inputs; JSON/CSV/text labelled — PLAN §5.7, §Phase 10(g)
+- ☐ **10.8** — **Model: Terra High.** Book range policy: refuse a schedule
+  that needs more entries than remain from `--book-start`, `--book-wrap`
+  opt-in recorded, dry-run reports the index range; datagen recipe written in
+  the match documentation against it — PLAN §5.9, §5.13, §Phase 10(h)
+- ☐ **10.9** — **Model: Terra High.** Split `composition.rs` into one module
+  per command with no behaviour change (generated command reference
+  byte-identical, tests unchanged); Chess960 recorded as a non-goal and
+  refused with a clear message — PLAN §S4, §Phase 10(i)
+- ☐ **10.10 — EXIT** — **Model: Sol High.** Release acceptance repeat:
+  regenerate the command reference, update `CHANGELOG-CLI.md` under 0.1.0,
+  Phase 4B oracle replay and Phase 8.1 parity matrix on the corrected source,
+  short third-party usability flows, fresh four-platform CI candidate and
+  exact archive smoke; then the maintainer merges `cli` to `main` and tags
+  `cli-v0.1.0` — PLAN §Phase 10(j)
+
+### Phase 11 — The GUI on the harness (after `cli-v0.1.0`)
+
+- ☐ **11.1** — **Model: Sol High.** Harness library crate
+  (`colosseum-harness`): run directory, run record, placement resolution and
+  the match/SPRT/tournament drivers moved out of `colosseum-cli`; observer
+  port for per-game live state and run snapshots; CLI becomes a thin
+  composition root; architecture tests keep GUI/windowing packages out of the
+  harness graph; CLI tests, fixtures and generated reference unchanged — PLAN
+  §Phase 11(a)
+- ☐ **11.2** — **Model: Sol High.** GUI tournaments run through the harness
+  driver: placement, adjudication default, fault classification, annotated
+  `games.pgn` and run directories under the app data directory; SQLite stays
+  the GUI-owned history index and resume mapping, not the game store; live
+  view reads the observer port — PLAN §Phase 11(b)
+- ☐ **11.3** — **Model: Sol High.** Retire `engine::scheduler` and the
+  `tournament` feature's game-store execution path; read-only migration keeps
+  old SQLite history openable; `CLAUDE.md`, architecture docs and a new ADR
+  record the single-mechanism decision — PLAN §Phase 11(c)
+- ☐ **11.4 — EXIT** — **Model: Terra High.** GUI release: stored-data rating
+  parity within 0.01 Elo, design guidelines checked, changelog records the
+  adjudication default and run directories, version chosen by the maintainer
+  (major bump recommended), GUI archive smoke passes — PLAN §Phase 11(d)
+
 ## Recurring procedures
 
 Not steps — they are never "done".
@@ -798,11 +875,13 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Implementation is complete.** Push the Phase 9.7 acceptance commit, merge
-`cli` to `main` using the repository's chosen merge strategy, then create and
-push `cli-v0.1.0` at the merged stable source. Confirm the stable workflow
-publishes the four archives and `SHA256SUMS`; remote merge, tag and publication
-remain maintainer-owned operations.
+**Phase 10 is open.** Work the steps in order, one commit per step, starting
+with 10.1. Steps 10.2 through 10.8 change game-playing behaviour or its
+record; do not repeat the recurring "after changing anything that runs
+games" procedure per step, run it once at 10.10 on the final state. The
+merge of `cli` to `main`, the `cli-v0.1.0` tag and publication remain
+maintainer-owned operations and happen only after 10.10 passes. Phase 11
+starts after publication.
 
 ```
 git diff --check

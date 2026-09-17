@@ -36,8 +36,16 @@ argumentation.
 
 ## S1. Implemented state
 
-**The CLI 0.1.0 implementation and release acceptance are complete.** This
-document remains the binding design record and maintenance specification.
+**The CLI 0.1.0 implementation and release acceptance are complete; the
+first public release is held behind Phase 10.** A maintainer review of the
+accepted candidate against the validation engines' real harness policy
+found first-release corrections that are cheaper before anyone depends on
+published defaults: explicit product-latest handling, adjudication off by
+default, class-aware CPU placement with one core of headroom, per-move PGN
+annotations, the final-theta SPSA estimator, graceful stop, a fixed rating
+field for tournaments and book-range refusal. Phase 11 then moves the GUI
+onto the same game-playing mechanism. This document remains the binding
+design record and maintenance specification.
 
 **Colosseum is the implementation identity for the whole product.** The desktop
 product and executable are **Colosseum** / `colosseum`; its Cargo package is
@@ -164,34 +172,46 @@ and every one of them is overridable on the command line or in a run file.
 | Hash | 64 MB when a compatible option is advertised | Small enough that concurrency × hash fits in ordinary RAM |
 | Worker count | 1 when a compatible option is advertised | One variable at a time; parallel search adds its own nondeterminism |
 | Pairing | both colours per opening | The pentanomial unit (S3-C4) requires it |
-| Resign | `movecount=3 score=600 twosided=true` | See below |
-| Draw | `movenumber=40 movecount=8 score=10` | See below |
-| Concurrency headroom | 2 physical cores left free | Leaves room for the harness and the OS so game slots are not descheduled |
+| Adjudication | none: draw, resign and max-moves all off | See below |
+| Resign, when enabled | `movecount=3 score=600 twosided=true` | See below |
+| Draw, when enabled | `movenumber=40 movecount=8 score=10` | See below |
+| Concurrency headroom | 1 physical core left free, with all its SMT siblings | Room for the harness and the OS; a second free core costs one game slot for no recorded benefit |
+| Placement pool on hybrid hosts | the highest-performance core class only | Mixed classes make game slots unequal; see S5.2 |
+| SPSA estimator | the final centre vector, rounded | No checkpoint is selected after the fact; a tail-window mean is optional (S5.5) |
 | SPSA horizon | 5,000 iterations | A useful default, not a floor; freely configurable |
 | SPSA mini-match | 32 games/iteration | Same |
 | Opening book | none | The tool ships no book and assumes no path |
 
-**Resignation defaults to two-sided** because a one-sided rule adjudicates on
-the losing side's own evaluation alone. That is a measurable asymmetry whenever
-the two sides differ in how extreme their scores are — most sharply in SPSA,
-where both arms are the *same binary* with perturbed parameters, so the arm that
-scores more extremely resigns more readily than its sibling and the difference
-lands directly in the estimated gradient. Requiring both engines to agree
-removes the asymmetry by construction. The threshold of 600 cp over 3 moves is
-high enough that agreement at that margin is rarely wrong.
+**Adjudication is off by default** because every adjudication rule ends games
+the engines would otherwise have had to convert, and conversion is part of what
+a strength measurement measures. The validation projects measured the cost while
+it was on: draw and resign rules ended more than half of all endgames before
+they were reached, which starves both the rating and any training corpus of
+exactly the positions weak engines misplay, and every adjudicated result rests
+on the engines' own evaluations rather than on the rules of chess. The cost of
+playing games out is throughput, which is the right thing to spend when the
+number has to be trusted. Users who value throughput enable the rules
+explicitly; the user documentation names common settings, including those of
+well-known public testing frameworks.
 
-**The draw default is conservative on both axes.** Adjudicating a draw ends a
-game that might still have contained a decisive result, and a false draw biases
-the measured score directly. Three properties reduce that risk: requiring
-agreement for 8 consecutive moves rather than a single ply; requiring a tight
-band (|score| ≤ 10 cp) rather than a loose one; and not starting before move 40,
-because evaluations in the opening and early middlegame are least reliable and
-most likely to agree by coincidence rather than because the position is drawn.
-The cost is throughput — games run longer — which is a deliberate trade of speed
-for fewer false terminations. Faster settings are perfectly reasonable for
-users who value throughput more; the user documentation names common
-alternatives, including the values used by well-known public testing
-frameworks.
+**When resignation is enabled it is two-sided** because a one-sided rule
+adjudicates on the losing side's own evaluation alone. That is a measurable
+asymmetry whenever the two sides differ in how extreme their scores are — most
+sharply in SPSA, where both arms are the *same binary* with perturbed
+parameters, so the arm that scores more extremely resigns more readily than its
+sibling and the difference lands directly in the estimated gradient. Requiring
+both engines to agree removes the asymmetry by construction. The threshold of
+600 cp over 3 moves is high enough that agreement at that margin is rarely
+wrong.
+
+**When draw adjudication is enabled its parameters are conservative on both
+axes.** Adjudicating a draw ends a game that might still have contained a
+decisive result, and a false draw biases the measured score directly. Three
+properties reduce that risk: requiring agreement for 8 consecutive moves rather
+than a single ply; requiring a tight band (|score| ≤ 10 cp) rather than a loose
+one; and not starting before move 40, because evaluations in the opening and
+early middlegame are least reliable and most likely to agree by coincidence
+rather than because the position is drawn.
 
 For a project house style, commit a run file beside the engine source. This is
 portable, reviewable and does not depend on hidden per-user state. Resolution
@@ -392,7 +412,8 @@ compiler/source-tree inspection, parameter baking into source, build-flavour
 logic, distributed execution, training-data extraction/filtering/labelling and
 neural-net management. The CLI consumes finished UCI executables. Correctness
 suites tied to a custom move generator or search command stay with the engine.
-Non-chess variants are out of scope; Chess960 is a Phase-8 decision.
+Non-chess variants and Chess960 are out of scope: the harness plays standard
+chess only and refuses a Chess960 request rather than attempting it.
 
 ---
 
@@ -585,8 +606,8 @@ right" is not a criterion.
   logical counts but no logical-ID sibling map, so macOS records that mapping
   as unavailable rather than inferring it. Placement capability remains owned
   by the later affinity steps.
-- Modes `auto` / `off` / explicit CPU list; configurable headroom (default 2
-  physical cores free) in `auto`. The resolved `auto` selection contains full
+- Modes `auto` / `off` / explicit CPU list; configurable headroom (default 1
+  physical core free, with all of its SMT siblings) in `auto`. The resolved `auto` selection contains full
   reported physical cores (all SMT siblings), while explicit mode retains the
   exact group-qualified logical IDs named by the user. Both require an exact
   sibling map; they fail to resolve rather than guessing where that map is
@@ -603,9 +624,19 @@ right" is not a criterion.
   reject `game-slots × 2 × cores-per-engine` requests larger than the selected
   pool. This allocation is independent of whichever UCI option controls the
   engine's internal worker count.
-- On hybrid systems, keep both A/B slots on the same core class. Record NUMA
-  node and core class; avoid cross-node placement by default and make any
-  unavoidable asymmetry visible.
+- Placement knows nothing about any particular processor. It reads what the
+  operating system reports: physical cores and SMT siblings, core class
+  (Windows CPU Set efficiency class, Linux `cpu_capacity`), NUMA node and the
+  last-level cache domain (Windows `RelationCache`, Linux
+  `cache/index3/shared_cpu_list`), which is the chiplet boundary on multi-die
+  parts. `auto` selects only the highest-performance core class when classes
+  differ, keeps every game slot inside one cache domain and one NUMA node when
+  the pool allows it, and records class, node and cache domain for every
+  engine allocation. When the host reports mixed classes but a class is
+  unknown, or reports no cache topology for a multi-domain part, `auto`
+  refuses with a message that names the detected topology and asks for an
+  explicit CPU list; it never guesses. Any unavoidable asymmetry between the
+  two engines of a slot is visible in the run record.
 - Fail when requested placement cannot be applied (A1); allow and record `off`.
 - macOS has no supported hard-affinity API: report the capability as advisory or
   unavailable, record which, and do not prohibit clock matches.
@@ -673,8 +704,9 @@ is pipeline evidence, not a full tolerance measurement. See
   scheduler jitter is not counted as a loss on time. Asymmetric controls are
   supported (odds matches, "same engine at double time").
 - **Clock accounting per S5.4a**, explicit and recorded.
-- **Adjudication:** draw, resign and max-moves each individually configurable and
-  each individually **disableable**. Arbitrary engine tablebase UCI options may
+- **Adjudication:** off by default (S3 Tier B). Draw, resign and max-moves are
+  each individually enableable with explicit parameters; enabling one is part
+  of the resolved configuration and run identity. Arbitrary engine tablebase UCI options may
   be forwarded; harness-side tablebase adjudication is deferred to Phase 8
   because it requires a new probing dependency and is not necessary for a
   trustworthy SPRT.
@@ -777,6 +809,25 @@ report an unattributable divergence.
 - Clock model/version, margin, resolution and charged-elapsed summary are present
   for every completed clock-based run and are not mislabelled as engine or
   harness overhead.
+
+### 5.4b Game record annotations — every game-playing command
+
+`games.pgn` carries per-move search evidence, because a PGN of bare moves
+cannot feed a training-data extractor or a tree-shape comparison, and the
+runner already holds the values. After every engine move the comment is
+`{s=<score> d=<depth> t=<ms>ms n=<nodes>}`: score from the mover's point of
+view as a signed integer in centipawns, or `#<n>` / `#-<n>` for mate in `n`;
+depth, harness-charged elapsed milliseconds and reported nodes as integers. A
+field the engine did not report is omitted, never written as zero. Pre-played
+book moves carry `{book}` and the `OpeningPlyCount` tag remains. The `stats`
+telemetry parser reads this form in addition to the existing ones and gains
+score coverage and mean absolute score, so `stats` on a Colosseum PGN reports
+full coverage. The writer form is versioned in the run record.
+
+**Success criteria:** a stub-engine match annotates every post-opening move;
+`stats` replay on that PGN reports 100% coverage for score, depth, time and
+nodes; a frozen annotated fixture in `tests/fixtures/` is parsed by the
+telemetry parser and by the workspace PGN reader used for openings.
 
 ### 5.5 SPSA — `colosseum-cli spsa` + core schedule
 
@@ -899,17 +950,22 @@ report an unattributable divergence.
   warnings and records them in the SPSA report and run record; dry-run performs
   every audit that does not require a live engine.
 - **Closing the loop.** A tune must not end at "here is a vector". On
-  completion, and on demand mid-run, emit the rounded mean of the final 10% of
-  completed centre vectors (window configurable and frozen in the run record) as
+  completion, and on demand mid-run, emit the final completed centre vector,
+  rounded half away from zero (the registered estimator of both validation
+  projects: no checkpoint is selected after the fact), as
   (a) a ready-to-paste `setoption` list, (b) JSON, and (c) a run file fragment.
   `colosseum-cli sprt --apply <result.json>` then gates the tuned values against
   the original vector **using the same executable and UCI options only** — no
   source edit, rebuild or engine-specific baking step. The artifact contains
   executable hash, original/tuned vectors, tune conditions, schema and schedule
   versions. A changed executable hash is refused unless explicitly overridden,
-  and an override is prominent in the gate record.
+  and an override is prominent in the gate record. A tail-window mean
+  (`--final-window-percent`, 1–100) remains available; when selected it is
+  frozen in the configuration and result exactly as the default is, and
+  `spsa status` exposes the same candidate policy mid-run. The result schema
+  version identifies which estimator produced a vector.
 
-  **Implementation evidence (5.7):** application policy freezes a configurable
+  **Implementation evidence (5.7, superseded by Phase 10.5 for the default):** application policy freezes a configurable
   1–100% final horizon window (default 10%, sample count rounded up), validates
   ordered centre history and emits the half-away-from-zero rounded mean with
   original values, rails, exact window, executable hash and result/schedule/
@@ -1067,7 +1123,16 @@ Expose both formats already supported by the shared core:
 - gauntlet: one or more seeds against an opponent ladder
 
 Both provide joint ML ratings with error bars, optional anchor,
-standings/crosstable CSV and resume per S5.11. A `gauntlet` alias may exist for
+standings/crosstable CSV and resume per S5.11.
+
+A tournament may also declare a **fixed field**: any number of participants
+pinned at supplied ratings, with only the remaining participants estimated
+jointly against them and each other. This is how a newcomer is placed in an
+established pool without spending games on re-measuring the pool, and it uses
+the core's anchored maximum-likelihood rating with an anchor set rather than a
+second implementation. Pinned participants report no error bar; the run record
+retains the fixed ratings as inputs. A single `--anchor` is the degenerate
+case and stays. A `gauntlet` alias may exist for
 convenience, but it resolves to the same tournament use case rather than a
 second implementation.
 
@@ -1126,6 +1191,13 @@ endings, refuses overwrite by default and records input/output hashes.
 
 **Success criteria:** slicing is byte-reproducible across platforms; `verify`
 rejects a known-bad fixture.
+
+**Range policy for consumers.** Every game-playing command consumes book
+entries sequentially from `--book-start` in the resolved order. A run whose
+schedule needs more entries than remain refuses at resolution time, naming the
+shortfall, so two segments of one book cannot silently replay openings;
+`--book-wrap` opts into modular reuse and is recorded. Dry-run reports the
+exact index range a run will consume.
 
 ### 5.10 Statistics replay — `colosseum-cli stats`
 
@@ -1209,6 +1281,14 @@ or silent pooling of incomparable work.
   verified previous generation.
 - Interrupting is a supported operation, not an accident: a clean stop and a
   hard kill must both be recoverable.
+- **Graceful stop.** Ctrl-C (SIGINT, and the Windows console control event)
+  stops launching new units, lets in-flight games finish or aborts them after
+  a bounded grace period, writes a checkpoint, marks the run record
+  `cancelled` and exits with the documented cancelled exit code; a second
+  Ctrl-C is the hard kill. Units not yet committed are replayed on resume; for
+  SPSA that is the whole current mini-match, which is accepted.
+  `spsa --stop-after-iteration N` requests the same clean stop at an
+  iteration boundary without changing the stored horizon.
 - `colosseum-cli status <run-directory>` reads an atomic snapshot without
   mutation and reports command type/state, owning-process liveness where
   detectable, last durable checkpoint, completed/running/pending/failed units,
@@ -1255,6 +1335,8 @@ Revisit in Phase 8 only if concrete engine-independent requirements exceed
 `match`: corpus sharding, deterministic game IDs, deduplication, controlled
 randomisation or effectively unbounded horizons. Training-format extraction,
 position filtering, labelling and trainer-specific records remain out of scope.
+With S5.4b annotations and the S5.9 range policy the recipe is complete for the
+validation projects' corpora; a dedicated command remains declined.
 
 ### 5.14 Coverage target — generic machinery the CLI replaces
 
@@ -1400,6 +1482,9 @@ substitute for `Max`: use it only when the work can be divided into independent
 subtasks. Model names are workflow metadata and may be revised as the available
 lineup changes; tests, fixtures and phase exits remain the authority.
 
+When a Claude model is used instead, **Sol High** corresponds to Claude Opus 5
+at high effort and **Terra High** to Claude Sonnet 5 at high effort.
+
 Every identifier is covered below; ranges are inclusive.
 
 | Phase | Terra High | Sol High |
@@ -1416,6 +1501,8 @@ Every identifier is covered below; ranges are inclusive.
 | 7 | 7.1 | 7.2–7.3 |
 | 8 | — | 8.1–8.3 |
 | 9 | 9.2–9.3, 9.6 | 9.0–9.1, 9.4–9.5, 9.7 |
+| 10 | 10.1, 10.4, 10.7–10.9 | 10.2–10.3, 10.5–10.6, 10.10 |
+| 11 | 11.4 | 11.1–11.3 |
 
 ### Phase 0 — Current-state analysis and target architecture
 
@@ -1864,8 +1951,9 @@ with executable, artifact and raw-result hashes frozen in
 **Decided (8.2):** UCI pondering is adopted for 1.0 as an explicit, recorded,
 default-off clock-test condition across every game-playing CLI workflow. It is
 rejected for fixed movetime/nodes/depth because those controls have no
-opponent-clock budget. Chess960 and harness-side Syzygy adjudication are useful
-but deferred until their full correctness boundaries can be implemented.
+opponent-clock budget. Harness-side Syzygy adjudication is useful but deferred
+until its full correctness boundary can be implemented; Chess960 was deferred
+here and became a non-goal in Phase 10 (S4).
 Additional tournament formats, output formats and a dedicated datagen command
 are declined for 1.0 because the current static formats and JSON/PGN/CSV plus a
 normal durable `match` cover the demonstrated general engine-development
@@ -2005,6 +2093,117 @@ expected capped-inconclusive exit. The independent `0.1.0` version,
 identities and hashes are retained in
 [`docs/architecture/phase-9.7-release-acceptance.md`](docs/architecture/phase-9.7-release-acceptance.md).
 
+**Release publication moved behind Phase 10** by maintainer decision on
+2026-09-17. The 9.7 acceptance evidence stands for the candidate it names and
+the same gates are repeated at 10.10 on the corrected candidate.
+
+### Phase 10 — First-release corrections (before `cli-v0.1.0`)
+
+The accepted candidate was reviewed against the validation engines' real
+harness policy and a maintainer's release expectations. Nothing found is a
+defect in what 0.1.0 promised; each item is a default or a mechanism that is
+cheaper to correct before anyone depends on it. The CLI version stays 0.1.0
+because nothing has been published. Every step that changes game-playing
+behaviour is followed by the recurring "after changing anything that runs
+games" procedure at 10.10, once, on the final state.
+
+- **(a) Product-latest release handling.** GitHub keeps one repository-wide
+  "latest" release and both release workflows leave it to chance. The CLI
+  workflow marks its release `make_latest: false`; the GUI workflow marks a
+  stable release latest and a prerelease not. The architecture test asserts
+  both. README and product documentation link to product tag lists, never to
+  `/releases/latest`.
+- **(b) Adjudication off by default** across `match`, `sprt`, `calibrate`,
+  `spsa` and `tournament`, per the revised S3 Tier B. Draw and resignation are
+  enabled by explicit flags that carry their parameters; the previous `--no-*`
+  flags are removed rather than kept as no-ops because nothing has been
+  published. `--one-sided-resign-adjudication` requires resignation to be
+  enabled. Run files, resolved-configuration hashing, dry-run output, fixtures,
+  acceptance tests and user documentation follow; the documentation names the
+  common settings of public frameworks for users who want them.
+- **(c) Class-aware CPU placement** per the revised S5.2: headroom of one
+  physical core, highest-performance class only on hybrid hosts, last-level
+  cache domains detected and kept per slot, refusal with a topology-naming
+  message where the OS evidence is insufficient. `capabilities` reports class,
+  NUMA and cache domains. Fixtures cover a hybrid performance/efficiency host,
+  a dual-cache-domain single-socket host, a homogeneous SMT host and a
+  no-SMT host; the chosen pool and slot allocation are asserted for each.
+- **(d) Game record annotations** per S5.4b, in every game-playing command,
+  plus score in the telemetry parser and `stats`.
+- **(e) SPSA estimator and staged stop** per the revised S5.5: the final
+  centre vector is the default estimator, the tail-window mean is optional and
+  recorded, the result schema version is bumped, `spsa status` follows the
+  same policy, and `--stop-after-iteration N` requests a clean stop at an
+  iteration boundary without touching the stored horizon.
+- **(f) Graceful stop** per the revised S5.11 for every durable command: one
+  cancellation path through the drivers, bounded grace for in-flight games,
+  checkpoint, `cancelled` run status, documented exit code, `status` showing
+  the cancelled state. The shared kill/resume suite gains a clean-stop case
+  per command; resumed statistics equal an uninterrupted run.
+- **(g) Fixed rating field** per the revised S5.7: `--fixed <index>:<rating>`
+  repeatable on `tournament run`, no error bar for pinned participants, fixed
+  ratings retained as run inputs, JSON/CSV/text rows labelled accordingly.
+- **(h) Book range policy** per S5.9: refusal instead of silent wraparound,
+  `--book-wrap` opt-in, dry-run index range, and the datagen recipe in the
+  match documentation written against it.
+- **(i) Command-layer split and non-goals.** `composition.rs` holds every
+  command in one file of more than six thousand lines; split it into one
+  module per command with no behaviour change, guarded by a byte-identical
+  generated command reference and unchanged tests. Record Chess960 as a
+  non-goal in S4 and the compatibility page; a Chess960 FEN or option request
+  is refused with a clear message.
+- **(j) Release acceptance repeat.** Regenerate the command reference, update
+  `CHANGELOG-CLI.md` under 0.1.0, run the Phase 4B oracle replay and the
+  Phase 8.1 parity matrix on the corrected source, repeat the short third-party
+  usability flows, build a fresh four-platform CI candidate and pass exact
+  archive smoke. The maintainer then merges `cli` to `main` and tags
+  `cli-v0.1.0`.
+
+**Exit criterion:** every item above demonstrated by its tests and fixtures;
+oracle replay and parity matrix agree on shared fields; the candidate's four
+archives pass smoke; documentation, changelog and generated reference are
+consistent; the tag contract validates.
+
+### Phase 11 — The GUI on the harness
+
+The GUI still plays games through `colosseum-engine::scheduler` and the SQLite
+store, while the CLI plays through its own drivers with placement, pentanomial
+statistics, fault policy and durable run directories. Two implementations of
+one mechanism in one repository is the "one real cost" of S2 doubled. Phase 11
+makes the CLI's drivers the single game-playing mechanism and keeps SQLite as
+the GUI's history index. It starts only after `cli-v0.1.0` is published, so
+the CLI release is never held by GUI work.
+
+- **(a) Harness library.** Move the run directory, run record, placement
+  resolution and the match, SPRT and tournament drivers from `colosseum-cli`
+  into a library crate (`colosseum-harness`) with no argument parser and no
+  `main`. Add an observer port that publishes per-game live state (board,
+  latest search line per side, clocks) and run-level snapshots. The CLI becomes
+  a thin composition root over the library; the architecture tests keep GUI
+  and windowing packages out of the harness dependency graph.
+- **(b) The GUI plays through the harness.** Tournament execution in the GUI
+  uses the harness tournament driver: placement, the adjudication default,
+  fault classification, `games.pgn` with annotations per tournament and run
+  directories under the application data directory. SQLite remains the
+  GUI-owned history index (tournament list, names, status, participant
+  correlation and the mapping to run directories for resume); it is no longer
+  the game store. The live view reads the observer port.
+- **(c) Retire the duplicate scheduler.** Remove `engine::scheduler` and the
+  `tournament` feature's game-store execution path. Pre-existing SQLite game
+  history stays readable through a read-only migration so the History tab
+  still opens old tournaments. Update `CLAUDE.md`, the architecture documents
+  and an ADR recording the single-mechanism decision.
+- **(d) GUI release.** Ratings on stored data agree with the previous
+  implementation within 0.01 Elo; the design guidelines are checked; the GUI
+  changelog records the adjudication default change and the new run
+  directories prominently. The version is the maintainer's call at this step;
+  a major bump is recommended because a shipped default changes.
+
+**Exit criterion:** one game-playing implementation in the workspace; GUI
+tournament parity demonstrated on stored data; the CLI's own tests, fixtures
+and generated reference unchanged by the extraction; a GUI candidate passes
+its archive smoke.
+
 ---
 
 ## S9. Risks
@@ -2022,6 +2221,9 @@ identities and hashes are retained in
 | Our defaults read as mandates | S3 tiers; committed run files; user docs name alternatives |
 | Statistics change meaning silently over time | `stats_version` + changelog (5.8) |
 | A derived constant is wrong and invisible | A5: assert written artifacts before play |
+| Phase 10 default changes silently alter fixtures | Each change is a numbered step with its own fixture update; oracle replay and parity repeat at 10.10 |
+| GUI unification regresses the released GUI | Phase 11 starts after `cli-v0.1.0`; stored-data rating parity and read-only history migration are exit criteria |
+| Class-aware placement guesses a processor | S5.2 refuses on insufficient OS evidence and asks for an explicit list; fixtures cover hybrid and multi-domain hosts |
 
 ### Rejected, with reasoning
 
