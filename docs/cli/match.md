@@ -239,7 +239,10 @@ configuration is refused on resume. The directory contains:
 | `result.json` | Final structured match report |
 | `failed-games/` | UCI traffic and stderr for abnormal games |
 
-Progress is written to stderr every `--progress-interval-secs N` seconds. The
+Progress is written to stderr every `--progress-every N` games, and once more
+at the end; a match block reports the score, the Elo estimate with its 95%
+interval, faults and the rate. See the
+[output contract](output.md) for the shared rules. The
 final human report names the artifact directory. In `--json` mode stdout still
 contains exactly one JSON document; it includes `run_directory`, while progress
 and diagnostics remain confined to stderr.

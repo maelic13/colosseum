@@ -1,0 +1,477 @@
+//! Progress blocks: what they say, and what makes one appear.
+//!
+//! The trigger is the run's own unit. The clock only ever withholds a block,
+//! so a test can drive both halves of the contract without depending on how
+//! fast the machine is: the stub's `--sleep-ms` sets how long a game takes,
+//! and the unit counts are exact.
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+use serde_json::Value;
+
+fn cli() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_colosseum-cli"))
+}
+
+fn engine() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_colosseum-cli"))
+}
+
+/// An ordinary UCI executable that answers every search with `e2e4`, legal
+/// only from the initial position. Against the conforming stub it gives a
+/// paired sample with variance, which is what an SPRT needs to report an LLR.
+fn one_move_engine() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_colosseum-uci-fixture"))
+}
+
+fn stderr(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// The progress blocks in an output stream, each as its own text.
+fn blocks(text: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    for line in text.lines() {
+        if line.starts_with("progress [") {
+            blocks.push(format!("{line}\n"));
+        } else if line.starts_with("  ")
+            && let Some(block) = blocks.last_mut()
+        {
+            block.push_str(line);
+            block.push('\n');
+        }
+    }
+    blocks
+}
+
+/// A match of `games` games where each game takes about `sleep_ms` times the
+/// move cap, so the duration is the stub's and not the host's.
+fn stub_match(run: &Path, games: u32, sleep_ms: u32, moves: u32, progress: &[&str]) -> Output {
+    cli()
+        .arg("match")
+        .arg(engine())
+        .arg(engine())
+        .args(["--games", &games.to_string()])
+        .args([
+            "--a-engine-arg=__uci-stub",
+            "--b-engine-arg=__uci-stub",
+            &format!("--a-engine-arg=--sleep-ms={sleep_ms}"),
+            &format!("--b-engine-arg=--sleep-ms={sleep_ms}"),
+        ])
+        .args([
+            "--a-movetime-ms",
+            "10",
+            "--b-movetime-ms",
+            "10",
+            "--max-moves",
+            &moves.to_string(),
+            "--max-engine-faults",
+            "999",
+            "--max-time-losses",
+            "999",
+        ])
+        .args(progress)
+        .arg("--dir")
+        .arg(run)
+        .arg("--json")
+        .output()
+        .unwrap()
+}
+
+/// Crossing a unit boundary is what prints a block, and termination adds the
+/// last one.
+#[test]
+fn a_match_prints_a_block_on_every_unit_boundary_it_crosses() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("run");
+    // Eight games of four moves at 60 ms a move is about two seconds, so
+    // every second boundary clears the one-second floor.
+    let output = stub_match(
+        &run,
+        8,
+        60,
+        4,
+        &["--progress-every", "2", "--progress-min-secs", "1"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stderr(&output);
+    let blocks = blocks(&text);
+    assert!(
+        blocks.len() >= 2,
+        "a run that crossed four boundaries printed {} blocks:\n{text}",
+        blocks.len()
+    );
+    // Every block is a boundary or the end, never a per-game report.
+    assert!(blocks.len() <= 4, "{text}");
+    let last = blocks.last().unwrap();
+    assert!(
+        last.starts_with("progress [match]: 8/8 games (100%),"),
+        "{last}"
+    );
+    for field in ["score", "W/D/L", "Elo", "faults", "rate"] {
+        assert!(last.contains(field), "{field} missing from:\n{last}");
+    }
+}
+
+/// The floor is the only thing the clock does: it withholds blocks, and the
+/// next boundary after it expires prints one.
+#[test]
+fn the_floor_coalesces_boundaries_that_arrive_too_fast() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("run");
+    // Every game is a boundary, and every one of them is inside the floor.
+    let output = stub_match(
+        &run,
+        8,
+        0,
+        2,
+        &["--progress-every", "1", "--progress-min-secs", "3600"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stderr(&output);
+    let blocks = blocks(&text);
+    assert_eq!(
+        blocks.len(),
+        1,
+        "eight boundaries inside the floor printed {} blocks:\n{text}",
+        blocks.len()
+    );
+    assert!(
+        blocks[0].starts_with("progress [match]: 8/8 games (100%),"),
+        "{text}"
+    );
+}
+
+/// Time alone never prints a block. A run that takes seconds but never
+/// reaches a boundary reports once, at the end.
+#[test]
+fn elapsed_time_alone_never_prints_a_block() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("run");
+    let output = stub_match(
+        &run,
+        8,
+        60,
+        4,
+        &["--progress-every", "1000", "--progress-min-secs", "1"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stderr(&output);
+    assert_eq!(blocks(&text).len(), 1, "{text}");
+}
+
+/// Both flags are diagnostics, so neither is part of the run identity and a
+/// resumed run may be told to report differently.
+#[test]
+fn neither_progress_flag_enters_the_hashed_configuration() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("run");
+    // The same conditions twice; only the reporting options differ.
+    let stopped = stub_match(
+        &run,
+        8,
+        0,
+        2,
+        &["--progress-every", "4", "--__stop-after-units", "4"],
+    );
+    assert_eq!(stopped.status.code(), Some(6), "{}", stderr(&stopped));
+
+    let resolved = std::fs::read_to_string(run.join("resolved-config.json")).unwrap();
+    assert!(
+        !resolved.contains("progress"),
+        "a reporting option reached the hashed configuration: {resolved}"
+    );
+
+    let resumed = stub_match(
+        &run,
+        8,
+        0,
+        2,
+        &["--progress-every", "1", "--progress-min-secs", "2"],
+    );
+    assert!(
+        resumed.status.success(),
+        "the run did not resume with different reporting options: {}",
+        stderr(&resumed)
+    );
+}
+
+/// `status` prints the block the console last showed, and `run.log` keeps
+/// every block the run ever printed.
+#[test]
+fn status_prints_the_last_block_and_the_log_keeps_them_all() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("run");
+    let output = stub_match(
+        &run,
+        8,
+        60,
+        4,
+        &["--progress-every", "2", "--progress-min-secs", "1"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let printed = blocks(&stderr(&output));
+
+    let log = std::fs::read_to_string(run.join("run.log")).unwrap();
+    let logged = log
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|event| event["event"] == "progress")
+        .count();
+    assert_eq!(logged, printed.len(), "{log}");
+
+    let status = cli().arg("status").arg(&run).output().unwrap();
+    assert!(status.status.success());
+    let shown = String::from_utf8_lossy(&status.stdout).into_owned();
+    assert!(
+        shown.contains(printed.last().unwrap().trim_end()),
+        "status did not print the last block:\n{shown}"
+    );
+
+    // The same block, machine-readable, for a caller that does not parse text.
+    let machine = cli()
+        .arg("status")
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    let record: Value = serde_json::from_slice(&machine.stdout).unwrap();
+    let block = &record["record"]["progress"];
+    assert_eq!(block["command"], "match", "{record}");
+    assert_eq!(block["unit"], "games");
+    assert_eq!(block["done"], 8);
+    assert_eq!(block["total"], 8);
+}
+
+/// A sequential test reports the whole decision, not a pair count.
+#[test]
+fn an_sprt_block_carries_the_sample_both_models_and_the_llr() {
+    let root = tempfile::tempdir().unwrap();
+    let book = root.path().join("openings.epd");
+    std::fs::write(
+        &book,
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\n\
+         rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1\n",
+    )
+    .unwrap();
+    let run = root.path().join("run");
+    let output = cli()
+        .arg("sprt")
+        .arg(engine())
+        .arg(one_move_engine())
+        .args([
+            "--max-pairs",
+            "20",
+            "--model",
+            "normalized",
+            "--elo0",
+            "0",
+            "--elo1",
+            "10",
+            "--alpha",
+            "0.05",
+            "--beta",
+            "0.05",
+            "--a-engine-arg=__uci-stub",
+            "--a-movetime-ms",
+            "10",
+            "--b-movetime-ms",
+            "10",
+            "--max-engine-faults",
+            "99999",
+            "--max-time-losses",
+            "99999",
+            "--progress-every",
+            "10",
+            "--progress-min-secs",
+            "1",
+            "--book-wrap",
+            "--book",
+        ])
+        .arg(&book)
+        .arg("--dir")
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    // Twenty pairs without a boundary is a capped inconclusive result.
+    assert_eq!(output.status.code(), Some(4), "{}", stderr(&output));
+    let text = stderr(&output);
+    let last = blocks(&text).pop().expect("a final block");
+    assert!(
+        last.starts_with("progress [sprt]: 20/20 pairs (100%),"),
+        "{last}"
+    );
+    for field in [
+        "games",
+        "W/D/L",
+        "pentanomial",
+        "nElo",
+        "Elo",
+        "LLR",
+        "faults",
+        "rate",
+        "expected remaining",
+    ] {
+        assert!(last.contains(field), "{field} missing from:\n{last}");
+    }
+    // The pentanomial is the vector the run committed, and the LLR is stated
+    // against its exact Wald bounds.
+    assert!(last.contains("[0, 0, 10, 0, 10]"), "{last}");
+    assert!(last.contains("in [-2.94, 2.94]"), "{last}");
+    assert!(last.contains("(95%)"), "{last}");
+}
+
+/// A tournament reports who is ahead, with the error bars its own rating step
+/// produced.
+#[test]
+fn a_tournament_block_names_the_standings_header() {
+    let root = tempfile::tempdir().unwrap();
+    let book = root.path().join("openings.epd");
+    std::fs::write(
+        &book,
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\n\
+         rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1\n\
+         rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2\n",
+    )
+    .unwrap();
+    let run = root.path().join("run");
+    let output = cli()
+        .args(["tournament", "run"])
+        .args(["--engine".as_ref(), engine().as_os_str()])
+        .args(["--engine".as_ref(), engine().as_os_str()])
+        .args(["--engine".as_ref(), engine().as_os_str()])
+        .args([
+            "--games-per-pair",
+            "2",
+            "--engine-arg=__uci-stub",
+            "--movetime-ms",
+            "10",
+            "--max-moves",
+            "2",
+            "--max-engine-faults",
+            "999",
+            "--progress-every",
+            "4",
+            "--progress-min-secs",
+            "1",
+            "--book",
+        ])
+        .arg(&book)
+        .arg("--dir")
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stderr(&output);
+    let last = blocks(&text).pop().expect("a final block");
+    assert!(
+        last.starts_with("progress [tournament]: 6/6 games (100%),"),
+        "{last}"
+    );
+    assert!(last.contains("standings"), "{last}");
+    assert!(last.contains('±'), "no error bar in:\n{last}");
+    assert!(last.contains("1. "), "no ranked row in:\n{last}");
+}
+
+/// A tune reports what the last mini-match said, how hard the schedule is
+/// pushing, and which centres are moving.
+#[test]
+fn a_tune_block_names_its_iteration_gain_and_moving_centres() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = root.path().join("tune.toml");
+    std::fs::write(
+        &tune,
+        "[[parameters]]\nname = \"Hash\"\ninitial = 16\nmin = 1\nmax = 1024\nc_end = 1.0\n",
+    )
+    .unwrap();
+    let run = root.path().join("run");
+    let output = cli()
+        .arg("spsa")
+        .arg(engine())
+        .arg("--engine-arg=__uci-stub")
+        .arg("--tune")
+        .arg(&tune)
+        .args([
+            "--r-end",
+            "0.002",
+            "--iterations",
+            "2",
+            "--games-per-iteration",
+            "2",
+            "--depth",
+            "1",
+            "--max-moves",
+            "2",
+            "--seed",
+            "7",
+            "--progress-every",
+            "1",
+            "--progress-min-secs",
+            "1",
+            "--dir",
+        ])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stderr(&output);
+    let last = blocks(&text).pop().expect("a final block");
+    assert!(
+        last.starts_with("progress [spsa]: 2/2 iterations (100%),"),
+        "{last}"
+    );
+    assert!(last.contains("last mini-match"), "{last}");
+    assert!(last.contains("gain a "), "{last}");
+    assert!(last.contains("perturbation scale c "), "{last}");
+    assert!(last.contains("largest moves"), "{last}");
+    assert!(last.contains("Hash "), "the knob is named in:\n{last}");
+}
+
+/// A calibration reports the paired sample it is measuring.
+#[test]
+fn a_calibration_block_reports_its_paired_sample() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("run");
+    let output = cli()
+        .arg("calibrate")
+        .arg(engine())
+        .arg(engine())
+        .args([
+            "--games",
+            "8",
+            "--a-engine-arg=__uci-stub",
+            "--b-engine-arg=__uci-stub",
+            "--a-movetime-ms",
+            "10",
+            "--b-movetime-ms",
+            "10",
+            "--max-moves",
+            "2",
+            "--progress-every",
+            "2",
+            "--progress-min-secs",
+            "1",
+            "--dir",
+        ])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    // Identical stubs draw every game, which is a zero-variance sample and an
+    // inconclusive calibration; the block still reports the sample.
+    assert_eq!(output.status.code(), Some(4), "{}", stderr(&output));
+    let text = stderr(&output);
+    let last = blocks(&text).pop().expect("a final block");
+    assert!(
+        last.starts_with("progress [calibrate]: 4/4 pairs (100%),"),
+        "{last}"
+    );
+    for field in ["games", "W/D/L", "pentanomial", "faults"] {
+        assert!(last.contains(field), "{field} missing from:\n{last}");
+    }
+    assert!(last.contains("[0, 0, 4, 0, 0]"), "{last}");
+}

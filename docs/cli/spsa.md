@@ -166,6 +166,15 @@ any reported statistic is defined. `--dry-run` resolves this
 schedule without launching the engine; live UCI-schema validation consequently
 occurs only when the actual run starts.
 
+Progress is written to stderr every `--progress-every N` committed iterations
+(default 1) and once more at termination. A tune block names the iteration and
+how far through the horizon it is, the elapsed time and a linear estimate of
+what is left, the last mini-match's pair score, the gain and perturbation scale
+that iteration used, and the three centres that moved most since the previous
+block. Those moves are measured as a fraction of each knob's own range, because
+ten units of a thousand-wide knob and ten units of a twenty-wide one are not
+the same fact.
+
 Use `--dir PATH` for an explicitly resumable run. Each checkpoint contains only
 whole completed iterations; a hard stop during a mini-match replays that entire
 mini-match on resume and cannot advance the gain schedule. Resume requires the

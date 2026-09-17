@@ -56,6 +56,12 @@ seed = 42
 colosseum-cli --run-file ./testing/fast.toml match ./candidate ./baseline --games 100
 ```
 
+Two options are deliberately outside the run identity: `progress-every` and
+`progress-min-secs` only decide how often a run talks to the console, so they
+are not part of the hashed configuration. A run file may set them, and a
+resumed run may be given different values, without the stored configuration
+hash changing.
+
 ## Inheritance and precedence
 
 A file may name one parent with `extend`. Resolution is:

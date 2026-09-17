@@ -14,11 +14,11 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | **Phases 0–9 are complete, and 10.1–10.9e with them.** Candidate `823b398` passed four-platform archive smoke and exact-artifact Rarog/Basilisk gates on Windows and WSL Linux; every first-release correction has landed since |
+| What exists | **Phases 0–9 are complete, and 10.1–10.9f with them.** Candidate `823b398` passed four-platform archive smoke and exact-artifact Rarog/Basilisk gates on Windows and WSL Linux; every first-release correction has landed since |
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9f** progress reports, then **10.10 — EXIT**, which needs a real machine and the maintainer |
+| Next step | **10.10 — EXIT**, the release acceptance repeat, which needs a real machine and the maintainer |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -846,7 +846,7 @@ model as well.
   run-dir-versus-PGN equality test on a run with one aborted game; `rng.rs`
   doc comment corrected; versioned schema refusal kept reachable for old
   SPSA schedule and result files — PLAN §Phase 10(o)
-- ☐ **10.9f** — **Model: Terra High.** Progress reports on stderr every
+- ☑ **10.9f — DONE** — **Model: Terra High.** Progress reports on stderr every
   `--progress-every N` units (pairs, games or iterations; defaults 10, 20,
   1) with a `--progress-min-secs` floor (default 5) and at termination,
   never per commit; `--progress-interval-secs` removed: `sprt` and

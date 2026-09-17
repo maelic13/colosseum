@@ -25,6 +25,12 @@ pub(crate) fn run_status(run_directory: &Path, machine: bool) -> ExitCode {
         );
         println!("scored games: {}", record.official_sample.scored_games);
         println!("anomalies: {}", record.anomalies.len());
+        // The last block the run published, verbatim: a closed console loses
+        // nothing, and `status` never invents a second account of the run.
+        match &record.progress {
+            Some(block) => print!("{}", block.render()),
+            None => println!("progress: none published yet"),
+        }
     }
     ExitCode::SUCCESS
 }

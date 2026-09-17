@@ -44,6 +44,32 @@ from the checkpoint, which stays authoritative, and its search telemetry from
 the directory's own `games.pgn`, so telemetry is never reported unavailable
 when the annotated export is sitting beside the checkpoint.
 
+## Progress
+
+A durable run prints one progress block on standard error every
+`--progress-every N` units of its own work, and one more when it terminates.
+The unit is what the command is made of: complete pairs for `sprt` and
+`calibrate`, games for `match` and `tournament run`, committed iterations for
+`spsa`. The defaults are 10 pairs, 20 games and 1 iteration.
+
+Counting units rather than seconds means a block always reports the same amount
+of new evidence, whatever the time control. `--progress-min-secs` (default 5)
+is the one concession to the clock: a run whose units finish faster than that
+coalesces its blocks instead of flooding the console, and prints at the first
+boundary after the floor expires. A block is never printed for every committed
+unit, and neither flag is part of the hashed configuration, so changing either
+one does not stop a run directory resuming.
+
+Each block names the command, the units done against the cap, and the elapsed
+time, then the figures a decision needs. A sequential test reports its sample,
+both Elo models with 95% intervals and its LLR against the Wald bounds; a
+tournament reports the standings header with ratings and error bars; a tune
+reports its last mini-match, the current gain and perturbation scale, and the
+centres that are moving. Every block is appended to `run.log`, and the most
+recent one is retained in `run-record.json`, so
+[`status`](status.md) prints exactly what the console last showed and a closed
+console loses nothing.
+
 Human-readable mode is the default. Automation should select `--json` and use
 the process exit status as the primary success/failure signal.
 

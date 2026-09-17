@@ -10,6 +10,7 @@ directory is initialized. It is the official status source and contains:
   opening policy);
 - the official durably committed sample, including paired pentanomial bins and
   any unpaired games;
+- the most recent progress block the run published;
 - an OS/architecture/visible-CPU and capability summary;
 - structured anomalies, including invalidation or unexpected owner loss.
 
@@ -26,6 +27,12 @@ is neither a failure nor a statistical conclusion.
 `run-record.json`; it never resumes, repairs, checkpoints or changes the run.
 Use `--json` for the common single-document machine output.
 
+It ends by printing the run's most recent progress block verbatim, exactly as
+the console showed it, so closing a terminal costs nothing. `run.log` keeps
+every block the run ever printed; the record keeps the latest. A run that has
+not published one yet says so. See the
+[output contract](output.md) for what a block contains and when it is printed.
+
 SPSA tunes additionally support `colosseum-cli spsa status <run-dir>`. That
 command reads the checksum-verified checkpoint generation and extends the
 common lifecycle view with trajectory, thirds, ETA and explicitly heuristic
@@ -39,3 +46,4 @@ Run-record schema history:
 | 2 | Added required command-specific `workflow` evidence so the statistical model and experimental conditions are stored in the record itself |
 | 3 | Added the last-level cache domain to every engine CPU placement, the versioned game-record annotation writer, and the SPSA estimator that produced a tuned vector |
 | 4 | Replaced the execution plan's `cores_per_engine` count with the slot allocation mode, so a record says whether the two engines of a game shared their cores or had their own |
+| 5 | Added the run's most recent progress block, so `status` reports what the console last showed |

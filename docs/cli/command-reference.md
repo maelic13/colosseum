@@ -105,31 +105,41 @@ Options:
       --json
           Emit exactly one JSON value on stdout
 
-      --a-label <A_LABEL>
-
-
       --dry-run
           Resolve and print configuration/invocations without launching an engine
 
-      --a-engine-arg <A_ARGUMENTS>
+      --progress-every <PROGRESS_EVERY>
+          Games between progress blocks on standard error
 
+          [default: 20]
+
+      --progress-min-secs <PROGRESS_MIN_SECS>
+          Shortest time between two progress blocks. A run whose games finish faster than this coalesces them instead of flooding the console
+
+          [default: 5]
 
       --run-file <PATH>
           Load reusable command options from an inheritable TOML run file
 
-      --a-cwd <A_CWD>
+      --a-label <A_LABEL>
 
 
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
 
-      --a-env <KEY=VALUE>
+      --a-engine-arg <A_ARGUMENTS>
 
 
       --stop-grace-secs <SECONDS>
           Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
 
           [default: 30]
+
+      --a-cwd <A_CWD>
+
+
+      --a-env <KEY=VALUE>
+
 
       --a-option <NAME=VALUE>
 
@@ -289,11 +299,6 @@ Options:
 
       --restart
           Archive an existing --dir and start a fresh run there
-
-      --progress-interval-secs <PROGRESS_INTERVAL_SECS>
-          Seconds between live progress reports on standard error
-
-          [default: 10]
 
   -h, --help
           Print help
@@ -365,6 +370,16 @@ Options:
       --beta <BETA>
           Type-II error probability
 
+      --progress-every <PROGRESS_EVERY>
+          Official pairs between progress blocks on standard error
+
+          [default: 10]
+
+      --progress-min-secs <PROGRESS_MIN_SECS>
+          Shortest time between two progress blocks. A run whose pairs finish faster than this coalesces them instead of flooding the console
+
+          [default: 5]
+
       --a-label <A_LABEL>
 
 
@@ -535,11 +550,6 @@ Options:
 
       --restart
           Archive an existing --dir and start a fresh run there
-
-      --progress-interval-secs <PROGRESS_INTERVAL_SECS>
-          Seconds between live progress reports on standard error
-
-          [default: 10]
 
   -h, --help
           Print help
@@ -714,8 +724,15 @@ Options:
       --restart
 
 
-      --progress-interval-secs <PROGRESS_INTERVAL_SECS>
-          [default: 10]
+      --progress-every <PROGRESS_EVERY>
+          Committed iterations between progress blocks on standard error
+
+          [default: 1]
+
+      --progress-min-secs <PROGRESS_MIN_SECS>
+          Shortest time between two progress blocks. A run whose iterations finish faster than this coalesces them instead of flooding the console
+
+          [default: 5]
 
   -h, --help
           Print help
@@ -988,19 +1005,29 @@ Options:
 
           [default: 5]
 
-      --a-label <A_LABEL>
+      --progress-every <PROGRESS_EVERY>
+          Complete pairs between progress blocks on standard error
 
+          [default: 10]
 
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
 
-      --a-engine-arg <A_ARGUMENTS>
+      --progress-min-secs <PROGRESS_MIN_SECS>
+          Shortest time between two progress blocks. A run whose pairs finish faster than this coalesces them instead of flooding the console
 
+          [default: 5]
 
       --stop-grace-secs <SECONDS>
           Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
 
           [default: 30]
+
+      --a-label <A_LABEL>
+
+
+      --a-engine-arg <A_ARGUMENTS>
+
 
       --a-cwd <A_CWD>
 
@@ -1166,11 +1193,6 @@ Options:
 
       --restart
           Archive an existing --dir and start a fresh run there
-
-      --progress-interval-secs <PROGRESS_INTERVAL_SECS>
-          Seconds between live progress reports on standard error
-
-          [default: 10]
 
   -h, --help
           Print help
@@ -2090,6 +2112,16 @@ Options:
 
       --restart
 
+
+      --progress-every <PROGRESS_EVERY>
+          Games between progress blocks on standard error
+
+          [default: 20]
+
+      --progress-min-secs <PROGRESS_MIN_SECS>
+          Shortest time between two progress blocks. A run whose games finish faster than this coalesces them instead of flooding the console
+
+          [default: 5]
 
   -h, --help
           Print help

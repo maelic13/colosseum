@@ -178,6 +178,13 @@ pub(crate) struct TournamentRunCommand {
     pub(crate) run_directory: Option<PathBuf>,
     #[arg(long, requires = "run_directory")]
     pub(crate) restart: bool,
+    /// Games between progress blocks on standard error.
+    #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) progress_every: u64,
+    /// Shortest time between two progress blocks. A run whose games finish
+    /// faster than this coalesces them instead of flooding the console.
+    #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) progress_min_secs: u64,
 }
 
 pub(crate) fn run_tournament_plan(
@@ -624,6 +631,8 @@ pub(crate) async fn run_tournament_command(
             return ExitCode::from(3);
         }
     };
+    let progress_observer = Arc::clone(&observer);
+    let resumed_games = checkpoint.games.len() as u64;
     colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
     let mut recorder = match if opened.resumed {
         RunRecorder::resume(&directory)
@@ -653,6 +662,12 @@ pub(crate) async fn run_tournament_command(
         eprintln!("run record failed: {error}");
         return ExitCode::from(3);
     }
+    let scheduled_games = plan.schedule.len() as u64;
+    let rating_inputs = TournamentRatingInputs {
+        plan: plan.clone(),
+        anchor,
+        fixed_ratings: fixed_ratings.clone(),
+    };
     let request = tournament_driver::TournamentRunRequest {
         plan,
         anchor,
@@ -667,9 +682,44 @@ pub(crate) async fn run_tournament_command(
         openings,
         max_engine_faults: command.max_engine_faults,
         completed_games: checkpoint.games,
-        observer: Some(observer),
+        observer: Some(Arc::clone(&observer) as Arc<dyn tournament_driver::TournamentObserver>),
     };
-    match tournament_driver::run_tournament(request).await {
+    let run_future = tournament_driver::run_tournament(request);
+    tokio::pin!(run_future);
+    let mut schedule = ProgressSchedule::new(
+        command.progress_every,
+        command.progress_min_secs,
+        resumed_games,
+    );
+    let mut poll =
+        tokio::time::interval_at(tokio::time::Instant::now() + PROGRESS_POLL, PROGRESS_POLL);
+    let outcome = loop {
+        tokio::select! {
+            result = &mut run_future => break result,
+            _ = poll.tick() => {
+                let block = tournament_progress_block(
+                    &progress_observer,
+                    &schedule,
+                    &rating_inputs,
+                    scheduled_games,
+                );
+                if schedule.due(block.done) {
+                    publish_progress(&block, &directory, &mut recorder);
+                }
+            }
+        }
+    };
+    let final_block = tournament_progress_block(
+        &progress_observer,
+        &schedule,
+        &rating_inputs,
+        scheduled_games,
+    );
+    if schedule.needs_final(final_block.done) {
+        schedule.mark(final_block.done);
+        publish_progress(&final_block, &directory, &mut recorder);
+    }
+    match outcome {
         Ok(report) => {
             if let Err(error) = write_tournament_artifacts(&directory, &report) {
                 eprintln!("tournament output failed: {error}");
@@ -809,6 +859,90 @@ pub(crate) fn print_tournament(report: &tournament_driver::TournamentReport) {
             row.rank, row.name, row.rating, row.points, row.games, row.wins, row.draws, row.losses
         );
     }
+}
+
+/// The inputs the tournament's own rating step needs, kept so a progress
+/// block can call exactly that step rather than estimate anything itself.
+pub(crate) struct TournamentRatingInputs {
+    pub(crate) plan: TournamentPlan,
+    pub(crate) anchor: Option<ParticipantId>,
+    pub(crate) fixed_ratings: Vec<TournamentFixedRating>,
+}
+
+/// What a tournament tells the operator: how far the schedule has run, who is
+/// ahead and by how much, and when it will be over.
+///
+/// The standings are produced by the same joint recompute the final result
+/// uses, on the games committed so far, so the header never disagrees with the
+/// result that follows it.
+pub(crate) fn tournament_progress_block(
+    observer: &DurableTournamentOutput,
+    schedule: &ProgressSchedule,
+    inputs: &TournamentRatingInputs,
+    scheduled_games: u64,
+) -> ProgressBlock {
+    let games = observer
+        .checkpoint
+        .lock()
+        .map(|checkpoint| checkpoint.games.clone())
+        .unwrap_or_default();
+    let done = games.len() as u64;
+    let mut block = ProgressBlock::new(
+        "tournament",
+        ProgressUnit::Games,
+        done,
+        Some(scheduled_games),
+        schedule.elapsed(),
+    );
+    let evidence = games
+        .iter()
+        .map(tournament_driver::TournamentGame::evidence)
+        .collect::<Vec<_>>();
+    match RateTournament::execute_with_fixed_field(
+        &inputs.plan,
+        &evidence,
+        inputs.anchor,
+        &inputs.fixed_ratings,
+    ) {
+        Ok(results) => {
+            block.field("scored", format!("{} games", results.games_scored));
+            // The header of the standings table: the label names the block
+            // once and the rows line up under it.
+            for (index, standing) in results.standings.iter().take(5).enumerate() {
+                block.field(
+                    if index == 0 { "standings" } else { "" },
+                    format!(
+                        "{}. {} {:.1}{} — {}/{} points",
+                        standing.rank,
+                        standing.name,
+                        standing.rating,
+                        match standing.error_95 {
+                            Some(error) => format!(" ±{error:.1}"),
+                            None => " (fixed)".to_owned(),
+                        },
+                        standing.points,
+                        standing.games
+                    ),
+                );
+            }
+        }
+        Err(error) => {
+            block.field("standings", format!("unavailable: {error}"));
+        }
+    }
+    if let Some(rate) =
+        progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
+    {
+        block.field("rate", format!("{rate:.0} games/hour"));
+    }
+    if let Some(eta) = progress::linear_eta(
+        schedule.units_since_start(done),
+        schedule.remaining_this_run(scheduled_games),
+        schedule.elapsed(),
+    ) {
+        block.field("ETA", progress::format_duration(eta.as_secs_f64()));
+    }
+    block
 }
 
 pub(crate) struct DurableTournamentOutput {

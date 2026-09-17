@@ -3,6 +3,14 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// A durable run reports its progress on standard error, so "quiet" means
+/// nothing there but progress blocks: no warning, no diagnostic, no error.
+fn only_progress(output: &std::process::Output) -> bool {
+    String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .all(|line| line.is_empty() || line.starts_with("progress [") || line.starts_with("  "))
+}
+
 fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_colosseum-cli"))
 }
@@ -827,7 +835,11 @@ fn calibration_persists_a_degenerate_identical_binary_run_as_inconclusive() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(4));
-    assert!(output.stderr.is_empty());
+    assert!(
+        only_progress(&output),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["type"], "calibration");
     assert_eq!(value["report"]["status"], "inconclusive");
@@ -868,7 +880,11 @@ fn calibration_marks_any_engine_fault_invalid_even_when_the_match_policy_allows_
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(5));
-    assert!(output.stderr.is_empty());
+    assert!(
+        only_progress(&output),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["report"]["status"], "invalid");
     assert!(
@@ -999,7 +1015,11 @@ fn sprt_live_report_is_pair_atomic_durable_and_inconclusive_at_its_cap() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(4));
-    assert!(output.stderr.is_empty());
+    assert!(
+        only_progress(&output),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["type"], "sprt");
     assert_eq!(value["report"]["status"], "inconclusive");
@@ -1101,7 +1121,11 @@ fn fixed_match_accepts_the_same_ordinary_uci_path_with_different_side_options() 
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output.stderr.is_empty());
+    assert!(
+        only_progress(&output),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["type"], "fixed-match");
     assert_eq!(
@@ -1157,7 +1181,11 @@ fn fixed_match_strict_default_invalidates_on_the_first_engine_fault() {
         .unwrap();
     assert!(!output.status.success());
     assert_eq!(output.status.code(), Some(1));
-    assert!(output.stderr.is_empty());
+    assert!(
+        only_progress(&output),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["report"]["status"], "invalid");
     assert_eq!(value["report"]["games_attempted"], 2);
@@ -1181,7 +1209,11 @@ fn fixed_match_never_scores_an_engine_spawn_failure() {
         .unwrap();
     assert!(!output.status.success());
     assert_eq!(output.status.code(), Some(3));
-    assert!(output.stderr.is_empty());
+    assert!(
+        only_progress(&output),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["report"]["status"], "infrastructure-error");
     assert_eq!(value["report"]["games_attempted"], 2);

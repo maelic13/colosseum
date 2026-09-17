@@ -40,6 +40,14 @@ pub(crate) struct SprtCommand {
     #[arg(long)]
     pub(crate) beta: Option<f64>,
 
+    /// Official pairs between progress blocks on standard error.
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) progress_every: u64,
+    /// Shortest time between two progress blocks. A run whose pairs finish
+    /// faster than this coalesces them instead of flooding the console.
+    #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) progress_min_secs: u64,
+
     #[command(flatten)]
     pub(crate) conditions: MatchConditions,
 }
@@ -197,6 +205,8 @@ pub(crate) async fn run_sprt(
     let apply_path = command.apply.clone();
     let apply_executable = command.apply_executable.clone();
     let allow_executable_mismatch = command.allow_executable_mismatch;
+    let progress_every = command.progress_every;
+    let progress_min_secs = command.progress_min_secs;
     let command = command.conditions;
     if command.book.is_none()
         && (command.book_start != 0
@@ -523,6 +533,7 @@ pub(crate) async fn run_sprt(
         eprintln!("SPRT run directory: {}", directory.paths().root.display());
     }
     let openings_report = openings.report().clone();
+    let resumed_pairs = checkpoint.official_pairs.len() as u64;
     let request = sprt_runner::PairScheduleRequest {
         settings: match_runner::PairGameSettings {
             engine_a,
@@ -542,20 +553,25 @@ pub(crate) async fn run_sprt(
     };
     let schedule_future = sprt_runner::run_pair_schedule(request);
     tokio::pin!(schedule_future);
-    let period = Duration::from_secs(command.progress_interval_secs);
-    let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    let mut progress = ProgressSchedule::new(progress_every, progress_min_secs, resumed_pairs);
+    let mut poll =
+        tokio::time::interval_at(tokio::time::Instant::now() + PROGRESS_POLL, PROGRESS_POLL);
     let outcome = loop {
         tokio::select! {
             result = &mut schedule_future => break result,
-            _ = interval.tick() => {
-                let (official, post_terminal) = observer.progress();
-                eprintln!(
-                    "SPRT progress: {official}/{} official pairs, {post_terminal} post-terminal",
-                    design.max_pairs
-                );
+            _ = poll.tick() => {
+                let block = sprt_progress_block(&observer, &progress, design);
+                if progress.due(block.done) {
+                    publish_progress(&block, &directory, &mut recorder);
+                }
             }
         }
     };
+    let final_block = sprt_progress_block(&observer, &progress, design);
+    if progress.needs_final(final_block.done) {
+        progress.mark(final_block.done);
+        publish_progress(&final_block, &directory, &mut recorder);
+    }
     match outcome {
         Ok(schedule) => {
             let status = schedule.status();
@@ -657,6 +673,110 @@ pub(crate) fn resolve_sprt_design(command: &SprtCommand) -> Result<SprtDesign, S
     SprtDesign::new(parameters, command.max_pairs, bundle).map_err(|error| error.to_string())
 }
 
+/// What a sequential test tells the operator: the sample, what it is worth in
+/// both Elo models, how far the LLR is from its bounds, and how much longer it
+/// would run if the evidence kept arriving at the rate it has.
+pub(crate) fn sprt_progress_block(
+    observer: &DurableSprtOutput,
+    progress: &ProgressSchedule,
+    design: SprtDesign,
+) -> ProgressBlock {
+    let (sample, post_terminal) = observer
+        .checkpoint
+        .lock()
+        .map(|checkpoint| {
+            (
+                PairedProgress::from_pairs(&checkpoint.official_pairs),
+                checkpoint.post_terminal_pairs.len(),
+            )
+        })
+        .unwrap_or_default();
+    let done = u64::from(sample.pairs);
+    let mut block = ProgressBlock::new(
+        "sprt",
+        ProgressUnit::Pairs,
+        done,
+        Some(u64::from(design.max_pairs)),
+        progress.elapsed(),
+    );
+    sample.add_fields(&mut block);
+    if post_terminal > 0 {
+        block.field(
+            "post-terminal",
+            format!("{post_terminal} pairs kept as evidence the sample excludes"),
+        );
+    }
+    let parameters = design.parameters;
+    let statistics = pentanomial_sprt(
+        &sample.vector,
+        parameters.model,
+        parameters.elo0,
+        parameters.elo1,
+        parameters.alpha,
+        parameters.beta,
+    );
+    match &statistics {
+        Ok(result) => {
+            block.field(
+                "LLR",
+                format!(
+                    "{:+.2} in [{:.2}, {:.2}] ({})",
+                    result.llr,
+                    result.lower,
+                    result.upper,
+                    match result.decision {
+                        SprtDecision::Continue => "continue",
+                        SprtDecision::AcceptH0 => "accept H0",
+                        SprtDecision::AcceptH1 => "accept H1",
+                    }
+                ),
+            );
+        }
+        Err(error) => {
+            block.field("LLR", format!("unavailable: {error}"));
+        }
+    }
+    if let Some(rate) =
+        progress::rate_per_hour(progress.units_since_start(done), progress.elapsed_hours())
+    {
+        block.field("rate", format!("{rate:.0} pairs/hour"));
+    }
+    block.field(
+        "expected remaining",
+        match statistics.as_ref().ok().and_then(pairs_to_bound) {
+            Some(pairs) => {
+                let capped = pairs.min(u64::from(design.max_pairs).saturating_sub(done));
+                format!("{} games at the current drift", capped * 2)
+            }
+            None => format!(
+                "{} games to the cap; no drift to extrapolate yet",
+                u64::from(design.max_pairs).saturating_sub(done) * 2
+            ),
+        },
+    );
+    block
+}
+
+/// Pairs until the LLR would reach the bound it is drifting towards.
+///
+/// This extrapolates the LLR the test already computed at its average rate per
+/// pair. It is arithmetic on the existing statistic and not a second estimator:
+/// a real sequential test's path is not a straight line, and the figure is
+/// labelled as the current drift for that reason.
+fn pairs_to_bound(result: &PentanomialSprtResult) -> Option<u64> {
+    if result.pairs == 0 || !result.llr.is_finite() {
+        return None;
+    }
+    let drift = result.llr / f64::from(result.pairs);
+    let target = if result.llr > 0.0 {
+        result.upper
+    } else {
+        result.lower
+    };
+    let remaining = (target - result.llr) / drift;
+    (drift != 0.0 && remaining.is_finite() && remaining > 0.0).then(|| remaining.ceil() as u64)
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct SprtCheckpoint {
     pub(crate) official_pairs: Vec<CompletePair<match_runner::MatchGame>>,
@@ -679,15 +799,6 @@ impl DurableSprtOutput {
         };
         output.rewrite_pgn()?;
         Ok(output)
-    }
-
-    pub(crate) fn progress(&self) -> (usize, usize) {
-        self.checkpoint.lock().map_or((0, 0), |checkpoint| {
-            (
-                checkpoint.official_pairs.len(),
-                checkpoint.post_terminal_pairs.len(),
-            )
-        })
     }
 
     pub(crate) fn persist_pair(

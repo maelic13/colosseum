@@ -47,8 +47,10 @@ fn dropped_owner_records_an_aborted_run_with_zero_official_sample() {
     let record = RunRecord::read(&run.paths().root).unwrap();
     assert_eq!(record.status, RunStatus::Aborted);
     assert_eq!(record.official_sample, OfficialSample::default());
-    assert_eq!(record.schema_version, 4);
+    assert_eq!(record.schema_version, 5);
     assert_eq!(record.stats_version, colosseum_core::STATS_VERSION);
+    // A run that never published a block has no block to report.
+    assert!(record.progress.is_none());
     assert!(
         record
             .host

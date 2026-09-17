@@ -147,9 +147,6 @@ pub(crate) struct MatchConditions {
     /// Archive an existing --dir and start a fresh run there.
     #[arg(long, requires = "run_directory")]
     pub(crate) restart: bool,
-    /// Seconds between live progress reports on standard error.
-    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..))]
-    pub(crate) progress_interval_secs: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -488,6 +485,158 @@ pub(crate) fn with_header_tags(pgn: &str, tags: &[(&str, &str)]) -> String {
         lines.insert(insert + offset, tag);
     }
     lines.join("\n")
+}
+
+/// Two-sided 95% confidence multiplier, the one every progress block reports.
+pub(crate) const Z95: f64 = 1.959_963_984_540_054;
+
+/// How often a run asks whether a progress block is due.
+///
+/// The answer is decided by units and by the time floor; this only bounds how
+/// late a due block can be, so it is an implementation detail rather than a
+/// reporting interval.
+pub(crate) const PROGRESS_POLL: Duration = Duration::from_millis(250);
+
+/// Publish one progress block.
+///
+/// The console, the append-only trajectory and `status` must never disagree
+/// about where a run stands, so all three are written from the same value. A
+/// progress report is diagnostics: failing to record one says so and does not
+/// stop the run.
+pub(crate) fn publish_progress(
+    block: &ProgressBlock,
+    directory: &RunDirectory,
+    recorder: &mut RunRecorder,
+) {
+    show_progress(block, directory);
+    if let Err(error) = recorder.update_progress(block.clone()) {
+        eprintln!("run record failed: {error}");
+    }
+}
+
+/// The console and the trajectory, for a command whose run recorder is owned
+/// by its observer.
+pub(crate) fn show_progress(block: &ProgressBlock, directory: &RunDirectory) {
+    eprint!("{}", block.render());
+    let mut line =
+        serde_json::to_vec(&block.log_event()).expect("a progress block is serializable");
+    line.push(b'\n');
+    if let Err(error) = directory.append_log(&line) {
+        eprintln!("run log failed: {error}");
+    }
+}
+
+/// The paired sample a run has committed so far.
+///
+/// `sprt` and `calibrate` both report the same paired evidence, and both must
+/// report the numbers their own final result will report, so this is computed
+/// from the committed games with the same pairing rule and handed to the same
+/// estimator.
+#[derive(Default)]
+pub(crate) struct PairedProgress {
+    pub(crate) pairs: u32,
+    pub(crate) scored_games: u32,
+    pub(crate) wins: u32,
+    pub(crate) draws: u32,
+    pub(crate) losses: u32,
+    pub(crate) vector: PentanomialVector,
+    pub(crate) faults: MatchFaultCounts,
+}
+
+impl PairedProgress {
+    /// Pair committed games the way the schedule played them: the odd game of
+    /// a pair had engine A as White, the even one the same opening reversed.
+    pub(crate) fn from_games(games: &[match_runner::MatchGame]) -> Self {
+        let mut by_pair = BTreeMap::<u32, Vec<&match_runner::MatchGame>>::new();
+        for game in games {
+            by_pair
+                .entry(game.number.div_ceil(2))
+                .or_default()
+                .push(game);
+        }
+        let mut progress = Self::default();
+        for pair in by_pair.values() {
+            progress.admit(pair);
+        }
+        progress
+    }
+
+    /// The same, for a command that commits whole pairs.
+    pub(crate) fn from_pairs(pairs: &[CompletePair<match_runner::MatchGame>]) -> Self {
+        let mut progress = Self::default();
+        for pair in pairs {
+            progress.admit(&[&pair.first, &pair.second]);
+        }
+        progress
+    }
+
+    fn admit(&mut self, pair: &[&match_runner::MatchGame]) {
+        for game in pair {
+            record_fault(&mut self.faults, game.white, game.fault.as_ref());
+            if !game.scorable {
+                continue;
+            }
+            self.scored_games += 1;
+            match result_for_engine_a(game.white, game.result) {
+                PairGameResult::Win => self.wins += 1,
+                PairGameResult::Draw => self.draws += 1,
+                PairGameResult::Loss => self.losses += 1,
+            }
+        }
+        let [first, second] = pair else { return };
+        if first.scorable && second.scorable && first.number + 1 == second.number {
+            self.vector.record_pair(
+                result_for_engine_a(first.white, first.result),
+                result_for_engine_a(second.white, second.result),
+            );
+            self.pairs += 1;
+        }
+    }
+
+    /// The lines both commands share, in reading order.
+    pub(crate) fn add_fields(&self, block: &mut ProgressBlock) {
+        block
+            .field("games", format!("{} scored", self.scored_games))
+            .field(
+                "W/D/L",
+                format!("{}/{}/{}", self.wins, self.draws, self.losses),
+            )
+            .field("pentanomial", format!("{:?}", self.vector.counts()));
+        match pentanomial_statistics(&self.vector, Z95) {
+            Ok(statistics) => {
+                block
+                    .field(
+                        "nElo",
+                        progress::interval(
+                            statistics.normalized_elo.elo,
+                            statistics.normalized_elo.lower,
+                            statistics.normalized_elo.upper,
+                        ),
+                    )
+                    .field(
+                        "Elo",
+                        progress::interval(
+                            statistics.logistic_elo.elo,
+                            statistics.logistic_elo.lower,
+                            statistics.logistic_elo.upper,
+                        ),
+                    );
+            }
+            Err(error) => {
+                block.field("Elo", format!("unavailable: {error}"));
+            }
+        }
+        block.field(
+            "faults",
+            format!(
+                "engine {}/{}, time losses {}/{}",
+                self.faults.engine_a,
+                self.faults.engine_b,
+                self.faults.time_losses_a,
+                self.faults.time_losses_b
+            ),
+        );
+    }
 }
 
 /// Resolve the slot allocation from the two mutually exclusive flags.

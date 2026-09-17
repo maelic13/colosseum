@@ -16,6 +16,7 @@ pub mod config;
 pub mod engine_args;
 pub mod master_seed;
 pub mod pgn_telemetry;
+pub mod progress;
 pub mod run_directory;
 pub mod run_record;
 pub mod spsa_schedule;
@@ -32,6 +33,7 @@ pub use master_seed::{
     MasterSeedEntropy, MasterSeedError, MasterSeedResolution, OsMasterSeedEntropy,
     ResolvedMasterSeedSource, ensure_master_seed,
 };
+pub use progress::{ProgressBlock, ProgressField, ProgressSchedule, ProgressUnit};
 pub use run_directory::{RunDirectory, RunDirectoryError, RunDirectoryOpen, RunDirectoryPaths};
 pub use run_record::{
     Anomaly, CapabilityLevel, HostSummary, OfficialSample, RunRecord, RunRecordError, RunRecorder,

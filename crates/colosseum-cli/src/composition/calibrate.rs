@@ -19,6 +19,14 @@ pub(crate) struct CalibrationCommand {
     #[arg(long, default_value_t = DEFAULT_CALIBRATION_TOLERANCE_NELO)]
     pub(crate) tolerance_nelo: f64,
 
+    /// Complete pairs between progress blocks on standard error.
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) progress_every: u64,
+    /// Shortest time between two progress blocks. A run whose pairs finish
+    /// faster than this coalesces them instead of flooding the console.
+    #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) progress_min_secs: u64,
+
     #[command(flatten)]
     pub(crate) conditions: MatchConditions,
 }
@@ -151,6 +159,7 @@ pub(crate) async fn run_calibration(
         return ExitCode::from(3);
     }
     let progress = match_runner::MatchProgress::default();
+    let resumed_pairs = PairedProgress::from_games(&completed_games).pairs.into();
     let request = match_runner::FixedMatchRequest {
         engine_a: prepared.engine_a,
         engine_b: prepared.engine_b,
@@ -178,17 +187,30 @@ pub(crate) async fn run_calibration(
     }
     let calibration_future = match_runner::run_fixed_match(request);
     tokio::pin!(calibration_future);
-    let period = Duration::from_secs(conditions.progress_interval_secs);
-    let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    let pairs_planned = u64::from(prepared.design.games / 2);
+    let mut schedule = ProgressSchedule::new(
+        command.progress_every,
+        command.progress_min_secs,
+        resumed_pairs,
+    );
+    let mut poll =
+        tokio::time::interval_at(tokio::time::Instant::now() + PROGRESS_POLL, PROGRESS_POLL);
     let outcome = loop {
         tokio::select! {
             result = &mut calibration_future => break result,
-            _ = interval.tick() => {
-                let snapshot = progress.snapshot();
-                eprintln!("calibration progress: {}/{} attempted, {} scored, {} faults", snapshot.attempted, prepared.design.games, snapshot.scored, snapshot.faults);
+            _ = poll.tick() => {
+                let block = calibration_progress_block(&observer, &schedule, pairs_planned);
+                if schedule.due(block.done) {
+                    publish_progress(&block, &directory, &mut recorder);
+                }
             }
         }
     };
+    let final_block = calibration_progress_block(&observer, &schedule, pairs_planned);
+    if schedule.needs_final(final_block.done) {
+        schedule.mark(final_block.done);
+        publish_progress(&final_block, &directory, &mut recorder);
+    }
     let fixed_match = match outcome {
         Ok(report) => report,
         Err(error) => {
@@ -427,6 +449,45 @@ pub(crate) fn prepare_calibration(
         current_directory,
         resolved,
     })
+}
+
+/// What a calibration tells the operator.
+///
+/// A calibration is a fixed paired sample, so it reports the same paired
+/// evidence an SPRT does; what it does not have is a sequential boundary, so
+/// there is no LLR and nothing to extrapolate towards one.
+pub(crate) fn calibration_progress_block(
+    observer: &DurableMatchOutput,
+    schedule: &ProgressSchedule,
+    pairs_planned: u64,
+) -> ProgressBlock {
+    let sample = observer
+        .games
+        .lock()
+        .map(|games| PairedProgress::from_games(&games))
+        .unwrap_or_default();
+    let done = u64::from(sample.pairs);
+    let mut block = ProgressBlock::new(
+        "calibrate",
+        ProgressUnit::Pairs,
+        done,
+        Some(pairs_planned),
+        schedule.elapsed(),
+    );
+    sample.add_fields(&mut block);
+    if let Some(rate) =
+        progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
+    {
+        block.field("rate", format!("{rate:.0} pairs/hour"));
+    }
+    if let Some(eta) = progress::linear_eta(
+        schedule.units_since_start(done),
+        schedule.remaining_this_run(pairs_planned),
+        schedule.elapsed(),
+    ) {
+        block.field("ETA", progress::format_duration(eta.as_secs_f64()));
+    }
+    block
 }
 
 pub(crate) fn calibration_interval(

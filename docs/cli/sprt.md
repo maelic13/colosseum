@@ -62,6 +62,15 @@ invalid pair. LLR and decision are present once the sample is non-degenerate;
 an all-identical early/capped sample reports that LLR is unavailable rather than
 inventing a finite statistic.
 
+Progress is written to stderr every `--progress-every N` official pairs
+(default 10) and once more at termination. An SPRT block carries the whole
+decision: games and pairs committed, W/D/L, the pentanomial vector, normalized
+and logistic Elo with 95% intervals, the LLR against its exact Wald bounds,
+engine faults and time losses, pairs per hour, and the games still expected if
+the LLR keeps drifting at the rate it has. That last figure extrapolates the
+LLR the test already computed and is labelled accordingly: a sequential path is
+not a straight line, and it is capped at the games remaining to `--max-pairs`.
+
 Run artifacts use the common layout. The checkpoint stores official and
 post-terminal pairs separately, `games.pgn` labels both classes in a
 `ColosseumSample` tag so [statistics replay](stats.md) reaches the same

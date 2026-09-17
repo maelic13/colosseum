@@ -2421,6 +2421,33 @@ games" procedure at 10.10, once, on the final state.
   recovered. Found when a maintainer stopped a real SPRT because the console
   showed only pair counts. Items (k) to (p) precede (j).
 
+  **Implementation evidence (Phase 10.9f):** one `ProgressBlock` type carries
+  every report: a command, its unit count against the cap, the elapsed time
+  and labelled lines. The same value is rendered to standard error, appended
+  to `run.log` as a `progress` event and retained in the run record
+  (`RUN_RECORD_SCHEMA_VERSION` 5), so `status` prints exactly what the console
+  last showed rather than a second account of the run. The block is what the
+  contract lists per command; the figures come from the estimators the final
+  result already uses — `pentanomial_statistics` for both Elo models,
+  `pentanomial_sprt` for the LLR and its Wald bounds, `elo_with_error` for an
+  unpaired match, and `RateTournament::execute_with_fixed_field` on the games
+  committed so far for the standings header. The one derived figure is the
+  SPRT's expected remaining games, which extrapolates the computed LLR at its
+  average drift per pair, capped at the games left to `--max-pairs` and
+  labelled as the current drift because a sequential path is not a line.
+
+  `ProgressSchedule` owns the decision: a block is due at `--progress-every`
+  units past the last one, and the `--progress-min-secs` floor can only
+  withhold it, never schedule it. A run polls that decision four times a
+  second, which is finer than the smallest permitted floor, so the floor and
+  not the polling is what bounds how close two blocks may be. A resumed run
+  counts from the units it inherited, so no rate or ETA claims time it did not
+  spend, and a final block that would repeat the last boundary block is not
+  printed twice. Neither flag reaches the resolved configuration, so an
+  existing run directory resumes whatever it is told to report. Machine mode
+  prints blocks too, and the tests that read "a quiet run says nothing on
+  standard error" now read "nothing but progress".
+
   **Implementation evidence (Phase 10.9e):** the abandoned game was the one
   game every driver already refused to score and no writer said so. It now
   carries `[ColosseumSample "unscorable"]` from `match` and `calibrate`, from

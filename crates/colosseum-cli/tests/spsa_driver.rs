@@ -5,6 +5,14 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+/// A durable run reports its progress on standard error, so "quiet" means
+/// nothing there but progress blocks: no warning, no diagnostic, no error.
+fn only_progress(output: &std::process::Output) -> bool {
+    String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .all(|line| line.is_empty() || line.starts_with("progress [") || line.starts_with("  "))
+}
+
 fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_colosseum-cli"))
 }
@@ -470,7 +478,11 @@ fn complete_mini_match_is_one_durable_gradient_commit() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output.stderr.is_empty());
+    assert!(
+        only_progress(&output),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["type"], "spsa");
     assert_eq!(value["report"]["driver"]["status"], "completed");
@@ -601,7 +613,11 @@ fn sprt_apply_consumes_the_unedited_spsa_result_and_verifies_executable_content(
         "{}",
         String::from_utf8_lossy(&gate.stderr)
     );
-    assert!(gate.stderr.is_empty());
+    assert!(
+        only_progress(&gate),
+        "{}",
+        String::from_utf8_lossy(&gate.stderr)
+    );
     let gate: Value = serde_json::from_slice(&gate.stdout).unwrap();
     assert_eq!(gate["report"]["apply"]["identity"]["status"], "verified");
     assert_eq!(gate["report"]["apply"]["parameters"][0]["name"], "Hash");
@@ -705,7 +721,11 @@ fn engine_fault_commits_invalid_evidence_but_never_a_gradient() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(5));
-    assert!(output.stderr.is_empty());
+    assert!(
+        only_progress(&output),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
     let driver = &value["report"]["driver"];
     assert_eq!(driver["status"], "invalid");

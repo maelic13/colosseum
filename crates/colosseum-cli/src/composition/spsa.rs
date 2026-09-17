@@ -216,8 +216,13 @@ pub(crate) struct SpsaConditions {
     pub(crate) run_directory: Option<PathBuf>,
     #[arg(long, requires = "run_directory")]
     pub(crate) restart: bool,
-    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..))]
-    pub(crate) progress_interval_secs: u64,
+    /// Committed iterations between progress blocks on standard error.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) progress_every: u64,
+    /// Shortest time between two progress blocks. A run whose iterations
+    /// finish faster than this coalesces them instead of flooding the console.
+    #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) progress_min_secs: u64,
 }
 
 pub(crate) fn run_spsa_plan(command: SpsaPlanCommand, machine: bool) -> ExitCode {
@@ -1010,6 +1015,9 @@ pub(crate) async fn run_spsa_command(
         }
     }
     let progress = spsa_driver::SpsaProgress::default();
+    let knobs = verified_schedule.artifact().knobs.clone();
+    let initial_centers = bound_tune.initial_centers();
+    let resumed_iterations = observer.committed_iterations();
     let driver_request = spsa_driver::SpsaDriverRequest {
         schedule: verified_schedule,
         settings,
@@ -1033,22 +1041,31 @@ pub(crate) async fn run_spsa_command(
     };
     let driver_future = spsa_driver::run_spsa(driver_request);
     tokio::pin!(driver_future);
-    let period = Duration::from_secs(conditions.progress_interval_secs);
-    let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    let mut schedule = ProgressSchedule::new(
+        conditions.progress_every,
+        conditions.progress_min_secs,
+        resumed_iterations,
+    );
+    let mut centres = SpsaCentreTracker::new(&knobs, &initial_centers);
+    let mut poll =
+        tokio::time::interval_at(tokio::time::Instant::now() + PROGRESS_POLL, PROGRESS_POLL);
     let outcome = loop {
         tokio::select! {
             result = &mut driver_future => break result,
-            _ = interval.tick() => {
-                let snapshot = progress.snapshot();
-                eprintln!(
-                    "SPSA progress: {}/{} committed iterations, {} complete pairs played",
-                    snapshot.completed_iterations,
-                    settings.iterations,
-                    snapshot.completed_pairs
-                );
+            _ = poll.tick() => {
+                let block = spsa_progress_block(&observer, &schedule, settings, &centres);
+                if schedule.due(block.done) {
+                    observer.publish_progress(&block);
+                    centres.remember(&observer.current_centers());
+                }
             }
         }
     };
+    let final_block = spsa_progress_block(&observer, &schedule, settings, &centres);
+    if schedule.needs_final(final_block.done) {
+        schedule.mark(final_block.done);
+        observer.publish_progress(&final_block);
+    }
     let driver = match outcome {
         Ok(report) => report,
         Err(error) => {
@@ -1191,6 +1208,155 @@ pub(crate) fn read_stored_spsa_inputs(
     Ok((settings, r_end, final_window_percent))
 }
 
+/// Which centres a tune has moved, measured in the fraction of each knob's own
+/// range that it travelled.
+///
+/// A raw centre change is not comparable between knobs: ten units of a
+/// thousand-wide knob and ten units of a twenty-wide one are different facts.
+/// Range units make the three largest moves the three that matter.
+pub(crate) struct SpsaCentreTracker {
+    /// Knob name and the width of its range, in schedule order.
+    knobs: Vec<(String, f64)>,
+    /// The centres at the previous published block.
+    previous: Vec<f64>,
+}
+
+impl SpsaCentreTracker {
+    pub(crate) fn new(knobs: &[SpsaDerivedKnob], initial_centers: &[f64]) -> Self {
+        Self {
+            knobs: knobs
+                .iter()
+                .map(|knob| (knob.name.clone(), (knob.max - knob.min) as f64))
+                .collect(),
+            previous: initial_centers.to_vec(),
+        }
+    }
+
+    /// The three largest moves since the previous block, largest first.
+    pub(crate) fn largest_moves(&self, centers: &[f64]) -> Option<String> {
+        if centers.len() != self.knobs.len() || self.previous.len() != self.knobs.len() {
+            return None;
+        }
+        let mut moves = self
+            .knobs
+            .iter()
+            .zip(centers)
+            .zip(&self.previous)
+            .filter(|(((_, range), _), _)| *range > 0.0)
+            .map(|(((name, range), center), previous)| (name.clone(), (center - previous) / range))
+            .collect::<Vec<_>>();
+        moves.sort_by(|left, right| {
+            right
+                .1
+                .abs()
+                .partial_cmp(&left.1.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        moves.truncate(3);
+        (!moves.is_empty()).then(|| {
+            moves
+                .iter()
+                .map(|(name, moved)| format!("{name} {moved:+.4}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+    }
+
+    /// Take the centres a published block reported as the new baseline.
+    pub(crate) fn remember(&mut self, centers: &[f64]) {
+        if centers.len() == self.knobs.len() {
+            self.previous = centers.to_vec();
+        }
+    }
+}
+
+/// What a tune tells the operator: how far through the horizon it is, what the
+/// last mini-match said, how hard the schedule is still pushing, and which
+/// centres are actually moving.
+pub(crate) fn spsa_progress_block(
+    observer: &DurableSpsaOutput,
+    schedule: &ProgressSchedule,
+    settings: SpsaRunSettings,
+    centres: &SpsaCentreTracker,
+) -> ProgressBlock {
+    let last = observer.checkpoint.lock().ok().and_then(|checkpoint| {
+        checkpoint
+            .completed_iterations
+            .last()
+            .cloned()
+            .map(|iteration| (checkpoint.completed_iterations.len() as u64, iteration))
+    });
+    let (done, last) = match last {
+        Some((done, iteration)) => (done, Some(iteration)),
+        None => (0, None),
+    };
+    let total = u64::from(settings.iterations);
+    let mut block = ProgressBlock::new(
+        "spsa",
+        ProgressUnit::Iterations,
+        done,
+        Some(total),
+        schedule.elapsed(),
+    );
+    if let Some(eta) = progress::linear_eta(
+        schedule.units_since_start(done),
+        schedule.remaining_this_run(total),
+        schedule.elapsed(),
+    ) {
+        block.field("ETA", progress::format_duration(eta.as_secs_f64()));
+    }
+    match &last {
+        Some(iteration) => {
+            let score = iteration.score;
+            block
+                .field(
+                    "last mini-match",
+                    format!(
+                        "iteration {}: {:+} (plus {} / draws {} / minus {})",
+                        iteration.iteration,
+                        score.difference,
+                        score.plus_wins,
+                        score.draws,
+                        score.plus_losses
+                    ),
+                )
+                .field("schedule", coefficient_summary(&iteration.prepared));
+            match centres.largest_moves(&iteration.centers_after) {
+                Some(moves) => block.field(
+                    "largest moves",
+                    format!("{moves} (range units since the previous block)"),
+                ),
+                None => block.field("largest moves", "none recorded yet"),
+            };
+        }
+        None => {
+            block.field("last mini-match", "no iteration has committed yet");
+        }
+    }
+    block
+}
+
+/// The gain and perturbation scale an iteration used, collapsed when every
+/// knob agrees and shown as a range when they do not.
+fn coefficient_summary(prepared: &SpsaIteration) -> String {
+    let summarize = |values: Vec<f64>| -> String {
+        let low = values.iter().copied().fold(f64::INFINITY, f64::min);
+        let high = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        if !low.is_finite() || !high.is_finite() {
+            "unavailable".to_owned()
+        } else if (high - low).abs() < 1e-12 {
+            format!("{low:.4}")
+        } else {
+            format!("{low:.4}\u{2013}{high:.4}")
+        }
+    };
+    format!(
+        "gain a {}, perturbation scale c {}",
+        summarize(prepared.coefficients.iter().map(|value| value.a).collect()),
+        summarize(prepared.coefficients.iter().map(|value| value.c).collect())
+    )
+}
+
 pub(crate) struct DurableSpsaOutput {
     pub(crate) directory: Arc<RunDirectory>,
     pub(crate) checkpoint: Mutex<spsa_driver::SpsaCheckpoint>,
@@ -1226,6 +1392,41 @@ impl DurableSpsaOutput {
         };
         output.rewrite_pgn()?;
         Ok(output)
+    }
+
+    /// Committed iterations this run already holds.
+    pub(crate) fn committed_iterations(&self) -> u64 {
+        self.checkpoint
+            .lock()
+            .map_or(0, |checkpoint| checkpoint.completed_iterations.len() as u64)
+    }
+
+    /// The centre vector the tune currently stands on.
+    pub(crate) fn current_centers(&self) -> Vec<f64> {
+        self.checkpoint.lock().map_or_else(
+            |_| Vec::new(),
+            |checkpoint| {
+                checkpoint
+                    .completed_iterations
+                    .last()
+                    .map(|iteration| iteration.centers_after.clone())
+                    .unwrap_or_default()
+            },
+        )
+    }
+
+    /// Publish a block through the run recorder this observer owns.
+    pub(crate) fn publish_progress(&self, block: &ProgressBlock) {
+        show_progress(block, &self.directory);
+        let Ok(mut recorder) = self.recorder.lock() else {
+            eprintln!("run record failed: SPSA run-record lock poisoned");
+            return;
+        };
+        if let Some(recorder) = recorder.as_mut()
+            && let Err(error) = recorder.update_progress(block.clone())
+        {
+            eprintln!("run record failed: {error}");
+        }
     }
 
     pub(crate) fn persist_checkpoint(&self) -> Result<(), String> {

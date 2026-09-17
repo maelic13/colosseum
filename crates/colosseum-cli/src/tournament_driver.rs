@@ -50,7 +50,8 @@ pub struct TournamentGame {
 }
 
 impl TournamentGame {
-    fn evidence(&self) -> TournamentCompletedGame {
+    /// The scoring evidence of this game, which is all the rating step reads.
+    pub fn evidence(&self) -> TournamentCompletedGame {
         TournamentCompletedGame {
             number: self.number,
             white: self.white,

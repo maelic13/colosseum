@@ -13,6 +13,14 @@ pub(crate) struct MatchCommand {
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) games: u32,
 
+    /// Games between progress blocks on standard error.
+    #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) progress_every: u64,
+    /// Shortest time between two progress blocks. A run whose games finish
+    /// faster than this coalesces them instead of flooding the console.
+    #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) progress_min_secs: u64,
+
     #[command(flatten)]
     pub(crate) conditions: MatchConditions,
 }
@@ -27,6 +35,8 @@ pub(crate) async fn run_match(
         games,
         engine_a: engine_a_path,
         engine_b: engine_b_path,
+        progress_every,
+        progress_min_secs,
         conditions: command,
     } = command;
     if command.book.is_none()
@@ -292,6 +302,7 @@ pub(crate) async fn run_match(
         return ExitCode::from(3);
     }
     let progress = match_runner::MatchProgress::default();
+    let resumed_games = completed_games.len();
     let request = match_runner::FixedMatchRequest {
         engine_a,
         engine_b,
@@ -322,20 +333,26 @@ pub(crate) async fn run_match(
     }
     let match_future = match_runner::run_fixed_match(request);
     tokio::pin!(match_future);
-    let period = Duration::from_secs(command.progress_interval_secs);
-    let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    let mut schedule =
+        ProgressSchedule::new(progress_every, progress_min_secs, resumed_games as u64);
+    let mut poll =
+        tokio::time::interval_at(tokio::time::Instant::now() + PROGRESS_POLL, PROGRESS_POLL);
     let outcome = loop {
         tokio::select! {
             result = &mut match_future => break result,
-            _ = interval.tick() => {
-                let snapshot = progress.snapshot();
-                eprintln!(
-                    "progress: {}/{} attempted, {} scored, {} faults",
-                    snapshot.attempted, games, snapshot.scored, snapshot.faults
-                );
+            _ = poll.tick() => {
+                let block = match_progress_block(&observer, &schedule, games);
+                if schedule.due(block.done) {
+                    publish_progress(&block, &directory, &mut recorder);
+                }
             }
         }
     };
+    let final_block = match_progress_block(&observer, &schedule, games);
+    if schedule.needs_final(final_block.done) {
+        schedule.mark(final_block.done);
+        publish_progress(&final_block, &directory, &mut recorder);
+    }
     match outcome {
         Ok(report) => {
             if let Err(error) = observer.finish(&report) {
@@ -379,6 +396,70 @@ pub(crate) async fn run_match(
             ExitCode::from(3)
         }
     }
+}
+
+/// What a fixed match tells the operator: how the score stands, what it is
+/// worth in Elo, and how fast the games are arriving.
+///
+/// Unpaired games are the unit here, so the estimate is the ordinary W/D/L one
+/// rather than the paired estimator an SPRT reports.
+pub(crate) fn match_progress_block(
+    observer: &DurableMatchOutput,
+    schedule: &ProgressSchedule,
+    total: u32,
+) -> ProgressBlock {
+    let (sample, done) = observer
+        .games
+        .lock()
+        .map(|games| (PairedProgress::from_games(&games), games.len() as u64))
+        .unwrap_or_default();
+    let mut block = ProgressBlock::new(
+        "match",
+        ProgressUnit::Games,
+        done,
+        Some(u64::from(total)),
+        schedule.elapsed(),
+    );
+    let points = f64::from(sample.wins) + 0.5 * f64::from(sample.draws);
+    if sample.scored_games > 0 {
+        block.field(
+            "score",
+            format!(
+                "{points}/{} ({:.1}%)",
+                sample.scored_games,
+                100.0 * points / f64::from(sample.scored_games)
+            ),
+        );
+    } else {
+        block.field("score", "no scored games yet");
+    }
+    block.field(
+        "W/D/L",
+        format!("{}/{}/{}", sample.wins, sample.draws, sample.losses),
+    );
+    match elo_with_error(sample.wins, sample.draws, sample.losses, Z95) {
+        Ok(estimate) => block.field(
+            "Elo",
+            progress::interval(estimate.elo, estimate.lower, estimate.upper),
+        ),
+        Err(error) => block.field("Elo", format!("unavailable: {error}")),
+    };
+    block.field(
+        "faults",
+        format!(
+            "engine {}/{}, time losses {}/{}",
+            sample.faults.engine_a,
+            sample.faults.engine_b,
+            sample.faults.time_losses_a,
+            sample.faults.time_losses_b
+        ),
+    );
+    if let Some(rate) =
+        progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
+    {
+        block.field("rate", format!("{rate:.0} games/hour"));
+    }
+    block
 }
 
 pub(crate) struct DurableMatchOutput {

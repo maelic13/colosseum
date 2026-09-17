@@ -31,7 +31,7 @@ use colosseum_application::{
     DEFAULT_SPSA_GAMES_PER_ITERATION, DEFAULT_SPSA_ITERATIONS, EngineInspection, EngineLaunchSpec,
     FixedPlanObjective, FixedPlanReport, FixedPlanRequest, InspectEngine, MeasureNps,
     NpsExperimentDesign, NpsExperimentParticipant, NpsExperimentReport, NpsHashPolicy, NpsReport,
-    NpsRequest, NpsScalingInput, NpsScalingReport, NpsStatePolicy, PlanTournament,
+    NpsRequest, NpsScalingInput, NpsScalingReport, NpsStatePolicy, PlanTournament, RateTournament,
     RuntimeParticipant, SPSA_TUNE_RESULT_SCHEMA_VERSION, SprtBundle, SprtDesign,
     SprtLengthPlanReport, SprtLengthPlanRequest, SprtParameters, SpsaBoundTune, SpsaCenterSample,
     SpsaCommittedUpdate, SpsaEstimator, SpsaEstimatorPolicy, SpsaGateHashStatus, SpsaPlanReport,
@@ -42,8 +42,10 @@ use colosseum_application::{
 };
 use colosseum_core::{
     AdjudicationConfig, DrawAdjudication, EloModel, GameResult, OpeningBook, OpeningFormat,
-    OpeningOrder, PairGameResult, ParticipantId, PentanomialVector, ResignAdjudication,
-    SpsaEndSpec, SpsaScheduleArtifact, TimeControl, fixed_n_achieved_resolution,
+    OpeningOrder, PairGameResult, ParticipantId, PentanomialSprtResult, PentanomialVector,
+    ResignAdjudication, SprtDecision, SpsaDerivedKnob, SpsaEndSpec, SpsaIteration,
+    SpsaScheduleArtifact, TimeControl, elo_with_error, fixed_n_achieved_resolution,
+    pentanomial_sprt, pentanomial_statistics,
 };
 use colosseum_engine::{
     CpuPlacementPlan, CpuPlacementPolicy, SlotAllocation, audit_opening_book,
@@ -56,6 +58,8 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::cancellation::{Cancellation, DEFAULT_STOP_GRACE_SECONDS};
+use crate::match_runner::{MatchFaultCounts, record_fault};
+use crate::progress::{self, ProgressBlock, ProgressSchedule, ProgressUnit};
 
 // The sample classes a written game may carry are the reader's vocabulary:
 // naming them once is what keeps a writer from drifting from the replay that

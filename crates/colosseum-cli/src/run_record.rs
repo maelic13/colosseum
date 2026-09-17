@@ -12,12 +12,15 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::RunDirectory;
+use crate::progress::ProgressBlock;
 
 /// Bumped when the record's shape changes, including the command-specific
 /// `workflow` payload. Version 3 added the last-level cache domain to every
 /// engine CPU placement; version 4 replaced the execution plan's
-/// `cores_per_engine` count with the slot allocation mode that produced it.
-pub const RUN_RECORD_SCHEMA_VERSION: u64 = 4;
+/// `cores_per_engine` count with the slot allocation mode that produced it;
+/// version 5 retains the run's most recent progress block so `status` reports
+/// what the console last showed.
+pub const RUN_RECORD_SCHEMA_VERSION: u64 = 5;
 static RECORD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,7 +90,9 @@ pub struct Anomaly {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// The retained progress block carries measured rates, so the record is
+// comparable but not `Eq`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunRecord {
     pub schema_version: u64,
     pub stats_version: u32,
@@ -98,6 +103,10 @@ pub struct RunRecord {
     pub started_unix_ms: u64,
     pub updated_unix_ms: u64,
     pub official_sample: OfficialSample,
+    /// The last progress block this run published, absent until it publishes
+    /// one. `status` prints exactly this, so a closed console loses nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<ProgressBlock>,
     pub host: HostSummary,
     pub workflow: Value,
     pub anomalies: Vec<Anomaly>,
@@ -116,6 +125,7 @@ impl RunRecord {
             started_unix_ms: now,
             updated_unix_ms: now,
             official_sample: OfficialSample::default(),
+            progress: None,
             host: HostSummary::current(),
             workflow: json!({
                 "applicability": "not-yet-populated",
@@ -193,6 +203,15 @@ impl RunRecorder {
     pub fn update_sample(&mut self, sample: OfficialSample) -> Result<(), RunRecordError> {
         self.require_running()?;
         self.record.official_sample = sample;
+        self.touch();
+        self.persist()
+    }
+
+    /// Retain the block a run just published. The record keeps only the most
+    /// recent one; `run.log` keeps the whole trajectory.
+    pub fn update_progress(&mut self, block: ProgressBlock) -> Result<(), RunRecordError> {
+        self.require_running()?;
+        self.record.progress = Some(block);
         self.touch();
         self.persist()
     }
