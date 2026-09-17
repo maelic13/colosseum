@@ -867,6 +867,22 @@ full coverage. The writer form is versioned in the run record.
 nodes; a frozen annotated fixture in `tests/fixtures/` is parsed by the
 telemetry parser and by the workspace PGN reader used for openings.
 
+**Implementation evidence (Phase 10.4):** the shared PGN writer takes one
+annotation per half-move, so every command that runs games through the runner
+— `match`, `sprt`, `calibrate`, `spsa` and `tournament` — gets the comments
+without its own writer. `t` is the harness-charged elapsed interval of the
+recorded clock model, which is the only time the harness can honestly
+attribute; an explicit `0ms` is a real sub-millisecond measurement and the
+telemetry parser now reads it as one instead of discarding it as a placeholder.
+The writer form is `colosseum-move-comment/1` and every run record names it.
+The telemetry parser gained `s`/`score`, score coverage and mean absolute
+score; a mate score counts as covered but is excluded from the centipawn
+values because it is a distance claim, not an evaluation on the same scale.
+[`tests/fixtures/annotated-games.pgn`](tests/fixtures/annotated-games.pgn)
+freezes the form with book plies, both score signs, both mate signs and a move
+whose engine reported no nodes, and is asserted through both the telemetry
+parser and the openings PGN reader.
+
 ### 5.5 SPSA — `colosseum-cli spsa` + core schedule
 
 **Requirements**

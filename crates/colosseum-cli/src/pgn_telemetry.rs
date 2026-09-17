@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-pub const SUPPORTED_TELEMETRY_SYNTAXES: [&str; 2] = [
+pub const SUPPORTED_TELEMETRY_SYNTAXES: [&str; 3] = [
     "PGN tags: [%depth N] [%emt SECONDS] [%nodes N]",
     "key/value comments: depth|d=N time|t=Nms|Ns nodes|n=N",
+    "Colosseum move comments: {s=CP|#N d=N t=Nms n=N} and {book}",
 ];
 
 const NODE_SEMANTICS_WARNING: &str = "implied NPS is comparable only when node accounting has compatible semantics, normally within the same engine lineage";
@@ -12,7 +13,7 @@ const NODE_SEMANTICS_WARNING: &str = "implied NPS is comparable only when node a
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SearchTelemetryReport {
     pub status: &'static str,
-    pub supported_syntaxes: [&'static str; 2],
+    pub supported_syntaxes: [&'static str; 3],
     pub opening_exclusion: &'static str,
     pub excluded_opening_moves: u32,
     pub node_semantics_warning: &'static str,
@@ -31,6 +32,12 @@ pub struct EngineTelemetryReport {
     pub elapsed_seconds: TelemetryMetric,
     pub nodes: TelemetryMetric,
     pub implied_nps: TelemetryMetric,
+    /// Reported score in centipawns from the mover's point of view. A mate
+    /// score is a claim about distance to mate, not an evaluation, so it is
+    /// counted as covered but excluded from the centipawn statistics.
+    pub score_cp: TelemetryMetric,
+    /// Mean |score|, the usual way to read how decided the games looked.
+    pub mean_absolute_score_cp: TelemetryMetric,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -50,6 +57,8 @@ struct MoveTelemetry {
     depth: Option<f64>,
     elapsed_seconds: Option<f64>,
     nodes: Option<f64>,
+    score_cp: Option<f64>,
+    mate_score: bool,
     is_book: bool,
 }
 
@@ -67,6 +76,9 @@ struct EngineSamples {
     elapsed: Vec<f64>,
     nodes: Vec<f64>,
     implied_nps: Vec<f64>,
+    score_cp: Vec<f64>,
+    absolute_score_cp: Vec<f64>,
+    mate_scores: u32,
 }
 
 pub fn unavailable(reason: impl Into<String>) -> SearchTelemetryReport {
@@ -107,8 +119,17 @@ pub fn analyze_pgn(text: &str) -> SearchTelemetryReport {
             if parsed.telemetry.depth.is_some()
                 || parsed.telemetry.elapsed_seconds.is_some()
                 || parsed.telemetry.nodes.is_some()
+                || parsed.telemetry.score_cp.is_some()
+                || parsed.telemetry.mate_score
             {
                 samples.annotated += 1;
+            }
+            if parsed.telemetry.mate_score {
+                samples.mate_scores += 1;
+            }
+            if let Some(value) = parsed.telemetry.score_cp {
+                samples.score_cp.push(value);
+                samples.absolute_score_cp.push(value.abs());
             }
             if let Some(value) = parsed.telemetry.depth {
                 samples.depth.push(value);
@@ -139,6 +160,12 @@ pub fn analyze_pgn(text: &str) -> SearchTelemetryReport {
             elapsed_seconds: metric(samples.elapsed, samples.eligible),
             nodes: metric(samples.nodes, samples.eligible),
             implied_nps: metric(samples.implied_nps, samples.eligible),
+            score_cp: score_metric(samples.score_cp, samples.eligible, samples.mate_scores),
+            mean_absolute_score_cp: score_metric(
+                samples.absolute_score_cp,
+                samples.eligible,
+                samples.mate_scores,
+            ),
         })
         .collect::<Vec<_>>();
     let annotated = engines
@@ -188,6 +215,18 @@ fn metric(mut values: Vec<f64>, eligible: u32) -> TelemetryMetric {
         mean,
         median,
     }
+}
+
+/// A score metric whose coverage counts mate scores, which are reported but
+/// deliberately excluded from the centipawn values themselves.
+fn score_metric(values: Vec<f64>, eligible: u32, mate_scores: u32) -> TelemetryMetric {
+    let mut reported = metric(values, eligible);
+    let covered = reported.samples.saturating_add(mate_scores);
+    reported.coverage = fraction(covered, eligible);
+    if reported.samples == 0 && mate_scores > 0 {
+        reported.status = "unavailable";
+    }
+    reported
 }
 
 fn fraction(numerator: u32, denominator: u32) -> f64 {
@@ -330,6 +369,17 @@ fn set_field(telemetry: &mut MoveTelemetry, key: &str, value: &str, bracketed: b
         }
         "emt" if bracketed => telemetry.elapsed_seconds = parse_seconds(value, true),
         "time" | "t" => telemetry.elapsed_seconds = parse_seconds(value, false),
+        "s" | "score" | "eval" | "ev" => {
+            let value = value.trim_matches(|character: char| matches!(character, ',' | ';'));
+            if let Some(mate) = value.strip_prefix('#') {
+                // A mate claim is a distance, not an evaluation.
+                telemetry.mate_score |= mate.parse::<i32>().is_ok();
+            } else if let Ok(value) = value.parse::<f64>()
+                && value.is_finite()
+            {
+                telemetry.score_cp = Some(value);
+            }
+        }
         "nodes" | "n" => {
             if let Ok(value) = value.replace('_', "").parse::<u64>()
                 && value > 0
@@ -343,9 +393,13 @@ fn set_field(telemetry: &mut MoveTelemetry, key: &str, value: &str, bracketed: b
 
 fn parse_seconds(value: &str, unitless_seconds: bool) -> Option<f64> {
     let value = value.trim_matches(|character: char| matches!(character, ',' | ';'));
-    let seconds = if let Some(value) = value.strip_suffix("ms") {
-        value.parse::<f64>().ok()? / 1_000.0
-    } else if let Some(value) = value.strip_suffix('s') {
+    // An explicit unit makes zero a measurement — a move that took under one
+    // millisecond — rather than the placeholder a bare `0` usually is.
+    if let Some(value) = value.strip_suffix("ms") {
+        let seconds = value.parse::<f64>().ok()? / 1_000.0;
+        return (seconds.is_finite() && seconds >= 0.0).then_some(seconds);
+    }
+    let seconds = if let Some(value) = value.strip_suffix('s') {
         value.parse::<f64>().ok()?
     } else if unitless_seconds {
         if value.contains(':') {

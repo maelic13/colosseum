@@ -5,6 +5,80 @@
 
 use colosseum_core::{GameResult, Termination};
 
+/// The version of the per-move comment form written by [`build_pgn`].
+///
+/// A reader that knows this identifier knows exactly which fields a comment
+/// can contain and how they are spelled, so a PGN taken months apart stays
+/// interpretable. It is recorded in every run record.
+pub const PGN_ANNOTATION_WRITER: &str = "colosseum-move-comment/1";
+
+/// A score as the mover reported it, from the mover's own point of view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnnotationScore {
+    /// Signed centipawns.
+    Centipawns(i32),
+    /// Mate in `n` moves; negative when the mover is the one being mated.
+    MateIn(i32),
+}
+
+impl AnnotationScore {
+    fn render(self) -> String {
+        match self {
+            Self::Centipawns(cp) => cp.to_string(),
+            Self::MateIn(moves) => format!("#{moves}"),
+        }
+    }
+}
+
+/// The search evidence behind one engine move.
+///
+/// Every field the engine did not report is `None` and is omitted from the
+/// comment. It is never written as zero, because a reported zero and an
+/// unreported value are different facts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SearchAnnotation {
+    pub score: Option<AnnotationScore>,
+    pub depth: Option<u32>,
+    /// Harness-charged elapsed milliseconds, per the recorded clock model.
+    pub time_ms: Option<u64>,
+    pub nodes: Option<u64>,
+}
+
+/// What a single half-move carries as its PGN comment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveAnnotation {
+    /// Pre-played from the opening book; no engine searched it.
+    Book,
+    /// Played by an engine, with whatever it reported.
+    Search(SearchAnnotation),
+}
+
+impl MoveAnnotation {
+    /// Render `{book}` or `{s=… d=… t=…ms n=…}`, or nothing when an engine
+    /// move carries no reported field at all.
+    fn render(self) -> Option<String> {
+        match self {
+            Self::Book => Some("{book}".into()),
+            Self::Search(search) => {
+                let mut fields = Vec::new();
+                if let Some(score) = search.score {
+                    fields.push(format!("s={}", score.render()));
+                }
+                if let Some(depth) = search.depth {
+                    fields.push(format!("d={depth}"));
+                }
+                if let Some(time_ms) = search.time_ms {
+                    fields.push(format!("t={time_ms}ms"));
+                }
+                if let Some(nodes) = search.nodes {
+                    fields.push(format!("n={nodes}"));
+                }
+                (!fields.is_empty()).then(|| format!("{{{}}}", fields.join(" ")))
+            }
+        }
+    }
+}
+
 /// The tag data needed to render a game's PGN header.
 #[derive(Debug, Clone)]
 pub struct PgnTags {
@@ -24,8 +98,15 @@ pub struct PgnTags {
 }
 
 /// Render a complete PGN game (header + movetext + result token).
+///
+/// `annotations` is parallel to `san_moves`; a shorter list simply leaves the
+/// remaining moves uncommented, so a caller with no evidence passes `&[]`.
 #[must_use]
-pub fn build_pgn(tags: &PgnTags, san_moves: &[String]) -> String {
+pub fn build_pgn(
+    tags: &PgnTags,
+    san_moves: &[String],
+    annotations: &[MoveAnnotation],
+) -> String {
     let mut out = String::new();
     let mut tag = |key: &str, value: &str| {
         // Escape backslashes and quotes per the PGN spec.
@@ -57,7 +138,13 @@ pub fn build_pgn(tags: &PgnTags, san_moves: &[String]) -> String {
     let (start_move, black_first) = fen_move_context(tags.fen.as_deref());
 
     out.push('\n');
-    out.push_str(&movetext(san_moves, tags.result, start_move, black_first));
+    out.push_str(&movetext(
+        san_moves,
+        annotations,
+        tags.result,
+        start_move,
+        black_first,
+    ));
     out.push('\n');
     out
 }
@@ -82,12 +169,13 @@ fn fen_move_context(fen: Option<&str>) -> (u32, bool) {
 /// `start_move` and accounting for whether Black moves first.
 fn movetext(
     san_moves: &[String],
+    annotations: &[MoveAnnotation],
     result: GameResult,
     start_move: u32,
     black_first: bool,
 ) -> String {
     const WRAP: usize = 80;
-    let mut tokens: Vec<String> = Vec::with_capacity(san_moves.len() + san_moves.len() / 2);
+    let mut tokens: Vec<String> = Vec::with_capacity(san_moves.len() * 3);
     let mut move_no = start_move;
     let mut white_to_move = !black_first;
     for (ply, san) in san_moves.iter().enumerate() {
@@ -98,6 +186,9 @@ fn movetext(
             tokens.push(format!("{move_no}..."));
         }
         tokens.push(san.clone());
+        if let Some(comment) = annotations.get(ply).copied().and_then(MoveAnnotation::render) {
+            tokens.push(comment);
+        }
         if !white_to_move {
             move_no += 1;
         }
@@ -159,7 +250,7 @@ mod tests {
             fen: None,
             opening_plies: 2,
         };
-        let pgn = build_pgn(&tags, &["e4".into(), "e5".into(), "Qh5".into()]);
+        let pgn = build_pgn(&tags, &["e4".into(), "e5".into(), "Qh5".into()], &[]);
         assert!(pgn.contains("[White \"Stockfish\"]"));
         assert!(pgn.contains("[Result \"1-0\"]"));
         assert!(pgn.contains("[Termination \"normal\"]"));
@@ -184,7 +275,7 @@ mod tests {
             fen: Some("rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2".into()),
             opening_plies: 0,
         };
-        let pgn = build_pgn(&tags, &["Nc6".into(), "Bb5".into(), "a6".into()]);
+        let pgn = build_pgn(&tags, &["Nc6".into(), "Bb5".into(), "a6".into()], &[]);
         // Black moves first at move 2, then White's move 3, then Black's move 3.
         assert!(pgn.contains("2... Nc6 3. Bb5 a6"));
         assert!(pgn.contains("[FEN \""));
@@ -206,7 +297,7 @@ mod tests {
             fen: None,
             opening_plies: 0,
         };
-        let pgn = build_pgn(&tags, &[]);
+        let pgn = build_pgn(&tags, &[], &[]);
         assert!(pgn.contains("[White \"Engine \\\"X\\\"\"]"));
         assert!(!pgn.contains("[TimeControl"));
     }

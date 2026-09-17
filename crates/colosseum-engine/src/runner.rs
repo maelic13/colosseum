@@ -21,7 +21,7 @@ use shakmaty::zobrist::Zobrist64;
 use shakmaty::{CastlingMode, Chess, Color, EnPassantMode, Position};
 
 use crate::live::{EvalPoint, LiveGameHandle, SEARCH_LOG_CAP, SearchLine, to_white_pov};
-use crate::pgn::{PgnTags, build_pgn};
+use crate::pgn::{AnnotationScore, MoveAnnotation, PgnTags, SearchAnnotation, build_pgn};
 
 /// Centipawn magnitude used to represent mate scores for adjudication.
 const ADJ_MATE_CP: i32 = 100_000;
@@ -440,6 +440,8 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
 
     let mut san_moves: Vec<String> = Vec::new();
     let mut uci_moves: Vec<String> = Vec::new();
+    // One comment per half-move, parallel to `san_moves`.
+    let mut annotations: Vec<MoveAnnotation> = Vec::new();
     let mut white_pov: Vec<i32> = Vec::new();
     let mut last_white_pov = 0i32;
     let mut repetitions: HashMap<Zobrist64, u8> = HashMap::new();
@@ -467,6 +469,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         };
         san_moves.push(SanPlus::from_move(pos.clone(), legal).to_string());
         uci_moves.push(uci.clone());
+        annotations.push(MoveAnnotation::Book);
         white_pov.push(last_white_pov); // no engine eval for opening plies
         pos.play_unchecked(legal);
         let key = pos.zobrist_hash::<Zobrist64>(EnPassantMode::Legal);
@@ -639,6 +642,18 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         }
 
         san_moves.push(SanPlus::from_move(pos.clone(), legal_move).to_string());
+        // Record exactly what the mover reported, from its own point of view.
+        // `elapsed` is the harness-charged interval of the recorded clock
+        // model, which is the only time the harness can honestly attribute.
+        annotations.push(MoveAnnotation::Search(SearchAnnotation {
+            score: output.score.map(|score| match score {
+                colosseum_uci::Score::Cp(cp) => AnnotationScore::Centipawns(cp),
+                colosseum_uci::Score::Mate(moves) => AnnotationScore::MateIn(moves),
+            }),
+            depth: output.depth,
+            time_ms: u64::try_from(output.elapsed.as_millis()).ok(),
+            nodes: output.reported_nodes,
+        }));
         // Store the CANONICAL encoding, not the engine's raw text: the move
         // list is replayed to the opponent every move, so a tolerated
         // nonstandard form must never leak into the shared history.
@@ -792,7 +807,13 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         black_move_ms: black_move_time.average_ms(),
         duration_ms: Some(game_start.elapsed().as_millis() as u64),
     };
-    let pgn = render_pgn(&spec, &san_moves, outcome.result, outcome.termination);
+    let pgn = render_pgn(
+        &spec,
+        &san_moves,
+        &annotations,
+        outcome.result,
+        outcome.termination,
+    );
 
     GameReport {
         game_id: spec.game_id,
@@ -1189,7 +1210,7 @@ async fn handle_setup_failure(
         stats: GameStats::default(),
         san_moves: Vec::new(),
         uci_moves: Vec::new(),
-        pgn: render_pgn(spec, &[], outcome.result, outcome.termination),
+        pgn: render_pgn(spec, &[], &[], outcome.result, outcome.termination),
         clock_accounting: clock_accounting_report(spec, monotonic_resolution_ns, None, None),
         fault: outcome.fault,
         error: outcome.error,
@@ -1288,6 +1309,7 @@ fn setup_incident_report(
 fn render_pgn(
     spec: &GameSpec,
     san_moves: &[String],
+    annotations: &[MoveAnnotation],
     result: GameResult,
     termination: Termination,
 ) -> String {
@@ -1304,7 +1326,7 @@ fn render_pgn(
         fen: spec.start_fen.clone(),
         opening_plies: spec.opening_moves.len() as u32,
     };
-    build_pgn(&tags, san_moves)
+    build_pgn(&tags, san_moves, annotations)
 }
 
 #[cfg(test)]

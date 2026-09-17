@@ -75,18 +75,26 @@ mainline move comments. It supports exactly these forms:
 {[%depth 18] [%emt 0.250] [%nodes 500000]}
 {depth=18 time=250ms nodes=500000}
 {d=18 t=0.250s n=500000}
+{s=24 d=18 t=250ms n=500000}
 ```
 
-`%emt` is elapsed move time in seconds (a `H:M:S` value is also accepted).
-Key/value `time`/`t` requires an explicit `ms` or `s` suffix. Depth and nodes
-must be positive integers. Other comments and annotation tags are left
-untouched and ignored by telemetry analysis.
+The last form is what Colosseum itself writes; see
+[fixed matches](match.md) for the annotations it produces. `%emt` is
+elapsed move time in seconds (a `H:M:S` value is also accepted). Key/value
+`time`/`t` requires an explicit `ms` or `s` suffix, and with that suffix a
+zero is read as a real sub-millisecond measurement rather than a placeholder.
+Depth and nodes must be positive integers. `s`/`score` is the mover’s own
+score in centipawns, or `#N` / `#-N` for mate in `N`. Other comments and
+annotation tags are left untouched and ignored by telemetry analysis.
 
 Each engine receives an eligible post-opening move count, an annotated-move
-coverage fraction, and separate coverage/mean/median reports for depth,
-elapsed seconds, nodes and implied NPS. A metric with no valid samples is
-labelled `unavailable`; missing data is never converted to zero. Implied NPS
-requires nodes and positive elapsed time on the same move.
+coverage fraction, and separate coverage/mean/median reports for score,
+mean absolute score, depth, elapsed seconds, nodes and implied NPS. A metric
+with no valid samples is labelled `unavailable`; missing data is never
+converted to zero. Implied NPS requires nodes and positive elapsed time on the
+same move. A mate score counts towards score coverage but is deliberately left
+out of the centipawn values: it is a claim about distance to mate, not an
+evaluation on the same scale.
 
 Colosseum-generated PGNs record the non-standard `OpeningPlyCount` tag whenever
 the harness pre-plays book moves. Those plies are excluded. For PGNs without

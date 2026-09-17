@@ -109,6 +109,28 @@ Natural mate and draw rules always apply. Tablebase-related UCI options can be
 forwarded through `--a-option` and `--b-option`; Colosseum does not inspect the
 tablebase files or perform harness-side tablebase adjudication.
 
+Every game-playing command writes the search evidence behind each move into
+`games.pgn`, because a PGN of bare moves cannot feed a training-data extractor
+or a tree-shape comparison and the runner already holds the values. After every
+engine move the comment is:
+
+```text
+{s=<score> d=<depth> t=<ms>ms n=<nodes>}
+```
+
+`s` is the score from the mover’s own point of view, a signed integer in
+centipawns or `#<n>` / `#-<n>` for mate in `n`. `d` is the reported depth, `t`
+is the harness-charged elapsed milliseconds under the recorded clock model, and
+`n` is the reported node count. A field the engine did not report is left out
+entirely rather than written as zero, so an absent value and a reported zero
+stay distinguishable. Moves pre-played from an opening book carry `{book}`
+instead, and the `OpeningPlyCount` tag still marks how many there were.
+
+The writer form is versioned and every run record names the version it used, so
+a PGN read months later can be interpreted against the exact form that produced
+it. [`stats`](stats.md) reads this form back and reports score, depth, time and
+node coverage.
+
 Engine and infrastructure faults are different outcomes. An engine timeout,
 disconnect, protocol failure or illegal move is a scored forfeit with explicit
 side and kind metadata. The match becomes `invalid` after more than

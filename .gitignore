@@ -15,7 +15,8 @@
 *.db
 /pgn/
 *.pgn
-# Reviewed external-runner fixture PGNs are test evidence, not local output.
+# Reviewed fixture PGNs are committed test evidence, not local output.
+!tests/fixtures/*.pgn
 !tests/fixtures/statistics/**/*.pgn
 
 # Temporary engine copies created by tests (real engine copied into temp dirs)

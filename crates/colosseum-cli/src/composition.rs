@@ -1485,6 +1485,7 @@ async fn run_sprt(command: SprtCommand, machine: bool, dry_run: bool) -> ExitCod
     };
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "sprt",
+        "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
         "design": design,
         "apply": &apply_record,
         "engine_a_time_control": engine_a_time_control,
@@ -2348,6 +2349,7 @@ async fn run_spsa_command(command: SpsaCommand, machine: bool, dry_run: bool) ->
     };
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "spsa",
+        "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
         "settings": settings,
         "r_end": r_end,
         "final_window_percent": final_window_percent,
@@ -2950,6 +2952,7 @@ async fn run_tournament_command(
     };
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "tournament",
+        "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
         "format": plan.design.format,
         "games_scheduled": plan.schedule.len(),
         "anchor": anchor,
@@ -4555,6 +4558,7 @@ async fn run_calibration(command: CalibrationCommand, machine: bool, dry_run: bo
     };
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "calibration",
+        "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
         "optional": true,
         "design": prepared.design,
         "binaries": prepared.binaries,
@@ -5147,6 +5151,7 @@ async fn run_match(command: MatchCommand, machine: bool, dry_run: bool) -> ExitC
     };
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "match",
+        "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
         "engine_a_time_control": engine_a_time_control,
         "engine_b_time_control": engine_b_time_control,
         "adjudication": adjudication,
