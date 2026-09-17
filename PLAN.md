@@ -2362,8 +2362,17 @@ games" procedure at 10.10, once, on the final state.
   be idempotent on resume against the cumulative iteration count; the stop
   grace period is one bounded period from the interrupt, not restarted per
   commit; `--anchor` together with `--fixed` on the same participant is a
-  configuration refusal (exit 2) at resolution and in dry-run. Items (k) to
-  (m) precede (j).
+  configuration refusal (exit 2) at resolution and in dry-run.
+- **(n) Pair-identity replay defects** found by review of (l), each with a
+  regression test: `stats` must pair games by the `PairNumber` and
+  `PairGame` tags, never by game-number arithmetic, so a tournament
+  encounter with any `--games-per-pair` replays to the checkpoint's vector;
+  post-terminal SPRT pairs and invalid SPSA iterations are marked in a PGN
+  tag the replay honours, so the official vector from a PGN equals the
+  checkpoint's for a run that crossed a boundary at concurrency above one;
+  tournament games carry the encounter's real `OpeningIndex`; the SPSA
+  schedule artifact's `stats_version` field is renamed to what it holds
+  (the RNG version). Items (k) to (n) precede (j).
 
   **Implementation evidence (Phase 10.9c):** each defect shared one shape,
   treating "a stop was asked for" as "the run did not finish". A match is now
