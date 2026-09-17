@@ -846,8 +846,10 @@ model as well.
   run-dir-versus-PGN equality test on a run with one aborted game; `rng.rs`
   doc comment corrected; versioned schema refusal kept reachable for old
   SPSA schedule and result files — PLAN §Phase 10(o)
-- ☐ **10.9f** — **Model: Terra High.** Progress reports on stderr at the
-  resolved interval and at termination, never per commit: `sprt` and
+- ☐ **10.9f** — **Model: Terra High.** Progress reports on stderr every
+  `--progress-every N` units (pairs, games or iterations; defaults 10, 20,
+  1) with a `--progress-min-secs` floor (default 5) and at termination,
+  never per commit; `--progress-interval-secs` removed: `sprt` and
   `calibrate` show games, pairs, W/D/L, pentanomial, Elo and nElo with 95%
   intervals, LLR against bounds, faults, pairs per hour and expected
   remaining games; `match` shows score, Elo with interval and rate; `spsa`

@@ -2394,10 +2394,18 @@ games" procedure at 10.10, once, on the final state.
   `stats_version`, and keep the versioned schema refusal reachable for old
   SPSA schedule and result files instead of a raw unknown-field error.
 - **(p) Progress reports.** A long run must tell the operator where it
-  stands without spamming the console. Every durable command prints one
-  progress block on standard error at the resolved interval (default 60
-  seconds, `--progress-interval-secs`, plus a final block at termination),
-  never more often than the interval and never on every commit. The block
+  stands without spamming the console. Progress is counted in the run's
+  own unit, as fastchess and cutechess do with `-ratinginterval N` games
+  and as an SPSA driver does per iteration: every durable command prints
+  one progress block on standard error every `--progress-every N` units
+  (pairs for `sprt`, `calibrate` and `spsa`-free paired runs, games for
+  `match` and `tournament`, iterations for `spsa`; defaults 10 pairs,
+  20 games, 1 iteration) plus a final block at termination. A time floor
+  (`--progress-min-secs`, default 5) coalesces blocks when units complete
+  faster than that, so a fixed-node run cannot flood the console; a block
+  is never printed on every commit and never delayed past the next unit
+  boundary once the floor has elapsed. `--progress-interval-secs` is
+  removed. The block
   carries what a decision needs: for `sprt` and `calibrate`, games and
   pairs done, W/D/L and the pentanomial vector, the point estimate with its
   95% interval in the run's Elo model (both models for SPRT), LLR against
