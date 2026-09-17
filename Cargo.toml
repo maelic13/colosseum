@@ -18,3 +18,15 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# ── Optimized test profile ────────────────────────────────────────────────────
+# The release test leg exists to run the suite with optimizations on, assertions
+# off and overflow checks off. Whole-program LTO and one codegen unit per crate
+# are distribution settings: they change no behaviour the suite can observe, but
+# applied to forty test binaries they cost minutes on every CI leg. Symbols are
+# kept so a failure in CI still has a backtrace.
+[profile.ci-release]
+inherits = "release"
+lto = false
+codegen-units = 16
+strip = "none"

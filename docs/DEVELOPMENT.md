@@ -146,7 +146,20 @@ cargo run -p colosseum-release -- cli-v0.1.0
 ```
 
 Push/pull-request CI runs the hermetic workspace on Windows, Linux and macOS in
-debug and release profiles, and independently builds the headless CLI artifact.
+debug and optimized profiles, and independently builds the headless CLI
+artifact. The optimized leg uses `ci-release`, which inherits the shipped
+release profile — same `opt-level`, assertions and overflow checks off — but
+drops the distribution-only whole-program LTO and single codegen unit, and
+keeps symbols so a CI failure still has a backtrace. Those settings change no
+behaviour the suite can observe and cost minutes across forty test binaries.
+Run it locally the same way:
+
+```bash
+cargo test --workspace --all-targets --profile ci-release
+```
+
+The shipped binary is still built with the full `release` profile; only the
+test legs use `ci-release`.
 Product release automation is split between `release-gui.yml` and
 `release-cli.yml`; only their final publication jobs receive write permission.
 

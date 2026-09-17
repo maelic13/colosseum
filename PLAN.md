@@ -1554,10 +1554,15 @@ the measurement meant to catch it.
 9. **Durable-run suite** (S5.11) against every long command.
 10. **Calibration is optional end-to-end evidence**, not a CI or user
     prerequisite; its outcome classification is tested deterministically.
-11. **CI matrix: Windows, Linux, macOS × debug and release.** Debug is not
+11. **CI matrix: Windows, Linux, macOS × debug and optimized.** Debug is not
     optional — a debug build is far slower, a CI runner slower again, and that
     combination is exactly how a flat-timeout test passes locally for months and
-    fails on a runner.
+    fails on a runner. The optimized leg runs the `ci-release` profile: the
+    shipped release profile without the distribution-only LTO and single
+    codegen unit, which change nothing the suite can observe and cost minutes
+    across forty test binaries. Each matrix leg carries its own build cache;
+    sharing one lets the legs race to save it and leaves the loser permanently
+    cold.
 12. **No new `clippy` warnings**; the workspace lint wall stays at zero.
 13. **Architecture tests enforce S4:** dependency inspection rejects GUI
     dependencies in the CLI and outward framework dependencies in inner crates;

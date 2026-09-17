@@ -849,7 +849,8 @@ Not steps — they are never "done".
 
 ### Declaring a platform supported
 
-- Full test suite green there, debug **and** release.
+- Full test suite green there, debug **and** optimized
+  (`cargo test --workspace --all-targets --profile ci-release`).
 - Affinity, process, timer and filesystem capabilities or fallbacks implemented,
   tested and documented there.
 - The exact released CLI artifact passes `--version`, `--help`, headless
