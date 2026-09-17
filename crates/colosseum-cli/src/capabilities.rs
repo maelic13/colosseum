@@ -90,82 +90,95 @@ pub fn probe() -> CapabilitiesReport {
 }
 
 pub fn print_text(report: &CapabilitiesReport) {
-    println!("platform: {} ({})", report.platform, report.architecture);
+    print!("{}", render_text(report));
+}
+
+/// Render the human-readable probe.
+///
+/// This is a pure function so every branch can be asserted on every platform.
+/// The headings are a contract: a host that supplies none of a fact still
+/// prints its line with the reason, because a reader scanning for topology,
+/// core class or cache domains must find an answer rather than nothing.
+#[must_use]
+pub fn render_text(report: &CapabilitiesReport) -> String {
+    let mut out = String::new();
+    let mut line = |text: String| {
+        out.push_str(&text);
+        out.push('\n');
+    };
+    line(format!(
+        "platform: {} ({})",
+        report.platform, report.architecture
+    ));
     match &report.topology.value {
         Some(topology) => {
-            println!(
+            line(format!(
                 "topology: available ({} physical cores, {} logical CPUs)",
                 topology.physical_core_count, topology.logical_cpu_count
-            );
+            ));
             match &topology.sibling_mapping {
                 SiblingMapping::Known { cores } => {
-                    println!("SMT sibling map: exact ({} cores)", cores.len());
+                    line(format!("SMT sibling map: exact ({} cores)", cores.len()));
                 }
                 SiblingMapping::Unavailable { reason } => {
-                    println!("SMT sibling map: unavailable — {reason}");
+                    line(format!("SMT sibling map: unavailable — {reason}"));
                 }
             }
         }
-        None => println!(
+        None => line(format!(
             "topology: unavailable — {}",
-            report
-                .topology
-                .reason
-                .as_deref()
-                .unwrap_or("unknown reason")
-        ),
+            reason_of(&report.topology.reason)
+        )),
     }
     match &report.allowed_cpus.value {
-        Some(AllowedCpuSet::Known { cpus, .. }) => println!(
+        Some(AllowedCpuSet::Known { cpus, .. }) => line(format!(
             "allowed logical CPUs: {} ({})",
             cpus.len(),
             cpus.iter()
                 .map(|cpu| format!("{}:{}", cpu.group, cpu.number))
                 .collect::<Vec<_>>()
                 .join(",")
-        ),
+        )),
         Some(AllowedCpuSet::Unavailable { reason }) => {
-            println!("allowed logical CPUs: unavailable — {reason}");
+            line(format!("allowed logical CPUs: unavailable — {reason}"));
         }
-        None => println!(
+        None => line(format!(
             "allowed logical CPUs: unavailable — {}",
-            report
-                .allowed_cpus
-                .reason
-                .as_deref()
-                .unwrap_or("unknown reason")
-        ),
+            reason_of(&report.allowed_cpus.reason)
+        )),
     }
     match &report.core_characteristics.value {
-        Some(characteristics) => print_characteristics(characteristics),
-        None => println!(
-            "core class / NUMA: unavailable — {}",
-            report
-                .core_characteristics
-                .reason
-                .as_deref()
-                .unwrap_or("unknown reason")
-        ),
+        Some(characteristics) => describe_characteristics(characteristics, &mut line),
+        None => {
+            let reason = reason_of(&report.core_characteristics.reason).to_owned();
+            line(format!("core class / NUMA: unavailable — {reason}"));
+            line(format!("last-level cache domains: unavailable — {reason}"));
+        }
     }
-    println!(
+    line(format!(
         "hard affinity: {}",
         match report.hard_affinity.level {
             colosseum_engine::AffinitySupportLevel::Enforced => "enforced",
             colosseum_engine::AffinitySupportLevel::Unavailable => "unavailable",
         }
-    );
+    ));
     if let Some(mechanism) = &report.hard_affinity.mechanism {
-        println!("affinity mechanism: {mechanism}");
+        line(format!("affinity mechanism: {mechanism}"));
     }
     for constraint in &report.hard_affinity.constraints {
-        println!("affinity constraint: {constraint}");
+        line(format!("affinity constraint: {constraint}"));
     }
     if let Some(reason) = &report.hard_affinity.reason {
-        println!("affinity reason: {reason}");
+        line(format!("affinity reason: {reason}"));
     }
+    out
 }
 
-fn print_characteristics(characteristics: &CpuCharacteristics) {
+fn reason_of(reason: &Option<String>) -> &str {
+    reason.as_deref().unwrap_or("unknown reason")
+}
+
+fn describe_characteristics(characteristics: &CpuCharacteristics, line: &mut impl FnMut(String)) {
     let classes = characteristics
         .cores
         .iter()
@@ -187,13 +200,13 @@ fn print_characteristics(characteristics: &CpuCharacteristics) {
         .filter(|core| core.last_level_cache.is_none())
         .count();
     let unknown = classes.contains(&CoreClass::Unknown);
-    println!(
+    line(format!(
         "core class / NUMA: available ({} distinct classes{}, {} nodes)",
         classes.len(),
         if unknown { ", including unknown" } else { "" },
         nodes.len()
-    );
-    println!(
+    ));
+    line(format!(
         "last-level cache domains: {}",
         if domains.is_empty() {
             "none reported".to_string()
@@ -208,15 +221,71 @@ fn print_characteristics(characteristics: &CpuCharacteristics) {
                     .join(", ")
             )
         }
-    );
+    ));
     if unreported > 0 {
-        println!("cores without a reported cache domain: {unreported}");
+        line(format!(
+            "cores without a reported cache domain: {unreported}"
+        ));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every heading a reader scans for, on every host.
+    const HEADINGS: [&str; 6] = [
+        "platform:",
+        "topology:",
+        "allowed logical CPUs:",
+        "core class / NUMA:",
+        "last-level cache domains:",
+        "hard affinity:",
+    ];
+
+    fn unavailable_report() -> CapabilitiesReport {
+        // A host like macOS: counts only, so no logical identity and therefore
+        // no class, node or cache evidence at all.
+        CapabilitiesReport {
+            schema_version: 2,
+            platform: "macos",
+            architecture: "aarch64",
+            topology: Probe::available(CpuTopology {
+                source: colosseum_engine::TopologySource::MacOsSysctlCounts,
+                physical_core_count: 3,
+                logical_cpu_count: 3,
+                sibling_mapping: SiblingMapping::Unavailable {
+                    reason: "counts only".into(),
+                },
+            }),
+            allowed_cpus: Probe::unavailable("no logical CPU identities"),
+            core_characteristics: Probe::unavailable("logical CPU identities are unavailable"),
+            hard_affinity: colosseum_engine::affinity_capability(),
+        }
+    }
+
+    /// The regression this exists for: a host that reports no core
+    /// characteristics used to print no cache-domain line at all, so the fact
+    /// was missing rather than reported unavailable.
+    #[test]
+    fn a_host_without_any_placement_evidence_still_reports_every_heading() {
+        let text = render_text(&unavailable_report());
+        for heading in HEADINGS {
+            assert!(text.contains(heading), "missing {heading} in\n{text}");
+        }
+        assert!(
+            text.contains("last-level cache domains: unavailable — logical CPU identities"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn this_host_reports_every_heading_whatever_it_supports() {
+        let text = render_text(&probe());
+        for heading in HEADINGS {
+            assert!(text.contains(heading), "missing {heading} in\n{text}");
+        }
+    }
 
     #[test]
     fn host_probe_is_serializable_and_names_the_platform() {
