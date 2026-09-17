@@ -122,7 +122,11 @@ schedule order. CPU placement defaults to `--placement off`, which makes no
 hard request and works on platforms without affinity. Use `--placement auto`
 with `--cores-per-engine N` and optional `--headroom-cores N` to allocate
 disjoint whole physical cores through the detected topology, or provide an
-explicit logical CPU pool such as `--placement 0-7`. Existing per-side
+explicit logical CPU pool such as `--placement 0-7`. `auto` leaves one whole
+physical core free by default, selects only the highest-performance core class
+on a host whose classes differ, and keeps each game slot inside one last-level
+cache domain and one NUMA node when the pool allows it; see
+[CPU topology](cpu-topology.md). Existing per-side
 `--a-cores` / `--b-cores` lists are also enforced, but only for concurrency 1.
 Any requested placement that cannot be applied and read back is an
 infrastructure error, never a silent fallback.

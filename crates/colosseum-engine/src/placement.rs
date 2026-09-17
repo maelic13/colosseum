@@ -11,11 +11,15 @@ use thiserror::Error;
 use colosseum_application::CpuAllocation;
 
 use crate::allowed_cpus::AllowedCpuSet;
-use crate::characteristics::{CoreClass, CpuCharacteristics, NumaNodeId};
+use crate::characteristics::{CacheDomainId, CoreClass, CpuCharacteristics, NumaNodeId};
 use crate::topology::{CpuTopology, LogicalCpuId, PhysicalCore};
 
 /// The default number of whole physical cores left for the harness and host.
-pub const DEFAULT_AUTO_HEADROOM_PHYSICAL_CORES: usize = 2;
+///
+/// One whole core, with all of its SMT siblings, is room for the harness and
+/// the operating system. A second free core costs a game slot for no recorded
+/// benefit.
+pub const DEFAULT_AUTO_HEADROOM_PHYSICAL_CORES: usize = 1;
 
 /// User-selected CPU placement policy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,6 +94,8 @@ pub struct EngineCpuPlacement {
     pub physical_core_count: usize,
     pub core_classes: Vec<CoreClass>,
     pub numa_nodes: Vec<NumaNodeId>,
+    #[serde(default)]
+    pub cache_domains: Vec<CacheDomainId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,8 +105,11 @@ pub enum PlacementAsymmetry {
     EngineBSpansCoreClasses,
     EngineASpansNumaNodes,
     EngineBSpansNumaNodes,
+    EngineASpansCacheDomains,
+    EngineBSpansCacheDomains,
     CoreClassMismatch,
     NumaNodeMismatch,
+    CacheDomainMismatch,
 }
 
 /// Disjoint CPU placements for the two engines occupying one concurrent game
@@ -118,9 +127,10 @@ struct LocatedCore {
     core: PhysicalCore,
     core_class: CoreClass,
     numa_node: Option<NumaNodeId>,
+    cache_domain: Option<CacheDomainId>,
 }
 
-type LocationKey = (CoreClass, Option<NumaNodeId>);
+type LocationKey = (CoreClass, Option<NumaNodeId>, Option<CacheDomainId>);
 
 /// Divide a resolved placement pool between concurrent game slots.
 ///
@@ -186,6 +196,7 @@ fn unrestricted_engine_placement() -> EngineCpuPlacement {
         physical_core_count: 0,
         core_classes: Vec::new(),
         numa_nodes: Vec::new(),
+        cache_domains: Vec::new(),
     }
 }
 
@@ -221,6 +232,7 @@ fn locate_cores(
                 core: core.clone(),
                 core_class: characteristic.core_class,
                 numa_node: characteristic.numa_node,
+                cache_domain: characteristic.last_level_cache,
             })
         })
         .collect()
@@ -278,7 +290,7 @@ fn location_groups(cores: &[LocatedCore]) -> BTreeMap<LocationKey, Vec<usize>> {
     let mut groups = BTreeMap::new();
     for (index, core) in cores.iter().enumerate() {
         groups
-            .entry((core.core_class, core.numa_node))
+            .entry((core.core_class, core.numa_node, core.cache_domain))
             .or_insert_with(Vec::new)
             .push(index);
     }
@@ -318,6 +330,12 @@ fn engine_placement(cores: &[LocatedCore]) -> EngineCpuPlacement {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect(),
+        cache_domains: cores
+            .iter()
+            .filter_map(|core| core.cache_domain)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
     }
 }
 
@@ -338,11 +356,20 @@ fn placement_asymmetries(
     if engine_b.numa_nodes.len() > 1 {
         output.push(PlacementAsymmetry::EngineBSpansNumaNodes);
     }
+    if engine_a.cache_domains.len() > 1 {
+        output.push(PlacementAsymmetry::EngineASpansCacheDomains);
+    }
+    if engine_b.cache_domains.len() > 1 {
+        output.push(PlacementAsymmetry::EngineBSpansCacheDomains);
+    }
     if engine_a.core_classes != engine_b.core_classes {
         output.push(PlacementAsymmetry::CoreClassMismatch);
     }
     if engine_a.numa_nodes != engine_b.numa_nodes {
         output.push(PlacementAsymmetry::NumaNodeMismatch);
+    }
+    if engine_a.cache_domains != engine_b.cache_domains {
+        output.push(PlacementAsymmetry::CacheDomainMismatch);
     }
     output
 }
@@ -357,6 +384,7 @@ fn placement_asymmetries(
 pub fn plan_cpu_placement(
     topology: &CpuTopology,
     allowed: &AllowedCpuSet,
+    characteristics: &CpuCharacteristics,
     policy: &CpuPlacementPolicy,
 ) -> Result<CpuPlacementPlan, CpuPlacementError> {
     match policy {
@@ -365,6 +393,7 @@ pub fn plan_cpu_placement(
             headroom_physical_cores,
         } => {
             let cores = available_cores(topology, allowed)?;
+            let cores = highest_performance_class(&locate_cores(&cores, characteristics)?)?;
             if *headroom_physical_cores >= cores.len() {
                 return Err(CpuPlacementError::HeadroomExhaustsTopology {
                     headroom_physical_cores: *headroom_physical_cores,
@@ -373,7 +402,10 @@ pub fn plan_cpu_placement(
             }
             let selected_count = cores.len() - headroom_physical_cores;
             Ok(CpuPlacementPlan::WholePhysicalCores {
-                cores: cores[..selected_count].to_vec(),
+                cores: cores[..selected_count]
+                    .iter()
+                    .map(|core| core.core.clone())
+                    .collect(),
                 headroom_physical_cores: *headroom_physical_cores,
             })
         }
@@ -416,6 +448,111 @@ pub fn plan_cpu_placement(
                 physical_cores,
             })
         }
+    }
+}
+
+/// Reduce an `auto` pool to the one core class worth measuring on, refusing
+/// wherever the operating system's own evidence is too thin to decide.
+///
+/// Placement never names a processor. It reads what the OS reports — core
+/// class, NUMA node and last-level cache domain — and where that evidence is
+/// mixed or missing it names the detected topology and asks for an explicit
+/// CPU list rather than guessing.
+fn highest_performance_class(cores: &[LocatedCore]) -> Result<Vec<LocatedCore>, CpuPlacementError> {
+    let classes = cores
+        .iter()
+        .map(|core| core.core_class)
+        .collect::<BTreeSet<_>>();
+    if classes.len() > 1 && classes.contains(&CoreClass::Unknown) {
+        return Err(CpuPlacementError::UnknownCoreClassAmongMixedClasses {
+            detected: describe_topology(cores),
+        });
+    }
+    let selected = if classes.len() > 1 {
+        let best = *classes.last().expect("at least one class");
+        cores
+            .iter()
+            .filter(|core| core.core_class == best)
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        cores.to_vec()
+    };
+
+    let domains = selected
+        .iter()
+        .map(|core| core.cache_domain)
+        .collect::<BTreeSet<_>>();
+    if domains.len() > 1 && domains.contains(&None) {
+        return Err(CpuPlacementError::PartialCacheTopology {
+            detected: describe_topology(&selected),
+        });
+    }
+    if domains == BTreeSet::from([None]) {
+        // No cache evidence at all. A part the operating system reports as
+        // spanning several NUMA nodes is multi-domain on that evidence alone,
+        // and a slot cannot be kept inside a domain never reported. Where the
+        // host reports no node evidence either, there is nothing that says the
+        // part is multi-domain, and both facts stay visible in the run record.
+        let nodes = selected
+            .iter()
+            .filter_map(|core| core.numa_node)
+            .collect::<BTreeSet<_>>();
+        if nodes.len() > 1 {
+            return Err(CpuPlacementError::CacheTopologyUnavailable {
+                detected: describe_topology(&selected),
+            });
+        }
+    }
+    Ok(selected)
+}
+
+/// Name the detected topology in a refusal, without naming a processor.
+fn describe_topology(cores: &[LocatedCore]) -> String {
+    let classes = cores
+        .iter()
+        .map(|core| core.core_class)
+        .collect::<BTreeSet<_>>();
+    let nodes = cores
+        .iter()
+        .map(|core| core.numa_node)
+        .collect::<BTreeSet<_>>();
+    let domains = cores
+        .iter()
+        .map(|core| core.cache_domain)
+        .collect::<BTreeSet<_>>();
+    format!(
+        "{} physical cores; core classes [{}]; NUMA nodes [{}]; last-level cache domains [{}]",
+        cores.len(),
+        classes
+            .iter()
+            .map(describe_class)
+            .collect::<Vec<_>>()
+            .join(", "),
+        nodes
+            .iter()
+            .map(|node| match node {
+                Some(node) => format!("{}:{}", node.group, node.number),
+                None => "unknown".into(),
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+        domains
+            .iter()
+            .map(|domain| match domain {
+                Some(domain) => format!("L{} #{}", domain.level, domain.index),
+                None => "unreported".into(),
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
+}
+
+fn describe_class(class: &CoreClass) -> String {
+    match class {
+        CoreClass::Unknown => "unknown".into(),
+        CoreClass::WindowsEfficiencyClass(value) => format!("windows-efficiency-class {value}"),
+        CoreClass::LinuxCapacity(value) => format!("linux-cpu-capacity {value}"),
     }
 }
 
@@ -522,6 +659,18 @@ pub enum CpuPlacementError {
     MissingCoreCharacteristics(LogicalCpuId),
     #[error("core characteristics do not describe the selected sibling set consistently")]
     InconsistentCoreCharacteristics,
+    #[error(
+        "automatic CPU placement cannot choose a core class because the host reports mixed classes and at least one is unknown ({detected}); supply an explicit CPU list with --placement"
+    )]
+    UnknownCoreClassAmongMixedClasses { detected: String },
+    #[error(
+        "automatic CPU placement cannot keep a game slot inside one last-level cache domain because the host reports cache topology for only some cores ({detected}); supply an explicit CPU list with --placement"
+    )]
+    PartialCacheTopology { detected: String },
+    #[error(
+        "automatic CPU placement cannot keep a game slot inside one last-level cache domain because the host reports no cache topology for a part that spans several nodes ({detected}); supply an explicit CPU list with --placement"
+    )]
+    CacheTopologyUnavailable { detected: String },
 }
 
 #[cfg(test)]
@@ -574,7 +723,15 @@ mod tests {
         topology: &CpuTopology,
         policy: &CpuPlacementPolicy,
     ) -> Result<CpuPlacementPlan, CpuPlacementError> {
-        plan_cpu_placement(topology, &all_allowed(topology), policy)
+        plan_with(topology, &characteristics(topology), policy)
+    }
+
+    fn plan_with(
+        topology: &CpuTopology,
+        characteristics: &CpuCharacteristics,
+        policy: &CpuPlacementPolicy,
+    ) -> Result<CpuPlacementPlan, CpuPlacementError> {
+        plan_cpu_placement(topology, &all_allowed(topology), characteristics, policy)
     }
 
     fn characteristics(topology: &CpuTopology) -> CpuCharacteristics {
@@ -585,6 +742,19 @@ mod tests {
         topology: &CpuTopology,
         metadata: &[(CoreClass, Option<NumaNodeId>)],
     ) -> CpuCharacteristics {
+        located(
+            topology,
+            &metadata
+                .iter()
+                .map(|(class, node)| (*class, *node, None))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn located(
+        topology: &CpuTopology,
+        metadata: &[(CoreClass, Option<NumaNodeId>, Option<CacheDomainId>)],
+    ) -> CpuCharacteristics {
         let cores = topology.cores().unwrap();
         assert_eq!(cores.len(), metadata.len());
         CpuCharacteristics {
@@ -592,11 +762,12 @@ mod tests {
             cores: cores
                 .iter()
                 .zip(metadata)
-                .map(|(core, (core_class, numa_node))| {
+                .map(|(core, (core_class, numa_node, last_level_cache))| {
                     crate::characteristics::PhysicalCoreCharacteristics {
                         logical_cpus: core.logical_cpus.clone(),
                         core_class: *core_class,
                         numa_node: *numa_node,
+                        last_level_cache: *last_level_cache,
                     }
                 })
                 .collect(),
@@ -607,8 +778,45 @@ mod tests {
         Some(NumaNodeId { group: 0, number })
     }
 
+    fn cache(index: u32) -> Option<CacheDomainId> {
+        Some(CacheDomainId { level: 3, index })
+    }
+
+    /// A topology of `cores` single-threaded physical cores, CPUs 0..cores.
+    fn no_smt_topology(cores: u32) -> CpuTopology {
+        CpuTopology {
+            source: TopologySource::LinuxThreadSiblingsList,
+            physical_core_count: cores as usize,
+            logical_cpu_count: cores as usize,
+            sibling_mapping: SiblingMapping::Known {
+                cores: (0..cores)
+                    .map(|number| PhysicalCore {
+                        logical_cpus: vec![cpu(number)],
+                    })
+                    .collect(),
+            },
+        }
+    }
+
+    /// A topology of `cores` SMT physical cores; core `i` owns CPUs `i` and
+    /// `i + cores`, which is deliberately not adjacent numbering.
+    fn smt_topology_of(cores: u32) -> CpuTopology {
+        CpuTopology {
+            source: TopologySource::LinuxThreadSiblingsList,
+            physical_core_count: cores as usize,
+            logical_cpu_count: (cores * 2) as usize,
+            sibling_mapping: SiblingMapping::Known {
+                cores: (0..cores)
+                    .map(|number| PhysicalCore {
+                        logical_cpus: vec![cpu(number), cpu(number + cores)],
+                    })
+                    .collect(),
+            },
+        }
+    }
+
     #[test]
-    fn auto_default_keeps_two_whole_physical_cores_free() {
+    fn auto_default_keeps_one_whole_physical_core_free_with_all_its_siblings() {
         let plan = plan(&smt_topology(), &CpuPlacementPolicy::default()).unwrap();
         assert_eq!(
             plan,
@@ -620,13 +828,223 @@ mod tests {
                     PhysicalCore {
                         logical_cpus: vec![cpu(1), cpu(5)],
                     },
+                    PhysicalCore {
+                        logical_cpus: vec![cpu(2), cpu(6)],
+                    },
                 ],
-                headroom_physical_cores: 2,
+                headroom_physical_cores: 1,
             }
         );
+        // The one free core keeps both of its SMT siblings.
         assert_eq!(
             plan.logical_cpus(),
-            Some(vec![cpu(0), cpu(4), cpu(1), cpu(5)])
+            Some(vec![cpu(0), cpu(4), cpu(1), cpu(5), cpu(2), cpu(6)])
+        );
+    }
+
+    #[test]
+    fn auto_on_a_hybrid_host_selects_the_highest_performance_class_only() {
+        let topology = no_smt_topology(8);
+        let metadata = (0..8)
+            .map(|index| {
+                (
+                    CoreClass::WindowsEfficiencyClass(u8::from(index < 4)),
+                    node(0),
+                    cache(0),
+                )
+            })
+            .collect::<Vec<_>>();
+        let plan = plan_with(
+            &topology,
+            &located(&topology, &metadata),
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            plan.logical_cpus(),
+            Some(vec![cpu(0), cpu(1), cpu(2), cpu(3)])
+        );
+    }
+
+    #[test]
+    fn auto_refuses_a_mixed_class_host_whose_class_is_partly_unknown() {
+        let topology = no_smt_topology(4);
+        let metadata = vec![
+            (CoreClass::LinuxCapacity(1024), node(0), cache(0)),
+            (CoreClass::LinuxCapacity(1024), node(0), cache(0)),
+            (CoreClass::Unknown, node(0), cache(0)),
+            (CoreClass::Unknown, node(0), cache(0)),
+        ];
+        let error = plan_with(
+            &topology,
+            &located(&topology, &metadata),
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 0,
+            },
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        // The refusal names the detected topology and never a processor.
+        assert!(message.contains("linux-cpu-capacity 1024"), "{message}");
+        assert!(message.contains("unknown"), "{message}");
+        assert!(message.contains("--placement"), "{message}");
+    }
+
+    #[test]
+    fn auto_refuses_a_multi_node_host_that_reports_no_cache_topology() {
+        let topology = no_smt_topology(4);
+        let metadata = vec![
+            (CoreClass::Unknown, node(0), None),
+            (CoreClass::Unknown, node(0), None),
+            (CoreClass::Unknown, node(1), None),
+            (CoreClass::Unknown, node(1), None),
+        ];
+        let error = plan_with(
+            &topology,
+            &located(&topology, &metadata),
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 0,
+            },
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("last-level cache domain"), "{message}");
+        assert!(message.contains("unreported"), "{message}");
+        assert!(message.contains("--placement"), "{message}");
+    }
+
+    #[test]
+    fn auto_refuses_a_host_that_reports_cache_topology_for_only_some_cores() {
+        let topology = no_smt_topology(4);
+        let metadata = vec![
+            (CoreClass::Unknown, node(0), cache(0)),
+            (CoreClass::Unknown, node(0), cache(0)),
+            (CoreClass::Unknown, node(0), None),
+            (CoreClass::Unknown, node(0), None),
+        ];
+        let error = plan_with(
+            &topology,
+            &located(&topology, &metadata),
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 0,
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("only some cores"), "{error}");
+    }
+
+    #[test]
+    fn auto_accepts_a_host_reporting_neither_class_nor_node_nor_cache() {
+        // Nothing here says the part is multi-domain, so placement proceeds and
+        // the run record carries class, node and cache as unreported.
+        let topology = smt_topology_of(4);
+        let plan = plan_with(
+            &topology,
+            &characteristics(&topology),
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            plan.logical_cpus(),
+            Some(vec![cpu(0), cpu(4), cpu(1), cpu(5), cpu(2), cpu(6)])
+        );
+    }
+
+    #[test]
+    fn slots_stay_inside_one_cache_domain_when_the_pool_allows_it() {
+        let topology = no_smt_topology(8);
+        let metadata = (0..8)
+            .map(|index| {
+                (
+                    CoreClass::WindowsEfficiencyClass(0),
+                    node(0),
+                    cache(u32::from(index >= 4)),
+                )
+            })
+            .collect::<Vec<_>>();
+        let characteristics = located(&topology, &metadata);
+        let plan = plan_with(
+            &topology,
+            &characteristics,
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 0,
+            },
+        )
+        .unwrap();
+        let slots = allocate_game_slots(&plan, &characteristics, 2, 2).unwrap();
+        for slot in &slots {
+            assert_eq!(slot.engine_a.cache_domains.len(), 1, "{slot:?}");
+            assert_eq!(slot.engine_a.cache_domains, slot.engine_b.cache_domains);
+            assert!(slot.asymmetries.is_empty(), "{slot:?}");
+        }
+        assert_eq!(slots[0].engine_a.cache_domains[0].index, 0);
+        assert_eq!(slots[1].engine_a.cache_domains[0].index, 1);
+    }
+
+    #[test]
+    fn a_slot_forced_across_cache_domains_records_the_asymmetry() {
+        let topology = no_smt_topology(4);
+        let metadata = (0..4)
+            .map(|index| {
+                (
+                    CoreClass::WindowsEfficiencyClass(0),
+                    node(0),
+                    cache(u32::from(index >= 2)),
+                )
+            })
+            .collect::<Vec<_>>();
+        let characteristics = located(&topology, &metadata);
+        let plan = plan_with(
+            &topology,
+            &characteristics,
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 0,
+            },
+        )
+        .unwrap();
+        let slots = allocate_game_slots(&plan, &characteristics, 1, 2).unwrap();
+        // Each engine still fits one domain, but the two differ, so the slot
+        // carries the mismatch rather than hiding it.
+        assert_eq!(slots[0].engine_a.cache_domains.len(), 1);
+        assert_eq!(slots[0].engine_b.cache_domains.len(), 1);
+        assert_eq!(
+            slots[0].asymmetries,
+            vec![PlacementAsymmetry::CacheDomainMismatch]
+        );
+    }
+
+    #[test]
+    fn an_engine_forced_to_span_cache_domains_records_that_too() {
+        let topology = no_smt_topology(4);
+        let metadata = (0..4)
+            .map(|index| {
+                (
+                    CoreClass::WindowsEfficiencyClass(0),
+                    node(0),
+                    cache(u32::from(index >= 3)),
+                )
+            })
+            .collect::<Vec<_>>();
+        let characteristics = located(&topology, &metadata);
+        let plan = plan_with(
+            &topology,
+            &characteristics,
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 0,
+            },
+        )
+        .unwrap();
+        let slots = allocate_game_slots(&plan, &characteristics, 1, 2).unwrap();
+        assert!(
+            slots[0]
+                .asymmetries
+                .contains(&PlacementAsymmetry::EngineBSpansCacheDomains),
+            "{:?}",
+            slots[0]
         );
     }
 
@@ -692,6 +1110,10 @@ mod tests {
             &topology,
             &AllowedCpuSet::Unavailable {
                 reason: "no logical IDs".into(),
+            },
+            &CpuCharacteristics {
+                source: crate::characteristics::CharacteristicsSource::LinuxSysfs,
+                cores: Vec::new(),
             },
             &CpuPlacementPolicy::Off,
         )
@@ -816,6 +1238,10 @@ mod tests {
                     &AllowedCpuSet::Unavailable {
                         reason: "no logical IDs".into(),
                     },
+                    &CpuCharacteristics {
+                        source: crate::characteristics::CharacteristicsSource::LinuxSysfs,
+                        cores: Vec::new(),
+                    },
                     &policy,
                 )
                 .unwrap_err(),
@@ -834,6 +1260,7 @@ mod tests {
         let plan = plan_cpu_placement(
             &topology,
             &allowed,
+            &characteristics(&topology),
             &CpuPlacementPolicy::Auto {
                 headroom_physical_cores: 1,
             },
@@ -853,6 +1280,7 @@ mod tests {
             plan_cpu_placement(
                 &topology,
                 &allowed,
+                &characteristics(&topology),
                 &CpuPlacementPolicy::Explicit { cpus: vec![cpu(1)] },
             )
             .unwrap_err(),

@@ -238,9 +238,9 @@ Options:
           [default: off]
 
       --headroom-cores <HEADROOM_CORES>
-          Whole physical cores left free when placement is auto
+          Whole physical cores left free when placement is auto. Whole physical cores left free for the harness and the operating system
 
-          [default: 2]
+          [default: 1]
 
       --memory-budget-mb <MEMORY_BUDGET_MB>
           Trusted hard budget for the two engines' configured Hash memory
@@ -475,9 +475,9 @@ Options:
           [default: off]
 
       --headroom-cores <HEADROOM_CORES>
-          Whole physical cores left free when placement is auto
+          Whole physical cores left free when placement is auto. Whole physical cores left free for the harness and the operating system
 
-          [default: 2]
+          [default: 1]
 
       --memory-budget-mb <MEMORY_BUDGET_MB>
           Trusted hard budget for the two engines' configured Hash memory
@@ -643,7 +643,9 @@ Options:
           [default: off]
 
       --headroom-cores <HEADROOM_CORES>
-          [default: 2]
+          Whole physical cores left free for the harness and the operating system
+
+          [default: 1]
 
       --memory-budget-mb <MEMORY_BUDGET_MB>
 
@@ -1066,9 +1068,9 @@ Options:
           [default: off]
 
       --headroom-cores <HEADROOM_CORES>
-          Whole physical cores left free when placement is auto
+          Whole physical cores left free when placement is auto. Whole physical cores left free for the harness and the operating system
 
-          [default: 2]
+          [default: 1]
 
       --memory-budget-mb <MEMORY_BUDGET_MB>
           Trusted hard budget for the two engines' configured Hash memory
@@ -1899,7 +1901,9 @@ Options:
           [default: off]
 
       --headroom-cores <HEADROOM_CORES>
-          [default: 2]
+          Whole physical cores left free for the harness and the operating system
+
+          [default: 1]
 
       --memory-budget-mb <MEMORY_BUDGET_MB>
 

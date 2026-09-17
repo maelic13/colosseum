@@ -3,9 +3,9 @@
 use std::collections::BTreeSet;
 
 use colosseum_engine::{
-    AffinityCapability, AllowedCpuSet, CoreClass, CpuCharacteristics, CpuTopology, NumaNodeId,
-    SiblingMapping, affinity_capability, detect_allowed_cpu_set, detect_cpu_characteristics,
-    detect_cpu_topology,
+    AffinityCapability, AllowedCpuSet, CacheDomainId, CoreClass, CpuCharacteristics, CpuTopology,
+    NumaNodeId, SiblingMapping, affinity_capability, detect_allowed_cpu_set,
+    detect_cpu_characteristics, detect_cpu_topology,
 };
 use serde::Serialize;
 
@@ -79,7 +79,7 @@ pub fn probe() -> CapabilitiesReport {
     };
 
     CapabilitiesReport {
-        schema_version: 1,
+        schema_version: 2,
         platform: std::env::consts::OS,
         architecture: std::env::consts::ARCH,
         topology,
@@ -176,6 +176,16 @@ fn print_characteristics(characteristics: &CpuCharacteristics) {
         .iter()
         .filter_map(|core| core.numa_node)
         .collect::<BTreeSet<NumaNodeId>>();
+    let domains = characteristics
+        .cores
+        .iter()
+        .filter_map(|core| core.last_level_cache)
+        .collect::<BTreeSet<CacheDomainId>>();
+    let unreported = characteristics
+        .cores
+        .iter()
+        .filter(|core| core.last_level_cache.is_none())
+        .count();
     let unknown = classes.contains(&CoreClass::Unknown);
     println!(
         "core class / NUMA: available ({} distinct classes{}, {} nodes)",
@@ -183,6 +193,25 @@ fn print_characteristics(characteristics: &CpuCharacteristics) {
         if unknown { ", including unknown" } else { "" },
         nodes.len()
     );
+    println!(
+        "last-level cache domains: {}",
+        if domains.is_empty() {
+            "none reported".to_string()
+        } else {
+            format!(
+                "{} ({})",
+                domains.len(),
+                domains
+                    .iter()
+                    .map(|domain| format!("L{} #{}", domain.level, domain.index))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+    );
+    if unreported > 0 {
+        println!("cores without a reported cache domain: {unreported}");
+    }
 }
 
 #[cfg(test)]
@@ -193,8 +222,28 @@ mod tests {
     fn host_probe_is_serializable_and_names_the_platform() {
         let report = probe();
         let value = serde_json::to_value(&report).unwrap();
-        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["schema_version"], 2);
         assert_eq!(value["platform"], std::env::consts::OS);
         assert!(value["hard_affinity"]["level"].is_string());
+    }
+
+    /// Class, NUMA node and last-level cache domain are all reportable fields;
+    /// a core the operating system said nothing about stays explicitly null.
+    #[test]
+    fn host_probe_reports_class_numa_and_cache_domain_per_core() {
+        let report = probe();
+        let value = serde_json::to_value(&report).unwrap();
+        let Some(cores) = value["core_characteristics"]["value"]["cores"].as_array() else {
+            assert_eq!(value["core_characteristics"]["status"], "unavailable");
+            return;
+        };
+        for core in cores {
+            assert!(core["core_class"].is_object());
+            assert!(core["numa_node"].is_object() || core["numa_node"].is_null());
+            assert!(
+                core["last_level_cache"].is_object() || core["last_level_cache"].is_null(),
+                "{core}"
+            );
+        }
     }
 }

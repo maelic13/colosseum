@@ -1793,7 +1793,7 @@ fn capabilities_reports_platform_state_in_strict_json() {
     assert!(output.stderr.is_empty());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["type"], "capabilities");
-    assert_eq!(value["report"]["schema_version"], 1);
+    assert_eq!(value["report"]["schema_version"], 2);
     assert_eq!(value["report"]["platform"], std::env::consts::OS);
     assert!(matches!(
         value["report"]["topology"]["status"].as_str(),
@@ -1814,6 +1814,8 @@ fn capabilities_text_is_human_readable() {
         "platform:",
         "topology:",
         "allowed logical CPUs:",
+        "core class / NUMA:",
+        "last-level cache domains:",
         "hard affinity:",
     ] {
         assert!(stdout.contains(heading), "missing {heading} in {stdout}");

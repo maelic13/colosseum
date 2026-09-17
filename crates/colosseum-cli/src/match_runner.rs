@@ -536,7 +536,7 @@ pub fn plan_execution(
             .map_err(|error| MatchError::Placement(error.to_string()))?;
         let characteristics = detect_cpu_characteristics(&topology)
             .map_err(|error| MatchError::Placement(error.to_string()))?;
-        let plan = plan_cpu_placement(&topology, &allowed, &placement_policy)
+        let plan = plan_cpu_placement(&topology, &allowed, &characteristics, &placement_policy)
             .map_err(|error| MatchError::Placement(error.to_string()))?;
         allocate_game_slots(&plan, &characteristics, concurrency, cores_per_engine)
             .map_err(|error| MatchError::Placement(error.to_string()))?
@@ -582,6 +582,7 @@ fn direct_engine_placement(allocation: CpuAllocation) -> EngineCpuPlacement {
             vec![CoreClass::Unknown]
         },
         numa_nodes: Vec::new(),
+        cache_domains: Vec::new(),
     }
 }
 

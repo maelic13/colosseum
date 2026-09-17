@@ -267,7 +267,8 @@ struct TournamentRunCommand {
     cores_per_engine: u32,
     #[arg(long, default_value = "off")]
     placement: String,
-    #[arg(long, default_value_t = 2)]
+    /// Whole physical cores left free for the harness and the operating system.
+    #[arg(long, default_value_t = colosseum_engine::DEFAULT_AUTO_HEADROOM_PHYSICAL_CORES)]
     headroom_cores: usize,
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     memory_budget_mb: Option<u64>,
@@ -396,7 +397,8 @@ struct MatchConditions {
     #[arg(long, default_value = "off")]
     placement: String,
     /// Whole physical cores left free when placement is auto.
-    #[arg(long, default_value_t = 2)]
+    /// Whole physical cores left free for the harness and the operating system.
+    #[arg(long, default_value_t = colosseum_engine::DEFAULT_AUTO_HEADROOM_PHYSICAL_CORES)]
     headroom_cores: usize,
     /// Trusted hard budget for the two engines' configured Hash memory.
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
@@ -664,7 +666,8 @@ struct SpsaConditions {
     cores_per_engine: u32,
     #[arg(long, default_value = "off")]
     placement: String,
-    #[arg(long, default_value_t = 2)]
+    /// Whole physical cores left free for the harness and the operating system.
+    #[arg(long, default_value_t = colosseum_engine::DEFAULT_AUTO_HEADROOM_PHYSICAL_CORES)]
     headroom_cores: usize,
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     memory_budget_mb: Option<u64>,
@@ -3976,6 +3979,7 @@ async fn run_nps_scaling(
     let placement = match plan_cpu_placement(
         &topology,
         &allowed,
+        &characteristics,
         &CpuPlacementPolicy::Auto {
             headroom_physical_cores: 0,
         },

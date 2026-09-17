@@ -2,8 +2,9 @@
 
 Run `colosseum-cli capabilities` to inspect this machine without launching an
 engine or creating a run directory. Add `--json` for one stable machine-readable
-document containing the topology, current-process restrictions, core/NUMA
-metadata, affinity mechanism, limitations and unavailable reasons. Because this
+document containing the topology, current-process restrictions, core class,
+NUMA and last-level cache metadata, affinity mechanism, limitations and
+unavailable reasons. Because this
 is a read-only probe, `--dry-run` is rejected as meaningless.
 
 Colosseum obtains physical-core and simultaneous-multithreading relationships
@@ -24,15 +25,22 @@ inconsistent sibling reports.
 Colosseum also records placement-quality metadata without estimating it from
 clock frequency or CPU numbering:
 
-| Platform | Core-class source | NUMA source |
-|---|---|---|
-| Windows | CPU Set `EfficiencyClass` | CPU Set `NumaNodeIndex`, qualified by processor group |
-| Linux | `cpu_capacity` when the kernel exports it; otherwise unknown | Per-CPU `nodeN` sysfs membership |
-| macOS | Unavailable without a logical sibling map | Unavailable without a logical sibling map |
+| Platform | Core-class source | NUMA source | Last-level cache source |
+|---|---|---|---|
+| Windows | CPU Set `EfficiencyClass` | CPU Set `NumaNodeIndex`, qualified by processor group | `GetLogicalProcessorInformationEx(RelationCache)`, highest unified or data level |
+| Linux | `cpu_capacity` when the kernel exports it; otherwise unknown | Per-CPU `nodeN` sysfs membership | `cpu*/cache/index*/shared_cpu_list` at the highest unified or data level, typically `index3` |
+| macOS | Unavailable without a logical sibling map | Unavailable without a logical sibling map | Unavailable without a logical sibling map |
 
-An unknown class is kept as unknown. This avoids silently treating unlike
-cores as equivalent when the operating system supplies no trustworthy class
-signal.
+An unknown class is kept as unknown, and a core the operating system reported
+no cache for keeps no cache domain. This avoids silently treating unlike cores
+as equivalent when the operating system supplies no trustworthy signal.
+
+Cache domains are the sharing sets at a core's last reported cache level,
+numbered in ascending order of their lowest member CPU so the identity is
+stable between runs. On a multi-die part this is the chiplet boundary: two
+cores in different domains do not share a last-level cache, and a game slot
+split across that boundary is not measuring the same thing as one kept inside
+it.
 
 Colosseum separately detects the set available to the current process:
 
@@ -50,9 +58,32 @@ The placement-policy resolver has three modes:
 
 | Mode | Selection |
 |---|---|
-| `auto` | Physical cores from the allowed set, leaving two physical cores free by default; the headroom is configurable |
+| `auto` | Physical cores from the allowed set, highest-performance class only where classes differ, leaving one whole physical core free by default; the headroom is configurable |
 | `off` | No CPU selection or affinity request |
 | explicit CPU list | Exactly the named group-qualified logical CPU identities |
+
+The default headroom is one whole physical core with all of its SMT siblings.
+That is room for the harness and the operating system; a second free core costs
+a game slot for no measured benefit.
+
+Placement knows nothing about any particular processor. It reads core class,
+NUMA node and last-level cache domain from the operating system and decides
+from those alone. On a host whose classes differ, `auto` selects the
+highest-performance class only, because mixed classes make game slots unequal.
+
+Where the operating system's own evidence is too thin to decide, `auto`
+refuses, names the detected topology and asks for an explicit CPU list rather
+than guessing:
+
+- the host reports mixed core classes and at least one of them is unknown;
+- the host reports a cache domain for some cores and none for others;
+- the host reports no cache topology at all for a part it also reports as
+  spanning more than one NUMA node.
+
+A host that reports neither a cache domain nor more than one node says nothing
+that makes it multi-domain, so `auto` proceeds and both facts stay visible as
+unreported in the run record. An explicit CPU list is always accepted; it is
+your statement about the machine rather than the tool's inference.
 
 `auto` counts cores only after applying the allowed set and keeps every allowed
 SMT sibling belonging to a selected core. Explicit lists are canonicalized and
@@ -69,13 +100,14 @@ allocation is independent of the engine's UCI worker-thread option: changing
 `Threads` never changes `cores-per-engine`, or vice versa. A request that cannot
 fit `game-slots × 2 × cores-per-engine` physical cores is rejected.
 
-Allocation first looks for enough cores of one class and NUMA node for both
-engines in a slot. If that is impossible, it keeps each engine within one node
-and prefers matching classes; only then does it fall back to the remaining
-cores. Every engine allocation records its class and node sets, together with
-explicit flags for class mismatch, node mismatch, or an engine spanning more
-than one class or node. The run record can therefore expose unavoidable
-asymmetry instead of hiding it.
+Allocation first looks for enough cores of one class, NUMA node and cache
+domain for both engines in a slot, so a slot stays inside one domain and one
+node whenever the pool allows it. If that is impossible, it keeps each engine
+within one group and prefers matching classes; only then does it fall back to
+the remaining cores. Every engine allocation records its class, node and cache
+domain sets, together with explicit flags for class, node or cache-domain
+mismatch and for an engine spanning more than one of any of them. The run
+record can therefore expose unavoidable asymmetry instead of hiding it.
 
 The OS adapter has an explicit capability contract:
 

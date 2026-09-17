@@ -3,8 +3,8 @@ use std::process::{Child, Command, Stdio};
 
 use colosseum_application::CpuAllocation;
 use colosseum_engine::{
-    AffinitySupportLevel, AllowedCpuSet, CharacteristicsSource, CoreClass, CpuCharacteristics,
-    CpuPlacementPolicy, CpuTopology, LogicalCpuId, NumaNodeId, PhysicalCore,
+    AffinitySupportLevel, AllowedCpuSet, CacheDomainId, CharacteristicsSource, CoreClass,
+    CpuCharacteristics, CpuPlacementPolicy, CpuTopology, LogicalCpuId, NumaNodeId, PhysicalCore,
     PhysicalCoreCharacteristics, PlacementAsymmetry, SiblingMapping, TopologySource,
     affinity_capability, allocate_game_slots, apply_process_affinity, detect_allowed_cpu_set,
     detect_cpu_topology, plan_cpu_placement, process_affinity_groups,
@@ -20,6 +20,8 @@ struct RecordedFixture {
     allowed: Vec<[u32; 2]>,
     game_slots: usize,
     cores_per_engine: usize,
+    /// The logical CPUs `auto` selects before any slot is carved out of them.
+    expected_pool: Vec<[u32; 2]>,
     expected: Vec<ExpectedSlot>,
 }
 
@@ -28,6 +30,7 @@ struct RecordedCore {
     cpus: Vec<[u32; 2]>,
     core_class: CoreClass,
     numa_node: Option<NumaNodeId>,
+    last_level_cache: Option<CacheDomainId>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,6 +55,7 @@ fn recorded_topology_corpus_selects_exact_expected_cpu_lists() {
         BTreeSet::from([
             "dual-socket",
             "hybrid-performance-efficiency",
+            "dual-cache-domain",
             "no-smt",
             "processor-groups",
             "restricted-cpuset",
@@ -96,17 +100,25 @@ fn recorded_topology_corpus_selects_exact_expected_cpu_lists() {
                     logical_cpus: ids(&core.cpus),
                     core_class: core.core_class,
                     numa_node: core.numa_node,
+                    last_level_cache: core.last_level_cache,
                 })
                 .collect(),
         };
         let plan = plan_cpu_placement(
             &topology,
             &allowed,
+            &characteristics,
             &CpuPlacementPolicy::Auto {
                 headroom_physical_cores: 0,
             },
         )
         .unwrap_or_else(|error| panic!("{} planning failed: {error}", fixture.name));
+        assert_eq!(
+            plan.logical_cpus(),
+            Some(ids(&fixture.expected_pool)),
+            "{} selected an unexpected placement pool",
+            fixture.name
+        );
         let actual = allocate_game_slots(
             &plan,
             &characteristics,

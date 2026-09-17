@@ -641,6 +641,32 @@ right" is not a criterion.
 - macOS has no supported hard-affinity API: report the capability as advisory or
   unavailable, record which, and do not prohibit clock matches.
 
+**Implementation evidence (Phase 10.3):** the default `auto` headroom is one
+whole physical core with all of its SMT siblings. Last-level cache domains are
+read from `GetLogicalProcessorInformationEx(RelationCache)` on Windows and from
+`cpu*/cache/index*/{type,level,shared_cpu_list}` on Linux, taking the highest
+unified or data level a core reports; domains are the distinct sharing sets at
+that level, indexed by their lowest member so the identity is stable between
+runs. A core the OS reported no cache for keeps no domain, and nothing is
+inferred for it from a neighbour. `auto` selects only the highest-performance
+class when classes differ, and slot allocation groups by class, node and cache
+domain so a slot stays inside one domain and one node whenever the pool allows
+it; class, node and cache-domain mismatches and spans are recorded per slot.
+`auto` refuses, naming the detected topology and asking for an explicit CPU
+list, when classes are mixed and one is unknown, when cache evidence exists for
+only some cores, or when a part reporting no cache topology also reports more
+than one NUMA node. A host reporting neither cache nor multiple nodes offers no
+evidence of being multi-domain, so placement proceeds and both facts stay
+visible as unreported. `capabilities` reports class, NUMA and cache domains and
+its schema version is 2. Recorded fixtures assert both the chosen pool and the
+slot allocation for a hybrid performance/efficiency host, a single-socket
+dual-cache-domain host, a homogeneous SMT host, a no-SMT host, a restricted
+cpuset, processor groups and a dual socket. macOS still has no sibling map, so
+`auto` and explicit placement remain unresolvable there while `off` is
+unaffected. The run record schema version is 3 because every engine placement
+in the record gained its cache domain; later Phase 10 steps do not re-bump an
+unpublished version.
+
 **Success criteria**
 
 - Unit tests over recorded topology fixtures (SMT 16c/32t, performance/efficiency

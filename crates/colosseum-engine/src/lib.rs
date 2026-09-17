@@ -38,8 +38,8 @@ pub use affinity::{
 };
 pub use allowed_cpus::{AllowedCpuError, AllowedCpuSet, AllowedCpuSource, detect_allowed_cpu_set};
 pub use characteristics::{
-    CharacteristicsError, CharacteristicsSource, CoreClass, CpuCharacteristics, NumaNodeId,
-    PhysicalCoreCharacteristics, detect_cpu_characteristics,
+    CacheDomainId, CharacteristicsError, CharacteristicsSource, CoreClass, CpuCharacteristics,
+    NumaNodeId, PhysicalCoreCharacteristics, detect_cpu_characteristics,
 };
 #[cfg(feature = "runner")]
 pub use colosseum_uci::Score;
