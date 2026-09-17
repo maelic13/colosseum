@@ -2075,6 +2075,8 @@ impl LiveData {
                 version: r.version.clone(),
                 elo: r.elo,
                 elo_delta: r.elo_delta,
+                // The GUI has no fixed field; every rating here is estimated.
+                fixed: false,
                 points: r.points,
                 games: r.games,
                 wins: r.wins,
@@ -2931,6 +2933,7 @@ fn export_rows(res: &TournamentResults) -> Vec<colosseum_core::ExportRow> {
             version: r.version,
             elo: r.elo,
             elo_delta: r.elo_delta,
+            fixed: false,
             points: r.points,
             games: r.games,
             wins: r.wins,

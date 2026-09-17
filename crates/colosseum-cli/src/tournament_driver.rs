@@ -4,7 +4,8 @@ use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
 
 use colosseum_application::{
-    RateTournament, TournamentCompletedGame, TournamentPlan, TournamentResults,
+    RateTournament, TournamentCompletedGame, TournamentFixedRating, TournamentPlan,
+    TournamentResults,
 };
 use colosseum_core::{AdjudicationConfig, GameResult, ParticipantId, Termination};
 use colosseum_engine::{ClockAccountingReport, GameFault};
@@ -91,6 +92,8 @@ pub trait TournamentObserver: Send + Sync {
 pub struct TournamentRunRequest {
     pub plan: TournamentPlan,
     pub anchor: Option<ParticipantId>,
+    /// Participants pinned at supplied ratings; only the rest are estimated.
+    pub fixed_ratings: Vec<TournamentFixedRating>,
     pub time_control: ConfiguredTimeControl,
     pub adjudication: AdjudicationConfig,
     pub ponder: bool,
@@ -146,7 +149,12 @@ pub async fn run_tournament(
         .iter()
         .map(TournamentGame::evidence)
         .collect::<Vec<_>>();
-    RateTournament::execute(&request.plan, &evidence, request.anchor)
+    RateTournament::execute_with_fixed_field(
+        &request.plan,
+        &evidence,
+        request.anchor,
+        &request.fixed_ratings,
+    )
         .map_err(|error| TournamentRunError::InvalidCheckpoint(error.to_string()))?;
     let mut seen = BTreeSet::new();
     for game in &request.completed_games {
@@ -314,7 +322,12 @@ pub async fn run_tournament(
         .iter()
         .map(TournamentGame::evidence)
         .collect::<Vec<_>>();
-    let results = RateTournament::execute(&request.plan, &evidence, request.anchor)
+    let results = RateTournament::execute_with_fixed_field(
+        &request.plan,
+        &evidence,
+        request.anchor,
+        &request.fixed_ratings,
+    )
         .map_err(|error| TournamentRunError::Results(error.to_string()))?;
     Ok(TournamentReport {
         status,

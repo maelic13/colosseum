@@ -2055,6 +2055,9 @@ Options:
       --anchor <ANCHOR>
           One-based --engine index whose prior rating fixes the Elo scale
 
+      --fixed <INDEX:RATING>
+          Pin a participant at a supplied rating as one-based INDEX:RATING; repeat for every member of an established field
+
       --max-engine-faults <MAX_ENGINE_FAULTS>
           Invalidate only after more engine faults than this; omitted is non-strict
 

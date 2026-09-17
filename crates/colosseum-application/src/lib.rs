@@ -70,6 +70,6 @@ pub use suite::{
 };
 pub use tournament::{
     PlanTournament, RateTournament, TournamentCompletedGame, TournamentDesign,
-    TournamentParticipant, TournamentPlan, TournamentPlanError, TournamentResultError,
-    TournamentResults, TournamentScheduleGame, TournamentStanding,
+    TournamentFixedRating, TournamentParticipant, TournamentPlan, TournamentPlanError,
+    TournamentResultError, TournamentResults, TournamentScheduleGame, TournamentStanding,
 };

@@ -77,10 +77,30 @@ stems are used.
 
 Ratings are recomputed jointly from all scored games with the shared
 maximum-likelihood implementation. Each JSON/text row includes its asymptotic
-95% error half-width. `--anchor N` fixes the one-based participant at its
-initial `--rating` and estimates every other participant against that scale.
-Without an anchor, the participant priors center the otherwise relative rating
-scale.
+95% error half-width. Without a fixed participant, the participant priors
+center the otherwise relative rating scale.
+
+`--fixed N:RATING` pins the one-based participant at a rating you supply, and
+only the remaining participants are estimated — jointly, against the pinned
+field and each other. Repeat it once per member of an established pool:
+
+```text
+colosseum-cli tournament run   --engine ./newcomer --engine ./known-a --engine ./known-b   --fixed 2:2480 --fixed 3:2315 --games-per-pair 20
+```
+
+That is how a newcomer is placed in a pool whose ratings you already trust,
+without spending games re-measuring the pool. At least one participant must be
+left free, or the tournament would estimate nothing and is refused.
+
+A pinned participant reports no error bar: its rating is an input, not
+something this tournament measured, and an interval would suggest otherwise.
+Its standings row carries `fixed`, its CSV row says `yes` in the `Fixed`
+column and leaves `EloDelta` empty, its text row is marked `[fixed]`, and the
+supplied ratings are retained in the result and the run record as run inputs.
+
+`--anchor N` is the degenerate case and stays: it pins one participant at its
+own initial `--rating` instead of a separately supplied value. Naming the same
+participant through both is refused rather than resolved silently.
 
 Every run directory contains checksum-protected current/previous checkpoints,
 append-only `run.log`, `games.pgn`, `standings.csv`, `crosstable.csv`,

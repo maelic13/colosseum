@@ -49,6 +49,17 @@ pub struct TournamentCompletedGame {
     pub termination: Termination,
 }
 
+/// One participant pinned at a supplied rating for this tournament.
+///
+/// This is how a newcomer is placed in an established pool without spending
+/// games re-measuring the pool: the field is an input, and only the remaining
+/// participants are estimated against it and each other.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TournamentFixedRating {
+    pub participant: ParticipantId,
+    pub rating: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TournamentStanding {
     pub rank: usize,
@@ -56,8 +67,11 @@ pub struct TournamentStanding {
     pub name: String,
     pub initial_rating: f64,
     pub rating: f64,
+    /// `None` for a pinned participant: a supplied rating has no interval,
+    /// because this tournament did not estimate it.
     pub error_95: Option<f64>,
-    pub anchored: bool,
+    /// The rating is a supplied input rather than an estimate.
+    pub fixed: bool,
     pub points: f64,
     pub games: u32,
     pub wins: u32,
@@ -71,6 +85,9 @@ pub struct TournamentResults {
     pub games_attempted: usize,
     pub games_scored: usize,
     pub anchor: Option<ParticipantId>,
+    /// Every pinned rating this tournament was given, including the degenerate
+    /// single `anchor`, retained as a run input.
+    pub fixed_ratings: Vec<TournamentFixedRating>,
     pub standings: Vec<TournamentStanding>,
     pub standings_csv: String,
     pub crosstable_csv: String,
@@ -96,6 +113,16 @@ pub enum TournamentPlanError {
 pub enum TournamentResultError {
     #[error("rating anchor is not a tournament participant")]
     UnknownAnchor,
+    #[error("fixed rating names a participant that is not in this tournament")]
+    UnknownFixedParticipant,
+    #[error("participant is given a fixed rating more than once")]
+    DuplicateFixedParticipant,
+    #[error("fixed ratings must be finite")]
+    InvalidFixedRating,
+    #[error(
+        "every participant is pinned, so the tournament would estimate nothing; leave at least one free"
+    )]
+    EverythingFixed,
     #[error("completed game {0} is not in the tournament schedule")]
     UnknownGame(u32),
     #[error("completed game {0} has different participants from the schedule")]
@@ -167,6 +194,21 @@ impl RateTournament {
         games: &[TournamentCompletedGame],
         anchor: Option<ParticipantId>,
     ) -> Result<TournamentResults, TournamentResultError> {
+        Self::execute_with_fixed_field(plan, games, anchor, &[])
+    }
+
+    /// Rate a tournament against a fixed field.
+    ///
+    /// Pinned participants keep their supplied rating exactly; everyone else is
+    /// estimated jointly against them and each other through the same anchored
+    /// maximum-likelihood rating the single-anchor case uses. A lone `anchor`
+    /// is that case: it is pinned at its own prior.
+    pub fn execute_with_fixed_field(
+        plan: &TournamentPlan,
+        games: &[TournamentCompletedGame],
+        anchor: Option<ParticipantId>,
+        fixed: &[TournamentFixedRating],
+    ) -> Result<TournamentResults, TournamentResultError> {
         if anchor.is_some_and(|id| {
             !plan
                 .participants
@@ -174,6 +216,38 @@ impl RateTournament {
                 .any(|participant| participant.participant.id == id)
         }) {
             return Err(TournamentResultError::UnknownAnchor);
+        }
+        let mut pinned = HashMap::new();
+        for entry in fixed {
+            let Some(participant) = plan
+                .participants
+                .iter()
+                .find(|participant| participant.participant.id == entry.participant)
+            else {
+                return Err(TournamentResultError::UnknownFixedParticipant);
+            };
+            let _ = participant;
+            if !entry.rating.is_finite() {
+                return Err(TournamentResultError::InvalidFixedRating);
+            }
+            if pinned.insert(entry.participant, entry.rating).is_some() {
+                return Err(TournamentResultError::DuplicateFixedParticipant);
+            }
+        }
+        if let Some(anchor) = anchor {
+            let prior = plan
+                .participants
+                .iter()
+                .find(|participant| participant.participant.id == anchor)
+                .map_or(0.0, |participant| participant.initial_rating);
+            if pinned.insert(anchor, prior).is_some() {
+                // Naming one participant twice is ambiguous about which rating
+                // is meant, and a silent winner is exactly the wrong answer.
+                return Err(TournamentResultError::DuplicateFixedParticipant);
+            }
+        }
+        if !pinned.is_empty() && pinned.len() >= plan.participants.len() {
+            return Err(TournamentResultError::EverythingFixed);
         }
         let schedule = plan
             .schedule
@@ -213,25 +287,31 @@ impl RateTournament {
                 black_move_ms: None,
             });
         }
+        // A pinned rating replaces the participant's prior, so the fixed field
+        // is exactly the scale the free participants are measured against.
         let priors = plan
             .participants
             .iter()
             .map(|participant| {
                 (
                     engine_id(participant.participant.id),
-                    participant.initial_rating,
+                    pinned
+                        .get(&participant.participant.id)
+                        .copied()
+                        .unwrap_or(participant.initial_rating),
                 )
             })
             .collect::<Vec<_>>();
-        let ratings = if let Some(anchor) = anchor {
-            let updatable = ids
+        let ratings = if pinned.is_empty() {
+            ml_ratings(&aggregate, &priors)
+        } else {
+            let updatable = plan
+                .participants
                 .iter()
-                .copied()
-                .filter(|id| *id != engine_id(anchor))
+                .filter(|participant| !pinned.contains_key(&participant.participant.id))
+                .map(|participant| engine_id(participant.participant.id))
                 .collect::<Vec<_>>();
             ml_ratings_anchored(&aggregate, &priors, &updatable)
-        } else {
-            ml_ratings(&aggregate, &priors)
         };
         let by_id = plan
             .participants
@@ -253,14 +333,17 @@ impl RateTournament {
                 let participant_id = ParticipantId::from_uuid(id.as_uuid());
                 let participant = by_id[&participant_id];
                 let standing = aggregate.standing(*id);
+                let is_fixed = pinned.contains_key(&participant_id);
                 TournamentStanding {
                     rank: index + 1,
                     participant: participant_id,
                     name: participant_name(&participant.participant.launch),
                     initial_rating: participant.initial_rating,
                     rating: ratings[id],
-                    error_95: rating_error(&aggregate, &ratings, *id),
-                    anchored: anchor == Some(participant_id),
+                    error_95: (!is_fixed)
+                        .then(|| rating_error(&aggregate, &ratings, *id))
+                        .flatten(),
+                    fixed: is_fixed,
                     points: standing.points(),
                     games: standing.games(),
                     wins: standing.wins,
@@ -276,7 +359,8 @@ impl RateTournament {
                 name: row.name.clone(),
                 version: String::new(),
                 elo: row.rating,
-                elo_delta: (!row.anchored).then_some(row.rating - row.initial_rating),
+                elo_delta: (!row.fixed).then_some(row.rating - row.initial_rating),
+                fixed: row.fixed,
                 points: row.points,
                 games: row.games,
                 wins: row.wins,
@@ -297,6 +381,19 @@ impl RateTournament {
             games_attempted: games.len(),
             games_scored: games.iter().filter(|game| game.scorable).count(),
             anchor,
+            // Participant order, so the recorded inputs are stable.
+            fixed_ratings: plan
+                .participants
+                .iter()
+                .filter_map(|participant| {
+                    pinned
+                        .get(&participant.participant.id)
+                        .map(|rating| TournamentFixedRating {
+                            participant: participant.participant.id,
+                            rating: *rating,
+                        })
+                })
+                .collect(),
             standings,
             standings_csv: standings_csv(&export_rows),
             crosstable_csv: crosstable_csv(&cross_order, &aggregate),
@@ -516,7 +613,11 @@ mod tests {
             .find(|row| row.participant == anchor)
             .unwrap();
         assert_eq!(anchored.rating, 1_500.0);
-        assert!(anchored.anchored);
+        assert!(anchored.fixed);
+        assert!(
+            anchored.error_95.is_none(),
+            "a pinned rating is an input and carries no interval"
+        );
 
         let mut invalid = game;
         invalid.white = ParticipantId::from_u128(99);

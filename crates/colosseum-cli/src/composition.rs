@@ -1,6 +1,6 @@
 //! Independent headless composition root for Colosseum CLI.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -31,7 +31,8 @@ use colosseum_application::{
     SpsaEstimator, SpsaEstimatorPolicy, SpsaGateHashStatus, SpsaPlanReport, SpsaRunSettings,
     SpsaStatusReport, SpsaTimingInput,
     SpsaTuneAudit, SpsaTuneResult, SpsaTuneWarning, SpsaTuningState, TournamentDesign,
-    TournamentParticipant, TournamentPlan, UciOptionSchema, UciOptionValue, classify_calibration,
+    TournamentFixedRating, TournamentParticipant, TournamentPlan, UciOptionSchema, UciOptionValue,
+    classify_calibration,
     diagnose_spsa, plan_fixed, plan_sprt_length, plan_spsa, scaling_hash_mb, summarize_nps_scaling,
 };
 use colosseum_core::{
@@ -303,6 +304,10 @@ struct TournamentRunCommand {
     /// One-based --engine index whose prior rating fixes the Elo scale.
     #[arg(long)]
     anchor: Option<usize>,
+    /// Pin a participant at a supplied rating as one-based INDEX:RATING;
+    /// repeat for every member of an established field.
+    #[arg(long = "fixed", value_name = "INDEX:RATING")]
+    fixed_ratings: Vec<String>,
     /// Invalidate only after more engine faults than this; omitted is non-strict.
     #[arg(long)]
     max_engine_faults: Option<u32>,
@@ -2790,6 +2795,14 @@ async fn run_tournament_command(
         }
         None => None,
     };
+    let fixed_ratings =
+        match parse_fixed_ratings(&command.fixed_ratings, plan.participants.len()) {
+            Ok(fixed) => fixed,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        };
     let time_control = match resolve_time_control(
         "tournament",
         command.movetime_ms,
@@ -2915,6 +2928,7 @@ async fn run_tournament_command(
             "command": "tournament",
             "plan": &plan,
             "anchor": anchor,
+            "fixed_ratings": &fixed_ratings,
             "time_control": time_control,
             "adjudication": adjudication,
             "ponder": command.ponder,
@@ -3002,6 +3016,7 @@ async fn run_tournament_command(
         "format": plan.design.format,
         "games_scheduled": plan.schedule.len(),
         "anchor": anchor,
+        "fixed_ratings": &fixed_ratings,
         "ponder": command.ponder,
         "fault_policy": {
             "mode": if command.max_engine_faults.is_some() { "strict-limit" } else { "exploratory-non-strict" },
@@ -3015,6 +3030,7 @@ async fn run_tournament_command(
     let request = tournament_driver::TournamentRunRequest {
         plan,
         anchor,
+        fixed_ratings,
         cancellation: cancellation.clone(),
         time_control,
         adjudication,
@@ -3073,6 +3089,54 @@ async fn run_tournament_command(
             ExitCode::from(3)
         }
     }
+}
+
+/// Parse repeated `--fixed INDEX:RATING` values against the `--engine` order.
+///
+/// The index is one-based to match `--engine` and every other indexed option.
+/// A malformed, duplicated or out-of-range entry is refused here rather than
+/// silently dropped: a pinned rating is part of what the result means.
+fn parse_fixed_ratings(
+    values: &[String],
+    participants: usize,
+) -> Result<Vec<TournamentFixedRating>, String> {
+    let mut seen = BTreeSet::new();
+    let mut fixed = Vec::with_capacity(values.len());
+    for value in values {
+        let Some((index, rating)) = value.split_once(':') else {
+            return Err(format!("--fixed {value:?} must use INDEX:RATING"));
+        };
+        let index = index
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| format!("--fixed {value:?} has an invalid engine index"))?;
+        if !(1..=participants).contains(&index) {
+            return Err(format!(
+                "--fixed {value:?} is outside the --engine list of {participants}"
+            ));
+        }
+        if !seen.insert(index) {
+            return Err(format!("--fixed names engine {index} more than once"));
+        }
+        let rating = rating
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| format!("--fixed {value:?} has an invalid rating"))?;
+        if !rating.is_finite() {
+            return Err(format!("--fixed {value:?} has a non-finite rating"));
+        }
+        fixed.push(TournamentFixedRating {
+            participant: ParticipantId::from_u128(index as u128),
+            rating,
+        });
+    }
+    if !fixed.is_empty() && fixed.len() >= participants {
+        return Err(
+            "--fixed pins every participant, so nothing would be estimated; leave at least one free"
+                .into(),
+        );
+    }
+    Ok(fixed)
 }
 
 fn tournament_configuration_error(error: &str) -> ExitCode {
@@ -3136,9 +3200,9 @@ fn print_tournament(report: &tournament_driver::TournamentReport) {
         let error = row
             .error_95
             .map_or_else(|| "unavailable".into(), |value| format!("±{value:.1}"));
-        let anchor = if row.anchored { " [anchor]" } else { "" };
+        let fixed = if row.fixed { " [fixed]" } else { "" };
         println!(
-            "{}. {}: {:.1} {error}{anchor}; {:.1}/{} ({}-{}-{})",
+            "{}. {}: {:.1} {error}{fixed}; {:.1}/{} ({}-{}-{})",
             row.rank, row.name, row.rating, row.points, row.games, row.wins, row.draws, row.losses
         );
     }

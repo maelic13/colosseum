@@ -1222,6 +1222,20 @@ handling is explicit and a strict limit remains selectable.
 (ratings ≤0.01 Elo); kill/resume with deterministic stubs produces identical
 standings for both formats.
 
+**Implementation evidence (Phase 10.7):** `tournament run --fixed INDEX:RATING`
+is repeatable and pins any number of participants at supplied ratings; a pinned
+rating replaces that participant's prior, so the fixed field *is* the scale the
+remaining participants are estimated against through the same anchored
+maximum-likelihood rating, not a second implementation. A pinned participant
+reports no error bar, because its rating is an input rather than something the
+tournament measured. `--anchor` remains the degenerate case, pinned at its own
+prior, and naming one participant through both is refused. A malformed,
+duplicated or out-of-range entry, and a field that pins every participant, are
+all refused at configuration time rather than silently dropped. The supplied
+ratings are retained in the result and the run record as run inputs; JSON rows
+carry `fixed`, the shared standings CSV gained a `Fixed` column beside the
+already-empty `EloDelta`, and text rows are marked `[fixed]`.
+
 ### 5.8 Run record
 
 Generated JSON per run: both engines' canonical path, SHA-256, UCI identity,
