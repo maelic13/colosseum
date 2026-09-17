@@ -14,9 +14,10 @@ use thiserror::Error;
 use crate::RunDirectory;
 
 /// Bumped when the record's shape changes, including the command-specific
-/// `workflow` payload. Version 3 adds the last-level cache domain to every
-/// engine CPU placement.
-pub const RUN_RECORD_SCHEMA_VERSION: u64 = 3;
+/// `workflow` payload. Version 3 added the last-level cache domain to every
+/// engine CPU placement; version 4 replaced the execution plan's
+/// `cores_per_engine` count with the slot allocation mode that produced it.
+pub const RUN_RECORD_SCHEMA_VERSION: u64 = 4;
 static RECORD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

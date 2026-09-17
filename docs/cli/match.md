@@ -142,9 +142,16 @@ not offer selective retry or discard of already-started statistical games.
 `--concurrency N` runs that many game slots while keeping final game records in
 schedule order. CPU placement defaults to `--placement off`, which makes no
 hard request and works on platforms without affinity. Use `--placement auto`
-with `--cores-per-engine N` and optional `--headroom-cores N` to allocate
-disjoint whole physical cores through the detected topology, or provide an
-explicit logical CPU pool such as `--placement 0-7`. `auto` leaves one whole
+with optional `--headroom-cores N` to allocate whole physical cores through the
+detected topology, or provide an explicit logical CPU pool such as
+`--placement 0-7`.
+
+Both engines of a game share one core set by default, `--cores-per-game N`
+(default 1), because without pondering only one of them searches at a time and
+the other is blocked reading a pipe. A 16-core host therefore runs 15
+one-thread games at once rather than 7. `--cores-per-engine N` gives each
+engine its own cores instead; the two flags are mutually exclusive, and the
+disjoint one is required with `--ponder`, whose engines do search at once. `auto` leaves one whole
 physical core free by default, selects only the highest-performance core class
 on a host whose classes differ, and keeps each game slot inside one last-level
 cache domain and one NUMA node when the pool allows it; see
@@ -198,7 +205,7 @@ colosseum-cli book slice ./master-book.epd ./shard-01.epd \
 colosseum-cli match ./engine ./engine \
   --games 40000 --a-nodes 20000 --b-nodes 20000 \
   --book ./shard-01.epd --book-start 0 \
-  --concurrency 12 --placement auto --cores-per-engine 1 \
+  --concurrency 12 --placement auto \
   --seed 4242 --dir ./corpus/shard-01
 ```
 

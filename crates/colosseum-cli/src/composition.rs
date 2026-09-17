@@ -46,9 +46,9 @@ use colosseum_core::{
     SpsaEndSpec, SpsaScheduleArtifact, TimeControl, fixed_n_achieved_resolution,
 };
 use colosseum_engine::{
-    CpuPlacementPlan, CpuPlacementPolicy, audit_opening_book, detect_allowed_cpu_set,
-    detect_cpu_characteristics, detect_cpu_topology, fen_after, load_openings_named,
-    plan_cpu_placement,
+    CpuPlacementPlan, CpuPlacementPolicy, SlotAllocation, audit_opening_book,
+    detect_allowed_cpu_set, detect_cpu_characteristics, detect_cpu_topology, fen_after,
+    load_openings_named, plan_cpu_placement,
 };
 use colosseum_uci::{AffinityUciSessionFactory, UciSessionFactory};
 use serde::{Deserialize, Serialize};

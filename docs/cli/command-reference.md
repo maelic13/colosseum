@@ -198,7 +198,7 @@ Options:
           [default: 2000]
 
       --ponder
-          Let engines think on the opponent's clock through the UCI ponder protocol
+          Let engines think on the opponent's clock through the UCI ponder protocol. Both engines then search at once, so each needs its own cores
 
       --draw-adjudication
           Adjudicate a draw once both engines agree; off unless requested
@@ -242,10 +242,11 @@ Options:
 
           [default: 1]
 
+      --cores-per-game <CORES_PER_GAME>
+          Physical cores per game slot, shared by both of its engines. This is the default allocation, because without pondering only one engine of a game searches at a time
+
       --cores-per-engine <CORES_PER_ENGINE>
           Physical cores allocated separately to each engine in each game slot
-
-          [default: 1]
 
       --placement <PLACEMENT>
           CPU placement: off, auto, or an explicit logical CPU list
@@ -443,7 +444,7 @@ Options:
           [default: 2000]
 
       --ponder
-          Let engines think on the opponent's clock through the UCI ponder protocol
+          Let engines think on the opponent's clock through the UCI ponder protocol. Both engines then search at once, so each needs its own cores
 
       --draw-adjudication
           Adjudicate a draw once both engines agree; off unless requested
@@ -487,10 +488,11 @@ Options:
 
           [default: 1]
 
+      --cores-per-game <CORES_PER_GAME>
+          Physical cores per game slot, shared by both of its engines. This is the default allocation, because without pondering only one engine of a game searches at a time
+
       --cores-per-engine <CORES_PER_ENGINE>
           Physical cores allocated separately to each engine in each game slot
-
-          [default: 1]
 
       --placement <PLACEMENT>
           CPU placement: off, auto, or an explicit logical CPU list
@@ -636,7 +638,7 @@ Options:
           [default: 2000]
 
       --ponder
-          Let both perturbation arms think on the opponent's clock
+          Let both perturbation arms think on the opponent's clock. Both then search at once, so each needs its own cores
 
       --draw-adjudication
           Adjudicate a draw once both engines agree; off unless requested
@@ -670,8 +672,11 @@ Options:
 
           [default: 1]
 
+      --cores-per-game <CORES_PER_GAME>
+          Physical cores per game slot, shared by both of its engines. This is the default allocation, because without pondering only one engine of a game searches at a time
+
       --cores-per-engine <CORES_PER_ENGINE>
-          [default: 1]
+          Physical cores allocated separately to each engine in each game slot
 
       --placement <PLACEMENT>
           [default: off]
@@ -1070,7 +1075,7 @@ Options:
           [default: 2000]
 
       --ponder
-          Let engines think on the opponent's clock through the UCI ponder protocol
+          Let engines think on the opponent's clock through the UCI ponder protocol. Both engines then search at once, so each needs its own cores
 
       --draw-adjudication
           Adjudicate a draw once both engines agree; off unless requested
@@ -1114,10 +1119,11 @@ Options:
 
           [default: 1]
 
+      --cores-per-game <CORES_PER_GAME>
+          Physical cores per game slot, shared by both of its engines. This is the default allocation, because without pondering only one engine of a game searches at a time
+
       --cores-per-engine <CORES_PER_ENGINE>
           Physical cores allocated separately to each engine in each game slot
-
-          [default: 1]
 
       --placement <PLACEMENT>
           CPU placement: off, auto, or an explicit logical CPU list
@@ -2000,7 +2006,7 @@ Options:
           [default: 2000]
 
       --ponder
-          Let engines think on the opponent's clock through the UCI ponder protocol
+          Let engines think on the opponent's clock through the UCI ponder protocol. Both engines then search at once, so each needs its own cores
 
       --draw-adjudication
           Adjudicate a draw once both engines agree; off unless requested
@@ -2034,8 +2040,11 @@ Options:
 
           [default: 1]
 
+      --cores-per-game <CORES_PER_GAME>
+          Physical cores per game slot, shared by both of its engines. This is the default allocation, because without pondering only one engine of a game searches at a time
+
       --cores-per-engine <CORES_PER_ENGINE>
-          [default: 1]
+          Physical cores allocated separately to each engine in each game slot
 
       --placement <PLACEMENT>
           [default: off]

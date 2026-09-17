@@ -1240,6 +1240,8 @@ fn ponder_is_explicit_recorded_and_limited_to_clock_controls() {
             "missing-a",
             "missing-b",
             "--ponder",
+            "--cores-per-engine",
+            "1",
             "--dry-run",
             "--json",
         ])
@@ -1261,6 +1263,8 @@ fn ponder_is_explicit_recorded_and_limited_to_clock_controls() {
             "--preset",
             "gainer",
             "--ponder",
+            "--cores-per-engine",
+            "1",
             "--dry-run",
             "--json",
         ])
@@ -1273,7 +1277,7 @@ fn ponder_is_explicit_recorded_and_limited_to_clock_controls() {
     let binary = env!("CARGO_BIN_EXE_colosseum-cli");
     let calibration = cli()
         .args(["calibrate", binary, binary, "--games", "2", "--ponder"])
-        .args(["--dry-run", "--json"])
+        .args(["--cores-per-engine", "1", "--dry-run", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -1293,6 +1297,8 @@ fn ponder_is_explicit_recorded_and_limited_to_clock_controls() {
             "--engine",
             "missing-b",
             "--ponder",
+            "--cores-per-engine",
+            "1",
             "--dry-run",
             "--json",
         ])
@@ -1314,6 +1320,8 @@ fn ponder_is_explicit_recorded_and_limited_to_clock_controls() {
             "--b-nodes",
             "100",
             "--ponder",
+            "--cores-per-engine",
+            "1",
             "--dry-run",
         ])
         .output()
@@ -1355,6 +1363,8 @@ fn fixed_match_drives_the_uci_ponder_protocol() {
             "--b-engine-arg=__uci-stub",
             "--b-engine-arg=--ponder-hints",
             "--ponder",
+            "--cores-per-engine",
+            "1",
             "--max-moves",
             "2",
             "--placement",

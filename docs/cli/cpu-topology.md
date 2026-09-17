@@ -93,16 +93,36 @@ sibling map; on macOS they therefore report that the selection cannot yet be
 resolved rather than guessing CPU identities. `off` remains available without
 a sibling map or allowed-set identity.
 
-The selected pool is divided into disjoint concurrent game slots. Each slot
-gets two engine allocations, and each engine receives the configured number of
-physical cores with every available SMT sibling belonging to those cores. This
-allocation is independent of the engine's UCI worker-thread option: changing
-`Threads` never changes `cores-per-engine`, or vice versa. A request that cannot
-fit `game-slots × 2 × cores-per-engine` physical cores is rejected.
+The selected pool is divided into disjoint concurrent game slots, and each
+slot's cores carry every available SMT sibling belonging to them. How a slot's
+cores are divided between its two engines is the allocation mode:
+
+| Mode | Flag | Cores a slot consumes |
+|---|---|---|
+| Shared (default) | `--cores-per-game N` (default 1) | `game-slots × cores-per-game` |
+| Disjoint | `--cores-per-engine N` | `game-slots × 2 × cores-per-engine` |
+
+**Sharing is the default because it is what the games actually need.** Without
+pondering, only one engine of a game searches at any moment; the other is
+blocked reading a pipe. Pinning the two engines to separate cores therefore
+leaves half the pool idle: a 16-core host with one core of headroom runs 15
+one-thread games at once when they share, and 7 when they do not.
+
+`--cores-per-engine N` selects the disjoint allocation, and the two flags are
+mutually exclusive. It is required with `--ponder`, and a shared request with
+`--ponder` is refused: a pondering engine searches on its opponent's time, so
+both engines of a game can run at once and cannot share a core.
+
+Either way the allocation is independent of the engine's UCI worker-thread
+option: changing `Threads` never changes `cores-per-game` or
+`cores-per-engine`, or vice versa. A request that does not fit the pool is
+rejected, and the refusal names the arithmetic it applied. The mode and every
+engine allocation are in the run record and in `--dry-run` output.
 
 Allocation first looks for enough cores of one class, NUMA node and cache
-domain for both engines in a slot, so a slot stays inside one domain and one
-node whenever the pool allows it. If that is impossible, it keeps each engine
+domain for the whole slot, so a slot stays inside one domain and one node
+whenever the pool allows it. A shared slot takes its cores from a single group
+for the same reason. If that is impossible, the disjoint mode keeps each engine
 within one group and prefers matching classes; only then does it fall back to
 the remaining cores. Every engine allocation records its class, node and cache
 domain sets, together with explicit flags for class, node or cache-domain

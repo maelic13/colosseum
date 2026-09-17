@@ -355,7 +355,7 @@ pub(crate) fn prepare_calibration(
         &engine_a,
         &engine_b,
         conditions.concurrency as usize,
-        conditions.cores_per_engine as usize,
+        resolve_slot_allocation(conditions.cores_per_game, conditions.cores_per_engine),
         placement,
         conditions.memory_budget_mb,
     )

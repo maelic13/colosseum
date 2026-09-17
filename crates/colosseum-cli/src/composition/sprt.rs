@@ -338,7 +338,7 @@ pub(crate) async fn run_sprt(
         &engine_a,
         &engine_b,
         command.concurrency as usize,
-        command.cores_per_engine as usize,
+        resolve_slot_allocation(command.cores_per_game, command.cores_per_engine),
         placement_policy,
         command.memory_budget_mb,
     ) {

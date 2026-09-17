@@ -5,9 +5,9 @@ use colosseum_application::CpuAllocation;
 use colosseum_engine::{
     AffinitySupportLevel, AllowedCpuSet, CacheDomainId, CharacteristicsSource, CoreClass,
     CpuCharacteristics, CpuPlacementPolicy, CpuTopology, LogicalCpuId, NumaNodeId, PhysicalCore,
-    PhysicalCoreCharacteristics, PlacementAsymmetry, SiblingMapping, TopologySource,
-    affinity_capability, allocate_game_slots, apply_process_affinity, detect_allowed_cpu_set,
-    detect_cpu_topology, plan_cpu_placement, process_affinity_groups,
+    PhysicalCoreCharacteristics, PlacementAsymmetry, SiblingMapping, SlotAllocation,
+    TopologySource, affinity_capability, allocate_game_slots, apply_process_affinity,
+    detect_allowed_cpu_set, detect_cpu_topology, plan_cpu_placement, process_affinity_groups,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -19,10 +19,29 @@ struct RecordedFixture {
     cores: Vec<RecordedCore>,
     allowed: Vec<[u32; 2]>,
     game_slots: usize,
-    cores_per_engine: usize,
+    /// Cores each engine gets separately; absent selects the shared mode.
+    #[serde(default)]
+    cores_per_engine: Option<usize>,
+    /// Cores the two engines of a game share; absent means one.
+    #[serde(default)]
+    cores_per_game: Option<usize>,
+    /// Whole physical cores `auto` leaves free.
+    #[serde(default)]
+    headroom_physical_cores: usize,
     /// The logical CPUs `auto` selects before any slot is carved out of them.
     expected_pool: Vec<[u32; 2]>,
     expected: Vec<ExpectedSlot>,
+}
+
+impl RecordedFixture {
+    fn allocation(&self) -> SlotAllocation {
+        match self.cores_per_engine {
+            Some(cores_per_engine) => SlotAllocation::PerEngine { cores_per_engine },
+            None => SlotAllocation::Shared {
+                cores_per_game: self.cores_per_game.unwrap_or(1),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +77,8 @@ fn recorded_topology_corpus_selects_exact_expected_cpu_lists() {
             "dual-cache-domain",
             "no-smt",
             "processor-groups",
+            "smt-16c-32t-shared-one-thread",
+            "smt-16c-32t-disjoint-one-thread",
             "restricted-cpuset",
             "smt-16c-32t",
         ])
@@ -109,7 +130,7 @@ fn recorded_topology_corpus_selects_exact_expected_cpu_lists() {
             &allowed,
             &characteristics,
             &CpuPlacementPolicy::Auto {
-                headroom_physical_cores: 0,
+                headroom_physical_cores: fixture.headroom_physical_cores,
             },
         )
         .unwrap_or_else(|error| panic!("{} planning failed: {error}", fixture.name));
@@ -123,7 +144,7 @@ fn recorded_topology_corpus_selects_exact_expected_cpu_lists() {
             &plan,
             &characteristics,
             fixture.game_slots,
-            fixture.cores_per_engine,
+            fixture.allocation(),
         )
         .unwrap_or_else(|error| panic!("{} allocation failed: {error}", fixture.name));
         assert_eq!(actual.len(), fixture.expected.len(), "{}", fixture.name);

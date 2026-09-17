@@ -56,8 +56,8 @@ pub use openings::{
 };
 pub use placement::{
     CpuPlacementError, CpuPlacementPlan, CpuPlacementPolicy, DEFAULT_AUTO_HEADROOM_PHYSICAL_CORES,
-    EngineCpuPlacement, GameSlotCpuAllocation, PlacementAsymmetry, allocate_game_slots,
-    plan_cpu_placement,
+    EngineCpuPlacement, GameSlotCpuAllocation, PlacementAsymmetry, SlotAllocation,
+    allocate_game_slots, plan_cpu_placement,
 };
 #[cfg(feature = "runner")]
 pub use runner::{

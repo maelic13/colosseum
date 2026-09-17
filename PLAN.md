@@ -645,6 +645,18 @@ right" is not a criterion.
   request with `--ponder` is refused. The chosen mode, the pool arithmetic
   (`game-slots × cores-per-game` or `game-slots × 2 × cores-per-engine`) and
   every allocation are in the run record and the dry-run output.
+
+  **Implementation evidence (Phase 10.9a):** `SlotAllocation` carries the mode
+  through the placement API, so a slot takes `cores_per_slot()` cores from one
+  class, node and cache-domain group and hands both engines the same set in
+  the shared mode. `--cores-per-game` and `--cores-per-engine` are mutually
+  exclusive at the parser, `--ponder` requires the disjoint one on `match`,
+  `sprt`, `calibrate`, `spsa` and `tournament run`, and a pool too small is
+  refused with the arithmetic it applied named in the message. Recorded
+  fixtures assert 15 shared and 7 disjoint one-thread slots from the same
+  16-core single-class SMT host at headroom 1. The run-record schema version
+  is 4 because the execution plan reports the mode in place of a per-engine
+  core count.
 - Placement knows nothing about any particular processor. It reads what the
   operating system reports: physical cores and SMT siblings, core class
   (Windows CPU Set efficiency class, Linux `cpu_capacity`), NUMA node and the

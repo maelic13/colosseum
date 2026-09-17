@@ -204,7 +204,7 @@ pub async fn run_tournament(
             .clone();
             let execution = MatchExecutionPlan {
                 concurrency: 1,
-                cores_per_engine: request.execution.cores_per_engine,
+                allocation: request.execution.allocation,
                 placement_policy: request.execution.placement_policy.clone(),
                 slots: vec![slot],
                 hash_memory: request.execution.hash_memory.clone(),

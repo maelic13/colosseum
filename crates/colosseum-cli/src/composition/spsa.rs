@@ -145,8 +145,9 @@ pub(crate) struct SpsaConditions {
     pub(crate) depth: Option<u32>,
     #[arg(long, default_value_t = match_runner::DEFAULT_MARGIN_MS)]
     pub(crate) margin_ms: u64,
-    /// Let both perturbation arms think on the opponent's clock.
-    #[arg(long)]
+    /// Let both perturbation arms think on the opponent's clock. Both then
+    /// search at once, so each needs its own cores.
+    #[arg(long, requires = "cores_per_engine")]
     pub(crate) ponder: bool,
 
     /// Adjudicate a draw once both engines agree; off unless requested.
@@ -175,8 +176,18 @@ pub(crate) struct SpsaConditions {
     /// Number of games allowed to run at once.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) concurrency: u32,
-    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
-    pub(crate) cores_per_engine: u32,
+    /// Physical cores per game slot, shared by both of its engines. This is
+    /// the default allocation, because without pondering only one engine of a
+    /// game searches at a time.
+    #[arg(
+        long,
+        value_parser = clap::value_parser!(u32).range(1..),
+        conflicts_with = "cores_per_engine"
+    )]
+    pub(crate) cores_per_game: Option<u32>,
+    /// Physical cores allocated separately to each engine in each game slot.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    pub(crate) cores_per_engine: Option<u32>,
     #[arg(long, default_value = "off")]
     pub(crate) placement: String,
     /// Whole physical cores left free for the harness and the operating system.
@@ -707,7 +718,7 @@ pub(crate) async fn run_spsa_command(
         &planning_engine,
         &planning_engine,
         conditions.concurrency as usize,
-        conditions.cores_per_engine as usize,
+        resolve_slot_allocation(conditions.cores_per_game, conditions.cores_per_engine),
         placement,
         conditions.memory_budget_mb,
     ) {

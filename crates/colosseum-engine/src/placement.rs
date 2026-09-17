@@ -122,6 +122,56 @@ pub struct GameSlotCpuAllocation {
     pub asymmetries: Vec<PlacementAsymmetry>,
 }
 
+/// How one game slot's cores are divided between its two engine processes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "kebab-case")]
+pub enum SlotAllocation {
+    /// Both engines of a game are pinned to the same cores.
+    ///
+    /// Without pondering only one engine of a game searches at any moment and
+    /// the other waits on a pipe, so a disjoint allocation would leave half
+    /// the pool idle. Sharing is therefore the default: a 16-core host runs 15
+    /// one-thread games at once rather than 7.
+    Shared { cores_per_game: usize },
+    /// Each engine of a game gets its own cores, disjoint from its opponent's
+    /// and from every other slot. Required whenever both engines can search at
+    /// the same time, which is what pondering makes possible.
+    PerEngine { cores_per_engine: usize },
+}
+
+impl SlotAllocation {
+    /// Physical cores one slot consumes.
+    #[must_use]
+    pub fn cores_per_slot(self) -> usize {
+        match self {
+            Self::Shared { cores_per_game } => cores_per_game,
+            Self::PerEngine { cores_per_engine } => cores_per_engine * 2,
+        }
+    }
+
+    /// Physical cores each engine process is pinned to.
+    #[must_use]
+    pub fn cores_per_engine(self) -> usize {
+        match self {
+            Self::Shared { cores_per_game } => cores_per_game,
+            Self::PerEngine { cores_per_engine } => cores_per_engine,
+        }
+    }
+
+    /// The arithmetic printed in refusals and recorded with every run.
+    #[must_use]
+    pub fn pool_formula(self) -> &'static str {
+        match self {
+            Self::Shared { .. } => "game-slots × cores-per-game",
+            Self::PerEngine { .. } => "game-slots × 2 × cores-per-engine",
+        }
+    }
+
+    fn is_zero(self) -> bool {
+        self.cores_per_engine() == 0
+    }
+}
+
 #[derive(Debug, Clone)]
 struct LocatedCore {
     core: PhysicalCore,
@@ -134,19 +184,20 @@ type LocationKey = (CoreClass, Option<NumaNodeId>, Option<CacheDomainId>);
 
 /// Divide a resolved placement pool between concurrent game slots.
 ///
-/// Each engine receives `cores_per_engine` physical cores. A physical core's
-/// available SMT siblings always stay together. Slots never share a logical
-/// CPU. With placement `off`, every engine remains unrestricted.
+/// A slot consumes `allocation.cores_per_slot()` physical cores: shared by both
+/// engines, or split disjointly between them. A physical core's available SMT
+/// siblings always stay together, and slots never share a logical CPU. With
+/// placement `off`, every engine remains unrestricted.
 pub fn allocate_game_slots(
     plan: &CpuPlacementPlan,
     characteristics: &CpuCharacteristics,
     game_slots: usize,
-    cores_per_engine: usize,
+    allocation: SlotAllocation,
 ) -> Result<Vec<GameSlotCpuAllocation>, CpuPlacementError> {
     if game_slots == 0 {
         return Err(CpuPlacementError::ZeroGameSlots);
     }
-    if cores_per_engine == 0 {
+    if allocation.is_zero() {
         return Err(CpuPlacementError::ZeroCoresPerEngine);
     }
     let Some(cores) = plan.physical_cores() else {
@@ -160,23 +211,29 @@ pub fn allocate_game_slots(
             .collect());
     };
     let required = game_slots
-        .checked_mul(2)
-        .and_then(|engines| engines.checked_mul(cores_per_engine))
+        .checked_mul(allocation.cores_per_slot())
         .ok_or(CpuPlacementError::AllocationSizeOverflow)?;
     if required > cores.len() {
         return Err(CpuPlacementError::InsufficientPhysicalCores {
             required,
             available: cores.len(),
             game_slots,
-            cores_per_engine,
+            formula: allocation.pool_formula(),
         });
     }
 
     let mut remaining = locate_cores(cores, characteristics)?;
     let mut slots = Vec::with_capacity(game_slots);
     for slot_index in 0..game_slots {
-        let (engine_a_cores, engine_b_cores) =
-            take_symmetric_slot(&mut remaining, cores_per_engine);
+        let (engine_a_cores, engine_b_cores) = match allocation {
+            SlotAllocation::Shared { cores_per_game } => {
+                let shared = take_shared_slot(&mut remaining, cores_per_game);
+                (shared.clone(), shared)
+            }
+            SlotAllocation::PerEngine { cores_per_engine } => {
+                take_symmetric_slot(&mut remaining, cores_per_engine)
+            }
+        };
         let engine_a = engine_placement(&engine_a_cores);
         let engine_b = engine_placement(&engine_b_cores);
         let asymmetries = placement_asymmetries(&engine_a, &engine_b);
@@ -188,6 +245,20 @@ pub fn allocate_game_slots(
         });
     }
     Ok(slots)
+}
+
+/// Take one shared slot, preferring cores of a single class, node and cache
+/// domain so a game stays inside one domain whenever the pool allows it.
+fn take_shared_slot(remaining: &mut Vec<LocatedCore>, cores_per_game: usize) -> Vec<LocatedCore> {
+    let groups = location_groups(remaining);
+    if let Some(indices) = groups
+        .values()
+        .find(|indices| indices.len() >= cores_per_game)
+    {
+        let selected = indices[..cores_per_game].to_vec();
+        return take_indices(remaining, &selected);
+    }
+    take_indices(remaining, &(0..cores_per_game).collect::<Vec<_>>())
 }
 
 fn unrestricted_engine_placement() -> EngineCpuPlacement {
@@ -645,13 +716,13 @@ pub enum CpuPlacementError {
     #[error("CPU allocation size overflow")]
     AllocationSizeOverflow,
     #[error(
-        "{game_slots} game slots at {cores_per_engine} physical cores per engine require {required} physical cores, but placement provides {available}"
+        "{game_slots} game slots need {required} physical cores ({formula}), but placement provides {available}"
     )]
     InsufficientPhysicalCores {
         required: usize,
         available: usize,
         game_slots: usize,
-        cores_per_engine: usize,
+        formula: &'static str,
     },
     #[error("core characteristics contain logical CPU {0:?} more than once")]
     DuplicateCoreCharacteristics(LogicalCpuId),
@@ -975,7 +1046,15 @@ mod tests {
             },
         )
         .unwrap();
-        let slots = allocate_game_slots(&plan, &characteristics, 2, 2).unwrap();
+        let slots = allocate_game_slots(
+            &plan,
+            &characteristics,
+            2,
+            SlotAllocation::PerEngine {
+                cores_per_engine: 2,
+            },
+        )
+        .unwrap();
         for slot in &slots {
             assert_eq!(slot.engine_a.cache_domains.len(), 1, "{slot:?}");
             assert_eq!(slot.engine_a.cache_domains, slot.engine_b.cache_domains);
@@ -1006,7 +1085,15 @@ mod tests {
             },
         )
         .unwrap();
-        let slots = allocate_game_slots(&plan, &characteristics, 1, 2).unwrap();
+        let slots = allocate_game_slots(
+            &plan,
+            &characteristics,
+            1,
+            SlotAllocation::PerEngine {
+                cores_per_engine: 2,
+            },
+        )
+        .unwrap();
         // Each engine still fits one domain, but the two differ, so the slot
         // carries the mismatch rather than hiding it.
         assert_eq!(slots[0].engine_a.cache_domains.len(), 1);
@@ -1038,7 +1125,15 @@ mod tests {
             },
         )
         .unwrap();
-        let slots = allocate_game_slots(&plan, &characteristics, 1, 2).unwrap();
+        let slots = allocate_game_slots(
+            &plan,
+            &characteristics,
+            1,
+            SlotAllocation::PerEngine {
+                cores_per_engine: 2,
+            },
+        )
+        .unwrap();
         assert!(
             slots[0]
                 .asymmetries
@@ -1298,7 +1393,15 @@ mod tests {
             },
         )
         .unwrap();
-        let slots = allocate_game_slots(&placement, &characteristics(&topology), 1, 2).unwrap();
+        let slots = allocate_game_slots(
+            &placement,
+            &characteristics(&topology),
+            1,
+            SlotAllocation::PerEngine {
+                cores_per_engine: 2,
+            },
+        )
+        .unwrap();
         assert_eq!(slots.len(), 1);
         assert_eq!(
             slots[0].engine_a.allocation,
@@ -1320,7 +1423,15 @@ mod tests {
             },
         )
         .unwrap();
-        let slots = allocate_game_slots(&placement, &characteristics(&topology), 2, 1).unwrap();
+        let slots = allocate_game_slots(
+            &placement,
+            &characteristics(&topology),
+            2,
+            SlotAllocation::PerEngine {
+                cores_per_engine: 1,
+            },
+        )
+        .unwrap();
         let allocations = slots
             .iter()
             .flat_map(|slot| [&slot.engine_a.allocation, &slot.engine_b.allocation])
@@ -1336,12 +1447,20 @@ mod tests {
         assert_eq!(allocations[3], [cpu(3), cpu(7)]);
 
         assert_eq!(
-            allocate_game_slots(&placement, &characteristics(&topology), 2, 2).unwrap_err(),
+            allocate_game_slots(
+                &placement,
+                &characteristics(&topology),
+                2,
+                SlotAllocation::PerEngine {
+                    cores_per_engine: 2
+                }
+            )
+            .unwrap_err(),
             CpuPlacementError::InsufficientPhysicalCores {
                 required: 8,
                 available: 4,
                 game_slots: 2,
-                cores_per_engine: 2,
+                formula: "game-slots × 2 × cores-per-engine",
             }
         );
     }
@@ -1366,7 +1485,15 @@ mod tests {
             ],
         );
 
-        let slots = allocate_game_slots(&placement, &characteristics, 2, 1).unwrap();
+        let slots = allocate_game_slots(
+            &placement,
+            &characteristics,
+            2,
+            SlotAllocation::PerEngine {
+                cores_per_engine: 1,
+            },
+        )
+        .unwrap();
 
         assert_eq!(
             slots[0].engine_a.core_classes,
@@ -1403,7 +1530,15 @@ mod tests {
             ],
         );
 
-        let slots = allocate_game_slots(&placement, &characteristics, 1, 2).unwrap();
+        let slots = allocate_game_slots(
+            &placement,
+            &characteristics,
+            1,
+            SlotAllocation::PerEngine {
+                cores_per_engine: 2,
+            },
+        )
+        .unwrap();
         let slot = &slots[0];
 
         assert_eq!(slot.engine_a.numa_nodes.len(), 1);
@@ -1432,7 +1567,15 @@ mod tests {
             ],
         );
 
-        let slots = allocate_game_slots(&placement, &characteristics, 1, 1).unwrap();
+        let slots = allocate_game_slots(
+            &placement,
+            &characteristics,
+            1,
+            SlotAllocation::PerEngine {
+                cores_per_engine: 1,
+            },
+        )
+        .unwrap();
 
         assert_eq!(
             slots[0].asymmetries,
@@ -1450,7 +1593,15 @@ mod tests {
             },
         )
         .unwrap();
-        let slots = allocate_game_slots(&placement, &characteristics(&topology), 1, 1).unwrap();
+        let slots = allocate_game_slots(
+            &placement,
+            &characteristics(&topology),
+            1,
+            SlotAllocation::PerEngine {
+                cores_per_engine: 1,
+            },
+        )
+        .unwrap();
         assert_eq!(
             slots[0].engine_a.allocation,
             CpuAllocation::Enforced(vec![cpu(0)])
@@ -1462,13 +1613,122 @@ mod tests {
     }
 
     #[test]
+    fn a_shared_slot_pins_both_engines_to_the_same_cores() {
+        let topology = smt_topology_of(4);
+        let plan = plan_with(
+            &topology,
+            &characteristics(&topology),
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 0,
+            },
+        )
+        .unwrap();
+        let slots = allocate_game_slots(
+            &plan,
+            &characteristics(&topology),
+            4,
+            SlotAllocation::Shared { cores_per_game: 1 },
+        )
+        .unwrap();
+        // Four cores run four shared games; the disjoint mode would run two.
+        assert_eq!(slots.len(), 4);
+        for slot in &slots {
+            assert_eq!(slot.engine_a.allocation, slot.engine_b.allocation);
+            assert_eq!(slot.engine_a.physical_core_count, 1);
+            assert!(slot.asymmetries.is_empty(), "{slot:?}");
+        }
+        // Slots are still disjoint from each other, siblings kept together.
+        assert_eq!(
+            slots[0].engine_a.allocation,
+            CpuAllocation::Enforced(vec![cpu(0), cpu(4)])
+        );
+        assert_eq!(
+            slots[3].engine_b.allocation,
+            CpuAllocation::Enforced(vec![cpu(3), cpu(7)])
+        );
+    }
+
+    #[test]
+    fn a_shared_slot_stays_inside_one_cache_domain() {
+        let topology = no_smt_topology(8);
+        let metadata = (0..8)
+            .map(|index| {
+                (
+                    CoreClass::WindowsEfficiencyClass(0),
+                    node(0),
+                    cache(u32::from(index >= 4)),
+                )
+            })
+            .collect::<Vec<_>>();
+        let characteristics = located(&topology, &metadata);
+        let plan = plan_with(
+            &topology,
+            &characteristics,
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 0,
+            },
+        )
+        .unwrap();
+        let slots = allocate_game_slots(
+            &plan,
+            &characteristics,
+            4,
+            SlotAllocation::Shared { cores_per_game: 2 },
+        )
+        .unwrap();
+        for slot in &slots {
+            assert_eq!(slot.engine_a.cache_domains.len(), 1, "{slot:?}");
+            assert!(slot.asymmetries.is_empty(), "{slot:?}");
+        }
+    }
+
+    #[test]
+    fn the_two_modes_size_the_pool_differently() {
+        let shared = SlotAllocation::Shared { cores_per_game: 1 };
+        let disjoint = SlotAllocation::PerEngine {
+            cores_per_engine: 1,
+        };
+        assert_eq!(shared.cores_per_slot(), 1);
+        assert_eq!(disjoint.cores_per_slot(), 2);
+        assert_eq!(shared.cores_per_engine(), 1);
+        assert_eq!(disjoint.cores_per_engine(), 1);
+
+        // Fifteen cores: fifteen shared games, or seven disjoint ones.
+        let topology = no_smt_topology(16);
+        let characteristics = characteristics(&topology);
+        let plan = plan_with(&topology, &characteristics, &CpuPlacementPolicy::default()).unwrap();
+        assert_eq!(
+            allocate_game_slots(&plan, &characteristics, 15, shared)
+                .unwrap()
+                .len(),
+            15
+        );
+        assert!(allocate_game_slots(&plan, &characteristics, 16, shared).is_err());
+        assert_eq!(
+            allocate_game_slots(&plan, &characteristics, 7, disjoint)
+                .unwrap()
+                .len(),
+            7
+        );
+        let refusal = allocate_game_slots(&plan, &characteristics, 8, disjoint).unwrap_err();
+        assert!(
+            refusal
+                .to_string()
+                .contains("game-slots × 2 × cores-per-engine"),
+            "{refusal}"
+        );
+    }
+
+    #[test]
     fn placement_off_keeps_every_slot_unrestricted() {
         let topology = smt_topology();
         let slots = allocate_game_slots(
             &CpuPlacementPlan::Unrestricted,
             &characteristics(&topology),
             3,
-            8,
+            SlotAllocation::PerEngine {
+                cores_per_engine: 8,
+            },
         )
         .unwrap();
         assert_eq!(slots.len(), 3);
@@ -1486,7 +1746,9 @@ mod tests {
                 &CpuPlacementPlan::Unrestricted,
                 &characteristics(&smt_topology()),
                 0,
-                1,
+                SlotAllocation::PerEngine {
+                    cores_per_engine: 1
+                },
             )
             .unwrap_err(),
             CpuPlacementError::ZeroGameSlots
@@ -1496,7 +1758,9 @@ mod tests {
                 &CpuPlacementPlan::Unrestricted,
                 &characteristics(&smt_topology()),
                 1,
-                0,
+                SlotAllocation::PerEngine {
+                    cores_per_engine: 0
+                },
             )
             .unwrap_err(),
             CpuPlacementError::ZeroCoresPerEngine

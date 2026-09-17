@@ -73,6 +73,8 @@ fn spsa_dry_run_resolves_defaults_and_schedule_without_launching_an_engine() {
             "--r-end",
             "0.002",
             "--ponder",
+            "--cores-per-engine",
+            "1",
             "--dry-run",
             "--json",
             "--seed",

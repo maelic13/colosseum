@@ -18,8 +18,9 @@ use colosseum_core::{
 use colosseum_engine::{
     ClockAccountingReport, CoreClass, CpuPlacementPolicy, EngineCpuPlacement, EngineFaultKind,
     EngineGameSpec, GameFault, GameSide, GameSlotCpuAllocation, GameSpec, LiveGameState,
-    ResolvedOpening, allocate_game_slots, detect_allowed_cpu_set, detect_cpu_characteristics,
-    detect_cpu_topology, load_openings_named, plan_cpu_placement, run_game,
+    ResolvedOpening, SlotAllocation, allocate_game_slots, detect_allowed_cpu_set,
+    detect_cpu_characteristics, detect_cpu_topology, load_openings_named, plan_cpu_placement,
+    run_game,
 };
 use colosseum_uci::SpawnOptions;
 use serde::{Deserialize, Serialize};
@@ -356,7 +357,8 @@ pub struct HashMemoryReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MatchExecutionPlan {
     pub concurrency: usize,
-    pub cores_per_engine: usize,
+    /// How each slot's cores are divided between its two engine processes.
+    pub allocation: SlotAllocation,
     pub placement_policy: CpuPlacementPolicy,
     pub slots: Vec<GameSlotCpuAllocation>,
     pub hash_memory: HashMemoryReport,
@@ -539,14 +541,14 @@ pub fn plan_execution(
     engine_a: &EngineLaunchSpec,
     engine_b: &EngineLaunchSpec,
     concurrency: usize,
-    cores_per_engine: usize,
+    allocation: SlotAllocation,
     placement_policy: CpuPlacementPolicy,
     trusted_memory_budget_mb: Option<u64>,
 ) -> Result<MatchExecutionPlan, MatchError> {
     if concurrency == 0 {
         return Err(MatchError::ZeroConcurrency);
     }
-    if cores_per_engine == 0 {
+    if allocation.cores_per_engine() == 0 {
         return Err(MatchError::ZeroCoresPerEngine);
     }
     let direct = !matches!(engine_a.allocated_cpus, CpuAllocation::Unrestricted)
@@ -582,7 +584,7 @@ pub fn plan_execution(
             .map_err(|error| MatchError::Placement(error.to_string()))?;
         let plan = plan_cpu_placement(&topology, &allowed, &characteristics, &placement_policy)
             .map_err(|error| MatchError::Placement(error.to_string()))?;
-        allocate_game_slots(&plan, &characteristics, concurrency, cores_per_engine)
+        allocate_game_slots(&plan, &characteristics, concurrency, allocation)
             .map_err(|error| MatchError::Placement(error.to_string()))?
     };
     let engine_a_hash_mb = configured_hash_mb(engine_a);
@@ -602,7 +604,7 @@ pub fn plan_execution(
     }
     Ok(MatchExecutionPlan {
         concurrency,
-        cores_per_engine,
+        allocation,
         placement_policy,
         slots,
         hash_memory: HashMemoryReport {
@@ -1010,8 +1012,15 @@ mod tests {
             allocated_cpus: CpuAllocation::Enforced(vec![1.into()]),
             ..EngineLaunchSpec::path_only("engine".into())
         };
-        let plan =
-            plan_execution(&engine_a, &engine_b, 1, 1, CpuPlacementPolicy::Off, None).unwrap();
+        let plan = plan_execution(
+            &engine_a,
+            &engine_b,
+            1,
+            SlotAllocation::Shared { cores_per_game: 1 },
+            CpuPlacementPolicy::Off,
+            None,
+        )
+        .unwrap();
         assert_eq!(plan.slots[0].engine_a.allocation, engine_a.allocated_cpus);
         assert_eq!(plan.slots[0].engine_b.allocation, engine_b.allocated_cpus);
     }
@@ -1044,7 +1053,7 @@ mod tests {
             &EngineLaunchSpec::path_only("a".into()),
             &EngineLaunchSpec::path_only("b".into()),
             1,
-            1,
+            SlotAllocation::Shared { cores_per_game: 1 },
             CpuPlacementPolicy::Off,
             None,
         )

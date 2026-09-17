@@ -38,3 +38,4 @@ Run-record schema history:
 | 1 | Common identity, lifecycle, host, sample and anomalies |
 | 2 | Added required command-specific `workflow` evidence so the statistical model and experimental conditions are stored in the record itself |
 | 3 | Added the last-level cache domain to every engine CPU placement, the versioned game-record annotation writer, and the SPSA estimator that produced a tuned vector |
+| 4 | Replaced the execution plan's `cores_per_engine` count with the slot allocation mode, so a record says whether the two engines of a game shared their cores or had their own |

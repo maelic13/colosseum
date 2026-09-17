@@ -36,7 +36,10 @@ The schema has three user keys:
 
 Option names and values are validated by the real Clap parser after expansion,
 so the [generated command reference](command-reference.md) is the authoritative
-schema. A file may contain only `[options]`; supply the command and positionals
+schema. That includes options that exclude each other: a file inheriting
+`cores-per-engine` from its parent cannot simply add `cores-per-game`, because
+the two name different allocation modes. Drop the inherited one first with
+`unset = ["/options/cores-per-engine"]`. A file may contain only `[options]`; supply the command and positionals
 normally to share conditions across workflows:
 
 ```toml

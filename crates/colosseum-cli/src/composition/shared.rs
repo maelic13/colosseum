@@ -59,7 +59,8 @@ pub(crate) struct MatchConditions {
     pub(crate) b_margin_ms: u64,
 
     /// Let engines think on the opponent's clock through the UCI ponder protocol.
-    #[arg(long)]
+    /// Both engines then search at once, so each needs its own cores.
+    #[arg(long, requires = "cores_per_engine")]
     pub(crate) ponder: bool,
 
     /// Adjudicate a draw once both engines agree; off unless requested.
@@ -97,9 +98,18 @@ pub(crate) struct MatchConditions {
     /// Number of games allowed to run at once.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) concurrency: u32,
+    /// Physical cores per game slot, shared by both of its engines. This is
+    /// the default allocation, because without pondering only one engine of a
+    /// game searches at a time.
+    #[arg(
+        long,
+        value_parser = clap::value_parser!(u32).range(1..),
+        conflicts_with = "cores_per_engine"
+    )]
+    pub(crate) cores_per_game: Option<u32>,
     /// Physical cores allocated separately to each engine in each game slot.
-    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
-    pub(crate) cores_per_engine: u32,
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    pub(crate) cores_per_engine: Option<u32>,
     /// CPU placement: off, auto, or an explicit logical CPU list.
     #[arg(long, default_value = "off")]
     pub(crate) placement: String,
@@ -445,6 +455,27 @@ pub(crate) fn configure_ponder(engine: &mut EngineLaunchSpec, ponder: bool) -> R
             .insert("Ponder".into(), UciOptionValue::Check(true));
     }
     Ok(())
+}
+
+/// Resolve the slot allocation from the two mutually exclusive flags.
+///
+/// Sharing is the default: without pondering only one engine of a game
+/// searches at any moment, so a disjoint allocation would leave half the pool
+/// waiting on a pipe. Clap enforces both that the flags never appear together
+/// and that `--ponder` names `--cores-per-engine`, so this cannot see a
+/// contradictory pair.
+pub(crate) fn resolve_slot_allocation(
+    cores_per_game: Option<u32>,
+    cores_per_engine: Option<u32>,
+) -> SlotAllocation {
+    match cores_per_engine {
+        Some(cores_per_engine) => SlotAllocation::PerEngine {
+            cores_per_engine: cores_per_engine as usize,
+        },
+        None => SlotAllocation::Shared {
+            cores_per_game: cores_per_game.unwrap_or(1) as usize,
+        },
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9a** shared game slots, then 10.9b and 10.9c; 10.10 follows and needs a real machine and the maintainer |
+| Next step | **10.9b** PGN pair identity, then 10.9c; 10.10 follows and needs a real machine and the maintainer |
 | Recommended model | **Sol High** for 10.9a–10.9c and 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -813,7 +813,7 @@ model as well.
   per command with no behaviour change (generated command reference
   byte-identical, tests unchanged); Chess960 recorded as a non-goal and
   refused with a clear message — PLAN §S4, §Phase 10(i)
-- ☐ **10.9a** — **Model: Sol High.** Shared game slots: `--cores-per-game N`
+- ☑ **10.9a — DONE** — **Model: Sol High.** Shared game slots: `--cores-per-game N`
   (default 1) pins both engines of a ponder-off game to one core set;
   `--cores-per-engine N` keeps the disjoint allocation and is the only mode
   accepted with `--ponder`; pool arithmetic per mode; mode and allocations
