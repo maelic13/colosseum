@@ -84,6 +84,8 @@
       "raw_result_sha256": "572a5cbb38d3c2ded8f767b47f2f4d528a83e458183d45a8f9f7dd9e4af0e7e6",
       "rerun_byte_identical": false,
       "command": "<colosseum-cli> sprt <rarog> <rarog> --max-pairs 4 --preset gainer --a-depth 1 --b-depth 1 --draw-move 5 --draw-moves 2 --draw-score-cp 10000 --dir <run-dir> --json --seed 123 --placement off",
+      "repeat_command": "<colosseum-cli> sprt <rarog> <rarog> --max-pairs 4 --preset gainer --a-depth 1 --b-depth 1 --draw-adjudication --draw-move 5 --draw-moves 2 --draw-score-cp 10000 --dir <run-dir> --json --seed 123 --placement off",
+      "repeat_reason": "Adjudication is off unless asked for, so the recorded command no longer runs: its draw parameters now require --draw-adjudication. Repeat the comparison with repeat_command, not with the recorded one. Dropping the draw parameters instead would let the games play out and compare different conditions, which reads as a parity divergence that is not one.",
       "exit_code": 4,
       "status": "inconclusive",
       "games": 8,

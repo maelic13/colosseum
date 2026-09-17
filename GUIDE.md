@@ -14,10 +14,10 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | **Phases 0–9 are complete.** Final candidate `823b398` passed four-platform archive smoke and exact-artifact Rarog/Basilisk gates on Windows and WSL Linux |
-| What is missing | **Phase 10** first-release corrections (release-latest handling, adjudication off, class-aware placement, PGN annotations, final-theta estimator, graceful stop, fixed rating field, book range policy, command split), then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
+| What exists | **Phases 0–9 are complete, and 10.1–10.9 with them.** Candidate `823b398` passed four-platform archive smoke and exact-artifact Rarog/Basilisk gates on Windows and WSL Linux; every first-release correction has landed since |
+| What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows/Linux/macOS ☑ required debug and release CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
+| Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
 | Next step | **10.10 — EXIT**, the release acceptance repeat; it needs a real machine and the maintainer |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
@@ -819,6 +819,17 @@ model as well.
   short third-party usability flows, fresh four-platform CI candidate and
   exact archive smoke; then the maintainer merges `cli` to `main` and tags
   `cli-v0.1.0` — PLAN §Phase 10(j)
+  - The recorded parity command no longer runs: adjudication is off unless
+    asked for, so it needs `--draw-adjudication` beside its draw parameters.
+    Use `repeat_command` from
+    [`docs/fixtures/phase8/parity.json`](docs/fixtures/phase8/parity.json);
+    dropping the draw parameters instead would compare different conditions
+  - `CHANGELOG-CLI.md` under 0.1.0 is written but dated `unreleased`; set the
+    date when the tag is cut
+  - Decide whether the telemetry parser now reading an explicit `t=0ms` as a
+    real measurement is a `stats_version` change. It does change a reported
+    statistic, but `stats_version` is wired to `RNG_VERSION`, so bumping it
+    would claim the random stream changed when it did not
 
 ### Phase 11 — The GUI on the harness (after `cli-v0.1.0`)
 

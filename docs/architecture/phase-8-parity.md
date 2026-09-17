@@ -32,6 +32,23 @@ not part of runner semantics.
 <colosseum-cli> sprt <rarog> <rarog> --max-pairs 4 --preset gainer --a-depth 1 --b-depth 1 --draw-move 5 --draw-moves 2 --draw-score-cp 10000 --dir <run-dir> --json --seed 123 --placement off
 ```
 
+### Repeating this comparison
+
+The commands above are what ran on 2026-08-03 and stay as recorded. The
+Colosseum one no longer runs: adjudication is now off unless asked for, so its
+draw parameters require `--draw-adjudication`. Repeat the comparison with:
+
+```text
+<colosseum-cli> sprt <rarog> <rarog> --max-pairs 4 --preset gainer --a-depth 1 --b-depth 1 --draw-adjudication --draw-move 5 --draw-moves 2 --draw-score-cp 10000 --dir <run-dir> --json --seed 123 --placement off
+```
+
+Add the flag; do not drop the draw parameters to make the command parse. The
+aggressive early draw rule is what makes all eight games draw and gives the
+three runners an identical outcome to compare. Without it the games play out,
+and the comparison is against different conditions — which reads as a parity
+divergence that is not one. The FastChess and Cute Chess commands are
+unaffected.
+
 ## Result and boundary
 
 All three runners agree on every shared oracle field: eight games, four
