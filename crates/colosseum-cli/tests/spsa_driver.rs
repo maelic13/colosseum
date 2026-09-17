@@ -370,7 +370,7 @@ fn the_default_estimator_is_the_final_centre_and_the_tail_window_is_opt_in() {
     assert_eq!(estimator["kind"], "final-center");
     assert_eq!(estimator["iteration"], 3);
     assert_eq!(default["report"]["tuned_result"]["completed_iterations"], 4);
-    assert_eq!(default["report"]["tuned_result"]["schema_version"], 2);
+    assert_eq!(default["report"]["tuned_result"]["schema_version"], 3);
 
     let window_run = root.path().join("window");
     let window_output = multi_iteration_command(&tune, &window_run, "4")

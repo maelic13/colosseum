@@ -63,8 +63,9 @@ an all-identical early/capped sample reports that LLR is unavailable rather than
 inventing a finite statistic.
 
 Run artifacts use the common layout. The checkpoint stores official and
-post-terminal pairs separately, `games.pgn` labels both classes, `run.log`
-records pair commits, and both `result.json` and `run-record.json` retain the
+post-terminal pairs separately, `games.pgn` labels both classes in a
+`ColosseumSample` tag so [statistics replay](stats.md) reaches the same
+official vector from either, `run.log` records pair commits, and both `result.json` and `run-record.json` retain the
 resolved statistical design. Resume accepts only the same resolved conditions.
 
 Automation exit codes are: `0` H1, `1` H0, `2` configuration refusal, `3`

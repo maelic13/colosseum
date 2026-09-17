@@ -43,9 +43,34 @@ pub struct StatsReplayReport {
     pub telemetry: SearchTelemetryReport,
 }
 
+/// Where a game sits in the schedule: which pair, and which colour assignment
+/// of that pair.
+///
+/// A pentanomial unit is two consecutive assignments of one pair, so an
+/// encounter played with four games per pair holds two units. Deriving that
+/// from the game number instead would silently pair games from different
+/// encounters whenever a pair is not exactly two games long.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PairSlot {
+    pair_number: u32,
+    pair_game: u32,
+}
+
+impl PairSlot {
+    /// The pentanomial unit this game belongs to.
+    fn unit(self) -> (u32, u32) {
+        (self.pair_number, self.pair_game.div_ceil(2))
+    }
+
+    /// True for the assignment that played the pair's first engine as White.
+    fn is_first_assignment(self) -> bool {
+        self.pair_game % 2 == 1
+    }
+}
+
 #[derive(Debug, Clone)]
 struct RawGame {
-    number: Option<u32>,
+    slot: Option<PairSlot>,
     opening: Option<String>,
     outcome: PairGameResult,
 }
@@ -82,28 +107,21 @@ fn replay_directory(path: &Path, subject: Option<&str>) -> Result<StatsReplayRep
             continue;
         }
         match read_source(authority, &candidate, subject) {
-            Ok((games, perspective, paired_capable, telemetry)) if !games.is_empty() => {
+            Ok(mut source) if !source.games.is_empty() => {
                 attempts.push(ReplayAttempt {
                     authority,
                     path: candidate.clone(),
                     accepted: true,
-                    detail: format!("replayed {} scored games", games.len()),
+                    detail: format!("replayed {} scored games", source.games.len()),
                 });
-                return Ok(build_report(
-                    authority,
-                    candidate,
-                    perspective,
-                    games,
-                    paired_capable,
-                    attempts,
-                    directory_telemetry(path, telemetry),
-                ));
+                source.telemetry = directory_telemetry(path, source.telemetry);
+                return Ok(build_report(authority, candidate, source, attempts));
             }
-            Ok(_) => attempts.push(ReplayAttempt {
+            Ok(source) => attempts.push(ReplayAttempt {
                 authority,
                 path: candidate,
                 accepted: false,
-                detail: "contains no scored games".into(),
+                detail: empty_detail(source.excluded),
             }),
             Err(error) => attempts.push(ReplayAttempt {
                 authority,
@@ -117,6 +135,20 @@ fn replay_directory(path: &Path, subject: Option<&str>) -> Result<StatsReplayRep
         "no replayable source found in {}; attempted structured store, PGN, forensic log and console",
         path.display()
     ))
+}
+
+/// Say why a source yielded nothing to score.
+///
+/// "No games" and "games the run itself did not count" are different facts,
+/// and a reader looking at a file full of games deserves the second one.
+fn empty_detail(excluded: u32) -> String {
+    if excluded > 0 {
+        format!(
+            "records {excluded} games but none of them belong to the official sample; the run marked them post-terminal or invalidated"
+        )
+    } else {
+        "contains no scored games".to_owned()
+    }
 }
 
 /// A run directory is one evidence set.
@@ -150,64 +182,78 @@ fn replay_file(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, 
         Some(value) if value.eq_ignore_ascii_case("log") => "forensic-log",
         _ => "console",
     };
-    let (games, perspective, paired_capable, telemetry) = read_source(authority, path, subject)?;
-    if games.is_empty() {
-        return Err(format!("{} contains no scored games", path.display()));
+    let source = read_source(authority, path, subject)?;
+    if source.games.is_empty() {
+        return Err(format!(
+            "{} {}",
+            path.display(),
+            empty_detail(source.excluded)
+        ));
     }
     let attempts = vec![ReplayAttempt {
         authority,
         path: path.to_owned(),
         accepted: true,
-        detail: format!("replayed {} scored games", games.len()),
+        detail: format!("replayed {} scored games", source.games.len()),
     }];
-    Ok(build_report(
-        authority,
-        path.to_owned(),
-        perspective,
-        games,
-        paired_capable,
-        attempts,
-        telemetry,
-    ))
+    Ok(build_report(authority, path.to_owned(), source, attempts))
+}
+
+/// What one evidence source yielded.
+struct SourceGames {
+    games: Vec<RawGame>,
+    perspective: String,
+    paired_capable: bool,
+    /// Games the source recorded but did not count towards its official
+    /// sample, so a reader can see they were left out rather than lost.
+    excluded: u32,
+    telemetry: SearchTelemetryReport,
 }
 
 fn read_source(
     authority: &'static str,
     path: &Path,
     subject: Option<&str>,
-) -> Result<(Vec<RawGame>, String, bool, SearchTelemetryReport), String> {
+) -> Result<SourceGames, String> {
     let text = fs::read_to_string(path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     match authority {
-        "structured-run-store" => structured_games(&text).map(|games| {
-            (
-                games,
-                "engine A".into(),
-                true,
-                unavailable("structured source has no PGN move annotations"),
-            )
+        "structured-run-store" => structured_games(&text).map(|games| SourceGames {
+            games,
+            perspective: "engine A".into(),
+            paired_capable: true,
+            excluded: 0,
+            telemetry: unavailable("structured source has no PGN move annotations"),
         }),
         "pgn-export" => {
-            let (games, paired_capable) = pgn_games(&text, subject);
+            let (games, paired_capable, excluded) = pgn_games(&text, subject);
             let perspective = match (subject, paired_capable) {
                 (Some(value), _) => value.to_owned(),
                 (None, true) => "first engine of each pair".into(),
                 (None, false) => "White side".into(),
             };
-            Ok((games, perspective, paired_capable, analyze_pgn(&text)))
+            Ok(SourceGames {
+                games,
+                perspective,
+                paired_capable,
+                excluded,
+                telemetry: analyze_pgn(&text),
+            })
         }
-        "forensic-log" => Ok((
-            log_games(&text),
-            "engine A".into(),
-            true,
-            unavailable("forensic log has no PGN move annotations"),
-        )),
-        _ => Ok((
-            result_tokens(&text),
-            "White side (console tokens)".into(),
-            false,
-            unavailable("console source has no PGN move annotations"),
-        )),
+        "forensic-log" => Ok(SourceGames {
+            games: log_games(&text),
+            perspective: "engine A".into(),
+            paired_capable: true,
+            excluded: 0,
+            telemetry: unavailable("forensic log has no PGN move annotations"),
+        }),
+        _ => Ok(SourceGames {
+            games: result_tokens(&text),
+            perspective: "White side (console tokens)".into(),
+            paired_capable: false,
+            excluded: 0,
+            telemetry: unavailable("console source has no PGN move annotations"),
+        }),
     }
 }
 
@@ -286,27 +332,59 @@ fn parse_structured_game(value: &Value) -> Option<RawGame> {
         return None;
     }
     let result = value.get("result")?.as_str()?;
-    let white = value.get("white").and_then(Value::as_str).unwrap_or("a");
+    let white = value.get("white").and_then(Value::as_str);
     let white_score = match result {
         "WhiteWin" | "white-win" | "1-0" => PairGameResult::Win,
         "BlackWin" | "black-win" | "0-1" => PairGameResult::Loss,
         "Draw" | "draw" | "1/2-1/2" => PairGameResult::Draw,
         _ => return None,
     };
-    let outcome = if white.eq_ignore_ascii_case("a") {
-        white_score
-    } else {
-        invert(white_score)
+    let slot = structured_slot(value);
+    let outcome = match white {
+        // A match or an SPRT names the two sides of its own pair, so the
+        // record says outright which of them had White.
+        Some(side) if side.eq_ignore_ascii_case("a") => white_score,
+        Some(side) if side.eq_ignore_ascii_case("b") => invert(white_score),
+        // A tournament names participants by identity instead, and its
+        // encounter alternates colours: the odd assignment gave White to the
+        // engine the pair is scored from. Taking every game from White's side
+        // would score a pair as its two colours rather than as one contest.
+        _ => match slot {
+            Some(slot) if !slot.is_first_assignment() => invert(white_score),
+            _ => white_score,
+        },
     };
     Some(RawGame {
-        number: value
-            .get("number")
-            .and_then(Value::as_u64)
-            .and_then(|value| value.try_into().ok()),
+        slot,
         opening: value
             .get("opening")
             .map(|opening| serde_json::to_string(opening).unwrap_or_default()),
         outcome,
+    })
+}
+
+/// Read the pair slot a structured game records.
+///
+/// A tournament game names its encounter and its position inside it. A match
+/// or SPRT game names only its number, and there the pair is the two
+/// consecutive games that share an opening, odd first.
+fn structured_slot(value: &Value) -> Option<PairSlot> {
+    let field = |name: &str| {
+        value
+            .get(name)
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+    };
+    if let (Some(pair_number), Some(pair_game)) = (field("encounter"), field("game_in_encounter")) {
+        return Some(PairSlot {
+            pair_number,
+            pair_game,
+        });
+    }
+    let number = field("number").filter(|number| *number > 0)?;
+    Some(PairSlot {
+        pair_number: number.div_ceil(2),
+        pair_game: if number % 2 == 1 { 1 } else { 2 },
     })
 }
 
@@ -326,11 +404,22 @@ fn log_games(text: &str) -> Vec<RawGame> {
 /// had White in assignment 1 — which is the perspective the checkpoint uses,
 /// so the two sources agree. A PGN without the tags yields no identity and the
 /// caller falls back to labelled unpaired statistics.
-fn pgn_games(text: &str, subject: Option<&str>) -> (Vec<RawGame>, bool) {
+fn pgn_games(text: &str, subject: Option<&str>) -> (Vec<RawGame>, bool, u32) {
     let mut paired_capable = true;
+    let mut excluded = 0_u32;
     let games = split_pgn(text)
         .into_iter()
         .filter_map(|game| {
+            // A run's own export keeps the games it played but did not count:
+            // the pairs an SPRT finished after its boundary, and the games of
+            // an invalidated SPSA iteration. The official sample excludes them
+            // exactly as the checkpoint does.
+            if pgn_tag(game, "ColosseumSample")
+                .is_some_and(|class| !class.eq_ignore_ascii_case("official"))
+            {
+                excluded += 1;
+                return None;
+            }
             let result = pgn_tag(game, "Result")?;
             let white = pgn_tag(game, "White").unwrap_or_default();
             let black = pgn_tag(game, "Black").unwrap_or_default();
@@ -343,43 +432,47 @@ fn pgn_games(text: &str, subject: Option<&str>) -> (Vec<RawGame>, bool) {
                 Some(name) if white == name => white_score,
                 Some(name) if black == name => invert(white_score),
                 Some(_) => return None,
-                // Assignment 2 is the same opening with the colours reversed,
-                // so its White is the pair's second engine.
-                None => match identity.as_ref().map(|identity| identity.pair_game) {
-                    Some(2) => invert(white_score),
+                // An even assignment is the same opening with the colours
+                // reversed, so its White is the pair's second engine.
+                None => match identity.as_ref() {
+                    Some(identity) if !identity.slot.is_first_assignment() => invert(white_score),
                     _ => white_score,
                 },
             };
             Some(RawGame {
-                number: identity.as_ref().map(|identity| identity.game_number),
+                slot: identity.as_ref().map(|identity| identity.slot),
                 opening: identity.as_ref().map(|identity| identity.opening.clone()),
                 outcome,
             })
         })
         .collect::<Vec<_>>();
     let paired_capable = paired_capable && !games.is_empty();
-    (games, paired_capable)
+    (games, paired_capable, excluded)
 }
 
 /// The schedule identity a Colosseum export carries.
+#[derive(Debug, Clone)]
 struct PgnIdentity {
-    game_number: u32,
-    pair_game: u32,
+    slot: PairSlot,
     opening: String,
 }
 
 fn pgn_identity(game: &str) -> Option<PgnIdentity> {
-    let game_number = pgn_tag(game, "GameNumber")?.parse().ok()?;
     let pair_number: u32 = pgn_tag(game, "PairNumber")?.parse().ok()?;
-    let pair_game = pgn_tag(game, "PairGame")?.parse().ok()?;
+    let pair_game: u32 = pgn_tag(game, "PairGame")?.parse().ok()?;
+    if pair_number == 0 || pair_game == 0 {
+        return None;
+    }
     // Both games of a pair must agree on their opening for the pair to be a
     // pair at all, so the identity carries whichever the export named.
     let opening = pgn_tag(game, "OpeningIndex")
         .or_else(|| pgn_tag(game, "OpeningLabel"))
         .unwrap_or_else(|| format!("pair {pair_number}"));
     Some(PgnIdentity {
-        game_number,
-        pair_game,
+        slot: PairSlot {
+            pair_number,
+            pair_game,
+        },
         opening,
     })
 }
@@ -412,7 +505,7 @@ fn result_tokens(text: &str) -> Vec<RawGame> {
     text.split_whitespace()
         .filter_map(token_result)
         .map(|outcome| RawGame {
-            number: None,
+            slot: None,
             opening: None,
             outcome,
         })
@@ -438,13 +531,17 @@ fn invert(result: PairGameResult) -> PairGameResult {
 
 fn build_report(
     authority: &'static str,
-    source: PathBuf,
-    perspective: String,
-    games: Vec<RawGame>,
-    paired_capable: bool,
+    path: PathBuf,
+    source: SourceGames,
     attempts: Vec<ReplayAttempt>,
-    telemetry: SearchTelemetryReport,
 ) -> StatsReplayReport {
+    let SourceGames {
+        games,
+        perspective,
+        paired_capable,
+        excluded,
+        telemetry,
+    } = source;
     let mut wins = 0;
     let mut draws = 0;
     let mut losses = 0;
@@ -458,20 +555,24 @@ fn build_report(
     let mut sample = PentanomialVector::default();
     let mut paired_games = 0;
     if paired_capable {
-        let mut by_pair = BTreeMap::<u32, Vec<&RawGame>>::new();
+        let mut by_unit = BTreeMap::<(u32, u32), Vec<&RawGame>>::new();
         for game in &games {
-            if let Some(number) = game.number.filter(|number| *number > 0) {
-                by_pair.entry((number - 1) / 2).or_default().push(game);
+            if let Some(slot) = game.slot {
+                by_unit.entry(slot.unit()).or_default().push(game);
             }
         }
-        for pair in by_pair.values_mut() {
-            pair.sort_by_key(|game| game.number);
-            if pair.len() == 2
-                && pair[0].number.is_some_and(|number| number % 2 == 1)
-                && pair[1].number == pair[0].number.map(|number| number + 1)
-                && pair[0].opening == pair[1].opening
+        for unit in by_unit.values_mut() {
+            unit.sort_by_key(|game| game.slot.map(|slot| slot.pair_game));
+            let assignments = unit
+                .iter()
+                .filter_map(|game| game.slot.map(|slot| slot.pair_game))
+                .collect::<Vec<_>>();
+            if unit.len() == 2
+                && unit[0].slot.is_some_and(PairSlot::is_first_assignment)
+                && assignments[1] == assignments[0] + 1
+                && unit[0].opening == unit[1].opening
             {
-                sample.record_pair(pair[0].outcome, pair[1].outcome);
+                sample.record_pair(unit[0].outcome, unit[1].outcome);
                 paired_games += 2;
             }
         }
@@ -508,6 +609,11 @@ fn build_report(
     });
     let games_count = games.len() as u32;
     let mut warnings = Vec::new();
+    if excluded > 0 {
+        warnings.push(format!(
+            "{excluded} recorded games are not part of the official sample and were excluded; the run played them as post-terminal or invalidated evidence"
+        ));
+    }
     if sample.unpaired_games() > 0 {
         warnings.push(
             "pair/opening identity is absent or incomplete for some games; unpaired W/D/L is reported without invented pentanomial statistics"
@@ -519,7 +625,7 @@ fn build_report(
     }
     StatsReplayReport {
         authority,
-        source,
+        source: path,
         perspective,
         pairing: if sample.pairs() > 0 {
             "paired"
@@ -549,7 +655,8 @@ mod tests {
     #[test]
     fn pgn_without_pair_identity_is_never_guessed_into_pairs() {
         let pgn = "[Event \"x\"]\n[White \"A\"]\n[Black \"B\"]\n[Result \"1-0\"]\n\n1-0\n\n[Event \"x\"]\n[White \"B\"]\n[Black \"A\"]\n[Result \"0-1\"]\n\n0-1\n";
-        let (games, paired_capable) = pgn_games(pgn, Some("A"));
+        let (games, paired_capable, excluded) = pgn_games(pgn, Some("A"));
+        assert_eq!(excluded, 0);
         assert!(
             !paired_capable,
             "a PGN without identity tags must not claim pairs"
@@ -557,11 +664,14 @@ mod tests {
         let report = build_report(
             "pgn-export",
             "x.pgn".into(),
-            "A".into(),
-            games,
-            paired_capable,
+            SourceGames {
+                games,
+                perspective: "A".into(),
+                paired_capable,
+                excluded,
+                telemetry: unavailable("fixture has no annotations"),
+            },
             vec![],
-            unavailable("fixture has no annotations"),
         );
         assert_eq!(report.wins, 2);
         assert_eq!(report.complete_pairs, 0);

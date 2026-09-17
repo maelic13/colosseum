@@ -1265,12 +1265,16 @@ impl DurableSpsaOutput {
                 for game in [&pair.first, &pair.second] {
                     writeln!(
                         file,
-                        "{{Colosseum SPSA iteration: {}; sample: committed}}",
-                        iteration.iteration
+                        "{tagged}\n",
+                        tagged = with_header_tags(
+                            game.pgn.trim_end(),
+                            &[
+                                ("ColosseumSample", "official"),
+                                ("ColosseumSpsaIteration", &iteration.iteration.to_string()),
+                            ],
+                        )
                     )
                     .map_err(|error| error.to_string())?;
-                    writeln!(file, "{}\n", game.pgn.trim_end())
-                        .map_err(|error| error.to_string())?;
                 }
             }
         }
@@ -1279,12 +1283,16 @@ impl DurableSpsaOutput {
                 for game in [&pair.first, &pair.second] {
                     writeln!(
                         file,
-                        "{{Colosseum SPSA iteration: {}; sample: invalid}}",
-                        iteration.iteration
+                        "{tagged}\n",
+                        tagged = with_header_tags(
+                            game.pgn.trim_end(),
+                            &[
+                                ("ColosseumSample", "invalid"),
+                                ("ColosseumSpsaIteration", &iteration.iteration.to_string()),
+                            ],
+                        )
                     )
                     .map_err(|error| error.to_string())?;
-                    writeln!(file, "{}\n", game.pgn.trim_end())
-                        .map_err(|error| error.to_string())?;
                 }
             }
         }

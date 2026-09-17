@@ -55,8 +55,11 @@ fn schedule_is_persisted_with_the_complete_reproducibility_contract() {
     let value: Value =
         serde_json::from_slice(&std::fs::read(run.paths().root.join(SPSA_SCHEDULE_FILE)).unwrap())
             .unwrap();
-    assert_eq!(value["schema_version"], 1);
-    assert_eq!(value["stats_version"], 1);
+    assert_eq!(value["schema_version"], 2);
+    // The artifact records how the draws were made, not how a statistic is
+    // defined, so the field names the random-stream version it holds.
+    assert_eq!(value["rng_version"], 1);
+    assert!(value.get("stats_version").is_none());
     assert_eq!(value["schedule"]["iterations"], 5_000);
     assert_eq!(value["r_end"], 0.002);
     assert_eq!(

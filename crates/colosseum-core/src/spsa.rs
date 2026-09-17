@@ -16,7 +16,10 @@ use crate::rng::{
 pub const SPSA_ALPHA: f64 = 0.601;
 pub const SPSA_GAMMA: f64 = 0.102;
 pub const SPSA_STABILITY_FRACTION: f64 = 0.1;
-pub const SPSA_SCHEDULE_SCHEMA_VERSION: u32 = 1;
+/// Version 2 names the random-stream version in `rng_version`. Version 1
+/// called the same value `stats_version`, which claimed the statistics
+/// definition had changed whenever only the draws had.
+pub const SPSA_SCHEDULE_SCHEMA_VERSION: u32 = 2;
 pub const SPSA_PERTURBATION_SAMPLER_ID: &str = "rademacher-minus-one-plus-one-v1";
 pub const SPSA_PERTURBATION_DRAW_ORDER: &str = "iteration-major-knob-order";
 pub const SPSA_PERTURBATION_BYTES_PER_DRAW: u32 = 8;
@@ -93,7 +96,10 @@ impl SpsaPerturbationContract {
 #[serde(deny_unknown_fields)]
 pub struct SpsaScheduleArtifact {
     pub schema_version: u32,
-    pub stats_version: u32,
+    /// The random-stream version the perturbation draws came from. It is not
+    /// the statistics version: this artifact records how the numbers were
+    /// drawn, not how any reported figure is defined.
+    pub rng_version: u32,
     pub schedule: SpsaSchedule,
     pub r_end: f64,
     pub perturbations: SpsaPerturbationContract,
@@ -147,7 +153,7 @@ impl SpsaScheduleArtifact {
             .collect::<Result<Vec<_>, SpsaError>>()?;
         Ok(Self {
             schema_version: SPSA_SCHEDULE_SCHEMA_VERSION,
-            stats_version: RNG_VERSION,
+            rng_version: RNG_VERSION,
             schedule,
             r_end,
             perturbations: SpsaPerturbationContract::new(master_seed),
@@ -163,9 +169,9 @@ impl SpsaScheduleArtifact {
                 version: self.schema_version,
             });
         }
-        if self.stats_version != RNG_VERSION {
-            return Err(SpsaError::UnsupportedStatsVersion {
-                version: self.stats_version,
+        if self.rng_version != RNG_VERSION {
+            return Err(SpsaError::UnsupportedRngVersion {
+                version: self.rng_version,
             });
         }
         self.schedule.validate()?;
@@ -578,8 +584,8 @@ pub enum SpsaError {
     NonFiniteUpdate,
     #[error("unsupported SPSA schedule artifact schema version {version}")]
     UnsupportedArtifactSchema { version: u32 },
-    #[error("unsupported SPSA statistics version {version}")]
-    UnsupportedStatsVersion { version: u32 },
+    #[error("unsupported SPSA random-stream version {version}")]
+    UnsupportedRngVersion { version: u32 },
     #[error(
         "SPSA end value {field} for knob {index} ({name}) must be finite and positive; got {value}"
     )]
@@ -856,8 +862,8 @@ mod tests {
             }],
         )
         .unwrap();
-        assert_eq!(artifact.schema_version, 1);
-        assert_eq!(artifact.stats_version, RNG_VERSION);
+        assert_eq!(artifact.schema_version, SPSA_SCHEDULE_SCHEMA_VERSION);
+        assert_eq!(artifact.rng_version, RNG_VERSION);
         assert_eq!(artifact.perturbations.algorithm, RNG_ALGORITHM_ID);
         assert_eq!(artifact.perturbations.derivation, RNG_DERIVATION_ID);
         assert_eq!(artifact.perturbations.u64_sampling, RNG_U64_SAMPLING_ID);
@@ -911,10 +917,10 @@ mod tests {
         );
 
         let mut wrong_version = artifact;
-        wrong_version.stats_version += 1;
+        wrong_version.rng_version += 1;
         assert!(matches!(
             wrong_version.validate(),
-            Err(SpsaError::UnsupportedStatsVersion { .. })
+            Err(SpsaError::UnsupportedRngVersion { .. })
         ));
     }
 

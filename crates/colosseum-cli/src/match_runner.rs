@@ -381,6 +381,13 @@ pub struct FixedMatchRequest {
     pub completed_games: Vec<MatchGame>,
     pub progress: MatchProgress,
     pub cancellation: Cancellation,
+    /// Schedule identity to write instead of the one this match would derive.
+    ///
+    /// A tournament plays each game through a one-game match, which would
+    /// otherwise call every game the first assignment of its own first pair.
+    /// The tournament knows the encounter and the opening it selected, so it
+    /// supplies them rather than having them patched into the written text.
+    pub identity_override: Option<GamePairIdentity>,
     pub observer: Option<Arc<dyn MatchObserver>>,
 }
 
@@ -507,6 +514,7 @@ pub async fn play_pair(
     let (first_opening, first_assignment) = settings.openings.assignment(first_number);
     let first = play_game(GameRequest {
         number: first_number,
+        identity_override: None,
         engine_a: engine_a.clone(),
         engine_b: engine_b.clone(),
         time_control_a: settings.engine_a_time_control,
@@ -520,6 +528,7 @@ pub async fn play_pair(
     let (second_opening, second_assignment) = settings.openings.assignment(second_number);
     let second = play_game(GameRequest {
         number: second_number,
+        identity_override: None,
         engine_a,
         engine_b,
         time_control_a: settings.engine_a_time_control,
@@ -662,6 +671,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         completed_games,
         progress,
         cancellation,
+        identity_override,
         observer,
     } = request;
     if games == 0 {
@@ -725,6 +735,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
             let (opening, opening_assignment) = openings.assignment(number);
             workers.spawn(play_game(GameRequest {
                 number,
+                identity_override: identity_override.clone(),
                 engine_a,
                 engine_b,
                 time_control_a: engine_a_time_control,
@@ -786,6 +797,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
 
 struct GameRequest {
     number: u32,
+    identity_override: Option<GamePairIdentity>,
     engine_a: EngineGameSpec,
     engine_b: EngineGameSpec,
     time_control_a: ConfiguredTimeControl,
@@ -799,6 +811,7 @@ struct GameRequest {
 async fn play_game(request: GameRequest) -> MatchGame {
     let GameRequest {
         number,
+        identity_override,
         engine_a,
         engine_b,
         time_control_a: engine_a_time_control,
@@ -854,13 +867,13 @@ async fn play_game(request: GameRequest) -> MatchGame {
         handshake_timeout: HANDSHAKE_TIMEOUT,
         // Games are scheduled as colour-reversed pairs: the odd game of a pair
         // is engine A as White, the even one the same opening reversed.
-        identity: Some(GamePairIdentity {
+        identity: Some(identity_override.unwrap_or_else(|| GamePairIdentity {
             game_number: number,
             pair_number: number.div_ceil(2),
             pair_game: if a_is_white { 1 } else { 2 },
             opening_index: opening_assignment.book_index,
             opening_label: opening_assignment.label.clone(),
-        }),
+        })),
     };
     let live = LiveGameState::new_handle(
         game_id,

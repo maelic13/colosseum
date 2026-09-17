@@ -17,9 +17,9 @@ stronger source therefore cannot silently pretend to be authoritative, while a
 valid weaker artifact remains usable.
 
 Structured match games carry schedule number, side and opening assignment.
-Only exact odd/even colour-reversed companions with identical opening identity
-enter the pentanomial vector. Incomplete or inconsistent games stay counted as
-unpaired. The usual paired statistics block is calculated when the complete
+Only the two consecutive colour assignments of one pair, with identical opening
+identity, enter the pentanomial vector. Incomplete or inconsistent games stay
+counted as unpaired. The usual paired statistics block is calculated when the complete
 sample is sufficient and non-degenerate; otherwise its precise reason is
 reported.
 
@@ -104,21 +104,44 @@ evaluation on the same scale.
 
 The seven-tag roster says who played and how a game ended. It cannot say which
 colour-reversed pair a game belongs to, and that pair is the unit every paired
-statistic is computed over. Every game Colosseum writes therefore carries four
+statistic is computed over. Every game Colosseum writes therefore carries five
 more tags beside `OpeningPlyCount`:
 
 | Tag | Meaning |
 |---|---|
 | `GameNumber` | Harness game number in schedule order, counting from one |
 | `PairNumber` | The colour-reversed pair, or the tournament encounter, counting from one |
-| `PairGame` | Which colour assignment of that pair this is: `1`, or `2` for the same opening reversed |
+| `PairGame` | Which colour assignment of that pair this is, counting from one; every even assignment is the odd one before it with the colours reversed |
 | `OpeningIndex` | Zero-based index into the resolved opening order; absent without a book |
 | `OpeningLabel` | The opening's label, `startpos` when no book supplied one |
 
 `stats` reads them back, so replaying a Colosseum PGN reports the same
-pentanomial vector as the checkpoint it came from. Without a subject the
-outcome is taken from the pair's first engine — the one that had White in
-assignment `1` — which is the perspective the checkpoint uses.
+pentanomial vector as the checkpoint it came from. Pairing follows
+`PairNumber` and `PairGame` alone, never the game numbers: a tournament
+encounter played with four games per pair is two pentanomial units, and one
+game per pair is none at all, whatever the games are numbered. Without a
+subject the outcome is taken from the pair's first engine — the one that had
+White in assignment `1` — which is the perspective the checkpoint uses.
+
+## Games a run kept but did not count
+
+A run's own `games.pgn` holds every game it played. Some of those games are
+deliberately outside its official sample: the pairs an SPRT was still playing
+in its other slots when it crossed a boundary, and the games of an SPSA
+iteration an engine fault invalidated. They are kept because they are evidence,
+and they are marked so no reader has to guess:
+
+| Tag | Values |
+|---|---|
+| `ColosseumSample` | `official`, `post-terminal` (played after an SPRT boundary), `invalid` (an invalidated SPSA iteration) |
+| `ColosseumSpsaIteration` | Zero-based SPSA iteration the game belongs to |
+
+`stats` counts only `official` games, so `stats <pgn>` reports the same pair
+count and the same pentanomial vector as `stats <run-dir>` for the same run. It
+also warns how many games it left out. A file in which nothing is official —
+the export of a single invalidated SPSA iteration, for example — is refused
+with that reason rather than replayed as statistics. A game with no
+`ColosseumSample` tag is official, so a PGN from any other source is unaffected.
 
 A PGN that does not carry these tags is not paired by guesswork: the order
 games appear in is not evidence that two of them share an opening, so such a

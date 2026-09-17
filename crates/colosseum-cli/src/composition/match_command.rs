@@ -308,6 +308,7 @@ pub(crate) async fn run_match(
         completed_games,
         progress: progress.clone(),
         cancellation: cancellation.clone(),
+        identity_override: None,
         observer: Some(observer.clone()),
     };
     if !machine {

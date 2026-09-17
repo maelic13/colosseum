@@ -28,5 +28,7 @@ For master seed `0x0123456789abcdef`, the `opening-order` key is
 its first 64 bytes are
 `c2198a09daf1a2cd09160d69492bff7c848323cd90f7fa7a916110036907f4553565d341820734b4348b985eb06a2ec5e975f2d492da09119596fc7ef6da02ff`.
 Repository tests also pin bounded, shuffle, Rademacher, bootstrap and every
-built-in stream-name vector. Changing any part requires a `stats_version`
-change; resumed runs retain their recorded version.
+built-in stream-name vector. Changing any part requires a random-stream version
+change, which artifacts record as `rng_version`; resumed runs retain their
+recorded version. It is not the statistics version: this contract says how the
+numbers were drawn, not how a reported figure is defined.

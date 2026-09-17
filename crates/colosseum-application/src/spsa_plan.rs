@@ -151,7 +151,8 @@ pub struct SpsaHorizonKnob {
 pub struct SpsaPlanReport {
     pub schema_version: u32,
     pub schedule_schema_version: u32,
-    pub stats_version: u32,
+    /// The random-stream version the planned schedule would be drawn from.
+    pub rng_version: u32,
     pub settings: SpsaRunSettings,
     pub r_end: f64,
     pub total_games: u64,
@@ -221,7 +222,7 @@ pub fn plan_spsa(
     Ok(SpsaPlanReport {
         schema_version: SPSA_PLAN_SCHEMA_VERSION,
         schedule_schema_version: SPSA_SCHEDULE_SCHEMA_VERSION,
-        stats_version: primary.stats_version,
+        rng_version: primary.rng_version,
         settings,
         r_end,
         total_games: primary.total_games,
@@ -237,7 +238,7 @@ pub fn plan_spsa(
 }
 
 struct BuiltSchedule {
-    stats_version: u32,
+    rng_version: u32,
     total_games: u64,
     total_pairs: u64,
     wall_time: Option<SpsaWallTimeEstimate>,
@@ -310,7 +311,7 @@ fn build_schedule(
         })
         .collect::<Result<Vec<_>, SpsaPlanError>>()?;
     Ok(BuiltSchedule {
-        stats_version: artifact.stats_version,
+        rng_version: artifact.rng_version,
         total_games,
         total_pairs,
         wall_time,

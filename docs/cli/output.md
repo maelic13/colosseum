@@ -12,7 +12,10 @@ configuration hash, the complete resolved configuration and every exact process
 invocation without starting an engine or playing a game. An invocation is
 represented by separate executable, argument-vector, working-directory,
 environment, UCI-option and CPU-allocation fields. It is deliberately not a
-shell command string: shell quoting is neither exact nor portable.
+shell command string: shell quoting is neither exact nor portable. The
+`invocations` block shows the launch template both engines are started from,
+and `execution.slots` shows the per-slot pinning each concurrent game will
+actually be given.
 
 The command-specific `type` values include:
 
@@ -30,8 +33,10 @@ its dry-run or suite report explicitly.
 Every game Colosseum writes carries its schedule identity in the PGN header:
 `GameNumber`, `PairNumber`, `PairGame`, `OpeningIndex` where a book supplied
 one, and `OpeningLabel`, beside the standard seven tags and `OpeningPlyCount`.
-They are what lets an exported PGN be replayed into the same pentanomial vector
-as the run directory it came from; see [statistics replay](stats.md).
+A run that keeps games it did not count also marks each one with
+`ColosseumSample`. Together they are what lets an exported PGN be replayed into
+the same pentanomial vector as the run directory it came from; see
+[statistics replay](stats.md).
 
 A run directory is one evidence set. `stats <run-dir>` takes its statistics
 from the checkpoint, which stays authoritative, and its search telemetry from

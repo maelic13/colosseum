@@ -721,10 +721,9 @@ impl DurableSprtOutput {
         ] {
             for pair in pairs {
                 for game in [&pair.first, &pair.second] {
-                    writeln!(file, "{{Colosseum sample: {class}}}")
-                        .map_err(|error| error.to_string())?;
-                    writeln!(file, "{}\n", game.pgn.trim_end())
-                        .map_err(|error| error.to_string())?;
+                    let tagged =
+                        with_header_tags(game.pgn.trim_end(), &[("ColosseumSample", class)]);
+                    writeln!(file, "{tagged}\n").map_err(|error| error.to_string())?;
                 }
             }
         }

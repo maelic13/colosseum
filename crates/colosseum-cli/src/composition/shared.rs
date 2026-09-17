@@ -457,6 +457,31 @@ pub(crate) fn configure_ponder(engine: &mut EngineLaunchSpec, ponder: bool) -> R
     Ok(())
 }
 
+/// Add tags to a rendered game's header.
+///
+/// Some facts about a game are only known after it was played: whether its
+/// pair still counted towards the official sample, or which SPSA iteration it
+/// belonged to. They were written as a comment line above the game, which a
+/// PGN reader attributes to whatever came before it — so the marker was there
+/// but no reader could act on it. A tag inside the header can be read.
+pub(crate) fn with_header_tags(pgn: &str, tags: &[(&str, &str)]) -> String {
+    let rendered = tags
+        .iter()
+        .map(|(name, value)| format!("[{name} \"{value}\"]"))
+        .collect::<Vec<_>>();
+    let mut lines = pgn.lines().map(str::to_owned).collect::<Vec<_>>();
+    // The header is the leading run of tag pairs; the blank line after it
+    // separates them from the movetext.
+    let insert = lines
+        .iter()
+        .position(|line| !line.starts_with('['))
+        .unwrap_or(lines.len());
+    for (offset, tag) in rendered.into_iter().enumerate() {
+        lines.insert(insert + offset, tag);
+    }
+    lines.join("\n")
+}
+
 /// Resolve the slot allocation from the two mutually exclusive flags.
 ///
 /// Sharing is the default: without pondering only one engine of a game

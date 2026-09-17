@@ -453,8 +453,9 @@ right" is not a criterion.
   consumer — opening order, SPSA perturbations, bootstrap resampling, position
   order, warm-up scheduling — by a documented derivation from the master seed and
   the stream's **name**, never by sequential draws from one shared generator.
-  The names, the derivation and the generator algorithm are part of
-  `stats_version` and are recorded.
+  The names, the derivation and the generator algorithm are part of the
+  random-stream version (`RNG_VERSION`, recorded as `rng_version`) and not of
+  `stats_version`, which says how a reported statistic is defined.
   Deriving by name rather than by draw order is what makes the streams
   independent: adding a new random consumer, or changing how many values an
   existing one takes, cannot shift any other stream — so a later feature cannot
@@ -466,7 +467,7 @@ right" is not a criterion.
   stable ASCII identifiers. Shuffle, bounded-integer, Rademacher and bootstrap
   sampling algorithms are specified rather than delegated to dependency helper
   APIs, and golden vectors pin derivation and the first samples. A future change
-  requires a `stats_version` change; resume keeps the stored version.
+  requires an `RNG_VERSION` change; resume keeps the stored version.
 - `--dry-run` prints the fully resolved configuration and the exact engine
   invocations without playing a game.
 - In machine-readable mode stdout contains one documented JSON value only;
@@ -1840,7 +1841,8 @@ Fisher–Yates, Rademacher mapping and bootstrap-with-replacement. Independent
 Python-reference-derived vectors pin all built-in names, raw bytes and sampling
 outputs. The CLI retains a configured u64 or obtains OS entropy, inserts the
 generated seed before hashing/writing and exposes the resolved value through the
-application seed port. Built-in `stats_version` is tied to `RNG_VERSION`.
+application seed port. The built-in vectors pin `RNG_VERSION`, which Phase
+10.9d separated from `stats_version` in the artifact that records it.
 
 **Implemented engine diagnosis (2.5):** `engine inspect` launches the supplied
 ordinary executable with direct process controls and reports handshake identity
@@ -2373,6 +2375,28 @@ games" procedure at 10.10, once, on the final state.
   tournament games carry the encounter's real `OpeningIndex`; the SPSA
   schedule artifact's `stats_version` field is renamed to what it holds
   (the RNG version). Items (k) to (n) precede (j).
+
+  **Implementation evidence (Phase 10.9d):** all four defects were the same
+  mistake — the identity was written and the reader guessed anyway. `stats`
+  now groups games by `PairNumber` together with the unit its `PairGame`
+  falls in, so an encounter of four games is two pentanomial units and an
+  encounter of one game is none, and the colour inversion follows every even
+  assignment instead of a hard-coded `2`. The structured reader needed the
+  same correction: a tournament game names its participants by identity
+  rather than by side letter, so before this it scored every game from
+  White's perspective and a checkpoint disagreed with its own PGN. Games a
+  run keeps but does not count now carry `[ColosseumSample "post-terminal"]`
+  or `"invalid"` inside the header — they were marked with a comment line
+  above the game, which a PGN reader attributes to the previous game, so the
+  marker existed but no reader could act on it. A file in which nothing is
+  official is refused with that reason rather than replayed. Tournament games
+  no longer have their identity patched into the rendered text: the driver
+  supplies the encounter, the assignment and the opening it actually chose to
+  the one-game match, which is why `OpeningIndex` was `0` everywhere —
+  `select_encounter` hands the inner match a single-entry book. The SPSA
+  schedule artifact's field is `rng_version` (schema version 2, tune result
+  schema version 3), and the randomness documentation and §5.4 no longer
+  attribute the stream contract to `stats_version`.
 
   **Implementation evidence (Phase 10.9c):** each defect shared one shape,
   treating "a stop was asked for" as "the run did not finish". A match is now

@@ -160,7 +160,9 @@ opportunistic opponent-time search cannot change the nominal fixed work.
 
 Before any game, `spsa-schedule.json` is written, read back and checked against
 the schedule derived from the resolved configuration. It records the exact RNG
-algorithm, seed, draw order and gain constants. `--dry-run` resolves this
+algorithm, seed, draw order and gain constants, and names the random-stream
+version they came from in `rng_version` — how the numbers were drawn, not how
+any reported statistic is defined. `--dry-run` resolves this
 schedule without launching the engine; live UCI-schema validation consequently
 occurs only when the actual run starts.
 
@@ -172,7 +174,10 @@ conditions. The stored iterations, games-per-iteration and `r_end` are
 authoritative on resume, so repeating different values cannot silently change
 the gain schedule. The stored estimator is authoritative as well.
 Logs append, PGN is rebuilt from committed evidence, and
-`run-record.json` publishes each durable iteration after its checkpoint.
+`run-record.json` publishes each durable iteration after its checkpoint. Every
+written game names its iteration in `ColosseumSpsaIteration`, and an
+invalidated iteration's games are kept marked `ColosseumSample "invalid"` so
+[statistics replay](stats.md) leaves them out of the sample.
 
 Gate the completed vector against its original values without editing the
 result file:

@@ -14,8 +14,9 @@ use crate::{EngineInspection, UciOptionSchema};
 pub const DEFAULT_SPSA_ITERATIONS: u32 = 5_000;
 pub const DEFAULT_SPSA_GAMES_PER_ITERATION: u32 = 32;
 /// Version 2 records which estimator produced the vector: the final centre
-/// (the default) or the optional tail-window mean.
-pub const SPSA_TUNE_RESULT_SCHEMA_VERSION: u32 = 2;
+/// (the default) or the optional tail-window mean. Version 3 renames the
+/// copied schedule field to `rng_version`, which is what it holds.
+pub const SPSA_TUNE_RESULT_SCHEMA_VERSION: u32 = 3;
 
 /// Resolved run-wide SPSA sizing. The defaults are useful production values,
 /// not minimums: short development or synthetic runs may use one iteration
@@ -468,7 +469,9 @@ pub enum SpsaEstimator {
 pub struct SpsaTuneResult {
     pub schema_version: u32,
     pub schedule_schema_version: u32,
-    pub stats_version: u32,
+    /// The random-stream version the tune's schedule was drawn from, copied
+    /// from the schedule artifact.
+    pub rng_version: u32,
     pub engine_sha256: String,
     pub settings: SpsaRunSettings,
     pub estimator: SpsaEstimator,
@@ -746,7 +749,7 @@ impl SpsaBoundTune {
         let result = SpsaTuneResult {
             schema_version: SPSA_TUNE_RESULT_SCHEMA_VERSION,
             schedule_schema_version: schedule.schema_version,
-            stats_version: schedule.stats_version,
+            rng_version: schedule.rng_version,
             engine_sha256,
             settings,
             estimator: recorded,
@@ -791,9 +794,9 @@ impl SpsaTuneResult {
                 version: self.schedule_schema_version,
             });
         }
-        if self.stats_version != colosseum_core::rng::RNG_VERSION {
-            return Err(SpsaTuneResultError::UnsupportedStatsVersion {
-                version: self.stats_version,
+        if self.rng_version != colosseum_core::rng::RNG_VERSION {
+            return Err(SpsaTuneResultError::UnsupportedRngVersion {
+                version: self.rng_version,
             });
         }
         self.settings.validate()?;
@@ -1024,8 +1027,8 @@ pub enum SpsaTuneResultError {
     UnsupportedResultSchema { version: u32 },
     #[error("unsupported SPSA schedule schema version {version}")]
     UnsupportedScheduleSchema { version: u32 },
-    #[error("unsupported SPSA statistics version {version}")]
-    UnsupportedStatsVersion { version: u32 },
+    #[error("unsupported SPSA random-stream version {version}")]
+    UnsupportedRngVersion { version: u32 },
     #[error("SPSA tune-result executable SHA-256 must be 64 lowercase hexadecimal characters")]
     InvalidExecutableHash,
     #[error("SPSA tune-result window is inconsistent with its frozen horizon")]
