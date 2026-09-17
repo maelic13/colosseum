@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9c** review defects; 10.10 follows and needs a real machine and the maintainer |
+| Next step | **10.10 — EXIT**, the release acceptance repeat; it needs a real machine and the maintainer |
 | Recommended model | **Sol High** for 10.9a–10.9c and 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -827,7 +827,7 @@ model as well.
   `games.pgn` for telemetry; parser accepts explicit `d=0`/`n=0`; annotated
   fixture regenerated; `stats.md` and `output.md` updated — PLAN §5.4b,
   §5.10, §Phase 10(l)
-- ☐ **10.9c** — **Model: Sol High.** Review defects with regression tests:
+- ☑ **10.9c — DONE** — **Model: Sol High.** Review defects with regression tests:
   late-interrupt verdicts for `match` (`match_runner.rs` completion guard)
   and `sprt` (`sprt_runner.rs` cap verdict), `suite` cancelled exit code,
   idempotent `--stop-after-iteration` on resume, one bounded stop grace

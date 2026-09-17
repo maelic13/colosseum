@@ -385,7 +385,11 @@ async fn prepare_and_run(
             );
         }
     }
-    Ok(if report.failed > 0 || report.malformed > 0 {
+    // A run that recorded itself cancelled exits like every other driver does,
+    // so a script sees the same code whichever command it interrupted.
+    Ok(if final_status == RunStatus::Cancelled {
+        ExitCode::from(crate::composition::CANCELLED_EXIT_CODE)
+    } else if report.failed > 0 || report.malformed > 0 {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS

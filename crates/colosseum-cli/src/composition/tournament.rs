@@ -400,6 +400,22 @@ pub(crate) async fn run_tournament_command(
             return ExitCode::from(2);
         }
     };
+    // --anchor pins a participant at its own --rating and --fixed pins one at
+    // a rating you supply. Naming the same participant through both says two
+    // different things about one rating, and resolving that silently would
+    // decide for the user which one the result means.
+    if let Some(anchor) = anchor
+        && let Some(conflict) = fixed_ratings
+            .iter()
+            .find(|fixed| fixed.participant == anchor)
+    {
+        eprintln!(
+            "configuration error: --anchor and --fixed both pin engine {}; --anchor uses its --rating while --fixed asks for {}, so name it once",
+            command.anchor.unwrap_or_default(),
+            conflict.rating
+        );
+        return ExitCode::from(2);
+    }
     let time_control = match resolve_time_control(
         "tournament",
         command.movetime_ms,

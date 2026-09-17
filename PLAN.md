@@ -2364,6 +2364,20 @@ games" procedure at 10.10, once, on the final state.
   commit; `--anchor` together with `--fixed` on the same participant is a
   configuration refusal (exit 2) at resolution and in dry-run. Items (k) to
   (m) precede (j).
+
+  **Implementation evidence (Phase 10.9c):** each defect shared one shape,
+  treating "a stop was asked for" as "the run did not finish". A match is now
+  cancelled only when games are actually missing, and a schedule only when
+  pairs remain below its cap, so a late interrupt cannot take away a verdict
+  already earned. `suite` exits with the cancelled code whenever it records
+  `cancelled`, like every other driver. `--stop-after-iteration N` is checked
+  before an iteration is played, against the cumulative committed count, so
+  repeating the command is a no-op rather than one more iteration each time.
+  The stop grace period has an absolute deadline taken from the interrupt:
+  drivers rebuild that future on every completed unit, and a relative delay
+  meant a run with several slots never reached it. `--anchor` together with
+  `--fixed` on one participant is refused at resolution, before a run
+  directory exists, because the two say different things about one rating.
 - **(j) Release acceptance repeat.** Regenerate the command reference, update
   `CHANGELOG-CLI.md` under 0.1.0, run the Phase 4B oracle replay and the
   Phase 8.1 parity matrix on the corrected source, repeat the short third-party

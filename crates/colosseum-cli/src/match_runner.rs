@@ -711,7 +711,6 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
     for game in &report.games {
         progress.record(game);
     }
-    let mut cancelled = false;
     while (!pending.is_empty() && !cancellation.stopping()) || !workers.is_empty() {
         while !pending.is_empty()
             && !cancellation.stopping()
@@ -742,7 +741,6 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
             joined = workers.join_next() => joined,
             () = cancellation.abandon() => {
                 workers.abort_all();
-                cancelled = true;
                 break;
             }
         };
@@ -777,12 +775,11 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         || report.faults.time_total() > fault_policy.max_time_losses
     {
         report.status = MatchStatus::Invalid;
-    } else if cancelled || cancellation.stopping() || report.games.len() < games as usize {
-        // A stop is only a stop when work is actually left; an interrupt that
-        // arrives after the last game still reports a completed match.
-        if cancellation.stopping() {
-            report.status = MatchStatus::Cancelled;
-        }
+    } else if cancellation.stopping() && report.games.len() < games as usize {
+        // A stop is only a stop when work was actually left undone. An
+        // interrupt that arrives while the last game is being joined still
+        // produced every requested game, and that is a completed match.
+        report.status = MatchStatus::Cancelled;
     }
     Ok(report)
 }

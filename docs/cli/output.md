@@ -51,10 +51,15 @@ For `sprt`, exit `0` is H1, `1` is H0, `4` is capped inconclusive and `5` is an
 invalid experiment. Configuration refusal remains `2` and infrastructure,
 runtime or persistence error remains `3`.
 
-Exit `6` means a durable run stopped cleanly on request instead of reaching its
-terminal state — an interrupt, or `spsa --stop-after-iteration`. Its run record
-is `cancelled`, its checkpoint is written, and the same run directory resumes
+Exit `6` means a durable run stopped cleanly on request **and still had work
+left to do** — an interrupt, or `spsa --stop-after-iteration`. Its run record is
+`cancelled`, its checkpoint is written, and the same run directory resumes
 where it stopped. A clean stop is not a failure and not a statistical
 conclusion: an SPRT that stopped before a boundary or its cap reports
-`cancelled` rather than `inconclusive`. See
-[run directories](run-directories.md) for how stopping works.
+`cancelled` rather than `inconclusive`.
+
+An interrupt that arrives once the last unit has been scored takes nothing
+away. A match that played every requested game is `completed`, and a schedule
+that reached its cap is capped `inconclusive` with exit `4`, because both had
+already earned that verdict. See [run directories](run-directories.md) for how
+stopping works.

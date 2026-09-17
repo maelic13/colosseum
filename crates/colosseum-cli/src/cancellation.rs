@@ -11,8 +11,9 @@
 //! contract exists to prevent.
 
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -35,6 +36,8 @@ pub enum CancelStage {
 pub struct Cancellation {
     stage: Arc<watch::Sender<CancelStage>>,
     grace: Duration,
+    /// When the stop was asked for. The grace period runs from here, once.
+    stopped_at: Arc<OnceLock<Instant>>,
     remaining_units: Option<Arc<AtomicU64>>,
 }
 
@@ -44,6 +47,7 @@ impl Cancellation {
         Self {
             stage: Arc::new(watch::channel(CancelStage::Running).0),
             grace,
+            stopped_at: Arc::new(OnceLock::new()),
             remaining_units: None,
         }
     }
@@ -96,6 +100,8 @@ impl Cancellation {
 
     /// Ask for a clean stop. Repeating it does not escalate.
     pub fn request_stop(&self) {
+        // The first request starts the clock; later ones do not restart it.
+        let _ = self.stopped_at.set(Instant::now());
         self.stage.send_if_modified(|stage| {
             if *stage == CancelStage::Running {
                 *stage = CancelStage::Stopping;
@@ -108,6 +114,7 @@ impl Cancellation {
 
     /// Escalate to abandoning in-flight units now.
     pub fn request_abandon(&self) {
+        let _ = self.stopped_at.set(Instant::now());
         self.stage.send_if_modified(|stage| {
             if *stage == CancelStage::Abandon {
                 false
@@ -121,6 +128,11 @@ impl Cancellation {
     /// Resolve when in-flight units must be abandoned: the grace period after
     /// a stop expired, or a second interrupt arrived. This never resolves
     /// while the run is healthy, so a driver can select on it every iteration.
+    ///
+    /// The deadline is absolute, measured from the interrupt. Drivers rebuild
+    /// this future on every completed unit, so a relative delay would restart
+    /// the grace period each time a game finished and a busy run would never
+    /// reach it at all.
     pub async fn abandon(&self) {
         let mut stage = self.stage.subscribe();
         while *stage.borrow_and_update() == CancelStage::Running {
@@ -133,7 +145,8 @@ impl Cancellation {
         if *stage.borrow() == CancelStage::Abandon {
             return;
         }
-        let grace = tokio::time::sleep(self.grace);
+        let deadline = self.stopped_at.get().copied().unwrap_or_else(Instant::now) + self.grace;
+        let grace = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline));
         tokio::pin!(grace);
         loop {
             tokio::select! {
@@ -234,6 +247,38 @@ mod tests {
             .await
             .expect("a second interrupt must not wait for the grace period");
         assert_eq!(cancellation.stage(), CancelStage::Abandon);
+    }
+
+    /// Drivers rebuild the abandon future every time a unit completes. With
+    /// more than one slot that happens constantly, so a grace period measured
+    /// from each rebuild would never expire and an interrupted run would hang
+    /// on its slowest game instead of stopping.
+    #[tokio::test]
+    async fn the_grace_period_runs_once_from_the_interrupt() {
+        let grace = Duration::from_millis(150);
+        let cancellation = Cancellation::new(grace);
+        cancellation.request_stop();
+        let requested = std::time::Instant::now();
+
+        let mut abandoned = false;
+        for _ in 0..12 {
+            // Each pass is one completed unit re-entering the select.
+            if tokio::time::timeout(Duration::from_millis(30), cancellation.abandon())
+                .await
+                .is_ok()
+            {
+                abandoned = true;
+                break;
+            }
+        }
+        assert!(
+            abandoned,
+            "the grace period restarted on every commit instead of running once"
+        );
+        assert!(
+            requested.elapsed() >= grace,
+            "in-flight work was abandoned before its grace period elapsed"
+        );
     }
 
     #[tokio::test]

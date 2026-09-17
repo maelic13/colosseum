@@ -51,6 +51,10 @@ when you resume the same `--dir`. For SPSA that means the mini-match in flight
 is replayed as a whole, which is what keeps a gain schedule from advancing on a
 partial iteration.
 
+The grace period is one bounded period, measured from the interrupt rather
+than from each game that finishes inside it, so a busy run with several slots
+still stops when the period is up.
+
 A cancelled run is not a failure and not a statistical conclusion. An SPRT that
 stopped before reaching a boundary or its cap reports `cancelled` rather than
 `inconclusive`, because it never sampled far enough to say anything; a

@@ -165,9 +165,14 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
         let mut game_settings = request.game_settings.clone();
         game_settings.engine_a = plus;
         game_settings.engine_b = minus;
-        // An interrupt between iterations stops before committing the engines
-        // to another complete mini-match.
-        if request.cancellation.stopping() {
+        // Stop before committing the engines to another complete mini-match.
+        // The staged limit counts committed iterations cumulatively, including
+        // those a resume replayed, so repeating the same command after a stop
+        // at N plays nothing rather than one more iteration each time.
+        let staged_stop = request
+            .stop_after_iteration
+            .is_some_and(|limit| state.completed_iterations() >= limit);
+        if request.cancellation.stopping() || staged_stop {
             return Ok(SpsaDriverReport {
                 status: SpsaStatus::Cancelled,
                 settings: request.settings,
@@ -244,23 +249,6 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
             .progress
             .completed_iterations
             .store(state.completed_iterations(), Ordering::Relaxed);
-        // A staged stop lands on a committed boundary, so nothing partial is
-        // replayed and the horizon in the checkpoint is unchanged. An
-        // interrupt takes the same path: the current mini-match is the only
-        // work replayed on resume, which the durable-run contract accepts.
-        if request.cancellation.stopping()
-            || request
-                .stop_after_iteration
-                .is_some_and(|limit| state.completed_iterations() >= limit)
-        {
-            return Ok(SpsaDriverReport {
-                status: SpsaStatus::Cancelled,
-                settings: request.settings,
-                completed_iterations,
-                invalid_iteration: None,
-                final_centers: state.centers().to_vec(),
-            });
-        }
     }
 
     Ok(SpsaDriverReport {

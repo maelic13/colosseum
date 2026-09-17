@@ -118,6 +118,11 @@ stored horizon is untouched: resuming the same `--dir` continues towards the
 original number of iterations. Use it to take a look at a long tune, or to
 stop one at a planned point without pretending it finished.
 
+**`N` is cumulative**, counted against every iteration the run directory holds,
+including those a resume replayed. Repeating the same command therefore plays
+nothing once the tune has reached `N`; raise the number to go further, in the
+same way you would name a larger checkpoint to stop at.
+
 One floating-point centre vector is retained throughout the run. For each
 iteration Colosseum derives deterministic plus/minus integer option vectors,
 plays the same openings with colours reversed, and applies an update only after

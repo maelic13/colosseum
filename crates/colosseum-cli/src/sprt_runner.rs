@@ -177,8 +177,13 @@ pub async fn run_pair_schedule(
             }
         }
     }
+    // A stop only cancels a schedule that still had pairs to play. Reaching
+    // the cap is an inconclusive result in its own right, and an interrupt
+    // arriving while the final pair is being joined does not take that away.
+    let stopped = cancelled || request.cancellation.stopping();
+    let cancelled = stopped && (official_pairs.len() as u32) < request.design.max_pairs;
     Ok(PairScheduleReport {
-        cancelled: cancelled || request.cancellation.stopping(),
+        cancelled,
         max_pairs: request.design.max_pairs,
         official_pairs,
         post_terminal_pairs,
