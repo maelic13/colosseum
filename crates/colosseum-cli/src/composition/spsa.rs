@@ -225,8 +225,10 @@ pub(crate) struct SpsaConditions {
     pub(crate) run_directory: Option<PathBuf>,
     #[arg(long, requires = "run_directory")]
     pub(crate) restart: bool,
-    /// Committed iterations between progress blocks on standard error.
-    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..))]
+    /// Committed iterations between progress blocks on standard error. One
+    /// block per iteration: a mini-match takes about half a minute, which is a
+    /// useful pulse and no flood, and a run is never silent at its start.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) progress_every: u64,
     /// Shortest time between two progress blocks. A run whose iterations
     /// finish faster than this coalesces them instead of flooding the console.
@@ -1460,55 +1462,68 @@ pub(crate) fn spsa_progress_block(
         Some(total),
         schedule.elapsed(),
     );
-    block
-        .field(
-            "time remaining",
-            match progress::time_for_units(
-                schedule.units_since_start(done),
-                schedule.elapsed(),
-                total.saturating_sub(done),
-            ) {
-                Some(left) => progress::format_duration(left.as_secs_f64()),
-                None => "unknown".to_owned(),
-            },
-        )
-        .field(
-            "faults",
+    let games_per_iteration = u64::from(settings.games_per_iteration);
+    let since_start = schedule.units_since_start(done);
+    let elapsed = schedule.elapsed().as_secs_f64();
+    block.field(
+        "games",
+        (observer.iterations_played() * games_per_iteration).to_string(),
+    );
+    if since_start > 0 && elapsed > 0.0 {
+        block.field(
+            "rate",
             format!(
-                "time {}/{}, other {}/{}; {}",
-                faults.time_losses_a,
-                faults.time_losses_b,
-                faults.engine_a.saturating_sub(faults.time_losses_a),
-                faults.engine_b.saturating_sub(faults.time_losses_b),
-                fault_allowance_text(
-                    fault_policy,
-                    faults,
-                    observer.iterations_played() * u64::from(settings.games_per_iteration)
-                )
+                "{}/iteration, {:.0} games/hour",
+                progress::format_duration(elapsed / since_start as f64),
+                (since_start * games_per_iteration) as f64 * 3600.0 / elapsed
             ),
         );
-    match &last {
-        Some(iteration) => {
-            block
-                .field("at a rail", centres.at_a_rail(&iteration.centers_after))
-                .field(
-                    "moved most since start",
-                    centres
-                        .moves_since_start(&iteration.centers_after)
-                        .unwrap_or_else(|| "nothing yet".to_owned()),
-                );
-            for (label, value) in spsa_iteration_detail(
-                iteration,
-                centres.moves_since_last_block(&iteration.centers_after),
-                "since the previous block",
-            ) {
-                block.detail(label, value);
-            }
-        }
-        None => {
-            block.field("at a rail", "no iteration has committed yet");
-        }
     }
+    block.field(
+        "faults",
+        format!(
+            "time {}/{}, other {}/{}; {}",
+            faults.time_losses_a,
+            faults.time_losses_b,
+            faults.engine_a.saturating_sub(faults.time_losses_a),
+            faults.engine_b.saturating_sub(faults.time_losses_b),
+            fault_allowance_text(
+                fault_policy,
+                faults,
+                observer.iterations_played() * u64::from(settings.games_per_iteration)
+            )
+        ),
+    );
+    if let Some(iteration) = &last {
+        // A centre at its bound is being measured wrongly, which is worth
+        // interrupting a tune for; "none" is not worth a line.
+        let railed = centres.at_a_rail(&iteration.centers_after);
+        if railed != "none" {
+            block.field("at a rail", railed);
+        }
+        for (label, value) in spsa_iteration_detail(
+            iteration,
+            centres.moves_since_last_block(&iteration.centers_after),
+            "since the previous block",
+        ) {
+            block.detail(label, value);
+        }
+        block.detail(
+            "moved most since start",
+            centres
+                .moves_since_start(&iteration.centers_after)
+                .unwrap_or_else(|| "nothing yet".to_owned()),
+        );
+    }
+    // Last, so the eye finds it in the same place on every block.
+    block.field(
+        "time remaining",
+        match progress::time_for_units(since_start, schedule.elapsed(), total.saturating_sub(done))
+        {
+            Some(left) => progress::format_duration(left.as_secs_f64()),
+            None => "unknown".to_owned(),
+        },
+    );
     block
 }
 
@@ -1910,17 +1925,62 @@ fn spsa_railed_parameters(report: &SpsaReport) -> String {
 }
 
 pub(crate) fn print_spsa(report: &SpsaReport, run_directory: &Path) {
-    println!("SPSA {}", spsa_verdict(report.driver.status));
+    let settings = report.driver.settings;
+    let committed = report.driver.completed_iterations.len() as u64;
+    let games = committed * u64::from(settings.games_per_iteration);
+    let faults = spsa_faults(&spsa_driver::SpsaCheckpoint {
+        completed_iterations: report.driver.completed_iterations.clone(),
+        invalid_iteration: report.driver.invalid_iteration.clone(),
+    });
+    let games_played = (committed + u64::from(report.driver.invalid_iteration.is_some()))
+        * u64::from(settings.games_per_iteration);
+    let fault_line = format!(
+        "time {}/{}, other {}/{}; {}",
+        faults.time_losses_a,
+        faults.time_losses_b,
+        faults.engine_a.saturating_sub(faults.time_losses_a),
+        faults.engine_b.saturating_sub(faults.time_losses_b),
+        fault_allowance_text(report.fault_policy, faults, games_played)
+    );
+    // An absolute path: the reader may be in any directory when they come back.
+    let files = dunce::canonicalize(run_directory)
+        .unwrap_or_else(|_| run_directory.to_path_buf())
+        .display()
+        .to_string();
+    let rule = "-".repeat(50);
 
+    if report.driver.status != spsa_driver::SpsaStatus::Completed {
+        // A stopped or invalid tune has no result to tabulate; `spsa status`
+        // shows where every parameter stands at any time.
+        println!("{rule}");
+        match (&report.driver.status, &report.driver.invalid_iteration) {
+            (spsa_driver::SpsaStatus::Invalid, Some(invalid)) => println!(
+                "SPSA invalid at iteration {} of {}: {}. No values were taken from it.",
+                invalid.iteration + 1,
+                settings.iterations,
+                invalid.reason
+            ),
+            (spsa_driver::SpsaStatus::Invalid, None) => println!(
+                "SPSA invalid after iteration {committed} of {}.",
+                settings.iterations
+            ),
+            _ => println!(
+                "SPSA stopped after iteration {committed} of {}. Nothing is lost; run the same command again to resume.",
+                settings.iterations
+            ),
+        }
+        println!("  games    {games} played");
+        println!("  faults   {fault_line}");
+        println!("  files    {files}");
+        return;
+    }
+
+    println!(
+        "SPSA finished: {committed} of {} iterations, {games} games",
+        settings.iterations
+    );
     let rows = spsa_result_rows(report);
-    let headers = [
-        "parameter",
-        "initial",
-        "tuned",
-        "estimate",
-        "delta",
-        "range",
-    ];
+    let headers = ["parameter", "start", "tuned", "exact", "change", "range"];
     let columns: Vec<Vec<&str>> = vec![
         rows.iter().map(|row| row.parameter.as_str()).collect(),
         rows.iter().map(|row| row.initial.as_str()).collect(),
@@ -1974,60 +2034,26 @@ pub(crate) fn print_spsa(report: &SpsaReport, run_directory: &Path) {
             ])
         );
     }
-
+    println!("{rule}");
     println!(
-        "estimator: {}",
+        "  tuned      {}",
         match report.tuned_result.as_ref().map(|result| &result.estimator) {
-            Some(SpsaEstimator::FinalCenter { iteration }) =>
-                format!("rounded centre vector after iteration {iteration}"),
+            Some(SpsaEstimator::FinalCenter { .. }) =>
+                "the values the tune ended on, rounded to whole numbers".to_owned(),
             Some(SpsaEstimator::TailWindowMean(window)) => format!(
-                "rounded mean of {} from the final {}% window",
-                progress::plural(u64::from(window.samples_used), "sample"),
+                "the average of the last {}% of iterations, rounded to whole numbers",
                 window.percent
             ),
-            None => "none: this tune produced no vector".to_owned(),
+            None => "none: this tune produced no values".to_owned(),
         }
     );
-    let committed = report.driver.completed_iterations.len();
-    println!(
-        "iterations: {} of {} committed; games: {}",
-        committed,
-        report.driver.settings.iterations,
-        committed as u64 * u64::from(report.driver.settings.games_per_iteration)
-    );
-    let faults = spsa_faults(&spsa_driver::SpsaCheckpoint {
-        completed_iterations: report.driver.completed_iterations.clone(),
-        invalid_iteration: report.driver.invalid_iteration.clone(),
-    });
-    let games_played = (committed as u64 + u64::from(report.driver.invalid_iteration.is_some()))
-        * u64::from(report.driver.settings.games_per_iteration);
-    println!(
-        "faults: time {}/{}, other {}/{}; {}",
-        faults.time_losses_a,
-        faults.time_losses_b,
-        faults.engine_a.saturating_sub(faults.time_losses_a),
-        faults.engine_b.saturating_sub(faults.time_losses_b),
-        fault_allowance_text(report.fault_policy, faults, games_played)
-    );
-    if let Some(invalid) = &report.driver.invalid_iteration {
-        println!(
-            "iteration {} invalid: {}; no gradient applied",
-            invalid.iteration, invalid.reason
-        );
-    }
-    println!("centres at a rail: {}", spsa_railed_parameters(report));
-    println!("artifacts: {}", run_directory.display());
-}
-
-/// The run's outcome in the words a reader uses for it.
-fn spsa_verdict(status: spsa_driver::SpsaStatus) -> &'static str {
-    match status {
-        spsa_driver::SpsaStatus::Completed => "completed",
-        spsa_driver::SpsaStatus::Cancelled => {
-            "cancelled - stopped cleanly at an iteration boundary"
-        }
-        spsa_driver::SpsaStatus::Invalid => "invalid - an engine fault invalidated a mini-match",
-    }
+    println!("  faults     {fault_line}");
+    println!("  at a rail  {}", spsa_railed_parameters(report));
+    println!("  files      {files}");
+    println!("             tuned-options.txt   setoption lines, ready to paste");
+    println!("             tuned-options.toml  the same as a run-file fragment");
+    println!("             result.json         full record");
+    println!("  next       verify the tuned values with an SPRT against the start values");
 }
 
 pub(crate) fn print_spsa_tune_warning(warning: &SpsaTuneWarning) {

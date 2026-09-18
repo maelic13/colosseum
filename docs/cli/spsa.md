@@ -173,15 +173,21 @@ schedule without launching the engine; live UCI-schema validation consequently
 occurs only when the actual run starts.
 
 Progress is written to stderr every `--progress-every N` committed iterations
-(default 10) and once more at termination:
+(default 1, about one block per half minute at 32 games per iteration) and once
+more at termination:
 
 ```text
 progress [spsa]: 400/2000 iterations (20%), 41m12s elapsed
-  time remaining          2h44m
-  faults                  time 1/0, other 0/0; 1 of 64 allowed
-  at a rail               none
-  moved most since start  Hash +0.1840, Threads -0.0625, MoveOverhead +0.0090
+  games           12800
+  rate            6s/iteration, 18640 games/hour
+  faults          time 1/0, other 0/0; 1 of 64 allowed
+  time remaining  2h44m
 ```
+
+An `at a rail` line appears only when a centre sits at one of its bounds, and
+names it: that knob is being measured wrongly and is the one thing worth
+stopping a tune for. How far each knob has travelled since the start is in
+`run.log` and in `spsa status`, not on the console.
 
 The remaining time is a linear projection of the rate observed so far and
 reads `0s` once the horizon is reached. Movement is measured as a fraction of
@@ -195,26 +201,43 @@ perturbation scale that iteration used, and what moved since the previous
 block — is recorded in `run.log` and printed by `spsa status`, not by every
 block on the console.
 
-The final report is one table in tune-file order:
+The final report of a completed tune is one table in tune-file order, a rule,
+and a short footer:
 
 ```text
-SPSA completed
-parameter     initial  tuned  estimate  delta    range
-Hash               16    204  203.6412   +188  1..1024
-Threads             4      3    3.4410     -1    1..16
-estimator: rounded centre vector after iteration 1999
-iterations: 2000 of 2000 committed; games: 64000
-faults: time 0/0, other 0/0; 0 of 320 allowed
-centres at a rail: none
-artifacts: ./colosseum-runs/spsa-...
+SPSA finished: 2000 of 2000 iterations, 64000 games
+parameter  start  tuned     exact  change    range
+Hash          16    204  203.6412    +188  1..1024
+Threads        4      3    3.4410      -1    1..16
+--------------------------------------------------
+  tuned      the values the tune ended on, rounded to whole numbers
+  faults     time 0/0, other 0/0; 0 of 320 allowed
+  at a rail  none
+  files      /home/you/engine/colosseum-runs/spsa-...
+             tuned-options.txt   setoption lines, ready to paste
+             tuned-options.toml  the same as a run-file fragment
+             result.json         full record
+  next       verify the tuned values with an SPRT against the start values
 ```
 
-`estimate` is the unrounded value the estimator produced and `tuned` is the
-integer a UCI engine is given; `delta` is that integer against the tune file's
+`exact` is the unrounded value the tune ended on and `tuned` is the integer a
+UCI engine is given; `change` is that integer against the tune file's
 `initial`, and `range` is the knob's own bounds, so a value that has reached
-one is visible. `centres at a rail` names every knob whose tuned value sits on
-a bound, where the gradient was one-sided. The paste-ready forms remain the
-three `tuned-options` artifacts below.
+one is visible. `at a rail` names every knob whose tuned value sits on a bound,
+where the gradient was one-sided. With `--final-window-percent` the `tuned`
+line says the values are an average of the last stretch instead. The path is
+absolute, because the reader may be anywhere when they come back to it.
+
+A tune that was stopped prints no table, since partial values are not a
+result; `spsa status` shows where every parameter stands at any time:
+
+```text
+--------------------------------------------------
+SPSA stopped after iteration 24 of 60. Nothing is lost; run the same command again to resume.
+  games    768 played
+  faults   time 0/0, other 0/0; 0 of 3 allowed
+  files    /home/you/engine/colosseum-runs/spsa-...
+```
 
 Use `--dir PATH` for an explicitly resumable run. The journal records every
 game with its iteration, and a resume rebuilds the completed iterations from

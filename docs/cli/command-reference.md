@@ -723,9 +723,9 @@ Options:
 
 
       --progress-every <PROGRESS_EVERY>
-          Committed iterations between progress blocks on standard error
+          Committed iterations between progress blocks on standard error. One block per iteration: a mini-match takes about half a minute, which is a useful pulse and no flood, and a run is never silent at its start
 
-          [default: 10]
+          [default: 1]
 
       --progress-min-secs <PROGRESS_MIN_SECS>
           Shortest time between two progress blocks. A run whose iterations finish faster than this coalesces them instead of flooding the console

@@ -459,17 +459,25 @@ fn a_tune_block_reports_progress_and_records_its_trajectory() {
         last.starts_with("progress [spsa]: 4/4 iterations (100%),"),
         "{last}"
     );
-    for field in [
-        "time remaining",
-        "faults",
-        "at a rail",
-        "moved most since start",
-    ] {
+    for field in ["games", "faults", "time remaining"] {
         assert!(last.contains(field), "{field} missing from:\n{last}");
     }
-    assert!(last.contains("Hash "), "the knob is named in:\n{last}");
-    // The trajectory is not on the console.
-    for absent in ["last mini-match", "perturbation scale", "schedule"] {
+    assert!(
+        last.trim_end()
+            .lines()
+            .last()
+            .unwrap()
+            .contains("time remaining"),
+        "time remaining is the last line of:\n{last}"
+    );
+    // The trajectory is not on the console, and a rail line appears only
+    // when a centre is at one.
+    for absent in [
+        "last mini-match",
+        "perturbation scale",
+        "schedule",
+        "moved most since start",
+    ] {
         assert!(!last.contains(absent), "{absent} was printed:\n{last}");
     }
 
@@ -487,7 +495,12 @@ fn a_tune_block_reports_progress_and_records_its_trajectory() {
         .collect::<Vec<_>>();
     assert_eq!(
         labels,
-        ["last mini-match", "schedule", "moved most"],
+        [
+            "last mini-match",
+            "schedule",
+            "moved most",
+            "moved most since start"
+        ],
         "{recorded}"
     );
     assert!(
@@ -508,13 +521,24 @@ fn a_tune_block_reports_progress_and_records_its_trajectory() {
 
     // The final report is one table and a footer, with no per-parameter list.
     let report = String::from_utf8_lossy(&output.stdout).into_owned();
-    assert!(report.contains("SPSA completed"), "{report}");
     assert!(
-        report.contains("parameter  initial  tuned  estimate  delta"),
+        report.contains("SPSA finished: 4 of 4 iterations"),
         "{report}"
     );
-    assert!(report.contains("estimator: "), "{report}");
-    assert!(report.contains("centres at a rail: "), "{report}");
+    // Column widths follow the values, so compare the header's words.
+    assert!(
+        report
+            .lines()
+            .any(|line| line.split_whitespace().collect::<Vec<_>>()
+                == ["parameter", "start", "tuned", "exact", "change", "range"]),
+        "{report}"
+    );
+    assert!(
+        report.contains("the values the tune ended on, rounded to whole numbers"),
+        "{report}"
+    );
+    assert!(report.contains("  at a rail  "), "{report}");
+    assert!(report.contains("tuned-options.txt"), "{report}");
     assert!(!report.contains("setoption name"), "{report}");
 }
 
