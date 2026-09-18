@@ -2817,7 +2817,12 @@ games" procedure at 10.10, once, on the final state.
   refuses a `result.json` given as a file; a run file's `iterations` clashes
   with `--total-games` on the command line instead of being overridden. The
   maintainer's 60-iteration tune at 15 slots and 30 games per iteration is
-  the throughput evidence for (x); its figures are recorded here.
+  the throughput evidence for (x). **Measured 2026-09-18:** 1,800 games,
+  23.9 s per iteration, 4,517 games per hour (weather-factory on the same
+  surface 3,720; Colosseum before (x) and the shared book 2,745); slot
+  occupancy inside an iteration 83% against 81% modelled; all 15 launches of
+  a wave within a millisecond; no gap between iterations; no overlapping
+  slot spans; no time loss or other fault at 15 slots.
 - **(ab) Qualification on a real engine is part of the release, and lives
   here.** A project that adopts the harness must be able to trust a
   released binary without re-testing it, so the evidence that the harness
@@ -2852,7 +2857,59 @@ games" procedure at 10.10, once, on the final state.
   it concludes, then (ab) inside (j). Item (r), placement per platform, is
   recommended for deferral behind the release with the limitation stated in
   the release notes, since the reference platform is Windows; the
-  maintainer decides. Items (k) to (ab) precede (j).
+  maintainer decides.
+- **(ac) Harness time that belongs to neither clock.** The same tune missed
+  its predicted 4,860 games per hour by 7%, and not through the engines:
+  moves per game (122) and charged time per game (8.6 s) were identical to
+  the 14-slot run, and harness overhead inside the charged interval was
+  unchanged (`h=` median 1 ms, 99th percentile 21 ms). What grew is the
+  time per game outside both clocks, slot span minus charged time: 0.30 s at
+  14 pair-held slots, 1.22 s at 15 per-game slots, 2.5 against 10 ms per
+  move. It costs no fairness and 9% of throughput. Established so far: it
+  grows with concurrency in short runs (6.9, 12.9 and 21.5 ms per move at
+  8, 14 and 15 slots); raising the harness's priority class changes nothing
+  (15.4 against 14.2), so it is not CPU scheduling; one engine reaches
+  `readyok` in 18 ms alone and in 190 ms inside a burst of thirty, and since
+  the shared-book fix every wave starts thirty processes in the same
+  millisecond, which explains part of it and not all. Required: the journal
+  records, per game, start-up (slot taken to first `go`), play (first `go`
+  to last `bestmove`), the uncharged part of play, and teardown (last
+  `bestmove` to both processes exited); `stats` reports their distribution;
+  then the largest phase is reduced and the measurement repeated. The
+  candidate mechanism, shared with (w), is what fastchess does: keep each
+  slot's two engine processes alive between games (`ucinewgame`, options
+  re-sent when they change, as an SPSA iteration does), restarting on any
+  fault, on request, and always between different executables, with fresh
+  processes per game remaining selectable for crash isolation. Success
+  criterion on the reference host: uncharged time under 0.3 s per game at
+  15 slots, and no change in the `h=` distribution or the fault rate.
+- **(ad) Overlapped SPSA iterations, a recorded mode that is off until its
+  evidence is in.** The iteration tail is the last structural loss: 17% of
+  slot-time at 30 games on 15 slots, because the next iteration may not
+  start until the last game of this one has returned. It exists only in
+  `spsa`; `match`, `sprt`, `calibrate` and `tournament` already hand every
+  freed slot to the next unit for the whole run and have nothing to gain.
+  The mode: when a slot frees and the current iteration has no game left to
+  launch, launch the next iteration's games at once, perturbed around the
+  newest committed centre, which is one update behind; updates are applied
+  strictly in iteration order from whole mini-matches; staleness is bounded
+  at one update and recorded per iteration; `--overlap 1`, default 0;
+  resume replays whole iterations as today. Why the cost should be small:
+  one update moves a centre by `c × r × score`, a few percent of the
+  perturbation `c` early in a tune and about one percent late, so a gradient
+  measured around the previous centre is measured a small fraction of the
+  probe distance from where it is applied; fishtest tunes this way with far
+  larger staleness. Why that is not yet evidence here: fit quality is the
+  purpose of a tune and outranks throughput. Required before the default
+  may change: (1) a zero-game study on noisy synthetic objectives (separable
+  and coupled quadratics, 80 parameters, the real schedule and mini-match
+  noise), synchronous against overlapped over many seeds, reporting final
+  distance to the optimum and its spread; (2) the recovery test of (ab) run
+  in both modes from the same detuned start and budget, each gated by
+  `sprt --apply`; adopt as the tuning default only if overlapped recovers no
+  worse in both. Expected gain: occupancy from 83% towards 97%, about 15%
+  more games per hour. Items (k) to (ad) precede (j), with (ad) allowed to
+  follow the release if its evidence is not in.
 
   **Implementation evidence (Phase 10.9n):** `play_mini_match` now takes a
   slot from the run's pool per game: games are launched in schedule order

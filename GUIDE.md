@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9q** corrections, **10.9m** the fastchess study, **10.9r** qualification on a real engine (maintainer-run), then **10.10 — EXIT** (merge, tag); 10.9p deferred and 10.9h recommended for deferral behind the release |
+| Next step | **10.9q** corrections, **10.9s** uncharged harness time, **10.9m** the fastchess study, **10.9t** overlapped SPSA (study first, may follow the release), **10.9r** qualification on a real engine (maintainer-run), then **10.10 — EXIT**; 10.9p deferred, 10.9h recommended for deferral |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -964,6 +964,19 @@ model as well.
   Linux isolated-core and IRQ-affinity detection and preference, macOS
   advisory contract, WSL excluded as evidence; implementation follows as
   its own step if the note calls for it — PLAN §Phase 10(r)
+- ☐ **10.9s** — **Model: Sol High.** Harness time that belongs to neither
+  clock: per-game start-up, play, uncharged play and teardown in the journal
+  and in `stats`; reduce the largest phase, with persistent engine processes
+  per slot as the candidate (fresh processes stay selectable); target under
+  0.3 s uncharged per game at 15 slots (measured 1.22 s, 9% of throughput)
+  with `h=` and the fault rate unchanged — PLAN §Phase 10(ac)
+- ☐ **10.9t** — **Model: Sol High.** Overlapped SPSA iterations, `--overlap 1`,
+  default off: next iteration's games start on freed slots around the newest
+  committed centre, updates in order, staleness bounded at one and recorded;
+  zero-game study on noisy synthetic objectives over many seeds, then the
+  recovery test in both modes; becomes the tuning default only if it
+  recovers no worse; `spsa` only, the other commands have no tail; may
+  follow the release — PLAN §Phase 10(ad)
 - ☐ **10.9r** — **Model: Sol High.** Qualification on a real engine, part of
   the release and recorded in `docs/architecture/phase-10-qualification.md`:
   maintainer-run on the release candidate, one command at a time, each
