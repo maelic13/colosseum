@@ -2664,7 +2664,35 @@ games" procedure at 10.10, once, on the final state.
   reference host, or a documented operating-system floor that fastchess
   shares. This does not block use: a symmetric forfeit per thousand games
   moves an estimate by a small fraction of its error bar, and (v) keeps a
-  sequential test alive through one. Items (k) to (w) precede (j).
+  sequential test alive through one.
+- **(x) An SPSA iteration must fill the machine.** Measured on a real 60-
+  iteration tune at 14 slots, 32 games per iteration, mean game 8.9 s: mean
+  iteration 38.4 s where 32 games on 14 slots need about 20 s, slot occupancy
+  inside an iteration 53%, 2,900 games per hour against 5,500 for a fixed
+  match. Cause: (u) made the colour-reversed pair the slot-holding unit for
+  `spsa` as for `sprt`, so 16 pairs on 14 slots run as 14 pairs back to back
+  and then 2 more while 12 slots idle, and the update must wait for them.
+  For `sprt` the pair stays the unit. For `spsa` it buys nothing: both arms
+  play in every game and slots are identical by construction. Required:
+  within an iteration every game takes a free slot individually, in schedule
+  order; the two games of a pair may run on different slots and at the same
+  time; the iteration is still committed atomically and the gradient still
+  uses whole pairs, reassembled by pair identity; a fault policy decision is
+  still made on the whole mini-match. `spsa plan` and the dry run report the
+  wave shape for the resolved concurrency (games per wave, slots idle in the
+  last wave, expected occupancy) and warn when games per iteration is not a
+  multiple of the slot count, naming the nearest even multiples; its
+  wall-time estimate uses waves. Test: a stub iteration with more pairs than
+  slots and uneven game lengths whose slot occupancy is asserted, and which
+  fails on pair-held slots. Success criterion on the reference host: a tune at
+  14 slots and 42 games per iteration, or 15 slots and 30, holds occupancy
+  above 85% and exceeds 5,000 games per hour. **Deferred to after the
+  release, as research:** asynchronous SPSA in the fishtest manner, where the
+  next games start on free slots with the current parameters and results are
+  applied as they return; it removes the iteration barrier at any mini-match
+  size but updates on slightly stale parameters and gives up the one
+  iteration, one update record, so it needs its own evidence that it reaches
+  the same optimum for less game budget. Items (k) to (x) precede (j).
 
   **Implementation evidence (Phase 10.9l):** `FaultPolicy` gained an
   optional `rate` (`FaultRate`: per mille, and which of the engine-fault and
