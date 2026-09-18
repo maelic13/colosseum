@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9h** placement per platform research note, then **10.10 — EXIT**, which needs a real machine and the maintainer |
+| Next step | **10.9i** writer hardening, then 10.9h, then **10.10 — EXIT**, which needs a real machine and the maintainer; the maintainer's 2,000-game 3+0.03 run with the 10.9j instrument is owed |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -881,14 +881,16 @@ model as well.
   `--restart` guidance; over-long protocol line a per-read fault; unscorable
   games keep their pair or iteration class in the journal; regression test
   per item — PLAN §Phase 10(s)
-- ☐ **10.9j** — **Model: Sol High.** Round-trip latency instrument: per-move
+- ☑ **10.9j — DONE** — **Model: Sol High.** Round-trip latency instrument: per-move
   phase stamps (`go` stamped, write returned, first and last `info` with
   the engine's reported time, `bestmove` arrived, consumed) taken by the
   thread doing each step; per-side maxima in the journal, `h=<ms>` overhead
   in `games.pgn`, full breakdown of the last five moves in a forfeit
   forensic, overhead distribution and over-margin count in `stats`; the
   maintainer's 2,000-game 3+0.03 run then names the guilty phase — PLAN
-  §Phase 10(t)
+  §Phase 10(t). **Owed, maintainer-run on the 16-core host:** the
+  2,000-game 3+0.03 match at 14 slots, read with `stats` and the forfeit
+  forensics, naming the phase that carries every overhead above 20 ms
 - ☐ **10.9h** — **Model: Sol High.** Placement per platform research note:
   Linux isolated-core and IRQ-affinity detection and preference, macOS
   advisory contract, WSL excluded as evidence; implementation follows as

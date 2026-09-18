@@ -10,7 +10,7 @@ use colosseum_core::{GameResult, Termination};
 /// A reader that knows this identifier knows exactly which fields a comment
 /// can contain and how they are spelled, so a PGN taken months apart stays
 /// interpretable. It is recorded in every run record.
-pub const PGN_ANNOTATION_WRITER: &str = "colosseum-move-comment/1";
+pub const PGN_ANNOTATION_WRITER: &str = "colosseum-move-comment/2";
 
 /// A score as the mover reported it, from the mover's own point of view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +41,9 @@ pub struct SearchAnnotation {
     pub depth: Option<u32>,
     /// Harness-charged elapsed milliseconds, per the recorded clock model.
     pub time_ms: Option<u64>,
+    /// Harness overhead: the charged milliseconds minus the time the engine
+    /// reported. Absent when the engine reported no time.
+    pub overhead_ms: Option<i64>,
     pub nodes: Option<u64>,
 }
 
@@ -54,8 +57,8 @@ pub enum MoveAnnotation {
 }
 
 impl MoveAnnotation {
-    /// Render `{book}` or `{s=… d=… t=…ms n=…}`, or nothing when an engine
-    /// move carries no reported field at all.
+    /// Render `{book}` or `{s=… d=… t=…ms h=…ms n=…}`, or nothing when an
+    /// engine move carries no reported field at all.
     fn render(self) -> Option<String> {
         match self {
             Self::Book => Some("{book}".into()),
@@ -69,6 +72,9 @@ impl MoveAnnotation {
                 }
                 if let Some(time_ms) = search.time_ms {
                     fields.push(format!("t={time_ms}ms"));
+                }
+                if let Some(overhead_ms) = search.overhead_ms {
+                    fields.push(format!("h={overhead_ms}ms"));
                 }
                 if let Some(nodes) = search.nodes {
                     fields.push(format!("n={nodes}"));
@@ -118,6 +124,10 @@ pub struct PgnTags {
     pub opening_plies: u32,
     /// Schedule identity, for exports that can supply it.
     pub identity: Option<GamePairIdentity>,
+    /// The time margins, White's then Black's, in milliseconds: how far a
+    /// move's charged time may exceed the clock before it forfeits. With the
+    /// per-move `h=`, they say how close each move came.
+    pub time_margins_ms: Option<[u64; 2]>,
 }
 
 /// Render a complete PGN game (header + movetext + result token).
@@ -161,6 +171,10 @@ pub fn build_pgn(tags: &PgnTags, san_moves: &[String], annotations: &[MoveAnnota
             tag("OpeningIndex", &index.to_string());
         }
         tag("OpeningLabel", &identity.opening_label);
+    }
+    if let Some([white, black]) = tags.time_margins_ms {
+        tag("WhiteTimeMarginMs", &white.to_string());
+        tag("BlackTimeMarginMs", &black.to_string());
     }
 
     let (start_move, black_first) = fen_move_context(tags.fen.as_deref());
@@ -282,12 +296,15 @@ mod tests {
             fen: None,
             identity: None,
             opening_plies: 2,
+            time_margins_ms: Some([20, 25]),
         };
         let pgn = build_pgn(&tags, &["e4".into(), "e5".into(), "Qh5".into()], &[]);
         assert!(pgn.contains("[White \"Stockfish\"]"));
         assert!(pgn.contains("[Result \"1-0\"]"));
         assert!(pgn.contains("[Termination \"normal\"]"));
         assert!(pgn.contains("[OpeningPlyCount \"2\"]"));
+        assert!(pgn.contains("[WhiteTimeMarginMs \"20\"]"));
+        assert!(pgn.contains("[BlackTimeMarginMs \"25\"]"));
         assert!(pgn.contains("1. e4 e5 2. Qh5"));
         assert!(pgn.trim_end().ends_with("1-0"));
     }
@@ -308,6 +325,7 @@ mod tests {
             fen: Some("rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2".into()),
             identity: None,
             opening_plies: 0,
+            time_margins_ms: None,
         };
         let pgn = build_pgn(&tags, &["Nc6".into(), "Bb5".into(), "a6".into()], &[]);
         // Black moves first at move 2, then White's move 3, then Black's move 3.
@@ -331,9 +349,29 @@ mod tests {
             fen: None,
             identity: None,
             opening_plies: 0,
+            time_margins_ms: None,
         };
         let pgn = build_pgn(&tags, &[], &[]);
         assert!(pgn.contains("[White \"Engine \\\"X\\\"\"]"));
         assert!(!pgn.contains("[TimeControl"));
+        assert!(!pgn.contains("MarginMs"));
+    }
+
+    #[test]
+    fn a_search_comment_carries_the_overhead_beside_the_charged_time() {
+        let search = |overhead_ms| {
+            MoveAnnotation::Search(SearchAnnotation {
+                score: Some(AnnotationScore::Centipawns(12)),
+                depth: Some(9),
+                time_ms: Some(57),
+                overhead_ms,
+                nodes: Some(1_000),
+            })
+            .render()
+            .unwrap()
+        };
+        assert_eq!(search(Some(4)), "{s=12 d=9 t=57ms h=4ms n=1000}");
+        assert_eq!(search(Some(-1)), "{s=12 d=9 t=57ms h=-1ms n=1000}");
+        assert_eq!(search(None), "{s=12 d=9 t=57ms n=1000}");
     }
 }

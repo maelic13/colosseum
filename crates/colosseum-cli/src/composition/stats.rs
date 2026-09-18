@@ -147,6 +147,9 @@ pub(crate) fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
                         metric_text(&engine.elapsed_seconds),
                         metric_text(&engine.implied_nps),
                     );
+                    if let Some(line) = overhead_text(&engine.harness_overhead_ms) {
+                        println!("{}: {line}", engine.engine);
+                    }
                 }
             }
             ExitCode::SUCCESS
@@ -156,6 +159,28 @@ pub(crate) fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The harness overhead of an engine's moves in one line, or nothing when the
+/// source carried none.
+pub(crate) fn overhead_text(metric: &crate::pgn_telemetry::OverheadMetric) -> Option<String> {
+    let (Some(p50), Some(p99), Some(p999), Some(max)) =
+        (metric.p50, metric.p99, metric.p999, metric.max)
+    else {
+        return None;
+    };
+    let margin = if metric.moves_with_margin > 0 {
+        format!(
+            "{} of {} moves over the time margin",
+            metric.over_margin, metric.moves_with_margin
+        )
+    } else {
+        "time margin not recorded".to_owned()
+    };
+    Some(format!(
+        "harness overhead p50 {p50:.0} ms, p99 {p99:.0} ms, p999 {p999:.0} ms, max {max:.0} ms over {} moves; {margin}",
+        metric.samples
+    ))
 }
 
 pub(crate) fn metric_text(metric: &crate::pgn_telemetry::TelemetryMetric) -> String {

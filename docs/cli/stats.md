@@ -76,7 +76,7 @@ mainline move comments. It supports exactly these forms:
 {[%depth 18] [%emt 0.250] [%nodes 500000]}
 {depth=18 time=250ms nodes=500000}
 {d=18 t=0.250s n=500000}
-{s=24 d=18 t=250ms n=500000}
+{s=24 d=18 t=250ms h=3ms n=500000}
 ```
 
 The last form is what Colosseum itself writes; see
@@ -85,8 +85,10 @@ elapsed move time in seconds (a `H:M:S` value is also accepted). Key/value
 `time`/`t` requires an explicit `ms` or `s` suffix, and with that suffix a
 zero is read as a real sub-millisecond measurement rather than a placeholder.
 Depth and nodes must be positive integers. `s`/`score` is the mover’s own
-score in centipawns, or `#N` / `#-N` for mate in `N`. Other comments and
-annotation tags are left untouched and ignored by telemetry analysis.
+score in centipawns, or `#N` / `#-N` for mate in `N`. `h` is the harness
+overhead in milliseconds — charged time minus the time the engine reported —
+and may be negative. Other comments and annotation tags are left untouched and
+ignored by telemetry analysis.
 
 An explicit zero is a report, not a missing field: a move commented
 `{s=18 d=0 t=1ms n=0}` counts towards depth, time and node coverage, because
@@ -100,6 +102,21 @@ converted to zero. Implied NPS requires nodes and positive elapsed time on the
 same move. A mate score counts towards score coverage but is deliberately left
 out of the centipawn values: it is a claim about distance to mate, not an
 evaluation on the same scale.
+
+Where moves carry `h=`, each engine also gets its harness-overhead
+distribution: the 50th, 99th and 99.9th percentiles and the maximum, in
+milliseconds, and how many moves' overhead exceeded that side's time margin
+as the game's `WhiteTimeMarginMs` / `BlackTimeMarginMs` tags record it:
+
+```text
+Engine A: harness overhead p50 3 ms, p99 11 ms, p999 164 ms, max 320 ms over 58112 moves; 7 of 58112 moves over the time margin
+```
+
+A move over the margin is a move that would have forfeited had the engine
+spent its whole remaining clock: overhead is time the engine never saw. A PGN
+without the margin tags still gets the distribution, and says the margin was
+not recorded. Percentiles use the nearest rank, so a quantile finer than the
+sample can resolve is the largest value.
 
 ## Pair identity in a Colosseum PGN
 

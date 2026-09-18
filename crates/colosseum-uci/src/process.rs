@@ -22,6 +22,7 @@ use crate::error::UciError;
 use crate::parse;
 use crate::position::{GoLimits, UciPosition};
 use crate::score::Score;
+use crate::timing::SearchTiming;
 
 /// How to launch an engine.
 #[derive(Debug, Clone, Default)]
@@ -118,6 +119,14 @@ pub struct EngineProcess {
     /// A `bestmove` that arrived while pondering (an engine bailing out of
     /// `go ponder` early); consumed by `ponderhit`/`stop_ponder`.
     ponder_early: Option<(String, Option<String>)>,
+    /// The stamps of the most recent search, answered or not, until the
+    /// caller takes them.
+    last_timing: Option<SearchTiming>,
+    /// When the game task last took a line off the reader's channel.
+    last_consumed: Instant,
+    /// A line that arrived after the deadline it was read against. It is not
+    /// an answer, but when it came is evidence.
+    late_line: Option<ArrivedLine>,
 }
 
 impl EngineProcess {
@@ -202,6 +211,9 @@ impl EngineProcess {
             transcript: VecDeque::new(),
             stderr_tail,
             ponder_early: None,
+            last_timing: None,
+            last_consumed: Instant::now(),
+            late_line: None,
         })
     }
 
@@ -333,7 +345,9 @@ impl EngineProcess {
         // end before it began.
         let charged_from = Instant::now();
         self.send(&limits.to_command()).await?;
-        self.await_bestmove(charged_from, deadline, on_info).await
+        let write_returned = Instant::now();
+        self.await_bestmove(charged_from, write_returned, deadline, on_info)
+            .await
     }
 
     /// Start a normal search and return immediately, leaving `bestmove` to be
@@ -356,7 +370,9 @@ impl EngineProcess {
     ) -> Result<SearchOutput, UciError> {
         let charged_from = Instant::now();
         self.send("stop").await?;
-        self.await_bestmove(charged_from, deadline, on_info).await
+        let write_returned = Instant::now();
+        self.await_bestmove(charged_from, write_returned, deadline, on_info)
+            .await
     }
 
     /// Start pondering: set the position (played move + predicted reply
@@ -415,7 +431,9 @@ impl EngineProcess {
         on_info: impl FnMut(&parse::InfoLine),
     ) -> Result<SearchOutput, UciError> {
         if let Some((best_move, ponder)) = self.ponder_early.take() {
-            // The engine already finished during ponder; its move is free.
+            // The engine already finished during ponder; its move is free,
+            // and there was no round trip to time.
+            self.last_timing = None;
             return Ok(SearchOutput {
                 best_move,
                 score: None,
@@ -430,7 +448,9 @@ impl EngineProcess {
         }
         let charged_from = Instant::now();
         self.send("ponderhit").await?;
-        self.await_bestmove(charged_from, deadline, on_info).await
+        let write_returned = Instant::now();
+        self.await_bestmove(charged_from, write_returned, deadline, on_info)
+            .await
     }
 
     /// The prediction missed: abort the ponder search and discard its result.
@@ -448,15 +468,68 @@ impl EngineProcess {
         }
     }
 
+    /// The stamps of the most recent search, taken so the next search starts
+    /// clean. `None` when the last move needed no round trip.
+    pub fn take_search_timing(&mut self) -> Option<SearchTiming> {
+        self.last_timing.take()
+    }
+
+    /// After a search missed its deadline, learn when its `bestmove` came.
+    ///
+    /// The game is already decided; this reads at most `window` more of the
+    /// engine's output so the forensic can say whether the answer was a few
+    /// milliseconds late or never came. It changes no result.
+    pub async fn await_late_bestmove(&mut self, window: Duration) {
+        let Some(mut timing) = self.last_timing.take() else {
+            return;
+        };
+        if timing.bestmove_arrived.is_none() {
+            if let Some(line) = self.late_line.take()
+                && parse::parse_bestmove(line.text.trim()).is_some()
+            {
+                timing.bestmove_arrived = Some(line.arrived);
+                timing.consumed = Some(self.last_consumed);
+                timing.late = true;
+            } else {
+                let until = Instant::now() + window;
+                while let Ok(line) = self.read_line_until(until, UciError::MoveTimeout).await {
+                    if parse::parse_bestmove(line.text.trim()).is_some() {
+                        timing.bestmove_arrived = Some(line.arrived);
+                        timing.consumed = Some(self.last_consumed);
+                        timing.late = true;
+                        break;
+                    }
+                }
+            }
+        }
+        self.last_timing = Some(timing);
+    }
+
     /// Read engine output until `bestmove`, tracking the last
-    /// score/nps/depth and feeding `info` lines to `on_info`.
+    /// score/nps/depth and feeding `info` lines to `on_info`. The search's
+    /// stamps are kept for [`Self::take_search_timing`] whether or not it
+    /// answered in time.
     async fn await_bestmove(
         &mut self,
         start: Instant,
+        write_returned: Instant,
         deadline: Duration,
+        on_info: impl FnMut(&parse::InfoLine),
+    ) -> Result<SearchOutput, UciError> {
+        let mut timing = SearchTiming::new(start, write_returned, start + deadline);
+        self.late_line = None;
+        let result = self.read_search(&mut timing, on_info).await;
+        self.last_timing = Some(timing);
+        result
+    }
+
+    async fn read_search(
+        &mut self,
+        timing: &mut SearchTiming,
         mut on_info: impl FnMut(&parse::InfoLine),
     ) -> Result<SearchOutput, UciError> {
-        let until = start + deadline;
+        let start = timing.go_stamped;
+        let until = timing.deadline;
         let mut score = None;
         let mut reported_nps = None;
         let mut nodes = None;
@@ -472,6 +545,8 @@ impl EngineProcess {
             let arrived = line.arrived;
             let line = line.text.trim();
             if let Some((best_move, ponder)) = parse::parse_bestmove_ponder(line) {
+                timing.bestmove_arrived = Some(arrived);
+                timing.consumed = Some(self.last_consumed);
                 let elapsed = charged_elapsed(start, arrived);
                 // Some engines report a literal `nps 0` on every info line
                 // (Fruit 2.1 does) — treat that as unreported and derive the
@@ -494,6 +569,7 @@ impl EngineProcess {
             if line.starts_with("info ")
                 && let Some(info) = parse::parse_info_line(line)
             {
+                timing.info(arrived, info.time_ms);
                 if info.score.is_some() {
                     score = info.score;
                 }
@@ -583,9 +659,12 @@ impl EngineProcess {
                 }
             }
         };
+        self.last_consumed = Instant::now();
         match event {
             PipeEvent::Line(line) => {
                 if line.arrived > until {
+                    self.record("<", &line.text);
+                    self.late_line = Some(line);
                     return Err(timeout_err);
                 }
                 tracing::trace!(target: "uci", direction = "recv", "{}", line.text);

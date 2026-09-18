@@ -375,6 +375,8 @@ mod tests {
                 monotonic_resolution_ns: 1,
                 white_charged_elapsed: None,
                 black_charged_elapsed: None,
+                white_round_trip: None,
+                black_round_trip: None,
             },
             opening: crate::match_runner::OpeningAssignment {
                 book_index: None,

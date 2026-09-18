@@ -35,7 +35,16 @@ line's other fields. The game record names the game (`number`, `pair_number`,
 `round`, for a tune its `iteration`), its `result`, `termination`, whether it
 is `scorable`, its `fault` with the fault kind, its `sample` class (the same
 class `games.pgn` carries as `ColosseumSample`: `official`, `post-terminal`,
-`invalid` or `unscorable`) and its clock accounting. It never holds moves.
+`invalid` or `unscorable`) and its clock accounting. The clock accounting
+includes, per side, where its searches' time went: the largest value each
+phase of a search's round trip reached in the game, in nanoseconds —
+`go_write_ns` (the harness writing `go`), `to_first_info_ns` (until the
+engine's first `info` arrived), `between_info_ns` (first to last `info`),
+`last_info_to_bestmove_ns` (last `info` until `bestmove` arrived),
+`bestmove_to_consumed_ns` (until the game task took it; not charged),
+`last_info_lag_ns` (the last `info`'s arrival minus the time it reported) and
+`overhead_ns` (charged time minus the engine's reported time). It never holds
+moves.
 Nothing is ever rewritten: a game is committed by appending its line.
 
 **`games.pgn`** is appended one game at a time and never rewritten. Its tags
@@ -63,7 +72,13 @@ the stop, resume and finish of the run. It does not repeat games; the journal
 has them.
 
 When the run finishes, `result.json` holds the final structured report, and
-`failed-games/` keeps the UCI traffic of every abnormal game.
+`failed-games/` keeps a forensic of every abnormal game: the round-trip stamps
+of each side's last five searches — when `go` was written, when the first and
+last `info` arrived with the time the engine reported, when `bestmove` arrived
+and when the game task took it, the overhead and the deadline — then the UCI
+traffic and stderr. When a search misses its deadline the harness waits up to
+one more second, only to time its `bestmove`; the forensic marks that late
+answer with `!`, or prints `never`.
 
 ### Durability
 

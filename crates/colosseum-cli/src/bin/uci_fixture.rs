@@ -11,6 +11,18 @@ struct FixtureArgs {
     legal_sequence: bool,
     append_pid_file: bool,
     pid_file: Option<std::path::PathBuf>,
+    /// A search in timed phases: wait, first `info`, wait, last `info`
+    /// reporting `report_time_ms`, wait, `bestmove`. Each line is flushed as
+    /// it is written, so each delay lands in exactly one round-trip phase.
+    phases: Option<Phases>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct Phases {
+    first_info_ms: u64,
+    between_info_ms: u64,
+    bestmove_after_info_ms: u64,
+    report_time_ms: u64,
 }
 
 fn arguments() -> FixtureArgs {
@@ -28,6 +40,27 @@ fn arguments() -> FixtureArgs {
             parsed.append_pid_file = true;
         } else if let Some(value) = argument.strip_prefix("--pid-file=") {
             parsed.pid_file = Some(value.into());
+        } else if let Some((name, value)) = argument
+            .strip_prefix("--")
+            .and_then(|rest| rest.split_once('='))
+            .filter(|(name, _)| {
+                matches!(
+                    *name,
+                    "first-info-ms"
+                        | "between-info-ms"
+                        | "bestmove-after-info-ms"
+                        | "report-time-ms"
+                )
+            })
+        {
+            let value = value.parse().expect("a phase delay needs an integer");
+            let phases = parsed.phases.get_or_insert_with(Phases::default);
+            match name {
+                "first-info-ms" => phases.first_info_ms = value,
+                "between-info-ms" => phases.between_info_ms = value,
+                "bestmove-after-info-ms" => phases.bestmove_after_info_ms = value,
+                _ => phases.report_time_ms = value,
+            }
         } else {
             panic!("unknown fixture argument: {argument}");
         }
@@ -82,8 +115,11 @@ fn main() -> std::io::Result<()> {
                     continue;
                 }
                 std::thread::sleep(Duration::from_millis(arguments.sleep_ms));
+                if let Some(phases) = arguments.phases {
+                    write_timed_search(&mut stdout, phases)?;
+                }
                 if arguments.legal_sequence {
-                    write_legal_bestmove(&mut stdout, &position)?;
+                    write_legal_bestmove(&mut stdout, &position, arguments.phases.is_none())?;
                 } else {
                     writeln!(stdout, "bestmove e2e4")?;
                 }
@@ -95,7 +131,26 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn write_legal_bestmove(output: &mut impl Write, position: &str) -> std::io::Result<()> {
+fn write_timed_search(output: &mut impl Write, phases: Phases) -> std::io::Result<()> {
+    std::thread::sleep(Duration::from_millis(phases.first_info_ms));
+    writeln!(output, "info depth 1 time 0 nodes 1 score cp 0")?;
+    output.flush()?;
+    std::thread::sleep(Duration::from_millis(phases.between_info_ms));
+    writeln!(
+        output,
+        "info depth 2 time {} nodes 2 score cp 0",
+        phases.report_time_ms
+    )?;
+    output.flush()?;
+    std::thread::sleep(Duration::from_millis(phases.bestmove_after_info_ms));
+    Ok(())
+}
+
+fn write_legal_bestmove(
+    output: &mut impl Write,
+    position: &str,
+    with_info: bool,
+) -> std::io::Result<()> {
     let moves = position
         .split_once(" moves ")
         .map_or(0, |(_, moves)| moves.split_whitespace().count());
@@ -103,6 +158,8 @@ fn write_legal_bestmove(output: &mut impl Write, position: &str) -> std::io::Res
         .get(moves)
         .copied()
         .unwrap_or("0000");
-    writeln!(output, "info depth 1 nodes 1 score cp 0")?;
+    if with_info {
+        writeln!(output, "info depth 1 nodes 1 score cp 0")?;
+    }
     writeln!(output, "bestmove {best}")
 }

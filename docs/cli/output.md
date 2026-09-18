@@ -99,7 +99,8 @@ last showed and a closed console loses nothing.
 
 A final report never lists a run's games one by one. It says how many ended
 abnormally and in which way; `games.pgn` holds every result, `run.log` every
-event, and `failed-games/` the UCI traffic of each abnormal game.
+event, and `failed-games/` the round-trip timing and UCI traffic of each
+abnormal game.
 
 Human-readable mode is the default. Automation should select `--json` and use
 the process exit status as the primary success/failure signal.

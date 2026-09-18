@@ -118,16 +118,21 @@ or a tree-shape comparison and the runner already holds the values. After every
 engine move the comment is:
 
 ```text
-{s=<score> d=<depth> t=<ms>ms n=<nodes>}
+{s=<score> d=<depth> t=<ms>ms h=<ms>ms n=<nodes>}
 ```
 
 `s` is the score from the mover’s own point of view, a signed integer in
 centipawns or `#<n>` / `#-<n>` for mate in `n`. `d` is the reported depth, `t`
-is the harness-charged elapsed milliseconds under the recorded clock model, and
-`n` is the reported node count. A field the engine did not report is left out
-entirely rather than written as zero, so an absent value and a reported zero
-stay distinguishable. Moves pre-played from an opening book carry `{book}`
-instead, and the `OpeningPlyCount` tag still marks how many there were.
+is the harness-charged elapsed milliseconds under the recorded clock model, `h`
+is the harness overhead — `t` minus the search time the engine itself reported,
+which can be slightly negative from rounding — and `n` is the reported node
+count. A field the engine did not report is left out entirely rather than
+written as zero, so an absent value and a reported zero stay distinguishable;
+`h` is absent when the engine reported no time. Moves pre-played from an
+opening book carry `{book}` instead, and the `OpeningPlyCount` tag still marks
+how many there were. The `WhiteTimeMarginMs` and `BlackTimeMarginMs` tags name
+each side's time margin, so a PGN alone says how close each move's overhead
+came to a forfeit.
 
 The writer form is versioned and every run record names the version it used, so
 a PGN read months later can be interpreted against the exact form that produced
@@ -247,7 +252,7 @@ configuration is refused on resume. The directory contains:
 | `run-record.json` | Versioned lifecycle and official sample |
 | `run.log` | Append-only JSON-lines log of progress blocks, faults, stop and resume |
 | `result.json` | Final structured match report |
-| `failed-games/` | UCI traffic and stderr for abnormal games |
+| `failed-games/` | Round-trip timing, UCI traffic and stderr for abnormal games |
 
 Progress is written to stderr every `--progress-every N` games, and once more
 at the end; a match block reports the score, the Elo estimate with its 95%

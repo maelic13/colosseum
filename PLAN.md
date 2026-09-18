@@ -2510,6 +2510,48 @@ games" procedure at 10.10, once, on the final state.
   that carries every overhead above 20 ms; the fix for that phase is its
   own step and is not guessed here. Items (k) to (t) precede (j).
 
+  **Implementation evidence (Phase 10.9j):** `colosseum-uci` keeps a
+  `SearchTiming` per search: the game task stamps `go` before the write, the
+  write's return, and the moment it takes each line off the reader's
+  channel; the reader thread's existing arrival stamp times the first and
+  last `info` and the `bestmove`; the last reported `time` and the `time` on
+  the last `info` are kept with them. Nothing was added to the reader
+  thread, and the game task only copies `Instant`s. `ponderhit` and `stop`
+  are timed the same way; a ponder that finished early has no round trip
+  and no timing. The stamps survive a missed deadline: a line that arrived
+  after it is kept, and the runner then waits up to one second more
+  (`LATE_BESTMOVE_WINDOW`), only to learn when the `bestmove` came; the
+  result is already decided. The runner keeps per side the maximum of five
+  phases — `go` write, to first `info`, first to last `info`, last `info` to
+  `bestmove` arrival, arrival to consumption — plus the last `info`'s lag
+  behind the time it reported and the overhead (charged minus reported
+  time); the maxima travel in the clock accounting, so the journal record
+  carries `white_round_trip` / `black_round_trip`. The forfeited search
+  counts, with its late arrival. Every abnormal-game forensic now begins
+  with a table of each side's last five searches in milliseconds after the
+  `go` stamp, `!` marking a late answer and `never` a missing one. The PGN
+  comment gains `h=<ms>ms` beside `t=` (`colosseum-move-comment/2`), and
+  every game carries `WhiteTimeMarginMs` / `BlackTimeMarginMs`; `stats`
+  reads `h=` back into a per-engine p50/p99/p999/max distribution and the
+  count of moves whose overhead exceeded that side's margin. Tests: the
+  fixture engine gained per-phase delays (`--first-info-ms`,
+  `--between-info-ms`, `--bestmove-after-info-ms`, `--report-time-ms`); a
+  session test injects 30/40/50 ms into the three engine-side phases and
+  blocks the game task's only thread while the answer arrives, and each
+  delay lands in its own phase with the consumption delay uncharged; a
+  match journals the same maxima for the delayed side only, writes `h =
+  t − 35` on every delayed move and `stats` reports every one of those moves
+  over a 20 ms margin; a forfeit forensic shows the late answer at its real
+  arrival. The PGN writer and the parser round-trip `h=` including negative
+  values. Deviations: the forensic prints the last five searches of each
+  side rather than the last five plies, so the forfeiting side always shows
+  five; the margin tags are new, because an over-margin count from a PGN
+  alone needs the margin; the `go` write phase is measured but not injected
+  in a test, because a pipe write blocks only on a full OS buffer, which no
+  portable test controls; the shared runner gives GUI games the same `h=`,
+  tags and forensic tables. Owed and maintainer-run: the 2,000-game 3+0.03
+  match at 14 slots that names the phase.
+
   **Implementation evidence (Phase 10.9g):** the `bestmove` instant is now
   the pipe's. A dedicated OS thread per engine owns its standard output,
   reads it line by line with the existing length bound, and stamps each

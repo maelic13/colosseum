@@ -5,7 +5,7 @@ use serde::Serialize;
 pub const SUPPORTED_TELEMETRY_SYNTAXES: [&str; 3] = [
     "PGN tags: [%depth N] [%emt SECONDS] [%nodes N]",
     "key/value comments: depth|d=N time|t=Nms|Ns nodes|n=N",
-    "Colosseum move comments: {s=CP|#N d=N t=Nms n=N} and {book}",
+    "Colosseum move comments: {s=CP|#N d=N t=Nms h=Nms n=N} and {book}; WhiteTimeMarginMs/BlackTimeMarginMs tags",
 ];
 
 const NODE_SEMANTICS_WARNING: &str = "implied NPS is comparable only when node accounting has compatible semantics, normally within the same engine lineage";
@@ -38,6 +38,32 @@ pub struct EngineTelemetryReport {
     pub score_cp: TelemetryMetric,
     /// Mean |score|, the usual way to read how decided the games looked.
     pub mean_absolute_score_cp: TelemetryMetric,
+    /// Harness overhead per move (`h=`): charged time minus the time the
+    /// engine reported, in milliseconds.
+    pub harness_overhead_ms: OverheadMetric,
+}
+
+/// The distribution of per-move harness overhead, and how often it exceeded
+/// the time margin: the moves that would have forfeited had the engine used
+/// its whole clock.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OverheadMetric {
+    pub status: &'static str,
+    pub samples: u32,
+    pub eligible_moves: u32,
+    pub coverage: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p50: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p99: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p999: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+    /// Moves with an overhead whose game named this side's time margin.
+    pub moves_with_margin: u32,
+    /// Of those, the moves whose overhead exceeded the margin.
+    pub over_margin: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -58,6 +84,7 @@ struct MoveTelemetry {
     elapsed_seconds: Option<f64>,
     nodes: Option<f64>,
     score_cp: Option<f64>,
+    overhead_ms: Option<f64>,
     mate_score: bool,
     is_book: bool,
 }
@@ -79,6 +106,9 @@ struct EngineSamples {
     score_cp: Vec<f64>,
     absolute_score_cp: Vec<f64>,
     mate_scores: u32,
+    overhead_ms: Vec<f64>,
+    moves_with_margin: u32,
+    over_margin: u32,
 }
 
 pub fn unavailable(reason: impl Into<String>) -> SearchTelemetryReport {
@@ -105,6 +135,9 @@ pub fn analyze_pgn(text: &str) -> SearchTelemetryReport {
         let starts_white = pgn_tag(game, "FEN")
             .and_then(|fen| fen.split_whitespace().nth(1).map(|side| side != "b"))
             .unwrap_or(true);
+        let margin = |tag| pgn_tag(game, tag).and_then(|value| value.parse::<f64>().ok());
+        let white_margin = margin("WhiteTimeMarginMs");
+        let black_margin = margin("BlackTimeMarginMs");
         for (index, parsed) in parse_mainline_moves(game, starts_white)
             .into_iter()
             .enumerate()
@@ -120,9 +153,21 @@ pub fn analyze_pgn(text: &str) -> SearchTelemetryReport {
                 || parsed.telemetry.elapsed_seconds.is_some()
                 || parsed.telemetry.nodes.is_some()
                 || parsed.telemetry.score_cp.is_some()
+                || parsed.telemetry.overhead_ms.is_some()
                 || parsed.telemetry.mate_score
             {
                 samples.annotated += 1;
+            }
+            if let Some(overhead) = parsed.telemetry.overhead_ms {
+                samples.overhead_ms.push(overhead);
+                if let Some(margin) = if parsed.white {
+                    white_margin
+                } else {
+                    black_margin
+                } {
+                    samples.moves_with_margin += 1;
+                    samples.over_margin += u32::from(overhead > margin);
+                }
             }
             if parsed.telemetry.mate_score {
                 samples.mate_scores += 1;
@@ -165,6 +210,12 @@ pub fn analyze_pgn(text: &str) -> SearchTelemetryReport {
                 samples.absolute_score_cp,
                 samples.eligible,
                 samples.mate_scores,
+            ),
+            harness_overhead_ms: overhead_metric(
+                samples.overhead_ms,
+                samples.eligible,
+                samples.moves_with_margin,
+                samples.over_margin,
             ),
         })
         .collect::<Vec<_>>();
@@ -214,6 +265,39 @@ fn metric(mut values: Vec<f64>, eligible: u32) -> TelemetryMetric {
         coverage: fraction(samples, eligible),
         mean,
         median,
+    }
+}
+
+/// Nearest-rank quantiles of the per-move overhead: the value at or below
+/// which that fraction of moves fell. With fewer samples than a quantile can
+/// resolve it is the largest value, which is the honest answer.
+fn overhead_metric(
+    mut values: Vec<f64>,
+    eligible: u32,
+    moves_with_margin: u32,
+    over_margin: u32,
+) -> OverheadMetric {
+    values.sort_by(f64::total_cmp);
+    let quantile = |fraction: f64| {
+        let rank = (fraction * values.len() as f64).ceil() as usize;
+        values.get(rank.max(1) - 1).copied()
+    };
+    let samples = values.len() as u32;
+    OverheadMetric {
+        status: if samples > 0 {
+            "available"
+        } else {
+            "unavailable"
+        },
+        samples,
+        eligible_moves: eligible,
+        coverage: fraction(samples, eligible),
+        p50: quantile(0.5),
+        p99: quantile(0.99),
+        p999: quantile(0.999),
+        max: values.last().copied(),
+        moves_with_margin,
+        over_margin,
     }
 }
 
@@ -369,6 +453,17 @@ fn set_field(telemetry: &mut MoveTelemetry, key: &str, value: &str, bracketed: b
         }
         "emt" if bracketed => telemetry.elapsed_seconds = parse_seconds(value, true),
         "time" | "t" => telemetry.elapsed_seconds = parse_seconds(value, false),
+        // Overhead is a difference, so it may be negative; it is written in
+        // milliseconds.
+        "h" | "overhead" => {
+            let value = value.trim_matches(|character: char| matches!(character, ',' | ';'));
+            let value = value.strip_suffix("ms").unwrap_or(value);
+            if let Ok(value) = value.parse::<f64>()
+                && value.is_finite()
+            {
+                telemetry.overhead_ms = Some(value);
+            }
+        }
         "s" | "score" | "eval" | "ev" => {
             let value = value.trim_matches(|character: char| matches!(character, ',' | ';'));
             if let Some(mate) = value.strip_prefix('#') {
@@ -476,6 +571,81 @@ mod tests {
         assert_eq!(b.depth.median, Some(30.0));
         assert_eq!(b.elapsed_seconds.mean, Some(0.5));
         assert_eq!(b.implied_nps.mean, Some(3_000.0));
+    }
+
+    #[test]
+    fn overhead_round_trips_through_the_writer_into_quantiles_and_over_margin_counts() {
+        use colosseum_core::GameResult;
+        use colosseum_engine::pgn::{
+            AnnotationScore, MoveAnnotation, PgnTags, SearchAnnotation, build_pgn,
+        };
+        let search = |time_ms, overhead_ms| {
+            MoveAnnotation::Search(SearchAnnotation {
+                score: Some(AnnotationScore::Centipawns(0)),
+                depth: Some(10),
+                time_ms: Some(time_ms),
+                overhead_ms: Some(overhead_ms),
+                nodes: Some(1),
+            })
+        };
+        let tags = PgnTags {
+            event: "e".into(),
+            site: "s".into(),
+            date: "2026.09.18".into(),
+            round: 1,
+            white: "A".into(),
+            black: "B".into(),
+            result: GameResult::Draw,
+            time_control: String::new(),
+            termination: None,
+            fen: None,
+            opening_plies: 0,
+            identity: None,
+            time_margins_ms: Some([20, 5]),
+        };
+        let moves = ["e4", "e5", "Nf3", "Nc6", "Bb5", "a6"].map(String::from);
+        let annotations = [
+            search(40, 2),
+            search(40, -1),
+            search(40, 25),
+            search(40, 6),
+            search(40, 3),
+            search(40, 5),
+        ];
+        let pgn = build_pgn(&tags, &moves, &annotations);
+        assert!(pgn.contains("h=25ms") && pgn.contains("h=-1ms"), "{pgn}");
+        let report = analyze_pgn(&pgn);
+        let engine = |name: &str| {
+            report
+                .engines
+                .iter()
+                .find(|engine| engine.engine == name)
+                .unwrap()
+                .harness_overhead_ms
+                .clone()
+        };
+        let a = engine("A");
+        assert_eq!(a.samples, 3);
+        assert_eq!(
+            (a.p50, a.p99, a.p999, a.max),
+            (Some(3.0), Some(25.0), Some(25.0), Some(25.0))
+        );
+        // Only the 25 ms overhead exceeds White's 20 ms margin.
+        assert_eq!((a.moves_with_margin, a.over_margin), (3, 1));
+        let b = engine("B");
+        assert_eq!((b.p50, b.max), (Some(5.0), Some(6.0)));
+        assert_eq!(b.p50, Some(5.0));
+        // Black's margin is 5 ms: 6 exceeds it, 5 does not, -1 does not.
+        assert_eq!((b.moves_with_margin, b.over_margin), (3, 1));
+    }
+
+    #[test]
+    fn overhead_without_a_margin_tag_is_measured_but_not_compared() {
+        let pgn = "[Event \"x\"]\n[White \"A\"]\n[Black \"B\"]\n[Result \"*\"]\n\n1. e4 {t=30ms h=12ms} e5 {t=30ms h=1ms} *\n";
+        let report = analyze_pgn(pgn);
+        let a = &report.engines[0].harness_overhead_ms;
+        assert_eq!(a.max, Some(12.0));
+        assert_eq!((a.moves_with_margin, a.over_margin), (0, 0));
     }
 
     #[test]

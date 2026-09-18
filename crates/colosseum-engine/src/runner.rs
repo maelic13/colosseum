@@ -24,6 +24,7 @@ use crate::live::{EvalPoint, LiveGameHandle, SEARCH_LOG_CAP, SearchLine, to_whit
 use crate::pgn::{
     AnnotationScore, GamePairIdentity, MoveAnnotation, PgnTags, SearchAnnotation, build_pgn,
 };
+use crate::round_trip::{FORENSIC_LEGEND, RoundTripMaxima, RoundTripRecorder};
 
 /// Centipawn magnitude used to represent mate scores for adjudication.
 const ADJ_MATE_CP: i32 = 100_000;
@@ -34,6 +35,9 @@ const MAX_PLIES: usize = 6000;
 const FIXED_SEARCH_DEADLINE: Duration = Duration::from_secs(600);
 /// How long an engine gets to answer `stop` when its ponder prediction missed.
 const PONDER_STOP_DEADLINE: Duration = Duration::from_secs(5);
+/// How long a forfeited search's `bestmove` is waited for after the deadline,
+/// only to learn when it came. The result is already decided.
+const LATE_BESTMOVE_WINDOW: Duration = Duration::from_secs(1);
 
 /// The charged interval of one search: from the start of the `go` write to
 /// the arrival of the `bestmove` line on the pipe, as the reader thread
@@ -234,6 +238,12 @@ pub struct ClockAccountingReport {
     pub monotonic_resolution_ns: u64,
     pub white_charged_elapsed: Option<ChargedElapsedSummary>,
     pub black_charged_elapsed: Option<ChargedElapsedSummary>,
+    /// Where White's search time went: the largest value each phase of its
+    /// round trips reached.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub white_round_trip: Option<RoundTripMaxima>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub black_round_trip: Option<RoundTripMaxima>,
 }
 
 /// Per-side running average of reported nps.
@@ -348,6 +358,7 @@ fn clock_accounting_report(
     monotonic_resolution_ns: u64,
     white: Option<&MoveTimeAccumulator>,
     black: Option<&MoveTimeAccumulator>,
+    round_trips: Option<&[RoundTripRecorder; 2]>,
 ) -> ClockAccountingReport {
     ClockAccountingReport {
         model: CLOCK_MODEL_ID.to_owned(),
@@ -357,6 +368,8 @@ fn clock_accounting_report(
         monotonic_resolution_ns,
         white_charged_elapsed: white.and_then(MoveTimeAccumulator::summary),
         black_charged_elapsed: black.and_then(MoveTimeAccumulator::summary),
+        white_round_trip: round_trips.and_then(|sides| sides[0].maxima()),
+        black_round_trip: round_trips.and_then(|sides| sides[1].maxima()),
     }
 }
 
@@ -460,6 +473,8 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
     let mut black_depth = DepthAccumulator::default();
     let mut white_move_time = MoveTimeAccumulator::default();
     let mut black_move_time = MoveTimeAccumulator::default();
+    // Per colour, where each search's time went.
+    let mut round_trips = [RoundTripRecorder::default(), RoundTripRecorder::default()];
     // Per color: the predicted reply the engine is currently pondering on
     // (canonical UCI) and when that ponder search started. `Some` means a
     // `go ponder` is outstanding and must be resolved before the engine's
@@ -585,6 +600,16 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             None => mover_search.await,
         };
 
+        // Whatever the search's outcome, its stamps say where its time went.
+        // A search that missed its deadline is given a moment more to show
+        // when its answer came, which is what its forensic is about.
+        if matches!(search, Err(UciError::MoveTimeout)) {
+            engine.await_late_bestmove(LATE_BESTMOVE_WINDOW).await;
+        }
+        if let Some(timing) = engine.take_search_timing() {
+            round_trips[color_idx(mover)].record(san_moves.len() + 1, timing);
+        }
+
         let output = match search {
             Ok(output) => output,
             Err(UciError::MoveTimeout) => {
@@ -661,6 +686,10 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             }),
             depth: output.depth,
             time_ms: u64::try_from(output.elapsed.as_millis()).ok(),
+            overhead_ms: output.reported_time_ms.and_then(|engine_ms| {
+                let charged_ms = i64::try_from(output.elapsed.as_millis()).ok()?;
+                Some(charged_ms - i64::try_from(engine_ms).ok()?)
+            }),
             nodes: output.reported_nodes,
         }));
         // Store the CANONICAL encoding, not the engine's raw text: the move
@@ -780,7 +809,14 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         outcome.termination,
         Termination::TimeForfeit | Termination::EngineCrash | Termination::IllegalMove
     ) {
-        let text = incident_report(&spec, &uci_moves, &clocks, &outcome, &white, &black);
+        let text = incident_report(
+            &spec,
+            &uci_moves,
+            &clocks,
+            &outcome,
+            [&white, &black],
+            &round_trips,
+        );
         let stub = format!(
             "{:?}-{}-vs-{}-r{}",
             outcome.termination, spec.white.name, spec.black.name, spec.round
@@ -840,6 +876,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             monotonic_resolution_ns,
             Some(&white_move_time),
             Some(&black_move_time),
+            Some(&round_trips),
         ),
         fault: outcome.fault,
         error: outcome.error,
@@ -884,8 +921,8 @@ fn incident_report(
     uci_moves: &[String],
     clocks: &Clocks,
     outcome: &Outcome,
-    white: &EngineProcess,
-    black: &EngineProcess,
+    [white, black]: [&EngineProcess; 2],
+    round_trips: &[RoundTripRecorder; 2],
 ) -> String {
     use std::fmt::Write as _;
     let mut s = String::with_capacity(8 * 1024);
@@ -921,6 +958,12 @@ fn incident_report(
     );
     let _ = writeln!(s, "opening plies: {}", spec.opening_moves.len());
     let _ = writeln!(s, "moves ({}): {}", uci_moves.len(), uci_moves.join(" "));
+    // Where the last searches' time went, before the traffic that shows what
+    // was said: a forfeit is a question of when, and these are the stamps.
+    for (label, recorder) in [("white", &round_trips[0]), ("black", &round_trips[1])] {
+        s.push_str(&recorder.forensic(label));
+    }
+    s.push_str(FORENSIC_LEGEND);
     for (label, engine) in [("white", white), ("black", black)] {
         let _ = writeln!(
             s,
@@ -1220,7 +1263,7 @@ async fn handle_setup_failure(
         san_moves: Vec::new(),
         uci_moves: Vec::new(),
         pgn: render_pgn(spec, &[], &[], outcome.result, outcome.termination),
-        clock_accounting: clock_accounting_report(spec, monotonic_resolution_ns, None, None),
+        clock_accounting: clock_accounting_report(spec, monotonic_resolution_ns, None, None, None),
         fault: outcome.fault,
         error: outcome.error,
     };
@@ -1335,6 +1378,10 @@ fn render_pgn(
         fen: spec.start_fen.clone(),
         opening_plies: spec.opening_moves.len() as u32,
         identity: spec.identity.clone(),
+        time_margins_ms: Some([
+            u64::try_from(spec.white_time_margin.as_millis()).unwrap_or(u64::MAX),
+            u64::try_from(spec.black_time_margin.as_millis()).unwrap_or(u64::MAX),
+        ]),
     };
     build_pgn(&tags, san_moves, annotations)
 }

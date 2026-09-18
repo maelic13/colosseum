@@ -13,6 +13,7 @@ pub mod position;
 pub mod process;
 pub mod score;
 pub mod session;
+pub mod timing;
 
 pub use error::UciError;
 pub use parse::{InfoLine, parse_bestmove, parse_info_line, parse_option_line};
@@ -23,3 +24,4 @@ pub use process::{
 };
 pub use score::Score;
 pub use session::{AffinityUciSessionFactory, ProcessAffinityFn, UciSessionFactory};
+pub use timing::{RoundTripPhase, SearchTiming};

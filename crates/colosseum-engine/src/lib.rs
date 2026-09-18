@@ -23,6 +23,8 @@ pub mod openings;
 pub mod pgn;
 pub mod placement;
 #[cfg(feature = "runner")]
+pub mod round_trip;
+#[cfg(feature = "runner")]
 pub mod runner;
 #[cfg(feature = "tournament")]
 pub mod scheduler;
@@ -61,6 +63,8 @@ pub use placement::{
     EngineCpuPlacement, GameSlotCpuAllocation, PlacementAsymmetry, SlotAllocation,
     allocate_game_slots, plan_cpu_placement,
 };
+#[cfg(feature = "runner")]
+pub use round_trip::RoundTripMaxima;
 #[cfg(feature = "runner")]
 pub use runner::{
     CLOCK_MODEL_ID, CLOCK_MODEL_VERSION, ChargedElapsedSummary, ClockAccountingReport,
