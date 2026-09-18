@@ -2590,7 +2590,26 @@ games" procedure at 10.10, once, on the final state.
   was stopped and resumed once through the journal; with under 100 ms on the
   clock the slowest charged move was 81 ms against fastchess's 95 ms. Elo
   +65.9 ± 11.0, nElo +93.7 ± 15.2 against fastchess's +54.3 ± 11.1 and
-  +75.6 ± 15.2 on the same binaries. Items (k) to (u) precede (j).
+  +75.6 ± 15.2 on the same binaries.
+- **(v) A rare forfeit must not void a sequential test.** With the pool in
+  place a real `[0,10]` SPRT was invalidated at pair 6 by one time loss: last
+  `info` at 21 ms, the engine's own cap at 39 ms, `bestmove` at 80.6 ms
+  against a deadline of 80.5 ms, no overlapping slot span, no other process
+  starting or exiting within 950 ms. One such event in 2,046 post-pool games
+  is indistinguishable from fastchess's zero in 4,000, and by the PGN metric
+  (scramble moves charged 25 ms past the engine's hard cap) fastchess shows
+  0.44–0.69 per 1,000 scramble moves where Colosseum shows none, so the
+  harness is not the outlier; an operating system occasionally holds a
+  process for tens of milliseconds. A zero allowance therefore voids any
+  long SPRT or tune: at this rate a 20,000-game test would die about ten
+  times. fastchess and fishtest score a time loss as a loss and continue.
+  Required: for `sprt` and `spsa` an engine-attributable forfeit is scored
+  as the loss it is, its pair stays in the official sample in order, and the
+  run becomes invalid only when faults exceed a documented rate (default
+  0.5% of games played, minimum 3, evaluated continuously), with the count
+  and rate in every progress block and the final report; `--max-time-losses
+  0` restores strict invalidation. Infrastructure faults stay unscored and
+  still invalidate the pair. Items (k) to (v) precede (j).
 
   **Implementation evidence (Phase 10.9k):** the execution plan hands each
   run a `SlotPool` (`MatchExecutionPlan::slot_pool`), and `match`
