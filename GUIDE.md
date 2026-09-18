@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9m** residual time losses (research), 10.9h, then **10.10 — EXIT**, which needs a real machine and the maintainer; the maintainer's 42-games-per-iteration tune at 14 slots on the 10.9n build is owed |
+| Next step | **10.9o** SPSA at scale, 10.9m residual time losses (research), 10.9h, then **10.10 — EXIT**, which needs a real machine and the maintainer |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -923,6 +923,13 @@ model as well.
   post-release research — PLAN §Phase 10(x). **Owed, maintainer-run on the
   reference host:** a tune at 14 slots and 42 games per iteration, or 15 and
   30, above 85% occupancy and 5,000 games per hour
+- ☐ **10.9o** — **Model: Sol High.** SPSA at the scale of a real tune:
+  `result.json` carries per-iteration summaries and refers to the journal;
+  driver memory bounded by the iteration in flight; 5,000-iteration stub tune
+  with flat commit time, bounded memory and result size; launch-spread
+  regression test for `spsa` and `sprt` on a large synthetic book plus an audit
+  of per-launch clones; `--total-games` budget; compact, fast-loading book;
+  `status` says when the first block is due — PLAN §Phase 10(y)
 - ☐ **10.9m** — **Model: Sol High.** Residual time losses, research before any
   fix: fastchess source study in `docs/architecture/fastchess-mechanics.md`
   (process lifetime, creation flags and priority, affinity, pipes and

@@ -2692,7 +2692,32 @@ games" procedure at 10.10, once, on the final state.
   applied as they return; it removes the iteration barrier at any mini-match
   size but updates on slightly stale parameters and gives up the one
   iteration, one update record, so it needs its own evidence that it reaches
-  the same optimum for less game budget. Items (k) to (x) precede (j).
+  the same optimum for less game budget. **Found while verifying (x),
+  2026-09-18:** the launch loops deep-copied the opening book per launched
+  game (`spsa`) or pair (`sprt`), about 0.45 s and hundreds of megabytes with
+  a 2.6-million-position book, on the one task that launches games: SPSA
+  games started 0.44 s apart (6 s to start 15), and `sprt` ran at 4,460 games
+  per hour where `match` reached 5,500. The book is now shared behind an
+  `Arc`; 15 launches land within 1 ms and measured occupancy is 80–86%
+  against the 81% predicted.
+- **(y) SPSA at the scale of a real tune.** A 60-iteration run left a 6.2 MB
+  `result.json`, about 100 KB per iteration, because the driver keeps every
+  game's full record in memory for the whole run and writes them all at the
+  end: over 500 MB and as much memory at 5,333 iterations. Required: the
+  result carries per-iteration summaries (centres, arm vectors, pair score,
+  faults) and refers to the journal for games; driver memory is bounded by
+  the iteration in flight, not by the run; a 5,000-iteration stub tune shows
+  flat per-iteration commit time, bounded resident memory and a result under
+  a stated size. A launch-spread regression test for `spsa` and `sprt` with
+  a large synthetic book (all launches of a wave within a few milliseconds)
+  so no per-launch deep copy can return, and an audit of every value cloned
+  per launch. The budget may be given in games (`--total-games`), from which
+  the iteration count is derived for the chosen mini-match size, so a
+  registered budget survives a change of size; `spsa plan` reports hours from
+  the wave model. The opening book is held compactly (offsets into one
+  buffer rather than an owned string per field) and loads in well under a
+  second. `status` on a run that has printed no block yet says when the first
+  is due. Items (k) to (y) precede (j).
 
   **Implementation evidence (Phase 10.9n):** `play_mini_match` now takes a
   slot from the run's pool per game: games are launched in schedule order
