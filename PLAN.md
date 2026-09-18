@@ -942,7 +942,7 @@ without its own writer. `t` is the harness-charged elapsed interval of the
 recorded clock model, which is the only time the harness can honestly
 attribute; an explicit `0ms` is a real sub-millisecond measurement and the
 telemetry parser now reads it as one instead of discarding it as a placeholder.
-The writer form is `colosseum-move-comment/1` and every run record names it.
+The writer form is `colosseum-move-comment/2` and every run record names it.
 The telemetry parser gained `s`/`score`, score coverage and mean absolute
 score; a mate score counts as covered but is excluded from the centipawn
 values because it is a distance claim, not an evaluation on the same scale.
@@ -2544,7 +2544,16 @@ games" procedure at 10.10, once, on the final state.
   moves whose overhead exceeded the margin. Success criterion: on the
   16-core host at 14 slots, a 2,000-game 3+0.03 match names the phase
   that carries every overhead above 20 ms; the fix for that phase is its
-  own step and is not guessed here. Items (k) to (t) precede (j).
+  own step and is not guessed here. Corrections owed from review of the
+  instrument, to land with that fix step: a `ponderhit` search charges from
+  the `ponderhit` write while the engine reports time since `go ponder`,
+  so `h=` is wrongly negative under `--ponder`; the forfeited move's own
+  overhead is recorded in the journal maxima but not in `games.pgn`, so
+  the `stats` over-margin count misses the one move that matters; the
+  late-`bestmove` wait stops on a per-read fault; PGN `h=` truncates to
+  milliseconds while the journal keeps nanoseconds; an SPSA resume over a
+  rebuilt iteration with an unscorable game reports a checkpoint mismatch
+  instead of naming the game. Items (k) to (t) precede (j).
 
   **Implementation evidence (Phase 10.9j):** `colosseum-uci` keeps a
   `SearchTiming` per search: the game task stamps `go` before the write, the

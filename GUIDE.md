@@ -891,6 +891,10 @@ model as well.
   §Phase 10(t). **Owed, maintainer-run on the 16-core host:** the
   2,000-game 3+0.03 match at 14 slots, read with `stats` and the forfeit
   forensics, naming the phase that carries every overhead above 20 ms
+  - Owed with the fix step: `h=` under `--ponder`, the forfeited move's
+    overhead in `games.pgn` and the `stats` over-margin count, the late
+    wait on a per-read fault, ms/ns rounding, and the SPSA unscorable
+    resume message — PLAN §Phase 10(t)
 - ☐ **10.9h** — **Model: Sol High.** Placement per platform research note:
   Linux isolated-core and IRQ-affinity detection and preference, macOS
   advisory contract, WSL excluded as evidence; implementation follows as
