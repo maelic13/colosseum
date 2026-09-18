@@ -586,7 +586,9 @@ impl DurableMatchOutput {
 
 impl match_runner::MatchObserver for DurableMatchOutput {
     fn game_completed(&self, game: &match_runner::MatchGame) -> Result<(), String> {
-        let record = game.journal_record(sample_class(game.scorable, OFFICIAL_SAMPLE), None);
+        // The journal files an unscorable game under the class it was played
+        // in, marked `scorable: false`; the PGN tags it `unscorable`.
+        let record = game.journal_record(OFFICIAL_SAMPLE, None);
         // A scorable game needs no class: an untagged game is part of the
         // sample, so a match export stays exactly what it was.
         let moves = if game.scorable {

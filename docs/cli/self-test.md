@@ -9,7 +9,7 @@ The checks cover:
 
 - UCI handshake, readiness, options, bounded search, stop, new game and quit;
 - concurrent stdout/stderr draining, finite diagnostic tails and rejection of
-  protocol lines larger than 64 KiB;
+  protocol lines larger than 64 KiB, after which the session still answers;
 - bounded shutdown escalation and process-tree reaping (Windows Job Object or
   Unix process group), including a descendant and an engine that ignores quit;
 - propagation of a required persistence write failure;

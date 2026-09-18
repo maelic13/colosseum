@@ -34,13 +34,16 @@ line's other fields. The game record names the game (`number`, `pair_number`,
 `pair_game`, `white`, `black`, the `opening`, and for a tournament its
 `round`, for a tune its `iteration`), its `result`, `termination`, whether it
 is `scorable`, its `fault` with the fault kind, its `sample` class (the same
-class `games.pgn` carries as `ColosseumSample`: `official`, `post-terminal`,
-`invalid` or `unscorable`) and its clock accounting. The clock accounting
-includes, per side, where its searches' time went: the largest value each
-phase of a search's round trip reached in the game, in nanoseconds —
-`go_write_ns` (the harness writing `go`), `to_first_info_ns` (until the
-engine's first `info` arrived), `between_info_ns` (first to last `info`),
-`last_info_to_bestmove_ns` (last `info` until `bestmove` arrived),
+class `games.pgn` carries as `ColosseumSample`: `official`, `post-terminal` or
+`invalid`) and its clock accounting. A game nobody could score keeps the class
+of the pair or iteration it was played in, with `scorable: false` as its mark,
+so a resume rebuilds that pair or iteration whole; its PGN tag says
+`unscorable`, which is what a reader of the export must know. The clock
+accounting includes, per side, where its searches' time went: the largest
+value each phase of a search's round trip reached in the game, in
+nanoseconds — `go_write_ns` (the harness writing `go`), `to_first_info_ns`
+(until the engine's first `info` arrived), `between_info_ns` (first to last
+`info`), `last_info_to_bestmove_ns` (last `info` until `bestmove` arrived),
 `bestmove_to_consumed_ns` (until the game task took it; not charged),
 `last_info_lag_ns` (the last `info`'s arrival minus the time it reported) and
 `overhead_ns` (charged time minus the engine's reported time). It never holds
@@ -90,7 +93,13 @@ resume does not have those games and plays them again; nothing else is lost,
 and nothing already synced changes.
 
 All of this writing happens off the thread that drives games, so a slow disk
-delays the files, never an engine's clock.
+delays the files, never an engine's clock. The writer may fall a bounded
+number of writes behind; past that, the game whose result is being committed
+waits for the disk, and it waits without holding up the others, so no other
+game's clock is read late on its account. If a write fails, the writer writes
+nothing more and the run stops at its next commit; its final `run-record.json`
+is then written directly, so a run that ended never reads `running`, and it
+carries a `writer-failed` anomaly naming the failure.
 
 ### Resume
 
@@ -116,8 +125,9 @@ hash mismatch inside the covered bytes, a damaged line followed by a valid
 one, or a `games.pgn` shorter than the checkpoint says was synced means the
 directory changed after the checkpoint was written; the resume stops and says
 so, and leaves the directory as it found it. A run directory written by an
-earlier version, whose checkpoint names no journal, is refused the same way;
-start it again with `--restart`.
+earlier version, without a journal, is refused with an explanation: run the
+same command with `--restart`, which archives the old directory and starts
+afresh.
 
 A resumed match schedules only the game numbers absent from the journal and
 keeps deterministic report order. SPRT journals complete official and

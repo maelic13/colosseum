@@ -251,3 +251,48 @@ fn a_journal_that_no_longer_matches_its_checkpoint_is_refused() {
     // The refusal left the directory exactly as it found it.
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
 }
+
+#[test]
+fn a_run_directory_from_before_the_journal_is_refused_with_the_restart_guidance() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("old");
+    let mut command = cli();
+    command.args(["--__stop-after-units", "3"]);
+    let template = match_command(&run);
+    let stopped = command.args(template.get_args().skip(1)).output().unwrap();
+    assert_eq!(stopped.status.code(), Some(6));
+
+    // What a directory written before the journal looks like to this
+    // version: checkpoints in the first schema, and no journal beside them.
+    for name in ["checkpoint.json", "checkpoint.previous.json"] {
+        let path = run.join(name);
+        if let Ok(bytes) = std::fs::read(&path) {
+            let mut envelope: Value = serde_json::from_slice(&bytes).unwrap();
+            envelope["schema_version"] = 1.into();
+            std::fs::write(&path, serde_json::to_vec(&envelope).unwrap()).unwrap();
+        }
+    }
+    std::fs::remove_file(run.join("games.jsonl")).unwrap();
+
+    let resumed = match_command(&run).output().unwrap();
+    assert!(!resumed.status.success());
+    let stderr = String::from_utf8_lossy(&resumed.stderr);
+    assert!(
+        stderr.contains("written by an earlier Colosseum version") && stderr.contains("--restart"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("unsupported schema version"),
+        "the refusal fell back to a bare schema message: {stderr}"
+    );
+
+    // The guidance works: a restart archives the old directory and plays.
+    let mut restarted = match_command(&run);
+    restarted.arg("--restart");
+    let restarted = restarted.output().unwrap();
+    assert!(
+        restarted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restarted.stderr)
+    );
+}

@@ -525,6 +525,25 @@ pub(crate) fn sample_class(scorable: bool, counted: &'static str) -> &'static st
     if scorable { counted } else { UNSCORABLE_SAMPLE }
 }
 
+/// A paired game's journal record and the `ColosseumSample` its PGN carries.
+///
+/// The journal keeps the class of the pair or iteration the game was played
+/// in, with `scorable: false` as the mark of a game nobody could score: a
+/// resume rebuilds pairs and iterations by class, and a game filed under
+/// `unscorable` instead would take its pair, or its whole iteration, with it.
+/// The PGN has one tag for both facts, and there `unscorable` wins, because a
+/// reader of the export must leave the game out.
+pub(crate) fn paired_game_entry(
+    game: &match_runner::MatchGame,
+    class: &'static str,
+    iteration: Option<u32>,
+) -> (crate::journal::GameRecord, &'static str) {
+    (
+        game.journal_record(class, iteration),
+        sample_class(game.scorable, class),
+    )
+}
+
 /// Add tags to a rendered game's header.
 ///
 /// Some facts about a game are only known after it was played: whether its

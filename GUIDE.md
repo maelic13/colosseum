@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9i** writer hardening, then 10.9h, then **10.10 — EXIT**, which needs a real machine and the maintainer; the maintainer's 2,000-game 3+0.03 run with the 10.9j instrument is owed |
+| Next step | **10.9h** placement per platform research note, then **10.10 — EXIT**, which needs a real machine and the maintainer; the maintainer's 2,000-game 3+0.03 run with the 10.9j instrument is owed |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -875,7 +875,7 @@ model as well.
   plus 20 ms; (2) fixed-movetime outlier probe — 100 ms, 14 slots, 50,000
   moves, at or below fastchess's outlier rate. Both are recorded in PLAN
   §Phase 10(q) when run
-- ☐ **10.9i** — **Model: Terra High.** Writer hardening: bounded writer
+- ☑ **10.9i — DONE** — **Model: Terra High.** Writer hardening: bounded writer
   queue with off-runtime back-pressure; terminal run record written directly
   when the writer has failed; pre-10.9g directories refused with the
   `--restart` guidance; over-long protocol line a per-read fault; unscorable

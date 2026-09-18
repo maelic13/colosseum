@@ -1079,7 +1079,9 @@ impl tournament_driver::TournamentObserver for DurableTournamentOutput {
         if !state.numbers.insert(game.number) {
             return Err(format!("duplicate tournament game {}", game.number));
         }
-        let record = game.journal_record(sample_class(game.scorable, OFFICIAL_SAMPLE));
+        // The journal files an unscorable game under the class it was played
+        // in, marked `scorable: false`; the PGN tags it `unscorable`.
+        let record = game.journal_record(OFFICIAL_SAMPLE);
         // A scorable game needs no class: an untagged game is part of the
         // sample, so the export of a run without faults is unchanged.
         let moves = if game.scorable {

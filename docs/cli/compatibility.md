@@ -31,8 +31,10 @@ used the value as intended.
 
 ## Limits and unsupported variants
 
-- Protocol lines are limited to 64 KiB excluding newline. Oversized lines are
-  protocol faults rather than unbounded memory input.
+- Protocol lines are limited to 64 KiB excluding newline. An oversized line
+  is skipped to its newline and fails the one read that met it as a protocol
+  fault, rather than becoming unbounded memory input; the engine's output
+  goes on being read, so it can still answer `stop`, `isready` and `quit`.
 - Standard chess is the supported ruleset. Chess960 is a non-goal, not a
   missing feature: a `UCI_Chess960` request is refused, and a position whose
   castling field uses the Shredder/X-FEN file letters is rejected as unusable

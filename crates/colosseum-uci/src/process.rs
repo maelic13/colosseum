@@ -671,10 +671,23 @@ impl EngineProcess {
                 self.record("<", &line.text);
                 Ok(line)
             }
+            PipeEvent::Overlong { bytes } => {
+                // One bad line fails the read that met it. The reader thread
+                // has already skipped past it and keeps draining, so the
+                // session still answers `stop`, `isready` and `quit`.
+                self.record("<", &format!("[{bytes}-byte line discarded]"));
+                Err(overlong_error())
+            }
             PipeEvent::Eof => Err(UciError::Terminated),
             PipeEvent::Failed(error) => Err(error),
         }
     }
+}
+
+fn overlong_error() -> UciError {
+    UciError::Protocol(format!(
+        "protocol line exceeds {MAX_PROTOCOL_LINE_BYTES} bytes"
+    ))
 }
 
 fn charged_elapsed(start: Instant, arrived: Instant) -> Duration {
@@ -692,7 +705,13 @@ struct ArrivedLine {
 #[derive(Debug)]
 enum PipeEvent {
     Line(ArrivedLine),
+    /// A line longer than [`MAX_PROTOCOL_LINE_BYTES`], skipped to its
+    /// newline. The pipe goes on being read.
+    Overlong {
+        bytes: usize,
+    },
     Eof,
+    /// The pipe could not be read. Nothing more will come.
     Failed(UciError),
 }
 
@@ -717,14 +736,15 @@ fn spawn_pipe_reader(stdout: ChildStdout) -> Result<mpsc::UnboundedReceiver<Pipe
 fn read_pipe(mut reader: impl std::io::BufRead, sender: &mpsc::UnboundedSender<PipeEvent>) {
     loop {
         let event = match read_bounded_line(&mut reader) {
-            Ok(Some(text)) => PipeEvent::Line(ArrivedLine {
+            Ok(Some(RawLine::Text(text))) => PipeEvent::Line(ArrivedLine {
                 text,
                 arrived: Instant::now(),
             }),
+            Ok(Some(RawLine::Overlong(bytes))) => PipeEvent::Overlong { bytes },
             Ok(None) => PipeEvent::Eof,
-            Err(error) => PipeEvent::Failed(error),
+            Err(error) => PipeEvent::Failed(error.into()),
         };
-        let last = !matches!(event, PipeEvent::Line(_));
+        let last = matches!(event, PipeEvent::Eof | PipeEvent::Failed(_));
         // A closed receiver means the engine handle is gone; nobody is
         // listening, so the thread has nothing left to do.
         if sender.send(event).is_err() || last {
@@ -733,34 +753,52 @@ fn read_pipe(mut reader: impl std::io::BufRead, sender: &mpsc::UnboundedSender<P
     }
 }
 
+/// One line as the reader took it off the pipe.
+#[derive(Debug)]
+enum RawLine {
+    Text(String),
+    /// Longer than the protocol allows; this many bytes were skipped.
+    Overlong(usize),
+}
+
 /// Read one line of at most [`MAX_PROTOCOL_LINE_BYTES`], without its newline.
-/// `None` is end of stream.
-fn read_bounded_line(reader: &mut impl std::io::BufRead) -> Result<Option<String>, UciError> {
+/// A longer line is consumed to its newline without being kept, so the next
+/// read starts on the next line. `None` is end of stream.
+fn read_bounded_line(reader: &mut impl std::io::BufRead) -> std::io::Result<Option<RawLine>> {
     let mut bytes = Vec::new();
+    // Once the line is too long, its bytes are counted, not kept.
+    let mut skipped: Option<usize> = None;
     loop {
         let available = reader.fill_buf()?;
         if available.is_empty() {
-            return if bytes.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
-            };
+            return Ok(match skipped {
+                Some(count) => Some(RawLine::Overlong(count)),
+                None if bytes.is_empty() => None,
+                None => Some(RawLine::Text(String::from_utf8_lossy(&bytes).into_owned())),
+            });
         }
         let newline = available.iter().position(|byte| *byte == b'\n');
         let take = newline.map_or(available.len(), |index| index + 1);
         let content = if newline.is_some() { take - 1 } else { take };
-        if bytes.len().saturating_add(content) > MAX_PROTOCOL_LINE_BYTES {
-            return Err(UciError::Protocol(format!(
-                "protocol line exceeds {MAX_PROTOCOL_LINE_BYTES} bytes"
-            )));
+        if skipped.is_none() && bytes.len().saturating_add(content) > MAX_PROTOCOL_LINE_BYTES {
+            skipped = Some(bytes.len());
+            bytes = Vec::new();
         }
-        bytes.extend_from_slice(&available[..content]);
+        match &mut skipped {
+            Some(count) => *count = count.saturating_add(content),
+            None => bytes.extend_from_slice(&available[..content]),
+        }
         reader.consume(take);
         if newline.is_some() {
+            if let Some(count) = skipped {
+                return Ok(Some(RawLine::Overlong(count)));
+            }
             if bytes.last() == Some(&b'\r') {
                 bytes.pop();
             }
-            return Ok(Some(String::from_utf8_lossy(&bytes).into_owned()));
+            return Ok(Some(RawLine::Text(
+                String::from_utf8_lossy(&bytes).into_owned(),
+            )));
         }
     }
 }
@@ -1036,8 +1074,36 @@ mod clock_tests {
         );
         assert!(matches!(
             receiver.try_recv(),
-            Ok(PipeEvent::Failed(UciError::Protocol(_)))
+            Ok(PipeEvent::Overlong { bytes }) if bytes == MAX_PROTOCOL_LINE_BYTES + 1
         ));
+        assert!(matches!(receiver.try_recv(), Ok(PipeEvent::Eof)));
+    }
+
+    #[test]
+    fn the_reader_skips_an_overlong_line_and_keeps_delivering_the_next_ones() {
+        // Small reads, so the long line spans many buffer refills.
+        let mut input = b"info depth 1\n".to_vec();
+        input.extend(vec![b'x'; MAX_PROTOCOL_LINE_BYTES * 2]);
+        input.extend(b"\r\nbestmove e2e4\n");
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        read_pipe(
+            std::io::BufReader::with_capacity(4096, std::io::Cursor::new(input)),
+            &sender,
+        );
+        let mut events = Vec::new();
+        while let Ok(event) = receiver.try_recv() {
+            events.push(event);
+        }
+        assert!(
+            matches!(&events[..], [
+                PipeEvent::Line(first),
+                PipeEvent::Overlong { .. },
+                PipeEvent::Line(last),
+                PipeEvent::Eof,
+            ] if first.text == "info depth 1" && last.text == "bestmove e2e4"),
+            "{events:?}"
+        );
+        assert!(overlong_error().to_string().contains("exceeds"));
     }
 
     #[test]

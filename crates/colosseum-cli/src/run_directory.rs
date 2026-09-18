@@ -258,10 +258,17 @@ impl RunDirectory {
             Ok(value) => serde_json::from_value(value).map_err(RunDirectoryError::Json),
             Err(current) => match read_generation(&previous_path) {
                 Ok(value) => serde_json::from_value(value).map_err(RunDirectoryError::Json),
-                Err(previous) => Err(RunDirectoryError::NoValidCheckpoint {
-                    current: current.to_string(),
-                    previous: previous.to_string(),
-                }),
+                // A directory an earlier version wrote is not damaged; it is
+                // in a layout this version cannot continue. Say so, and how
+                // to go on, rather than report two unreadable files.
+                Err(previous) => match (current, previous) {
+                    (error @ RunDirectoryError::EarlierLayout { .. }, _)
+                    | (_, error @ RunDirectoryError::EarlierLayout { .. }) => Err(error),
+                    (current, previous) => Err(RunDirectoryError::NoValidCheckpoint {
+                        current: current.to_string(),
+                        previous: previous.to_string(),
+                    }),
+                },
             },
         }
     }
@@ -293,6 +300,11 @@ pub enum RunDirectoryError {
     },
     #[error("invalid checkpoint {path}: {reason}")]
     InvalidCheckpoint { path: PathBuf, reason: String },
+    #[error(
+        "{} was written by an earlier Colosseum version (checkpoint schema {found}; this version keeps a game journal beside checkpoint schema {CHECKPOINT_SCHEMA_VERSION}) and cannot be resumed; run the same command with --restart, which archives this directory and starts afresh",
+        path.parent().unwrap_or(path).display()
+    )]
+    EarlierLayout { path: PathBuf, found: u64 },
     #[error("cannot archive run path without a final name: {0}")]
     UnnameableArchive(PathBuf),
 }
@@ -364,6 +376,15 @@ fn read_generation(path: &Path) -> Result<Value, RunDirectoryError> {
             path: path.to_path_buf(),
             reason: error.to_string(),
         })?;
+    if let Some(found) = envelope["schema_version"]
+        .as_u64()
+        .filter(|found| *found < CHECKPOINT_SCHEMA_VERSION)
+    {
+        return Err(RunDirectoryError::EarlierLayout {
+            path: path.to_path_buf(),
+            found,
+        });
+    }
     if envelope["schema_version"] != CHECKPOINT_SCHEMA_VERSION {
         return Err(RunDirectoryError::InvalidCheckpoint {
             path: path.to_path_buf(),

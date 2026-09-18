@@ -286,11 +286,30 @@ impl RunRecorder {
     }
 
     fn persist(&mut self) -> Result<(), RunRecordError> {
-        match &self.writer {
-            Some(writer) => writer
+        let Some(writer) = &self.writer else {
+            return write_atomic(&self.path, &self.record);
+        };
+        if !self.record.status.is_terminal() {
+            return writer
                 .replace(self.path.clone(), serde_json::to_vec(&self.record)?)
-                .map_err(RunRecordError::Writer),
-            None => write_atomic(&self.path, &self.record),
+                .map_err(RunRecordError::Writer);
+        }
+        // The terminal record must reach the disk whatever became of the
+        // writer: a run that ended must never be left reading `running`. The
+        // writer is asked, and waited for; one that has failed writes nothing
+        // more, so the record is then written here, directly, with the
+        // failure beside it.
+        match writer.replace_and_report(self.path.clone(), serde_json::to_vec(&self.record)?) {
+            Ok(()) => Ok(()),
+            Err(failure) => {
+                self.record.anomalies.push(Anomaly {
+                    code: "writer-failed".into(),
+                    message: format!(
+                        "the run directory writer failed, so this final record was written directly: {failure}"
+                    ),
+                });
+                write_atomic(&self.path, &self.record)
+            }
         }
     }
 }

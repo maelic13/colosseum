@@ -103,7 +103,7 @@ pub(crate) fn read_anchor(root: &Path) -> Result<Option<JournalAnchor>, String> 
     let payload: Value =
         RunDirectory::read_checkpoint_snapshot(root).map_err(|error| error.to_string())?;
     let anchor = payload.get("journal").cloned().ok_or(
-        "the checkpoint names no journal position; this run directory was written by an earlier version and cannot be resumed, so start it again with --restart",
+        "the checkpoint names no journal position; this run directory was written by an earlier Colosseum version and cannot be resumed; run the same command with --restart, which archives this directory and starts afresh",
     )?;
     serde_json::from_value(anchor)
         .map(Some)

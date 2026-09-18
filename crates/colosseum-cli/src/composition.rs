@@ -283,6 +283,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_unscorable_game_keeps_its_iteration_so_replay_keeps_the_whole_iteration() {
+        use colosseum_engine::ClockAccountingReport;
+        let game = |number: u32, scorable: bool| match_runner::MatchGame {
+            number,
+            white: if number % 2 == 1 {
+                match_runner::MatchSide::A
+            } else {
+                match_runner::MatchSide::B
+            },
+            result: GameResult::Draw,
+            scorable,
+            termination: Termination::FiftyMove,
+            clock_accounting: ClockAccountingReport {
+                model: "test".into(),
+                version: 1,
+                white_margin_ms: 0,
+                black_margin_ms: 0,
+                monotonic_resolution_ns: 1,
+                white_charged_elapsed: None,
+                black_charged_elapsed: None,
+                white_round_trip: None,
+                black_round_trip: None,
+            },
+            opening: match_runner::OpeningAssignment {
+                book_index: Some(number.div_ceil(2) as usize - 1),
+                label: "book".into(),
+            },
+            fault: None,
+            error: None,
+            pgn: String::new(),
+        };
+        // One iteration of two pairs; the third game could not be scored.
+        let entries = [game(1, true), game(2, true), game(3, false), game(4, true)]
+            .iter()
+            .map(|game| paired_game_entry(game, OFFICIAL_SAMPLE, Some(0)))
+            .collect::<Vec<_>>();
+        // The export tags the game for what a reader must do: leave it out.
+        assert_eq!(entries[2].1, UNSCORABLE_SAMPLE);
+        // The journal keeps its class, with the mark beside it.
+        assert_eq!(entries[2].0.sample, OFFICIAL_SAMPLE);
+        assert!(!entries[2].0.scorable);
+        let records = entries
+            .into_iter()
+            .map(|(record, _)| record)
+            .collect::<Vec<_>>();
+        let iterations = iterations_from_journal(&records);
+        let pairs = &iterations[&0];
+        assert_eq!(
+            pairs.iter().map(|pair| pair.pair_id).collect::<Vec<_>>(),
+            [1, 2],
+            "a resume dropped part of the iteration"
+        );
+        assert!(!pairs[1].first.scorable);
+        let official = pairs_from_journal(&records, OFFICIAL_SAMPLE);
+        assert_eq!(official.len(), 2);
+    }
+
+    #[test]
     fn the_default_forfeit_allowance_is_one_percent_and_at_least_five() {
         assert_eq!(forfeit_allowance(2), 5);
         assert_eq!(forfeit_allowance(599), 5);

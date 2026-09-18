@@ -501,10 +501,18 @@ fn structured_slot(value: &Value) -> Option<PairSlot> {
 
 /// The games of a run's journal, `games.jsonl`: every verified line, with the
 /// games the run did not count set aside by the class it wrote them with.
+///
+/// A game nobody could score keeps its pair's or iteration's class in the
+/// journal, marked `scorable: false`; it is set aside as `unscorable`, which
+/// is how the run's own PGN tags it, so the two sources agree.
 fn journal_games(bytes: &[u8]) -> (Vec<RawGame>, ExcludedGames) {
     let mut games = Vec::new();
     let mut excluded = ExcludedGames::default();
     for record in crate::journal::read_journal_bytes(bytes) {
+        if !record.scorable {
+            excluded.record(UNSCORABLE_SAMPLE);
+            continue;
+        }
         if !record.sample.eq_ignore_ascii_case(OFFICIAL_SAMPLE) {
             excluded.record(&record.sample);
             continue;

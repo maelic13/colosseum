@@ -1621,8 +1621,7 @@ impl DurableSpsaOutput {
         let number = iteration.to_string();
         for pair in pairs {
             for game in [&pair.first, &pair.second] {
-                let sample = sample_class(game.scorable, class);
-                let record = game.journal_record(sample, Some(iteration));
+                let (record, sample) = paired_game_entry(game, class, Some(iteration));
                 record_fault(&mut faults, game.white, game.fault.as_ref());
                 log_fault(&self.writer, &record);
                 let moves = with_header_tags(

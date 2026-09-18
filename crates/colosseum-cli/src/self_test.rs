@@ -120,11 +120,19 @@ async fn bounded_pipes(executable: &Path) -> Result<String, String> {
         .handshake(Duration::from_secs(2))
         .await
         .expect_err("over-limit line must fail");
-    long_line.kill().await.map_err(|error| error.to_string())?;
     if !error.to_string().contains("exceeds") {
+        long_line.kill().await.map_err(|error| error.to_string())?;
         return Err(format!("wrong long-line classification: {error}"));
     }
-    Ok("both pipes drained; tails and protocol lines remained bounded".into())
+    // The bad line failed only the read that met it: the session went on
+    // draining the pipe and still answers.
+    let still_answers = long_line.is_ready(Duration::from_secs(2)).await;
+    long_line.kill().await.map_err(|error| error.to_string())?;
+    still_answers.map_err(|error| format!("session stopped after an over-long line: {error}"))?;
+    Ok(
+        "both pipes drained; tails and protocol lines remained bounded; an over-long line failed one read and the session kept answering"
+            .into(),
+    )
 }
 
 async fn containment(executable: &Path) -> Result<String, String> {

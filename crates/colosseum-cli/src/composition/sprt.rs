@@ -868,8 +868,7 @@ impl DurableSprtOutput {
         class: &'static str,
     ) -> Result<(), String> {
         for game in [&pair.first, &pair.second] {
-            let sample = sample_class(game.scorable, class);
-            let record = game.journal_record(sample, None);
+            let (record, sample) = paired_game_entry(game, class, None);
             log_fault(&self.writer, &record);
             let moves = with_header_tags(game.pgn.trim_end(), &[("ColosseumSample", sample)]);
             self.writer.game(record, moves)?;

@@ -2488,6 +2488,42 @@ games" procedure at 10.10, once, on the final state.
   draining, not a permanent termination; an unscorable game keeps its pair
   or iteration class in the journal beside the `unscorable` mark so replay
   cannot drop the rest of an iteration. Each with a regression test.
+
+  **Implementation evidence (Phase 10.9i):** the writer queue is a
+  `sync_channel` of `WRITER_QUEUE_CAPACITY` (256) commands. A send tries
+  first; when the queue is full it waits inside `block_in_place` on a
+  multi-threaded runtime, so the committing task hands its worker to the
+  other games before it blocks (outside a runtime, or on a current-thread
+  one, it simply waits; the writer drains on its own thread). The regression
+  runs a one-worker runtime with the writer held and a queue of two: the
+  committing task stays blocked while a ticker task keeps running, and with
+  `block_in_place` removed the same test fails on the stopped ticker. A
+  terminal run record is written through `replace_and_report`, which waits
+  for the writer's answer; a failed writer, which writes nothing after its
+  first failure, answers with that failure and the recorder then writes the
+  record directly and atomically with a `writer-failed` anomaly. Both
+  `finish` and the dropped-owner `aborted` path are tested against a writer
+  whose replace failed. A checkpoint of an earlier schema is now a distinct
+  `EarlierLayout` error that names the directory and the `--restart`
+  remedy, preferred over the bare checksum/schema pair; the test downgrades
+  a real run's checkpoints, removes its journal, sees the guidance and no
+  bare schema message, then restarts it successfully. An over-long protocol
+  line is skipped to its newline by the reader thread and reported as one
+  `Overlong` event; the read that meets it fails as a protocol fault and the
+  reader goes on, so later lines still arrive (unit test with the long line
+  spanning many buffer refills) and the session still answers (`self-test`
+  now requires `isready` to succeed after the fault); only an I/O failure
+  or end of stream ends the reader. Unscorable games are journalled under
+  the class of their pair or iteration with `scorable: false`, through one
+  helper used by `sprt` and `spsa`, and `match` and `tournament` keep
+  `official`; the PGN tag stays `unscorable`, and the journal replay in
+  `stats` sets such a game aside as `unscorable`, so the 10.9e equality
+  between a run directory and its PGN holds. The regression rebuilds an
+  SPSA iteration containing an unscorable game from its journal records and
+  gets both pairs. Deviation: journal lines written by 10.9g–10.9j with
+  `sample: "unscorable"` still read, but a resume cannot place those games
+  in their pair; a directory from those builds should be restarted if it
+  holds one.
 - **(t) Round-trip latency instrument.** After (q) the commit stall is gone
   and the run directory stays small, but the real-host 3+0.03 forfeits did
   not move (15 in 2,000 games at 14 shared slots; 3 and 4 in 1,000 at 7
