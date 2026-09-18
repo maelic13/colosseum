@@ -16,6 +16,7 @@ pub mod score;
 pub mod session;
 pub mod timing;
 
+pub use cpu_time::ProcessSample;
 pub use error::UciError;
 pub use parse::{InfoLine, parse_bestmove, parse_info_line, parse_option_line};
 pub use position::{GoLimits, UciPosition};

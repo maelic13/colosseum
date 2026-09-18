@@ -50,7 +50,9 @@ nanoseconds — `go_write_ns` (the harness writing `go`), `to_first_info_ns`
 Windows x86-64 `held_ns` (charged time minus the CPU time the engine's
 process consumed: how long it was not running while its clock ran) with
 `held_over_10ms` and `held_over_25ms`, how many searches were held longer
-than that. For an engine that reports only at the end of each iteration,
+than that, `kernel_ns`, the most kernel-mode CPU one search cost the process
+(in whole scheduler ticks of about 15.6 ms), and `page_faults`, the most page
+faults it took in one search. For an engine that reports only at the end of each iteration,
 `overhead_ns` also holds its own search time since that report; `held_ns`
 depends on nothing the engine says. Its `phases`
 say where the game's wall time went, in nanoseconds: `startup_ns` (to the

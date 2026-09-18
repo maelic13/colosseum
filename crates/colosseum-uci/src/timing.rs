@@ -14,6 +14,8 @@
 
 use std::time::{Duration, Instant};
 
+use crate::cpu_time::ProcessSample;
+
 /// The monotonic stamps of one search, from `go` to the game task holding its
 /// `bestmove`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,11 +50,11 @@ pub struct SearchTiming {
     /// time then shares no origin with the charged interval, and neither the
     /// overhead nor the last `info`'s lag can be computed from the two.
     pub earlier_origin: bool,
-    /// The engine process's consumed CPU time just before the `go` was
-    /// stamped, in nanoseconds, where the platform can read it precisely.
-    pub cpu_at_go_ns: Option<u64>,
+    /// The engine process's counters just before the `go` was stamped,
+    /// where the platform can read them precisely.
+    pub process_at_go: Option<ProcessSample>,
     /// The same, read when the game task took the `bestmove`.
-    pub cpu_at_answer_ns: Option<u64>,
+    pub process_at_answer: Option<ProcessSample>,
 }
 
 /// One phase of a search's round trip, named for the report.
@@ -90,8 +92,8 @@ impl SearchTiming {
             consumed: None,
             late: false,
             earlier_origin: false,
-            cpu_at_go_ns: None,
-            cpu_at_answer_ns: None,
+            process_at_go: None,
+            process_at_answer: None,
         }
     }
 
@@ -167,8 +169,29 @@ impl SearchTiming {
     #[must_use]
     pub fn held_ns(&self) -> Option<i64> {
         let charged = self.charged()?;
-        let consumed = self.cpu_at_answer_ns?.checked_sub(self.cpu_at_go_ns?)?;
+        let consumed = self
+            .process_at_answer?
+            .cpu_ns
+            .checked_sub(self.process_at_go?.cpu_ns)?;
         Some(signed_ns(charged) - i64::try_from(consumed).ok()?)
+    }
+
+    /// Kernel-mode CPU time the engine's process spent over the search, in
+    /// nanoseconds. Tick-granular: a value is a multiple of about 15.6 ms,
+    /// which is fine for finding a burst of tens of milliseconds.
+    #[must_use]
+    pub fn kernel_ns(&self) -> Option<u64> {
+        self.process_at_answer?
+            .kernel_ns
+            .checked_sub(self.process_at_go?.kernel_ns)
+    }
+
+    /// Page faults the engine's process took over the search.
+    #[must_use]
+    pub fn page_faults(&self) -> Option<u64> {
+        self.process_at_answer?
+            .page_faults
+            .checked_sub(self.process_at_go?.page_faults)
     }
 }
 

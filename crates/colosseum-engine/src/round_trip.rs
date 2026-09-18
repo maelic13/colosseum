@@ -19,7 +19,8 @@ pub const FORENSIC_SEARCHES: usize = 5;
 /// How to read [`RoundTripRecorder::forensic`] tables.
 pub const FORENSIC_LEGEND: &str = "(times are ms after `go` was stamped; `!` marks a bestmove \
 that arrived after the deadline and was read only to time it; overhead = bestmove − engine t; \
-held = charged time the engine's process spent not running)\n";
+held = charged time the engine's process spent not running; kernel = its kernel-mode CPU in the \
+search, tick-granular; faults = its page faults in the search)\n";
 
 /// The largest value each phase of one side's searches reached in a game, in
 /// nanoseconds. A phase whose ends were never both observed is absent.
@@ -58,6 +59,13 @@ pub struct RoundTripMaxima {
     pub held_over_10ms: u32,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub held_over_25ms: u32,
+    /// The most kernel-mode CPU time one search cost the engine's process,
+    /// tick-granular.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kernel_ns: Option<u64>,
+    /// The most page faults the engine's process took in one search.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_faults: Option<u64>,
 }
 
 fn is_zero(value: &u32) -> bool {
@@ -93,6 +101,8 @@ impl RoundTripMaxima {
             self.held_over_10ms += u32::from(held > 10_000_000);
             self.held_over_25ms += u32::from(held > 25_000_000);
         }
+        raise(&mut self.kernel_ns, timing.kernel_ns());
+        raise(&mut self.page_faults, timing.page_faults());
     }
 }
 
@@ -147,7 +157,7 @@ impl RoundTripRecorder {
         );
         let _ = writeln!(
             text,
-            "{:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+            "{:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
             "ply",
             "written",
             "1st info",
@@ -157,7 +167,9 @@ impl RoundTripRecorder {
             "consumed",
             "overhead",
             "deadline",
-            "held"
+            "held",
+            "kernel",
+            "faults"
         );
         for (ply, timing) in &self.recent {
             let at = |instant: Option<std::time::Instant>| {
@@ -170,7 +182,7 @@ impl RoundTripRecorder {
             };
             let _ = writeln!(
                 text,
-                "{:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+                "{:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
                 ply,
                 ms(timing.since_go(timing.write_returned)),
                 at(timing.first_info),
@@ -185,6 +197,12 @@ impl RoundTripRecorder {
                     .map_or_else(|| "-".to_owned(), signed_ms),
                 ms(timing.since_go(timing.deadline)),
                 timing.held_ns().map_or_else(|| "-".to_owned(), signed_ms),
+                timing
+                    .kernel_ns()
+                    .map_or_else(|| "-".to_owned(), |nanos| ms(Duration::from_nanos(nanos))),
+                timing
+                    .page_faults()
+                    .map_or_else(|| "-".to_owned(), |faults| faults.to_string()),
             );
         }
         text

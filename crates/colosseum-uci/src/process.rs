@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use colosseum_core::UciOption;
+
+use crate::cpu_time::ProcessSample;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
@@ -349,12 +351,18 @@ impl EngineProcess {
         // answer the moment it lands, and a fast engine can answer before this
         // task returns from the write, which would otherwise make the interval
         // end before it began.
-        let cpu_at_go = self.cpu_consumed_ns();
+        let process_at_go = self.process_sample();
         let charged_from = Instant::now();
         self.send(&limits.to_command()).await?;
         let write_returned = Instant::now();
-        self.await_bestmove(charged_from, cpu_at_go, write_returned, deadline, on_info)
-            .await
+        self.await_bestmove(
+            charged_from,
+            process_at_go,
+            write_returned,
+            deadline,
+            on_info,
+        )
+        .await
     }
 
     /// Start a normal search and return immediately, leaving `bestmove` to be
@@ -375,12 +383,18 @@ impl EngineProcess {
         deadline: Duration,
         on_info: impl FnMut(&parse::InfoLine),
     ) -> Result<SearchOutput, UciError> {
-        let cpu_at_go = self.cpu_consumed_ns();
+        let process_at_go = self.process_sample();
         let charged_from = Instant::now();
         self.send("stop").await?;
         let write_returned = Instant::now();
         let result = self
-            .await_bestmove(charged_from, cpu_at_go, write_returned, deadline, on_info)
+            .await_bestmove(
+                charged_from,
+                process_at_go,
+                write_returned,
+                deadline,
+                on_info,
+            )
             .await;
         self.mark_earlier_origin();
         result
@@ -457,12 +471,18 @@ impl EngineProcess {
                 elapsed: Duration::ZERO,
             });
         }
-        let cpu_at_go = self.cpu_consumed_ns();
+        let process_at_go = self.process_sample();
         let charged_from = Instant::now();
         self.send("ponderhit").await?;
         let write_returned = Instant::now();
         let result = self
-            .await_bestmove(charged_from, cpu_at_go, write_returned, deadline, on_info)
+            .await_bestmove(
+                charged_from,
+                process_at_go,
+                write_returned,
+                deadline,
+                on_info,
+            )
             .await;
         self.mark_earlier_origin();
         result
@@ -491,10 +511,10 @@ impl EngineProcess {
         }
     }
 
-    /// CPU time the engine's process has consumed, in nanoseconds, where the
-    /// platform can read it precisely.
-    fn cpu_consumed_ns(&self) -> Option<u64> {
-        self.cpu.as_ref()?.consumed_ns()
+    /// The engine process's CPU time, kernel time and page faults, where the
+    /// platform can read them precisely.
+    fn process_sample(&self) -> Option<ProcessSample> {
+        self.cpu.as_ref()?.sample()
     }
 
     /// The stamps of the most recent search, taken so the next search starts
@@ -518,7 +538,7 @@ impl EngineProcess {
             {
                 timing.bestmove_arrived = Some(line.arrived);
                 timing.consumed = Some(self.last_consumed);
-                timing.cpu_at_answer_ns = self.cpu_consumed_ns();
+                timing.process_at_answer = self.process_sample();
                 timing.late = true;
             } else {
                 let until = Instant::now() + window;
@@ -527,7 +547,7 @@ impl EngineProcess {
                         Ok(line) if parse::parse_bestmove(line.text.trim()).is_some() => {
                             timing.bestmove_arrived = Some(line.arrived);
                             timing.consumed = Some(self.last_consumed);
-                            timing.cpu_at_answer_ns = self.cpu_consumed_ns();
+                            timing.process_at_answer = self.process_sample();
                             timing.late = true;
                             break;
                         }
@@ -550,13 +570,13 @@ impl EngineProcess {
     async fn await_bestmove(
         &mut self,
         start: Instant,
-        cpu_at_go: Option<u64>,
+        process_at_go: Option<ProcessSample>,
         write_returned: Instant,
         deadline: Duration,
         on_info: impl FnMut(&parse::InfoLine),
     ) -> Result<SearchOutput, UciError> {
         let mut timing = SearchTiming::new(start, write_returned, start + deadline);
-        timing.cpu_at_go_ns = cpu_at_go;
+        timing.process_at_go = process_at_go;
         self.late_line = None;
         let result = self.read_search(&mut timing, on_info).await;
         self.last_timing = Some(timing);
@@ -587,7 +607,7 @@ impl EngineProcess {
             if let Some((best_move, ponder)) = parse::parse_bestmove_ponder(line) {
                 timing.bestmove_arrived = Some(arrived);
                 timing.consumed = Some(self.last_consumed);
-                timing.cpu_at_answer_ns = self.cpu_consumed_ns();
+                timing.process_at_answer = self.process_sample();
                 let elapsed = charged_elapsed(start, arrived);
                 // Some engines report a literal `nps 0` on every info line
                 // (Fruit 2.1 does) — treat that as unreported and derive the
