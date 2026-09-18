@@ -290,6 +290,7 @@ pub(crate) async fn run_match(
     recorder.write_through(writer.clone());
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "match",
+        "progress": {"every": progress_every, "unit": "games", "min_secs": progress_min_secs},
         "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
         "engine_a_time_control": engine_a_time_control,
         "engine_b_time_control": engine_b_time_control,

@@ -47,7 +47,12 @@ and `journal` holds `games`, `covered_by_checkpoint`, `after_checkpoint`,
 It ends by printing the run's most recent progress block verbatim, exactly as
 the console showed it, so closing a terminal costs nothing. `run.log` keeps
 every block the run ever printed; the record keeps the latest. A run that has
-not published one yet says so. See the
+not published one yet says when the first is due, from the schedule it
+recorded:
+
+```text
+progress: none published yet; the first block is due once 20 games have been committed in this invocation (7 committed in total so far), and no sooner than 5 s after it started
+``` See the
 [output contract](output.md) for what a block contains and when it is printed.
 
 SPSA tunes additionally support `colosseum-cli spsa status <run-dir>`. That

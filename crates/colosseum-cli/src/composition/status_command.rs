@@ -35,7 +35,7 @@ pub(crate) fn run_status(run_directory: &Path, machine: bool) -> ExitCode {
         // nothing, and `status` never invents a second account of the run.
         match &record.progress {
             Some(block) => print!("{}", block.render()),
-            None => println!("progress: none published yet"),
+            None => println!("progress: {}", first_block_due(&record)),
         }
     }
     ExitCode::SUCCESS
@@ -139,4 +139,23 @@ fn durable_status(root: &Path) -> Option<DurableStatus> {
         }),
         journal,
     })
+}
+
+/// When a run that has printed no block yet will print its first: after the
+/// number of units its `--progress-every` names, and never sooner than its
+/// `--progress-min-secs` floor. A run that recorded no schedule says only that
+/// nothing has been published.
+pub(crate) fn first_block_due(record: &RunRecord) -> String {
+    let progress = &record.workflow["progress"];
+    let (Some(every), Some(unit), Some(min_secs)) = (
+        progress["every"].as_u64(),
+        progress["unit"].as_str(),
+        progress["min_secs"].as_u64(),
+    ) else {
+        return "none published yet".to_owned();
+    };
+    format!(
+        "none published yet; the first block is due once {every} {unit} have been committed in this invocation ({} committed in total so far), and no sooner than {min_secs} s after it started",
+        record.official_sample.committed_units
+    )
 }

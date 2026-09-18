@@ -343,6 +343,21 @@ mod tests {
     }
 
     #[test]
+    fn a_game_budget_gives_the_iterations_it_divides_into_and_names_the_nearest_otherwise() {
+        assert_eq!(spsa_iterations(None, None, 32), Ok(DEFAULT_SPSA_ITERATIONS));
+        assert_eq!(spsa_iterations(Some(60), None, 32), Ok(60));
+        assert_eq!(spsa_iterations(None, Some(160_000), 32), Ok(5_000));
+        assert_eq!(spsa_iterations(None, Some(168_000), 42), Ok(4_000));
+        let refused = spsa_iterations(None, Some(160_000), 42).unwrap_err();
+        assert!(
+            refused.contains("159978 (3809 iterations) or 160020 (3810 iterations)"),
+            "{refused}"
+        );
+        let small = spsa_iterations(None, Some(10), 32).unwrap_err();
+        assert!(small.contains("32 (1 iteration)"), "{small}");
+    }
+
+    #[test]
     fn the_default_forfeit_allowance_is_one_percent_and_at_least_five() {
         assert_eq!(forfeit_allowance(2), 5);
         assert_eq!(forfeit_allowance(599), 5);

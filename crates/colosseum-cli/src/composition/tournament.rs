@@ -666,6 +666,7 @@ pub(crate) async fn run_tournament_command(
     recorder.write_through(writer.clone());
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "tournament",
+        "progress": {"every": command.progress_every, "unit": "games", "min_secs": command.progress_min_secs},
         "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
         "format": plan.design.format,
         "games_scheduled": plan.schedule.len(),

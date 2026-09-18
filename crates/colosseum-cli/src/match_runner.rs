@@ -18,9 +18,9 @@ use colosseum_core::{
 use colosseum_engine::{
     ClockAccountingReport, CoreClass, CpuPlacementPolicy, EngineCpuPlacement, EngineFaultKind,
     EngineGameSpec, GameFault, GamePairIdentity, GameSide, GameSlotCpuAllocation, GameSpec,
-    LiveGameState, ResolvedOpening, SlotAllocation, allocate_game_slots, detect_allowed_cpu_set,
-    detect_cpu_characteristics, detect_cpu_topology, load_openings_named, plan_cpu_placement,
-    run_game,
+    LiveGameState, OpeningList, ResolvedOpening, SlotAllocation, allocate_game_slots,
+    detect_allowed_cpu_set, detect_cpu_characteristics, detect_cpu_topology, load_openings_named,
+    plan_cpu_placement, run_game,
 };
 use colosseum_uci::SpawnOptions;
 use serde::{Deserialize, Serialize};
@@ -441,7 +441,7 @@ pub struct MatchOpenings {
     // settings are cloned once per launched game or pair. A deep copy cost
     // about half a second on the one task that launches games, which
     // serialised every SPSA iteration and every SPRT pair behind it.
-    entries: Arc<Vec<ResolvedOpening>>,
+    entries: Arc<OpeningList>,
     report: OpeningPolicyReport,
 }
 
@@ -454,6 +454,10 @@ pub struct PairGameSettings {
     pub adjudication: AdjudicationConfig,
     pub ponder: bool,
     pub openings: MatchOpenings,
+    /// Internal, for scale tests: play each game in-process as an instant
+    /// result instead of launching engines, so a tune of thousands of
+    /// iterations can exercise everything around the games.
+    pub synthetic_games: bool,
 }
 
 impl MatchOpenings {
@@ -478,7 +482,7 @@ impl MatchOpenings {
         };
         let pair_index = (number.saturating_sub(1) / 2) as usize;
         let book_index = (start_index + pair_index) % self.entries.len();
-        let opening = self.entries[book_index].clone();
+        let opening = self.entries.get(book_index);
         let assignment = OpeningAssignment {
             book_index: Some(book_index),
             label: opening.label.clone(),
@@ -501,14 +505,14 @@ impl MatchOpenings {
             OpeningPolicyReport::Startpos { .. } => 0,
         };
         let book_index = (start_index + encounter.saturating_sub(1) as usize) % self.entries.len();
-        let opening = self.entries[book_index].clone();
+        let opening = self.entries.get(book_index);
         let assignment = OpeningAssignment {
             book_index: Some(book_index),
             label: opening.label.clone(),
         };
         (
             Self {
-                entries: Arc::new(vec![opening]),
+                entries: Arc::new(OpeningList::from_resolved([opening])),
                 report: OpeningPolicyReport::Startpos {
                     warning: "opening preselected by the tournament encounter".into(),
                 },
@@ -535,7 +539,7 @@ pub fn resolve_openings(
 ) -> Result<MatchOpenings, MatchError> {
     let Some(mut book) = book else {
         return Ok(MatchOpenings {
-            entries: Arc::new(Vec::new()),
+            entries: Arc::new(OpeningList::default()),
             report: OpeningPolicyReport::Startpos {
                 warning:
                     "no opening book: every game starts from startpos; opening diversity is absent"
@@ -792,6 +796,9 @@ pub async fn play_pair_game(
     slot: &GameSlotCpuAllocation,
     settings: &PairGameSettings,
 ) -> MatchGame {
+    if settings.synthetic_games {
+        return synthetic_game(number, slot, settings);
+    }
     let mut engine_a = settings.engine_a.clone();
     let mut engine_b = settings.engine_b.clone();
     engine_a.allocated_cpus = slot.engine_a.allocation.clone();
@@ -811,6 +818,82 @@ pub async fn play_pair_game(
         opening_assignment,
     })
     .await
+}
+
+/// An instant game with a result drawn from its number, for scale tests. It
+/// carries everything a real game's record does — identity, opening, slot and
+/// a PGN with the schedule tags — and no moves.
+fn synthetic_game(
+    number: u32,
+    slot: &GameSlotCpuAllocation,
+    settings: &PairGameSettings,
+) -> MatchGame {
+    let started_unix_us = unix_us();
+    let (_, opening) = settings.openings.assignment(number);
+    let a_is_white = number % 2 == 1;
+    let result = match number % 3 {
+        0 => GameResult::Draw,
+        1 => GameResult::WhiteWin,
+        _ => GameResult::BlackWin,
+    };
+    let pgn = colosseum_engine::pgn::build_pgn(
+        &colosseum_engine::pgn::PgnTags {
+            event: "Colosseum CLI synthetic game".into(),
+            site: "?".into(),
+            date: "????.??.??".into(),
+            round: number,
+            white: if a_is_white { "A" } else { "B" }.into(),
+            black: if a_is_white { "B" } else { "A" }.into(),
+            result,
+            time_control: String::new(),
+            termination: Some(Termination::MaxMoves),
+            fen: None,
+            opening_plies: 0,
+            identity: Some(GamePairIdentity {
+                game_number: number,
+                pair_number: number.div_ceil(2),
+                pair_game: if a_is_white { 1 } else { 2 },
+                opening_index: opening.book_index,
+                opening_label: opening.label.clone(),
+            }),
+            time_margins_ms: None,
+            slot: Some(slot.slot_index),
+            forfeited_search: None,
+        },
+        &[],
+        &[],
+    );
+    MatchGame {
+        number,
+        white: if a_is_white {
+            MatchSide::A
+        } else {
+            MatchSide::B
+        },
+        result,
+        scorable: true,
+        termination: Termination::MaxMoves,
+        clock_accounting: ClockAccountingReport {
+            model: "synthetic".into(),
+            version: 0,
+            white_margin_ms: 0,
+            black_margin_ms: 0,
+            monotonic_resolution_ns: 1,
+            white_charged_elapsed: None,
+            black_charged_elapsed: None,
+            white_round_trip: None,
+            black_round_trip: None,
+        },
+        opening,
+        fault: None,
+        error: None,
+        pgn,
+        slot: Some(SlotOccupancy {
+            index: slot.slot_index,
+            started_unix_us,
+            ended_unix_us: unix_us(),
+        }),
+    }
 }
 
 pub fn plan_execution(

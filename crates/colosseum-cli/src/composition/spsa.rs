@@ -20,6 +20,10 @@ pub(crate) struct SpsaCommand {
     /// Number of SPSA centre updates in the tune horizon.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) iterations: Option<u32>,
+    /// The tune's budget in games; the iteration count is derived from it for
+    /// the chosen games per iteration, which must divide it.
+    #[arg(long, conflicts_with = "iterations", value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) total_games: Option<u64>,
     /// Complete games in each pair-atomic mini-match.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) games_per_iteration: Option<u32>,
@@ -98,9 +102,13 @@ pub(crate) struct SpsaPlanCommand {
     /// Terminal SPSA gain ratio shared by every tuned parameter.
     #[arg(long)]
     pub(crate) r_end: f64,
-    /// Number of SPSA centre updates in the primary horizon.
-    #[arg(long, default_value_t = DEFAULT_SPSA_ITERATIONS, value_parser = clap::value_parser!(u32).range(1..))]
-    pub(crate) iterations: u32,
+    /// Number of SPSA centre updates in the primary horizon (default 5000).
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    pub(crate) iterations: Option<u32>,
+    /// The tune's budget in games; the iteration count is derived from it for
+    /// the chosen games per iteration, which must divide it.
+    #[arg(long, conflicts_with = "iterations", value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) total_games: Option<u64>,
     /// Complete games in each pair-atomic mini-match.
     #[arg(long, default_value_t = DEFAULT_SPSA_GAMES_PER_ITERATION, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) games_per_iteration: u32,
@@ -185,6 +193,10 @@ pub(crate) struct SpsaConditions {
     /// Number of games allowed to run at once.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) concurrency: u32,
+    /// Internal: play every game in-process as an instant result, so a scale
+    /// test can run a tune of thousands of iterations. Not a public interface.
+    #[arg(long = "__synthetic-games", hide = true)]
+    pub(crate) synthetic_games: bool,
     /// Physical cores per game slot, shared by both of its engines. This is
     /// the default allocation, because without pondering only one engine of a
     /// game searches at a time.
@@ -244,7 +256,18 @@ pub(crate) fn run_spsa_plan(command: SpsaPlanCommand, machine: bool) -> ExitCode
             return ExitCode::from(2);
         }
     };
-    let settings = match SpsaRunSettings::new(command.iterations, command.games_per_iteration) {
+    let iterations = match spsa_iterations(
+        command.iterations,
+        command.total_games,
+        command.games_per_iteration,
+    ) {
+        Ok(iterations) => iterations,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let settings = match SpsaRunSettings::new(iterations, command.games_per_iteration) {
         Ok(settings) => settings,
         Err(error) => {
             eprintln!("configuration error: {error}");
@@ -306,8 +329,14 @@ pub(crate) fn print_spsa_plan(report: &SpsaPlanReport) {
     );
     if let Some(timing) = &report.wall_time {
         println!(
-            "estimated wall time: {:.1}..{:.1} seconds ({} concurrent, {} game waves)",
-            timing.lower_seconds, timing.upper_seconds, timing.concurrency, timing.total_game_waves
+            "estimated wall time: {:.1}..{:.1} hours ({:.0}..{:.0} seconds; {} concurrent, {} waves of up to {} games)",
+            timing.lower_seconds / 3_600.0,
+            timing.upper_seconds / 3_600.0,
+            timing.lower_seconds,
+            timing.upper_seconds,
+            timing.concurrency,
+            timing.total_game_waves,
+            timing.concurrency
         );
     } else {
         println!("estimated wall time: unavailable (supply a seconds/game range or pilot samples)");
@@ -615,11 +644,20 @@ pub(crate) async fn run_spsa_command(
             eprintln!("configuration error: --r-end is required for a new SPSA run");
             return ExitCode::from(2);
         };
+        let games_per_iteration = command
+            .games_per_iteration
+            .unwrap_or(DEFAULT_SPSA_GAMES_PER_ITERATION);
+        let iterations =
+            match spsa_iterations(command.iterations, command.total_games, games_per_iteration) {
+                Ok(iterations) => iterations,
+                Err(error) => {
+                    eprintln!("configuration error: {error}");
+                    return ExitCode::from(2);
+                }
+            };
         (
-            command.iterations.unwrap_or(DEFAULT_SPSA_ITERATIONS),
-            command
-                .games_per_iteration
-                .unwrap_or(DEFAULT_SPSA_GAMES_PER_ITERATION),
+            iterations,
+            games_per_iteration,
             r_end,
             command.final_window_percent,
         )
@@ -828,31 +866,37 @@ pub(crate) async fn run_spsa_command(
         conditions.max_engine_faults,
         conditions.max_time_losses,
     );
+    let mut requested = json!({
+        "command": "spsa",
+        "engine": &engine,
+        "engine_sha256": "computed-and-checked-before-live-launch",
+        "tune": {
+            "path": tune_path,
+            "parameters": &tune.parameters,
+            "live_schema": "verified-before-game-launch"
+        },
+        "settings": settings,
+        "r_end": r_end,
+        "final_window_percent": final_window_percent,
+        "schedule": &expected_schedule,
+        "engine_time_control": engine_time_control,
+        "adjudication": adjudication,
+        "ponder": conditions.ponder,
+        "execution": execution,
+        "master_seed": master_seed,
+        "master_seed_generated": master_seed_generated,
+        "openings": openings.report(),
+        "fault_policy": fault_policy,
+    });
+    // A budget in games is part of what was asked for; a run given its
+    // iteration count directly keeps the configuration it always had.
+    if let Some(total_games) = command.total_games {
+        requested["total_games"] = json!(total_games);
+    }
     let resolved = match resolve_config(
         built_in_defaults(),
         None,
-        json!({
-            "command": "spsa",
-            "engine": &engine,
-            "engine_sha256": "computed-and-checked-before-live-launch",
-            "tune": {
-                "path": tune_path,
-                "parameters": &tune.parameters,
-                "live_schema": "verified-before-game-launch"
-            },
-            "settings": settings,
-            "r_end": r_end,
-            "final_window_percent": final_window_percent,
-            "schedule": &expected_schedule,
-            "engine_time_control": engine_time_control,
-            "adjudication": adjudication,
-            "ponder": conditions.ponder,
-            "execution": execution,
-            "master_seed": master_seed,
-            "master_seed_generated": master_seed_generated,
-            "openings": openings.report(),
-            "fault_policy": fault_policy,
-        }),
+        requested,
         &[],
         &current_directory,
         &path_pointers,
@@ -1032,6 +1076,7 @@ pub(crate) async fn run_spsa_command(
     recorder.write_through(writer.clone());
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "spsa",
+        "progress": {"every": conditions.progress_every, "unit": "iterations", "min_secs": conditions.progress_min_secs},
         "stop_after_iteration": command.stop_after_iteration,
         "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
         "settings": settings,
@@ -1092,6 +1137,7 @@ pub(crate) async fn run_spsa_command(
             adjudication,
             ponder: conditions.ponder,
             openings: openings.clone(),
+            synthetic_games: conditions.synthetic_games,
         },
         execution: execution.clone(),
         fault_policy,
@@ -1173,6 +1219,8 @@ pub(crate) async fn run_spsa_command(
         None
     };
     let report = SpsaReport {
+        schema_version: SPSA_RESULT_SCHEMA_VERSION,
+        games: crate::journal::JOURNAL_FILE,
         engine: recorded_engine,
         schedule: expected_schedule,
         bound_tune,
@@ -1212,8 +1260,17 @@ pub(crate) async fn run_spsa_command(
     }
 }
 
+/// Version 2 carries one summary per iteration and names the journal for the
+/// games; version 1 carried every game's full record, about 100 KB per
+/// iteration.
+pub(crate) const SPSA_RESULT_SCHEMA_VERSION: u32 = 2;
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct SpsaReport {
+    pub(crate) schema_version: u32,
+    /// Where the games are: the run directory's journal. Each iteration's
+    /// summary names the game numbers it holds.
+    pub(crate) games: &'static str,
     pub(crate) engine: EngineLaunchSpec,
     pub(crate) schedule: SpsaScheduleArtifact,
     pub(crate) bound_tune: SpsaBoundTune,
@@ -1405,20 +1462,11 @@ impl SpsaCentreTracker {
 /// Every engine fault a tune has committed, across every iteration it kept.
 pub(crate) fn spsa_faults(checkpoint: &spsa_driver::SpsaCheckpoint) -> MatchFaultCounts {
     let mut faults = MatchFaultCounts::default();
-    let pairs = checkpoint
-        .completed_iterations
-        .iter()
-        .flat_map(|iteration| &iteration.pairs)
-        .chain(
-            checkpoint
-                .invalid_iteration
-                .iter()
-                .flat_map(|iteration| &iteration.pairs),
-        );
-    for pair in pairs {
-        for game in [&pair.first, &pair.second] {
-            record_fault(&mut faults, game.white, game.fault.as_ref());
-        }
+    for iteration in &checkpoint.completed_iterations {
+        faults.absorb(iteration.faults);
+    }
+    if let Some(invalid) = &checkpoint.invalid_iteration {
+        faults.absorb(invalid.faults);
     }
     faults
 }
@@ -1625,7 +1673,10 @@ impl DurableSpsaOutput {
             state: Mutex::new(SpsaAggregate {
                 completed: completed.len() as u64,
                 last: completed.last().cloned(),
-                faults: MatchFaultCounts::default(),
+                faults: spsa_faults(&spsa_driver::SpsaCheckpoint {
+                    completed_iterations: completed.to_vec(),
+                    invalid_iteration: None,
+                }),
                 invalid: None,
                 cadence: CheckpointCadence::new(),
             }),
@@ -1783,22 +1834,18 @@ impl spsa_driver::SpsaObserver for DurableSpsaOutput {
     fn iteration_committed(
         &self,
         iteration: &spsa_driver::SpsaCommittedIteration,
+        pairs: &[CompletePair<match_runner::MatchGame>],
     ) -> Result<(), String> {
-        let faults = self.commit_games(iteration.iteration, &iteration.pairs, OFFICIAL_SAMPLE)?;
+        let faults = self.commit_games(iteration.iteration, pairs, OFFICIAL_SAMPLE)?;
         let mut state = self.state.lock().map_err(|_| "SPSA state lock poisoned")?;
         state.completed += 1;
         state.faults.engine_a += faults.engine_a;
         state.faults.engine_b += faults.engine_b;
         state.faults.time_losses_a += faults.time_losses_a;
         state.faults.time_losses_b += faults.time_losses_b;
-        // The last iteration is kept without its moves: the block needs its
-        // score and coefficients, not its games.
-        let mut last = iteration.clone();
-        for pair in &mut last.pairs {
-            pair.first.strip_moves();
-            pair.second.strip_moves();
-        }
-        state.last = Some(last);
+        // The last iteration's summary: the block needs its score and
+        // coefficients, not its games.
+        state.last = Some(iteration.clone());
         let completed = state.completed;
         if state.cadence.record(1) {
             self.writer.checkpoint(state.checkpoint())?;
@@ -1810,8 +1857,9 @@ impl spsa_driver::SpsaObserver for DurableSpsaOutput {
     fn iteration_invalid(
         &self,
         iteration: &spsa_driver::SpsaInvalidIteration,
+        pairs: &[CompletePair<match_runner::MatchGame>],
     ) -> Result<(), String> {
-        let faults = self.commit_games(iteration.iteration, &iteration.pairs, INVALID_SAMPLE)?;
+        let faults = self.commit_games(iteration.iteration, pairs, INVALID_SAMPLE)?;
         let mut state = self.state.lock().map_err(|_| "SPSA state lock poisoned")?;
         state.faults.engine_a += faults.engine_a;
         state.faults.engine_b += faults.engine_b;
@@ -1835,6 +1883,42 @@ pub(crate) fn spsa_official_sample(iterations: u64, settings: SpsaRunSettings) -
         pentanomial: [0; 5],
         unpaired_games: 0,
     }
+}
+
+/// The iteration count of a tune: given directly, derived from a budget in
+/// games, or the default horizon.
+///
+/// A budget in games survives a change of mini-match size: `--total-games
+/// 168000` is 5,250 iterations of 32 games or 4,000 of 42. A budget the
+/// mini-match does not divide is refused rather than rounded, naming the
+/// nearest budgets that it does divide.
+pub(crate) fn spsa_iterations(
+    iterations: Option<u32>,
+    total_games: Option<u64>,
+    games_per_iteration: u32,
+) -> Result<u32, String> {
+    let Some(total) = total_games else {
+        return Ok(iterations.unwrap_or(DEFAULT_SPSA_ITERATIONS));
+    };
+    let size = u64::from(games_per_iteration.max(1));
+    if total % size != 0 {
+        let lower = total / size * size;
+        let upper = lower + size;
+        let nearest = if lower == 0 {
+            format!("{upper} (1 iteration)")
+        } else {
+            format!(
+                "{lower} ({} iterations) or {upper} ({} iterations)",
+                lower / size,
+                upper / size
+            )
+        };
+        return Err(format!(
+            "--total-games {total} is not a multiple of {games_per_iteration} games per iteration; the nearest budgets are {nearest}"
+        ));
+    }
+    u32::try_from(total / size)
+        .map_err(|_| format!("--total-games {total} gives more iterations than a tune can hold"))
 }
 
 /// An absent percent means the default: the final completed centre vector.
@@ -2070,7 +2154,7 @@ pub(crate) fn print_spsa(report: &SpsaReport, run_directory: &Path) {
     println!("  files      {files}");
     println!("             tuned-options.txt   setoption lines, ready to paste");
     println!("             tuned-options.toml  the same as a run-file fragment");
-    println!("             result.json         full record");
+    println!("             result.json         one summary per iteration; games in games.jsonl");
     println!("  next       verify the tuned values with an SPRT against the start values");
 }
 

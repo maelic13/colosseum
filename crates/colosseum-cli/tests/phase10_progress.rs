@@ -641,3 +641,55 @@ fn a_match_report_summarises_abnormal_games_instead_of_listing_them() {
     let pgn = std::fs::read_to_string(run.join("games.pgn")).unwrap();
     assert_eq!(pgn.matches("[Result ").count(), 4, "{pgn}");
 }
+
+/// A run that has printed no block yet says when its first is due, from the
+/// schedule it recorded, rather than only that none was published.
+#[test]
+fn status_before_the_first_block_says_when_it_is_due() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("run");
+    let mut child = cli()
+        .arg("match")
+        .arg(engine())
+        .arg(engine())
+        .args([
+            "--a-engine-arg=__uci-stub",
+            "--b-engine-arg=__uci-stub",
+            "--a-engine-arg=--sleep-ms=200",
+            "--b-engine-arg=--sleep-ms=200",
+            "--a-movetime-ms",
+            "300",
+            "--b-movetime-ms",
+            "300",
+            "--max-moves",
+            "2",
+            "--games",
+            "40",
+            "--progress-every",
+            "20",
+            "--dir",
+        ])
+        .arg(&run)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !run.join("run-record.json").is_file() {
+        assert!(std::time::Instant::now() < deadline, "no run record");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let status = cli().arg("status").arg(&run).output().unwrap();
+    let _ = child.kill();
+    let _ = child.wait();
+    let shown = String::from_utf8_lossy(&status.stdout).into_owned();
+    assert!(
+        shown.contains("the first block is due once 20 games have been committed"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("no sooner than 5 s after it started"),
+        "{shown}"
+    );
+}

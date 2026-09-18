@@ -497,8 +497,14 @@ fn complete_mini_match_is_one_durable_gradient_commit() {
             .len(),
         1
     );
+    // The result carries a summary per iteration and names the journal for
+    // its games: one pair, games 1 and 2.
+    assert_eq!(value["report"]["schema_version"], 2);
+    assert_eq!(value["report"]["games"], "games.jsonl");
     let iteration = &value["report"]["driver"]["completed_iterations"][0];
-    assert_eq!(iteration["pairs"].as_array().unwrap().len(), 1);
+    assert!(iteration.get("pairs").is_none(), "{iteration}");
+    assert_eq!(iteration["games"]["first"], 1);
+    assert_eq!(iteration["games"]["last"], 2);
     assert_eq!(iteration["score"]["difference"], 0);
     assert_eq!(iteration["centers_before"][0], 16.0);
     assert_eq!(iteration["centers_after"][0], 16.0);
@@ -812,8 +818,20 @@ fn a_rare_forfeit_is_scored_into_the_gradient_until_the_allowance_is_exceeded() 
         2
     );
     assert!(completed[0].get("centers_after").is_some());
-    let first = &completed[0]["pairs"][0];
-    assert!(first["first"]["fault"].is_object() || first["second"]["fault"].is_object());
+    // Its summary counts the two forfeits; the games are in the journal.
+    let faults = &completed[0]["faults"];
+    assert_eq!(
+        faults["engine_a"].as_u64().unwrap() + faults["engine_b"].as_u64().unwrap(),
+        2
+    );
+    let journal = std::fs::read_to_string(run.join("games.jsonl")).unwrap();
+    assert!(
+        journal
+            .lines()
+            .take(2)
+            .all(|line| line.contains("\"fault\"")),
+        "{journal}"
+    );
     // Iteration 1 takes the count to four in four games: over the allowance.
     assert_eq!(driver["status"], "invalid");
     assert_eq!(driver["invalid_iteration"]["iteration"], 1);
@@ -902,17 +920,26 @@ fn killed_tune_resumes_the_exact_rng_iteration_and_durable_prefix() {
     // resume appended to them and changed none of them.
     let after = std::fs::read(run.join("games.jsonl")).unwrap();
     assert!(after.starts_with(&durable_prefix));
-    // The iteration the resume replayed is the one those lines describe.
+    // The iteration the resume replayed is the one those lines describe: its
+    // summary names their game numbers, and its score is theirs.
     let journal = journal_lines(&run);
     assert_eq!(journal.len(), 6);
-    for (index, pair) in completed[0]["pairs"].as_array().unwrap().iter().enumerate() {
-        for (offset, game) in [&pair["first"], &pair["second"]].into_iter().enumerate() {
-            let line = &journal[index * 2 + offset]["game"];
-            assert_eq!(line["number"], game["number"]);
-            assert_eq!(line["result"], game["result"]);
-            assert_eq!(line["white"], game["white"]);
-        }
-    }
+    assert_eq!(completed[0]["games"]["first"], 1);
+    assert_eq!(completed[0]["games"]["last"], 2);
+    let plus_points = journal[..2]
+        .iter()
+        .map(|line| {
+            let game = &line["game"];
+            let plus_is_white = game["white"] == "a";
+            match game["result"].as_str().unwrap() {
+                "Draw" => 0,
+                "WhiteWin" if plus_is_white => 1,
+                "BlackWin" if !plus_is_white => 1,
+                _ => -1,
+            }
+        })
+        .sum::<i64>();
+    assert_eq!(completed[0]["score"]["difference"], plus_points);
     assert_eq!(
         journal
             .iter()

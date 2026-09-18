@@ -517,6 +517,7 @@ pub(crate) async fn run_sprt(
     recorder.write_through(writer.clone());
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "sprt",
+        "progress": {"every": progress_every, "unit": "pairs", "min_secs": progress_min_secs},
         "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
         "design": design,
         "apply": &apply_record,
@@ -552,6 +553,7 @@ pub(crate) async fn run_sprt(
             adjudication,
             ponder: command.ponder,
             openings,
+            synthetic_games: false,
         },
         execution: execution.clone(),
         design,

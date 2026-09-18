@@ -317,12 +317,24 @@ fn an_spsa_iteration_places_each_game_on_a_free_slot() {
         concurrent_pairs >= 2,
         "no pair ran its two games at once: the pair is still holding the slot"
     );
-    // The gradient still used whole pairs: every iteration committed five.
-    for iteration in value["report"]["driver"]["completed_iterations"]
+    // The gradient still used whole pairs: every iteration committed its
+    // five, games 10k + 1 to 10k + 10 of the journal, with a full score.
+    for (index, iteration) in value["report"]["driver"]["completed_iterations"]
         .as_array()
         .unwrap()
+        .iter()
+        .enumerate()
     {
-        assert_eq!(iteration["pairs"].as_array().unwrap().len(), 5);
+        let first = index as u64 * 10 + 1;
+        assert_eq!(iteration["games"]["first"], first);
+        assert_eq!(iteration["games"]["last"], first + 9);
+        let score = &iteration["score"];
+        assert_eq!(
+            score["plus_wins"].as_u64().unwrap()
+                + score["plus_losses"].as_u64().unwrap()
+                + score["draws"].as_u64().unwrap(),
+            10
+        );
     }
 }
 

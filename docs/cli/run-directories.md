@@ -148,7 +148,13 @@ Completed SPSA runs additionally write the verified schedule and three views of
 the frozen final-window vector: `tuned-options.txt`, `tuned-options.json` and
 `tuned-options.toml`. The main `result.json` retains the source launch, tune
 conditions, schedule/version metadata, original values, floating means and
-rounded tuned values so it can feed `sprt --apply` without editing.
+rounded tuned values so it can feed `sprt --apply` without editing. Each
+iteration appears in it as a summary — the centres before and after, the plus
+and minus vectors sent, the pair score, the faults, and `games`, the first and
+last game numbers of its lines in `games.jsonl` — and never as its games: a
+tune of thousands of iterations writes a result of a few megabytes, and a
+running tune holds only the iteration it is playing. The document carries its
+own `schema_version` (2; version 1 carried every game).
 
 ## Stopping a run
 

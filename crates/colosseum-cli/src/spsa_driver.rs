@@ -33,26 +33,60 @@ pub enum SpsaStatus {
     Invalid,
 }
 
+/// What a tune keeps of a committed iteration once its games are in the
+/// journal: the centres before and after, the two arm vectors, the pair score
+/// and its faults. The games themselves are the journal's lines named by
+/// `games`; carrying every game's record through the whole run made a
+/// 60-iteration result 6 MB and a real tune's hundreds.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpsaCommittedIteration {
     /// Zero-based schedule iteration.
     pub iteration: u32,
     pub centers_before: Vec<f64>,
     pub prepared: SpsaIteration,
-    pub pairs: Vec<CompletePair<MatchGame>>,
     pub score: SpsaMiniMatchScore,
     pub centers_after: Vec<f64>,
+    pub faults: MatchFaultCounts,
+    pub games: SpsaJournalGames,
 }
 
+/// An iteration that completed but may not update SPSA, summarised the same
+/// way.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpsaInvalidIteration {
     /// Zero-based schedule iteration that completed but may not update SPSA.
     pub iteration: u32,
     pub centers_before: Vec<f64>,
     pub prepared: SpsaIteration,
-    pub pairs: Vec<CompletePair<MatchGame>>,
     pub faults: MatchFaultCounts,
     pub reason: String,
+    pub games: SpsaJournalGames,
+}
+
+/// Where an iteration's games are: the lines of the run's `games.jsonl` whose
+/// game numbers run from `first` to `last`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpsaJournalGames {
+    pub first: u32,
+    pub last: u32,
+}
+
+impl SpsaJournalGames {
+    /// The game numbers of zero-based `iteration`.
+    fn of(iteration: u32, settings: SpsaRunSettings) -> Result<Self, SpsaDriverError> {
+        let games = settings
+            .pairs_per_iteration()
+            .checked_mul(2)
+            .ok_or(SpsaDriverError::PairIdentityOverflow)?;
+        let first = iteration
+            .checked_mul(games)
+            .and_then(|value| value.checked_add(1))
+            .ok_or(SpsaDriverError::PairIdentityOverflow)?;
+        Ok(Self {
+            first,
+            last: first + games - 1,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -72,9 +106,20 @@ pub struct SpsaDriverReport {
     pub final_centers: Vec<f64>,
 }
 
+/// Receives each finished iteration with its games, once. The driver keeps only
+/// the summary afterwards, so what it holds is bounded by the iteration in
+/// flight, not by the length of the tune.
 pub trait SpsaObserver: Send + Sync {
-    fn iteration_committed(&self, iteration: &SpsaCommittedIteration) -> Result<(), String>;
-    fn iteration_invalid(&self, iteration: &SpsaInvalidIteration) -> Result<(), String>;
+    fn iteration_committed(
+        &self,
+        iteration: &SpsaCommittedIteration,
+        pairs: &[CompletePair<MatchGame>],
+    ) -> Result<(), String>;
+    fn iteration_invalid(
+        &self,
+        iteration: &SpsaInvalidIteration,
+        pairs: &[CompletePair<MatchGame>],
+    ) -> Result<(), String>;
 }
 
 #[derive(Clone)]
@@ -158,7 +203,7 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
     // allowance is judged over the whole tune.
     let mut run_faults = MatchFaultCounts::default();
     for iteration in &completed_iterations {
-        run_faults.absorb(fault_counts(&iteration.pairs));
+        run_faults.absorb(iteration.faults);
     }
     let games_per_iteration = u64::from(request.settings.pairs_per_iteration()) * 2;
     let resumed_iterations = state.completed_iterations();
@@ -220,17 +265,15 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
                 iteration: policy.iteration,
                 centers_before: policy.centers_before,
                 prepared: policy.prepared,
-                pairs,
                 faults,
                 reason: policy.reason,
+                games: SpsaJournalGames::of(iteration, request.settings)?,
             };
             if let Some(observer) = &request.observer {
                 observer
-                    .iteration_invalid(&invalid)
+                    .iteration_invalid(&invalid, &pairs)
                     .map_err(SpsaDriverError::Output)?;
             }
-            let mut invalid = invalid;
-            strip_moves(&mut invalid.pairs);
             return Ok(SpsaDriverReport {
                 status: SpsaStatus::Invalid,
                 settings: request.settings,
@@ -251,18 +294,19 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
             iteration: update.iteration,
             centers_before: update.centers_before,
             prepared: update.prepared,
-            pairs,
             score: update.score,
             centers_after: update.centers_after,
+            faults,
+            games: SpsaJournalGames::of(iteration, request.settings)?,
         };
         if let Some(observer) = &request.observer {
             observer
-                .iteration_committed(&committed)
+                .iteration_committed(&committed, &pairs)
                 .map_err(SpsaDriverError::Output)?;
         }
-        // The observer committed the moves; the driver keeps summaries.
-        let mut committed = committed;
-        strip_moves(&mut committed.pairs);
+        // The observer committed the games to the journal; the driver keeps
+        // the summary and lets the games go.
+        drop(pairs);
         completed_iterations.push(committed);
         request.cancellation.record_committed_unit();
         request
@@ -280,13 +324,6 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
     })
 }
 
-fn strip_moves(pairs: &mut [CompletePair<MatchGame>]) {
-    for pair in pairs {
-        pair.first.strip_moves();
-        pair.second.strip_moves();
-    }
-}
-
 /// Rebuild the committed iterations of a tune from their journalled games.
 ///
 /// Nothing about an iteration is stored except its games. Its perturbation,
@@ -294,7 +331,8 @@ fn strip_moves(pairs: &mut [CompletePair<MatchGame>]) {
 /// schedule exactly as the driver computed them the first time, so a resumed
 /// tune and a status report stand on the same arithmetic as the run that
 /// wrote the games. An iteration whose games are not all present was cut by a
-/// kill: it and anything after it are dropped, to be played again.
+/// kill: it and anything after it are dropped, to be played again. What is
+/// returned is the summaries; the games stay in the journal.
 pub fn replay_iterations(
     schedule: VerifiedSpsaSchedule,
     settings: SpsaRunSettings,
@@ -331,9 +369,10 @@ pub fn replay_iterations(
             iteration: update.iteration,
             centers_before: update.centers_before,
             prepared: update.prepared,
-            pairs: pairs.clone(),
             score: update.score,
             centers_after: update.centers_after,
+            faults: fault_counts(pairs),
+            games: SpsaJournalGames::of(iteration, settings)?,
         });
     }
     Ok(committed)
@@ -474,22 +513,19 @@ fn validate_checkpoint_evidence(
     for (index, record) in checkpoint.completed_iterations.iter().enumerate() {
         let iteration =
             u32::try_from(index).map_err(|_| SpsaDriverError::IterationCountOverflow)?;
-        if record.iteration != iteration {
-            return Err(SpsaDriverError::CheckpointMismatch { iteration });
-        }
-        validate_pair_ids(iteration, settings, &record.pairs)?;
-        if record.pairs.iter().any(pair_is_unscorable) {
-            return Err(SpsaDriverError::CheckpointMismatch { iteration });
-        }
-        let score = score_mini_match(&record.pairs)?;
-        if record.score != score {
+        // The games behind each summary were verified when it was rebuilt
+        // from the journal; here the summaries must be the schedule's own
+        // iterations, in order, over the games the schedule gives them.
+        if record.iteration != iteration
+            || record.games != SpsaJournalGames::of(iteration, settings)?
+        {
             return Err(SpsaDriverError::CheckpointMismatch { iteration });
         }
         history.push(SpsaCommittedUpdate {
             iteration: record.iteration,
             centers_before: record.centers_before.clone(),
             prepared: record.prepared.clone(),
-            score,
+            score: record.score,
             centers_after: record.centers_after.clone(),
         });
     }

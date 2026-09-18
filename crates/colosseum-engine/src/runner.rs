@@ -450,8 +450,14 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
     let game_start = std::time::Instant::now();
     let monotonic_resolution_ns = monotonic_resolution_ns();
 
-    let white = prepare(&spec.white, spec.handshake_timeout).await;
-    let black = prepare(&spec.black, spec.handshake_timeout).await;
+    // Both engines are spawned, handshaken and configured at once: an old
+    // engine's slow start no longer delays the other's, and neither side's
+    // setup waits in line. Each side keeps its own outcome, so a failure's
+    // forensics still belong to the side that failed.
+    let (white, black) = tokio::join!(
+        prepare(&spec.white, spec.handshake_timeout),
+        prepare(&spec.black, spec.handshake_timeout)
+    );
 
     let (mut white, mut black) = match (white, black) {
         (Prepared::Ready(w), Prepared::Ready(b)) => (w, b),

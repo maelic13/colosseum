@@ -612,6 +612,9 @@ Options:
       --iterations <ITERATIONS>
           Number of SPSA centre updates in the tune horizon
 
+      --total-games <TOTAL_GAMES>
+          The tune's budget in games; the iteration count is derived from it for the chosen games per iteration, which must divide it
+
       --games-per-iteration <GAMES_PER_ITERATION>
           Complete games in each pair-atomic mini-match
 
@@ -757,30 +760,31 @@ Options:
           Terminal SPSA gain ratio shared by every tuned parameter
 
       --iterations <ITERATIONS>
-          Number of SPSA centre updates in the primary horizon
-
-          [default: 5000]
+          Number of SPSA centre updates in the primary horizon (default 5000)
 
       --run-file <PATH>
           Load reusable command options from an inheritable TOML run file
+
+      --total-games <TOTAL_GAMES>
+          The tune's budget in games; the iteration count is derived from it for the chosen games per iteration, which must divide it
+
+      --unset-run-option <LONG_NAME>
+          Remove one inherited run-file option before applying CLI arguments
 
       --games-per-iteration <GAMES_PER_ITERATION>
           Complete games in each pair-atomic mini-match
 
           [default: 32]
 
-      --unset-run-option <LONG_NAME>
-          Remove one inherited run-file option before applying CLI arguments
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
 
       --concurrency <CONCURRENCY>
           Number of games expected to run concurrently within each iteration
 
           [default: 1]
-
-      --stop-grace-secs <SECONDS>
-          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
-
-          [default: 30]
 
       --compare-iterations <COMPARISON_HORIZONS>
           Compare cost and first/final gain values at another horizon; repeatable

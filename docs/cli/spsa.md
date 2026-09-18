@@ -46,6 +46,14 @@ starting values, not minimums. `--iterations 1 --games-per-iteration 2` is a
 valid smoke run; games per iteration must be positive and even so every opening
 has both colour assignments.
 
+A budget can be given in games instead: `--total-games N` sets the horizon to
+`N` divided by the games per iteration, so a registered budget survives a
+change of mini-match size (`--total-games 168000` is 4,000 iterations of 42
+games, or 5,250 of 32). A budget the mini-match does not divide is refused,
+naming the nearest budgets that it does; `--total-games` and `--iterations`
+are mutually exclusive, and the budget is stored in the run's resolved
+configuration.
+
 **Make games per iteration a multiple of the slot count.** Every game of an
 iteration takes whichever slot is free, the two games of a pair included, so
 an iteration runs as waves of as many games as there are slots, and the update
@@ -82,7 +90,8 @@ configuration. Repeated `--compare-iterations` values show how
 the first/final gains and cost change when the horizon changes.
 
 A wall-time range is emitted only from explicit end-to-end game-duration
-evidence. Supply a low/high seconds-per-game assumption as above, or repeat
+evidence, in hours: iterations times waves per iteration at the resolved
+`--concurrency`, times the seconds a game takes. Supply a low/high seconds-per-game assumption as above, or repeat
 `--pilot-game-seconds` with observed complete-game durations. Iterations remain
 sequential, and the games of one mini-match run as waves of `--concurrency`
 games, each game on whichever slot is free; the estimate counts those waves. This is workload arithmetic, not a prediction that a chess
@@ -237,7 +246,7 @@ Threads        4      3    3.4410      -1    1..16
   files      /home/you/engine/colosseum-runs/spsa-...
              tuned-options.txt   setoption lines, ready to paste
              tuned-options.toml  the same as a run-file fragment
-             result.json         full record
+             result.json         one summary per iteration; games in games.jsonl
   next       verify the tuned values with an SPRT against the start values
 ```
 

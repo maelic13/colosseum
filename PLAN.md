@@ -2718,6 +2718,61 @@ games" procedure at 10.10, once, on the final state.
   buffer rather than an owned string per field) and loads in well under a
   second. `status` on a run that has printed no block yet says when the first
   is due.
+
+  **Implementation evidence (Phase 10.9o):** an SPSA iteration is kept as a
+  summary — centres before and after, the arm vectors, the pair score, its
+  `faults` and `games` (the first and last game numbers of its journal lines)
+  — and the observer receives the iteration's games beside it once, to
+  journal them; the driver then drops them, so what it holds is the
+  iteration in flight plus one small summary per committed iteration.
+  `result.json` gained a document `schema_version` (2) and `games:
+  "games.jsonl"`; `tuned_result` and its version 3 are unchanged, so
+  `sprt --apply` reads old and new results alike. Resume rebuilds summaries
+  from the journal (pair identity, scorability and score are checked there;
+  the driver then checks each summary's iteration and game range), `spsa
+  status` and the progress blocks read summaries (a resumed tune's faults now
+  count in its blocks), and `stats` on an SPSA directory finds no game array
+  in the result and reads the journal. A hidden `--__synthetic-games` switch
+  plays games in-process as instant results for scale tests. A 5,000-
+  iteration, 4-game tune under it: median commit cycle 3,421 µs over the
+  first tenth and 3,406 µs over the last, resident memory 16.6 MB early and
+  18.8 MB late, `result.json` 5.66 MB (bound 8 MB, about 1.1 KB per iteration
+  of a one-knob tune against about 100 KB before); the test asserts the cycle
+  within 3× + 2 ms, growth under 16 MB and the result under 8 MB. Launch
+  audit: per launched game or pair the drivers clone two engine launch
+  specifications, time controls, adjudication, a slot allocation and the
+  `MatchOpenings` handle; the book was the only large value and is shared, and
+  `OpeningList` is no longer `Clone`, so a deep copy of a book does not
+  compile. The launch-spread test runs an SPSA iteration and an SPRT at four
+  slots on a 200,000-line book and requires the first wave's launches within
+  10 ms (measured 66 µs and 1 µs); with a per-clone copy of the book
+  restored it measured 324 and 328 ms and failed. `--total-games` (on `spsa`
+  and `spsa plan`, exclusive with `--iterations`) derives the horizon for the
+  chosen mini-match, refuses a budget it does not divide and names the
+  nearest two (160,000 at 42: 159,978 or 160,020), and is stored in the
+  resolved configuration only when given, so existing configurations hash
+  as before; the plan's estimate is printed in hours from the wave model.
+  The book is `OpeningList`: one text buffer and a 24-byte entry per opening
+  (`[FEN][moves][label]` offsets, the EPD label being the FEN itself), the
+  shuffle permuting entries with the same RNG and swaps, EPD lines validated
+  in parallel chunks cut at line boundaries and joined in file order; the
+  test compares 60,000 lines through the parallel path and a PGN book with
+  the previous owned loader for sequential, random and counted orders, and a
+  2.6-million-line book loads in 212 ms in an optimised build (the test
+  bounds 1 s there, and a tenth of the book within 10 s in a debug build).
+  `status` on a run with no block yet says when the first is due, from a
+  `progress` entry (every, unit, floor) each command now records in its
+  workflow evidence. `run_game` prepares both engines with `tokio::join!`;
+  a setup failure keeps its own side's error and forensics, and an engine
+  that spawned but failed setup is still reaped before the game returns;
+  the regression plays two games against an engine that fails its
+  handshake and finds the fault on Black, then White, with the broken
+  engine's forensic each time. Deviations: the result's own version is new
+  (`SPSA_RESULT_SCHEMA_VERSION` 2) rather than a bump of the tuned-result
+  version, which did not change; a run's retained summaries still grow with
+  its iterations, at about 0.6 KB each; memory is measured from the working
+  set on Windows and `VmRSS` on Linux and not asserted elsewhere; the scale
+  test's games are synthetic, so it measures everything but engine play.
 - **(z) Two games per physical core, as a measured experiment for tuning
   only.** A one-thread game keeps one logical CPU busy; the core's SMT sibling
   idles. Placing a second game on the sibling doubles the concurrent games
