@@ -166,9 +166,106 @@ pub struct SpsaPlanReport {
     pub checkpoint_generations_retained: u32,
     pub schedule_artifacts: u32,
     pub wall_time: Option<SpsaWallTimeEstimate>,
+    /// How one iteration's games fill the slots.
+    pub wave_shape: SpsaWaveShape,
     pub knobs: Vec<SpsaKnobPlan>,
     pub horizon_comparisons: Vec<SpsaHorizonComparison>,
     pub interpretation: String,
+}
+
+/// How one mini-match's games fill the game slots.
+///
+/// Every game of an iteration takes a free slot as it starts, and the update
+/// waits for the last game. With games of about equal length an iteration
+/// runs as waves of `slots` games, and a last wave that is not full leaves
+/// slots idle while the whole machine waits for it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpsaWaveShape {
+    pub slots: u32,
+    pub games_per_iteration: u32,
+    /// Games running at once in a full wave.
+    pub games_per_wave: u32,
+    pub waves_per_iteration: u32,
+    pub games_in_last_wave: u32,
+    pub slots_idle_in_last_wave: u32,
+    /// Games over slot-waves, for games of equal length: the share of the
+    /// machine an iteration keeps busy.
+    pub expected_occupancy: f64,
+    /// Even multiples of the slot count between half and twice the requested
+    /// games per iteration, offered when the request is not one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub suggested_games_per_iteration: Vec<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
+/// The wave shape of `games_per_iteration` games on `slots` slots.
+#[must_use]
+pub fn spsa_wave_shape(games_per_iteration: u32, slots: u32) -> SpsaWaveShape {
+    let slots = slots.max(1);
+    let games_per_wave = games_per_iteration.min(slots);
+    let waves_per_iteration = games_per_iteration.div_ceil(slots);
+    let games_in_last_wave = games_per_iteration - (waves_per_iteration.saturating_sub(1)) * slots;
+    let slots_idle_in_last_wave = slots - games_in_last_wave.min(slots);
+    let expected_occupancy = if waves_per_iteration == 0 {
+        0.0
+    } else {
+        f64::from(games_per_iteration) / (f64::from(waves_per_iteration) * f64::from(slots))
+    };
+    let fills_waves = games_per_iteration.is_multiple_of(slots);
+    let suggested_games_per_iteration = if fills_waves {
+        Vec::new()
+    } else {
+        even_multiples_near(games_per_iteration, slots)
+    };
+    let warning = (!fills_waves).then(|| {
+        let suggestions = suggested_games_per_iteration
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "{games_per_iteration} games per iteration is not a multiple of {slots} slots: the last wave of each iteration runs {games_in_last_wave} games while {slots_idle_in_last_wave} slots idle, for {:.0}% expected occupancy; {suggestions} games per iteration fill every wave",
+            expected_occupancy * 100.0
+        )
+    });
+    SpsaWaveShape {
+        slots,
+        games_per_iteration,
+        games_per_wave,
+        waves_per_iteration,
+        games_in_last_wave,
+        slots_idle_in_last_wave,
+        expected_occupancy,
+        suggested_games_per_iteration,
+        warning,
+    }
+}
+
+/// Even multiples of `slots` from half to twice `games`, or the smallest even
+/// multiple at or above `games` when that range holds none. Games per
+/// iteration must be even: a mini-match is made of colour-reversed pairs.
+fn even_multiples_near(games: u32, slots: u32) -> Vec<u32> {
+    let step = if slots.is_multiple_of(2) {
+        slots
+    } else {
+        slots.saturating_mul(2)
+    };
+    let low = games.div_ceil(2).max(1);
+    let high = games.saturating_mul(2);
+    let mut multiples = Vec::new();
+    let mut candidate = low.div_ceil(step).max(1).saturating_mul(step);
+    while candidate <= high && candidate > 0 {
+        multiples.push(candidate);
+        let Some(next) = candidate.checked_add(step) else {
+            break;
+        };
+        candidate = next;
+    }
+    if multiples.is_empty() {
+        multiples.push(games.div_ceil(step).max(1).saturating_mul(step));
+    }
+    multiples
 }
 
 pub fn plan_spsa(
@@ -234,6 +331,7 @@ pub fn plan_spsa(
         checkpoint_generations_retained: 2,
         schedule_artifacts: 1,
         wall_time: primary.wall_time,
+        wave_shape: spsa_wave_shape(settings.games_per_iteration, concurrency),
         knobs: primary.knobs,
         horizon_comparisons,
         interpretation: "factual schedule and workload arithmetic; timing assumes supplied end-to-end game durations and is not a chess-convergence forecast".into(),
@@ -344,7 +442,7 @@ fn estimate_wall_time(
         lower_seconds,
         upper_seconds,
         basis,
-        assumption: "iterations are sequential; games within one mini-match occupy concurrent waves; supplied durations include the complete game workload".into(),
+        assumption: "iterations are sequential; each game of a mini-match takes a free slot, so an iteration runs as waves of as many games as there are slots and ends with its last wave; supplied durations include the complete game workload".into(),
     })
 }
 
@@ -493,5 +591,51 @@ mod tests {
             ),
             Err(SpsaPlanError::Tune(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod wave_tests {
+    use super::*;
+
+    #[test]
+    fn a_mini_match_that_fills_its_waves_needs_no_advice() {
+        let shape = spsa_wave_shape(42, 14);
+        assert_eq!(
+            (
+                shape.games_per_wave,
+                shape.waves_per_iteration,
+                shape.slots_idle_in_last_wave
+            ),
+            (14, 3, 0)
+        );
+        assert!((shape.expected_occupancy - 1.0).abs() < 1e-12);
+        assert!(shape.warning.is_none());
+        assert!(shape.suggested_games_per_iteration.is_empty());
+    }
+
+    #[test]
+    fn a_partial_last_wave_is_named_with_the_even_multiples_that_fill_it() {
+        let shape = spsa_wave_shape(32, 14);
+        assert_eq!(shape.waves_per_iteration, 3);
+        assert_eq!(shape.games_in_last_wave, 4);
+        assert_eq!(shape.slots_idle_in_last_wave, 10);
+        assert!((shape.expected_occupancy - 32.0 / 42.0).abs() < 1e-12);
+        assert_eq!(shape.suggested_games_per_iteration, [28, 42, 56]);
+        let warning = shape.warning.unwrap();
+        assert!(warning.contains("28, 42, 56"), "{warning}");
+        assert!(warning.contains("10 slots idle"), "{warning}");
+        // Odd slot counts only have even multiples every two slots' worth.
+        assert_eq!(
+            spsa_wave_shape(32, 15).suggested_games_per_iteration,
+            [30, 60]
+        );
+        // Fewer games than slots: one partial wave.
+        let small = spsa_wave_shape(8, 14);
+        assert_eq!(
+            (small.games_per_wave, small.slots_idle_in_last_wave),
+            (8, 6)
+        );
+        assert_eq!(small.suggested_games_per_iteration, [14]);
     }
 }

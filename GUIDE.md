@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9n** SPSA iterations fill the machine, 10.9m residual time losses (research), 10.9h, then **10.10 — EXIT**, which needs a real machine and the maintainer |
+| Next step | **10.9m** residual time losses (research), 10.9h, then **10.10 — EXIT**, which needs a real machine and the maintainer; the maintainer's 42-games-per-iteration tune at 14 slots on the 10.9n build is owed |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -913,14 +913,16 @@ model as well.
   documented fault rate (default 0.5% of games, minimum 3); count and rate in
   every block and the final report; `--max-time-losses 0` restores strict
   behaviour; infrastructure faults unchanged — PLAN §Phase 10(v)
-- ☐ **10.9n** — **Model: Sol High.** An SPSA iteration fills the machine: games
+- ☑ **10.9n — DONE** — **Model: Sol High.** An SPSA iteration fills the machine: games
   take free slots individually within an iteration (a pair's two games may run
   on different slots at once), the iteration still commits atomically and the
   gradient still uses whole pairs; `spsa plan` and the dry run report wave
   shape, idle slots and expected occupancy and warn when games per iteration
   is not a multiple of the slot count; occupancy test that fails on pair-held
   slots; `sprt` keeps the pair as its unit; asynchronous SPSA recorded as
-  post-release research — PLAN §Phase 10(x)
+  post-release research — PLAN §Phase 10(x). **Owed, maintainer-run on the
+  reference host:** a tune at 14 slots and 42 games per iteration, or 15 and
+  30, above 85% occupancy and 5,000 games per hour
 - ☐ **10.9m** — **Model: Sol High.** Residual time losses, research before any
   fix: fastchess source study in `docs/architecture/fastchess-mechanics.md`
   (process lifetime, creation flags and priority, affinity, pipes and
@@ -977,6 +979,13 @@ model as well.
   parity within 0.01 Elo, design guidelines checked, changelog records the
   adjudication default and run directories, version chosen by the maintainer
   (major bump recommended), GUI archive smoke passes — PLAN §Phase 11(d)
+
+### Post-release research (not numbered steps)
+
+- Asynchronous SPSA in the fishtest manner: the next games start on free
+  slots with the current parameters and results are applied as they return;
+  needs its own evidence that it reaches the same optimum for less game
+  budget before it becomes a step — PLAN §Phase 11, Post-release research
 
 ## Recurring procedures
 

@@ -202,6 +202,7 @@ pub(crate) async fn run_nps(command: NpsCommand, machine: bool, dry_run: bool) -
                 config_sha256: resolved.sha256(),
                 resolved_configuration: resolved.value(),
                 invocations,
+                wave_shape: None,
             },
             machine,
         );
@@ -523,6 +524,7 @@ pub(crate) async fn run_nps_scaling(
                 config_sha256: resolved.sha256(),
                 resolved_configuration: resolved.value(),
                 invocations,
+                wave_shape: None,
             },
             machine,
         );

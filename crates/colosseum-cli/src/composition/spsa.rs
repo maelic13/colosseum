@@ -312,6 +312,20 @@ pub(crate) fn print_spsa_plan(report: &SpsaPlanReport) {
     } else {
         println!("estimated wall time: unavailable (supply a seconds/game range or pilot samples)");
     }
+    let shape = &report.wave_shape;
+    println!(
+        "waves: {} games per iteration on {} slots run as {} waves of up to {} games; the last runs {} games with {} slots idle; expected occupancy {:.0}%",
+        shape.games_per_iteration,
+        shape.slots,
+        shape.waves_per_iteration,
+        shape.games_per_wave,
+        shape.games_in_last_wave,
+        shape.slots_idle_in_last_wave,
+        shape.expected_occupancy * 100.0
+    );
+    if let Some(warning) = &shape.warning {
+        println!("warning: {warning}");
+    }
     for knob in &report.knobs {
         let first = knob
             .trajectory
@@ -856,6 +870,10 @@ pub(crate) async fn run_spsa_command(
                 config_sha256: resolved.sha256(),
                 resolved_configuration: resolved.value(),
                 invocations: vec![&engine],
+                wave_shape: Some(spsa_wave_shape(
+                    settings.games_per_iteration,
+                    conditions.concurrency,
+                )),
             },
             machine,
         );

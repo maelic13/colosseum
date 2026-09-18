@@ -453,6 +453,7 @@ pub(crate) async fn run_sprt(
                 config_sha256: resolved.sha256(),
                 resolved_configuration: resolved.value(),
                 invocations: vec![&engine_a, &engine_b],
+                wave_shape: None,
             },
             machine,
         );

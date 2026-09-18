@@ -46,6 +46,16 @@ starting values, not minimums. `--iterations 1 --games-per-iteration 2` is a
 valid smoke run; games per iteration must be positive and even so every opening
 has both colour assignments.
 
+**Make games per iteration a multiple of the slot count.** Every game of an
+iteration takes whichever slot is free, the two games of a pair included, so
+an iteration runs as waves of as many games as there are slots, and the update
+waits for the last wave. A last wave that is not full leaves slots idle: 32
+games on 14 slots is two full waves and a third of 4 games while 10 slots
+wait, about 76% of the machine. 28, 42 or 56 games on 14 slots, or 30 or 60 on
+15, fill every wave. `spsa plan` and `spsa --dry-run` report the wave shape for
+the concurrency you give them and name those multiples when the request is not
+one.
+
 Inspect the exact gain schedule and workload before launching an engine:
 
 ```text
@@ -55,16 +65,27 @@ colosseum-cli spsa plan --tune tune.toml --r-end 0.002 \
 ```
 
 `spsa plan` is offline. It validates the tune-file invariants, reports total
-iterations/games/pairs and durable checkpoint publications, and emits every
-knob's exact `c/a/r` trajectory plus the first perturbation below half a UCI
-integer unit, if one exists. Repeated `--compare-iterations` values show how
+iterations/games/pairs and durable checkpoint publications, the wave shape of
+one iteration at `--concurrency` (games per wave, waves, slots idle in the
+last wave and expected occupancy, with a warning when games per iteration is
+not a multiple of the slot count), and emits every knob's exact `c/a/r`
+trajectory plus the first perturbation below half a UCI integer unit, if one
+exists:
+
+```text
+waves: 32 games per iteration on 14 slots run as 3 waves of up to 14 games; the last runs 4 games with 10 slots idle; expected occupancy 76%
+warning: 32 games per iteration is not a multiple of 14 slots: the last wave of each iteration runs 4 games while 10 slots idle, for 76% expected occupancy; 28, 42, 56 games per iteration fill every wave
+```
+
+`spsa --dry-run` carries the same shape as `wave_shape` beside the resolved
+configuration. Repeated `--compare-iterations` values show how
 the first/final gains and cost change when the horizon changes.
 
 A wall-time range is emitted only from explicit end-to-end game-duration
 evidence. Supply a low/high seconds-per-game assumption as above, or repeat
 `--pilot-game-seconds` with observed complete-game durations. Iterations remain
-sequential, while games inside one mini-match are grouped into the requested
-concurrency waves. This is workload arithmetic, not a prediction that a chess
+sequential, and the games of one mini-match run as waves of `--concurrency`
+games, each game on whichever slot is free; the estimate counts those waves. This is workload arithmetic, not a prediction that a chess
 tune will converge; curvature, sensitivity, interactions, noise and distance
 from the optimum remain unknown.
 

@@ -20,7 +20,7 @@ use thiserror::Error;
 use crate::cancellation::Cancellation;
 use crate::match_runner::{
     FaultPolicy, MatchError, MatchExecutionPlan, MatchFaultCounts, MatchGame, MatchSide,
-    PairGameSettings, play_pair, record_fault,
+    PairGameSettings, pair_game_numbers, play_pair_game, record_fault,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -398,33 +398,60 @@ async fn play_mini_match(
         .checked_add(pairs_per_iteration - 1)
         .ok_or(SpsaDriverError::PairIdentityOverflow)?;
     let mut queue = PairCommitQueue::new(first_pair, last_pair)?;
+    // The slot-holding unit of a mini-match is the game, not the pair. Both
+    // arms play in every game and every slot is equivalent, so holding a slot
+    // for a whole pair buys nothing, and it costs a wave: sixteen pairs on
+    // fourteen slots ran as fourteen pairs and then two more on an otherwise
+    // idle machine. Games are launched in schedule order, each on the free
+    // slot it finds; the two games of a pair may run at once on different
+    // slots. The pairs are reassembled by identity before anything is scored.
+    let (first_game, _) = pair_game_numbers(first_pair)?;
+    let (_, last_game) = pair_game_numbers(last_pair)?;
     let mut workers = tokio::task::JoinSet::new();
-    let mut next_pair = first_pair;
+    let mut next_game = first_game;
+    let mut halves = std::collections::BTreeMap::<u32, MatchGame>::new();
     let mut pairs = Vec::with_capacity(pairs_per_iteration as usize);
     let mut pool = execution.slot_pool()?;
-    while next_pair <= last_pair || !workers.is_empty() {
-        while next_pair <= last_pair && workers.len() < execution.concurrency {
-            let pair_id = next_pair;
-            next_pair += 1;
-            // A pair holds one slot for both of its games.
+    while next_game <= last_game || !workers.is_empty() {
+        while next_game <= last_game && workers.len() < execution.concurrency {
+            let number = next_game;
+            next_game += 1;
             let position = pool
                 .take()
-                .expect("a mini-match keeps no more pairs live than it has slots");
+                .expect("a mini-match keeps no more games live than it has slots");
             debug_assert_eq!(pool.held(), workers.len() + 1);
             let slot = execution.slots[position].clone();
             let game_settings = game_settings.clone();
-            workers
-                .spawn(async move { (position, play_pair(pair_id, &slot, game_settings).await) });
+            workers.spawn(async move {
+                (
+                    position,
+                    play_pair_game(number, &slot, &game_settings).await,
+                )
+            });
         }
         let Some(joined) = workers.join_next().await else {
             break;
         };
-        let (position, pair) =
+        let (position, game) =
             joined.map_err(|error| SpsaDriverError::Worker(error.to_string()))?;
+        // The game's engines have exited: `play_pair_game` returns only then.
         pool.give_back(position);
-        let pair = pair?;
+        let pair_id = game.number.div_ceil(2);
+        let Some(other) = halves.remove(&pair_id) else {
+            halves.insert(pair_id, game);
+            continue;
+        };
+        let (first, second) = if other.number < game.number {
+            (other, game)
+        } else {
+            (game, other)
+        };
         progress.completed_pairs.fetch_add(1, Ordering::Relaxed);
-        pairs.extend(queue.complete(pair)?);
+        pairs.extend(queue.complete(CompletePair {
+            pair_id,
+            first,
+            second,
+        })?);
     }
     if pairs.len() != pairs_per_iteration as usize {
         return Err(SpsaDriverError::IncompleteMiniMatch {

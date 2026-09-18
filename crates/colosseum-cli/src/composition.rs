@@ -36,9 +36,10 @@ use colosseum_application::{
     SprtLengthPlanReport, SprtLengthPlanRequest, SprtParameters, SpsaBoundTune, SpsaCenterSample,
     SpsaEstimator, SpsaEstimatorPolicy, SpsaGateHashStatus, SpsaPlanReport, SpsaRunSettings,
     SpsaStatusReport, SpsaTimingInput, SpsaTuneAudit, SpsaTuneResult, SpsaTuneResultError,
-    SpsaTuneWarning, TournamentCompletedGame, TournamentDesign, TournamentFixedRating,
-    TournamentParticipant, TournamentPlan, UciOptionSchema, UciOptionValue, classify_calibration,
-    diagnose_spsa, plan_fixed, plan_sprt_length, plan_spsa, scaling_hash_mb, summarize_nps_scaling,
+    SpsaTuneWarning, SpsaWaveShape, TournamentCompletedGame, TournamentDesign,
+    TournamentFixedRating, TournamentParticipant, TournamentPlan, UciOptionSchema, UciOptionValue,
+    classify_calibration, diagnose_spsa, plan_fixed, plan_sprt_length, plan_spsa, scaling_hash_mb,
+    spsa_wave_shape, summarize_nps_scaling,
 };
 use colosseum_core::{
     AdjudicationConfig, DrawAdjudication, EloModel, GameResult, OpeningBook, OpeningFormat,

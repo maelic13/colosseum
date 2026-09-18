@@ -597,6 +597,7 @@ pub(crate) async fn run_tournament_command(
                 config_sha256: resolved.sha256(),
                 resolved_configuration: resolved.value(),
                 invocations,
+                wave_shape: None,
             },
             machine,
         );

@@ -2694,6 +2694,42 @@ games" procedure at 10.10, once, on the final state.
   iteration, one update record, so it needs its own evidence that it reaches
   the same optimum for less game budget. Items (k) to (x) precede (j).
 
+  **Implementation evidence (Phase 10.9n):** `play_mini_match` now takes a
+  slot from the run's pool per game: games are launched in schedule order
+  (`2p − 1`, `2p`, … across the iteration's pairs), each on the lowest free
+  slot, through `match_runner::play_pair_game`, which builds a game from its
+  number exactly as `play_pair` does (colours, opening, identity, arms); the
+  pair's second game no longer waits for its first. Returning games are
+  held by pair identity until both halves are in, then handed to the same
+  `PairCommitQueue`, so the iteration still commits atomically, the score
+  and gradient still use whole pairs in pair order, the fault decision is
+  still taken on the whole mini-match, and a stop still replays the whole
+  interrupted iteration. The per-slot invariants of (u) hold per game (debug
+  assertions on take, give-back and held count; a slot returns only when
+  `run_game` has returned after both engine processes exited). `sprt` keeps
+  `play_pair`, now two calls of `play_pair_game` on its one slot, with the
+  pair as its unit. `spsa plan` and `spsa --dry-run` report
+  `SpsaWaveShape` for the resolved concurrency: games per wave, waves, games
+  and idle slots in the last wave, expected occupancy (games over
+  slot-waves), and a warning naming the even multiples of the slot count
+  between half and twice the request (14 slots, 32 games: 28, 42, 56; 15
+  slots: 30, 60); the wall-time estimate already counted game waves and now
+  matches the scheduler it describes. Test: `phase10_slot_pool` runs two
+  iterations of five pairs on four slots with uneven stub games and asserts
+  the per-slot invariants, launch order, whole pairs per iteration, at
+  least two pairs whose games ran at once on different slots, and occupancy
+  of at least 60% (measured 78–88% over three runs). With the pair-held
+  scheduler restored it failed two runs of two, on launch order (game 3
+  before game 2) — pair-held occupancy measured 71–76%, so on this stub the
+  occupancy bound alone does not separate the two; the order and
+  concurrency assertions do. Unit tests cover the wave arithmetic.
+  Deviation: the dry run carries the shape as an optional `wave_shape`
+  field of its document and prints no separate warning line, because its
+  human form is that document; a live run prints none, so its standard
+  error stays progress only. Owed and maintainer-run: a tune at 14 slots and
+  42 games per iteration, or 15 and 30, above 85% occupancy and 5,000 games
+  per hour.
+
   **Implementation evidence (Phase 10.9l):** `FaultPolicy` gained an
   optional `rate` (`FaultRate`: per mille, and which of the engine-fault and
   time-loss limits grow) and three methods, `engine_limit(games)`,
@@ -3045,6 +3081,17 @@ the CLI release is never held by GUI work.
 tournament parity demonstrated on stored data; the CLI's own tests, fixtures
 and generated reference unchanged by the extraction; a GUI candidate passes
 its archive smoke.
+
+### Post-release research
+
+Not scheduled steps; each needs its own evidence before it becomes one.
+
+- **Asynchronous SPSA** (from Phase 10(x)): asynchronous SPSA in the
+  fishtest manner, where the next games start on free slots with the current
+  parameters and results are applied as they return; it removes the
+  iteration barrier at any mini-match size but updates on slightly stale
+  parameters and gives up the one iteration, one update record, so it needs
+  its own evidence that it reaches the same optimum for less game budget.
 
 ---
 

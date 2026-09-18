@@ -329,6 +329,9 @@ pub(crate) enum MachineOutput<'a> {
         config_sha256: &'a str,
         resolved_configuration: &'a Value,
         invocations: Vec<&'a EngineLaunchSpec>,
+        /// For `spsa`: how an iteration's games would fill the slots.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        wave_shape: Option<SpsaWaveShape>,
     },
     EngineInspection {
         inspection: EngineInspection,

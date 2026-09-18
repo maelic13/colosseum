@@ -205,8 +205,16 @@ fn an_sprt_pair_holds_one_slot_for_both_of_its_games() {
     assert_one_unit_per_slot(&directory, true);
 }
 
+/// Inside an SPSA iteration the game, not the pair, holds a slot.
+///
+/// Five pairs on four slots, with games of uneven length. Were the pair the
+/// unit, four pairs would play their two games back to back and the fifth
+/// would then play both of its games while three slots idled; no pair's games
+/// could ever run at the same time. Each game taking a free slot instead
+/// keeps the slots busy until the last wave, and the first wave alone puts
+/// both games of pairs 1 and 2 on the machine at once.
 #[test]
-fn an_spsa_iteration_places_each_pair_on_a_slot_of_its_own() {
+fn an_spsa_iteration_places_each_game_on_a_free_slot() {
     let root = tempfile::tempdir().unwrap();
     let tune = root.path().join("tune.toml");
     std::fs::write(
@@ -229,7 +237,7 @@ fn an_spsa_iteration_places_each_pair_on_a_slot_of_its_own() {
             "--iterations",
             "2",
             "--games-per-iteration",
-            "12",
+            "10",
             "--concurrency",
             "4",
             "--depth",
@@ -243,7 +251,79 @@ fn an_spsa_iteration_places_each_pair_on_a_slot_of_its_own() {
         .arg(&directory);
     let value = run(&mut command);
     assert_eq!(value["report"]["driver"]["status"], "completed", "{value}");
-    assert_one_unit_per_slot(&directory, true);
+    // The per-slot invariants hold for games: never two on one slot, every
+    // slot used, and the PGN names the slot the journal does.
+    let spans = assert_one_unit_per_slot(&directory, false);
+    assert_eq!(spans.len(), 20);
+
+    let iterations = std::fs::read_to_string(directory.join("games.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let game = &serde_json::from_str::<Value>(line).unwrap()["game"];
+            (
+                game["number"].as_u64().unwrap(),
+                game["iteration"].as_u64().unwrap(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut concurrent_pairs = 0;
+    for iteration in 0..2 {
+        let games = spans
+            .iter()
+            .filter(|span| iterations[&span.game] == iteration)
+            .collect::<Vec<_>>();
+        assert_eq!(games.len(), 10);
+        // Occupancy: slot-time held by games over the slot-time the iteration
+        // spanned. Pair-held slots leave three of four slots idle while the
+        // fifth pair plays its second game.
+        let started = games.iter().map(|span| span.started).min().unwrap();
+        let ended = games.iter().map(|span| span.ended).max().unwrap();
+        let held = games
+            .iter()
+            .map(|span| span.ended - span.started)
+            .sum::<u64>();
+        let occupancy = held as f64 / (SLOTS as f64 * (ended - started) as f64);
+        eprintln!("iteration {iteration}: occupancy {:.0}%", occupancy * 100.0);
+        assert!(
+            occupancy >= 0.6,
+            "iteration {iteration} kept its slots {:.0}% busy",
+            occupancy * 100.0
+        );
+        // Games launch in schedule order. Each span is stamped when its task
+        // first runs, which the runtime may reorder by a few microseconds, so
+        // order is asserted to within 20 ms.
+        let mut by_number = games.clone();
+        by_number.sort_by_key(|span| span.game);
+        for window in by_number.windows(2) {
+            assert!(
+                window[1].started + 20_000 >= window[0].started,
+                "game {} started before game {}",
+                window[1].game,
+                window[0].game
+            );
+        }
+        // A pair's two games may run at once, on different slots.
+        for pair in by_number.chunks(2) {
+            let (first, second) = (pair[0], pair[1]);
+            assert_eq!(first.pair, second.pair);
+            if second.started < first.ended {
+                assert_ne!(first.slot, second.slot);
+                concurrent_pairs += 1;
+            }
+        }
+    }
+    assert!(
+        concurrent_pairs >= 2,
+        "no pair ran its two games at once: the pair is still holding the slot"
+    );
+    // The gradient still used whole pairs: every iteration committed five.
+    for iteration in value["report"]["driver"]["completed_iterations"]
+        .as_array()
+        .unwrap()
+    {
+        assert_eq!(iteration["pairs"].as_array().unwrap().len(), 5);
+    }
 }
 
 #[test]

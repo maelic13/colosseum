@@ -230,6 +230,7 @@ pub(crate) async fn run_match(
             config_sha256: resolved.sha256(),
             resolved_configuration: resolved.value(),
             invocations: vec![&engine_a, &engine_b],
+            wave_shape: None,
         };
         print_output(&output, machine);
         return ExitCode::SUCCESS;

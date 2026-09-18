@@ -49,7 +49,7 @@ pub use spsa::{
 pub use spsa_plan::{
     SPSA_PLAN_SCHEMA_VERSION, SpsaHorizonComparison, SpsaHorizonKnob, SpsaKnobPlan, SpsaPlanError,
     SpsaPlanPoint, SpsaPlanReport, SpsaTimingBasis, SpsaTimingInput, SpsaWallTimeEstimate,
-    plan_spsa,
+    SpsaWaveShape, plan_spsa, spsa_wave_shape,
 };
 pub use spsa_status::{
     SPSA_DIAGNOSTIC_MIN_HISTORY, SPSA_FREQUENT_BOUND_CONTACT_FRACTION,

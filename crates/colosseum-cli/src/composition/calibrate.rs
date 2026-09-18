@@ -81,6 +81,7 @@ pub(crate) async fn run_calibration(
                 config_sha256: prepared.resolved.sha256(),
                 resolved_configuration: prepared.resolved.value(),
                 invocations: vec![&prepared.engine_a, &prepared.engine_b],
+                wave_shape: None,
             },
             machine,
         );

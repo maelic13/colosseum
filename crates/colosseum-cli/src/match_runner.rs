@@ -743,64 +743,67 @@ pub enum MatchError {
 
 /// Execute both colours of one opening as a single scheduler value. The second
 /// game is always attempted after the first returns; only the complete value
-/// can enter the pair commit queue.
+/// can enter the pair commit queue. `sprt` plays its pairs this way: the pair is
+/// its slot-holding unit, and both games run on the one slot it holds.
 pub async fn play_pair(
     pair_id: u32,
     slot: &GameSlotCpuAllocation,
     settings: PairGameSettings,
 ) -> Result<CompletePair<MatchGame>, MatchError> {
-    // Both games of a pair run on the one slot the pair holds.
-    let first_number = pair_id
-        .checked_mul(2)
-        .and_then(|value| value.checked_sub(1))
-        .ok_or(MatchError::PairIdentityOutOfRange(pair_id))?;
-    if pair_id == 0 {
-        return Err(MatchError::PairIdentityOutOfRange(pair_id));
-    }
-    let second_number = first_number
-        .checked_add(1)
-        .ok_or(MatchError::PairIdentityOutOfRange(pair_id))?;
-    let mut engine_a = settings.engine_a;
-    let mut engine_b = settings.engine_b;
-    engine_a.allocated_cpus = slot.engine_a.allocation.clone();
-    engine_b.allocated_cpus = slot.engine_b.allocation.clone();
-    let engine_a = engine_spec(engine_a, EngineId::from_u128(1));
-    let engine_b = engine_spec(engine_b, EngineId::from_u128(2));
-    let (first_opening, first_assignment) = settings.openings.assignment(first_number);
-    let first = play_game(GameRequest {
-        number: first_number,
-        slot: slot.slot_index,
-        identity_override: None,
-        engine_a: engine_a.clone(),
-        engine_b: engine_b.clone(),
-        time_control_a: settings.engine_a_time_control,
-        time_control_b: settings.engine_b_time_control,
-        adjudication: settings.adjudication,
-        ponder: settings.ponder,
-        opening: first_opening,
-        opening_assignment: first_assignment,
-    })
-    .await;
-    let (second_opening, second_assignment) = settings.openings.assignment(second_number);
-    let second = play_game(GameRequest {
-        number: second_number,
-        slot: slot.slot_index,
-        identity_override: None,
-        engine_a,
-        engine_b,
-        time_control_a: settings.engine_a_time_control,
-        time_control_b: settings.engine_b_time_control,
-        adjudication: settings.adjudication,
-        ponder: settings.ponder,
-        opening: second_opening,
-        opening_assignment: second_assignment,
-    })
-    .await;
+    let (first_number, second_number) = pair_game_numbers(pair_id)?;
+    let first = play_pair_game(first_number, slot, &settings).await;
+    let second = play_pair_game(second_number, slot, &settings).await;
     Ok(CompletePair {
         pair_id,
         first,
         second,
     })
+}
+
+/// The two game numbers of a pair: `2p − 1` with engine A as White, then `2p`
+/// with the colours reversed on the same opening.
+pub fn pair_game_numbers(pair_id: u32) -> Result<(u32, u32), MatchError> {
+    if pair_id == 0 {
+        return Err(MatchError::PairIdentityOutOfRange(pair_id));
+    }
+    let first = pair_id
+        .checked_mul(2)
+        .and_then(|value| value.checked_sub(1))
+        .ok_or(MatchError::PairIdentityOutOfRange(pair_id))?;
+    let second = first
+        .checked_add(1)
+        .ok_or(MatchError::PairIdentityOutOfRange(pair_id))?;
+    Ok((first, second))
+}
+
+/// Play one game of a colour-reversed pair schedule on `slot`: its colours,
+/// opening and identity come from its number exactly as when its pair is
+/// played as a unit. A caller that places games individually — an SPSA
+/// mini-match — reassembles the pairs by their identity afterwards.
+pub async fn play_pair_game(
+    number: u32,
+    slot: &GameSlotCpuAllocation,
+    settings: &PairGameSettings,
+) -> MatchGame {
+    let mut engine_a = settings.engine_a.clone();
+    let mut engine_b = settings.engine_b.clone();
+    engine_a.allocated_cpus = slot.engine_a.allocation.clone();
+    engine_b.allocated_cpus = slot.engine_b.allocation.clone();
+    let (opening, opening_assignment) = settings.openings.assignment(number);
+    play_game(GameRequest {
+        number,
+        slot: slot.slot_index,
+        identity_override: None,
+        engine_a: engine_spec(engine_a, EngineId::from_u128(1)),
+        engine_b: engine_spec(engine_b, EngineId::from_u128(2)),
+        time_control_a: settings.engine_a_time_control,
+        time_control_b: settings.engine_b_time_control,
+        adjudication: settings.adjudication,
+        ponder: settings.ponder,
+        opening,
+        opening_assignment,
+    })
+    .await
 }
 
 pub fn plan_execution(

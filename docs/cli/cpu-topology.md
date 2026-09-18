@@ -108,8 +108,12 @@ cores are divided between its two engines is the allocation mode:
 
 **A slot belongs to one game at a time.** A game takes a free slot before its
 first engine is spawned and gives it back only after both of its engine
-processes have exited; an `sprt` or `spsa` pair holds one slot for both of its
-games, which run on it one after the other. The next game goes to whichever
+processes have exited. An `sprt` pair holds one slot for both of its games,
+which run on it one after the other. Inside an `spsa` iteration each game takes
+a slot of its own, so the two games of a pair may run at once on different
+slots: both perturbation arms play in every game and every slot is alike, and
+holding a slot for a whole pair would leave the rest of the machine idle
+while the last pairs finish. The next game goes to whichever
 slot is free, never to a slot chosen by its number: games end at different
 times, and two games on one pinned CPU make their searches alternate in
 scheduler quanta, which costs whichever engine is thinking its clock. A run
