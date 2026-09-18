@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9p** two games per physical core (experiment), 10.9m residual time losses (research), 10.9h, then **10.10 — EXIT**, which needs a real machine and the maintainer |
+| Next step | **10.9q** corrections, **10.9m** the fastchess study, **10.9r** qualification on a real engine (maintainer-run), then **10.10 — EXIT** (merge, tag); 10.9p deferred and 10.9h recommended for deferral behind the release |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -930,6 +930,15 @@ model as well.
   regression test for `spsa` and `sprt` on a large synthetic book plus an audit
   of per-launch clones; `--total-games` budget; compact, fast-loading book;
   `status` says when the first block is due — PLAN §Phase 10(y)
+- ☐ **10.9q** — **Model: Terra High.** Corrections from review of 10.9o: drop
+  the replayed journal records on a resumed tune and cover resume in the
+  scale test; `result.json` keeps centres, pair score and faults per
+  iteration, not derivable vectors and coefficients (schema bump, `spsa
+  status` and `sprt --apply` unchanged); `book stats` and `load_openings`
+  stop materialising the book; dead self-comparison removed; `stats` reads a
+  `result.json` file; run-file `iterations` yields to `--total-games`; the
+  maintainer's 15-slot, 30-game throughput figures recorded — PLAN §Phase
+  10(aa)
 - ☐ **10.9p** — **Model: Sol High.** Two games per physical core, experiment for
   tuning only: explicit `--games-per-core 2` for `spsa` and `match`, refused
   elsewhere; one logical CPU per game, a core's two games on its two siblings;
@@ -937,7 +946,8 @@ model as well.
   throughput and per-engine speed, forfeits and late moves over 2,000 games,
   and transfer (the same short tune in both modes, each gated under ordinary
   conditions); adopt only if the sibling-mode tune gates no worse; never a
-  gate condition — PLAN §Phase 10(z)
+  gate condition; **DEFERRED behind the release** by maintainer decision
+  2026-09-18, with a no-code ten-minute pre-check recorded — PLAN §Phase 10(z)
 - ☐ **10.9m** — **Model: Sol High.** Residual time losses, research before any
   fix: fastchess source study in `docs/architecture/fastchess-mechanics.md`
   (process lifetime, creation flags and priority, affinity, pipes and
@@ -954,6 +964,16 @@ model as well.
   Linux isolated-core and IRQ-affinity detection and preference, macOS
   advisory contract, WSL excluded as evidence; implementation follows as
   its own step if the note calls for it — PLAN §Phase 10(r)
+- ☐ **10.9r** — **Model: Sol High.** Qualification on a real engine, part of
+  the release and recorded in `docs/architecture/phase-10-qualification.md`:
+  maintainer-run on the release candidate, one command at a time, each
+  result analysed from its run directory: symmetry (identical-binary
+  `calibrate`, 30,000 games, interval inside ±5 nElo), scale (fixed 2,000
+  games against a second runner's figure), verdict (SPRT replay), ratings
+  (fixed-field gauntlet), tuning (the SPSA recovery test from a detuned
+  start with `sprt --apply` accepting H1), faults (zero time losses or the
+  10.9m floor); an adopting project trusts the released binary and repeats
+  none of it — PLAN §Phase 10(ab)
 - ☐ **10.10 — EXIT** — **Model: Sol High.** Release acceptance repeat:
   regenerate the command reference, update `CHANGELOG-CLI.md` under 0.1.0,
   Phase 4B oracle replay and Phase 8.1 parity matrix on the corrected source,

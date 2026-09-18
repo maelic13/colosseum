@@ -2795,8 +2795,64 @@ games" procedure at 10.10, once, on the final state.
   both modes from the same seed and budget, each gated by `sprt --apply` under
   ordinary one-game-per-core conditions. Adopt for tuning only if (3) shows
   the sibling-mode tune gates no worse, and record the measured wall-time
-  saving; otherwise decline with the numbers. Never a gate condition. Items
-  (k) to (z) precede (j).
+  saving; otherwise decline with the numbers. Never a gate condition.
+  **Deferred behind the release by maintainer decision, 2026-09-18:** the
+  transfer evidence costs two tunes and two gates, and two tunes cannot be
+  compared by their values. A ten-minute pre-check needs no code: two
+  matches started together, one with `--placement 2,4,…,30` and one with
+  `--placement 3,5,…,31`, 15 games each, give the real throughput gain and
+  the per-engine slowdown; if the gain is small the step is declined.
+- **(aa) Corrections from review of (y), and a smaller result.** On a
+  resumed tune the journal records loaded for the replay stay resident for
+  the rest of the run (`composition/spsa.rs`, bound in the outer scope of
+  the run function): drop them after the replay, and extend the scale test
+  to a resumed run. `result.json` still stores, per iteration, the plus and
+  minus values, perturbation signs and gain coefficients of every knob,
+  about 16 KB per iteration at 82 knobs and some 200 MB pretty-printed for
+  a full tune, all derivable from the schedule, the seed and the centres:
+  store the centres after each iteration, the pair score and the faults,
+  bump the result schema, keep `spsa status` and `sprt --apply` working.
+  `book stats` and the desktop scheduler's `load_openings` still materialise
+  the whole book; a self-comparison in `spsa_driver` checks nothing; `stats`
+  refuses a `result.json` given as a file; a run file's `iterations` clashes
+  with `--total-games` on the command line instead of being overridden. The
+  maintainer's 60-iteration tune at 15 slots and 30 games per iteration is
+  the throughput evidence for (x); its figures are recorded here.
+- **(ab) Qualification on a real engine is part of the release, and lives
+  here.** A project that adopts the harness must be able to trust a
+  released binary without re-testing it, so the evidence that the harness
+  measures correctly belongs to this repository's release acceptance, run
+  by the maintainer on the reference host with a validation engine and
+  recorded in `docs/architecture/phase-10-qualification.md` with commands,
+  binary and input hashes and results. On the release candidate: (1)
+  **symmetry**, an identical-binary `calibrate` of 30,000 games with the
+  whole 95% normalized-Elo interval inside ±5; (2) **scale**, a fixed
+  2,000-game match of two builds whose difference a second runner has
+  measured, intervals overlapping; (3) **verdict**, an SPRT of a pair the
+  second runner has gated, same verdict; (4) **ratings**, a gauntlet with a
+  fixed field whose anchors keep their ratings; (5) **tuning, the recovery
+  test**, which replaces comparing two full tunes: two tunes of a wide
+  surface end at different noise around a flat region, so their values
+  cannot be compared, and their strength differs by less than a feasible
+  match resolves, whereas a tune with a known answer can fail. Three or
+  four high-sensitivity parameters are detuned far enough to cost at least
+  30 Elo in a fixed 2,000-game match against the defaults, every other
+  parameter fixed; `spsa` runs from the detuned start for about 30,000
+  games at full concurrency; pass means every detuned parameter ends at
+  least half way back to its default and `sprt --apply` of the tuned values
+  against the detuned start accepts H1 at `[0,10]`. A sign, scale or
+  schedule error fails it outright. (6) **faults**, zero time losses in the
+  scale match, or the floor (w) documents. Already on record from
+  2026-09-17/18, to be repeated on the candidate only where the code under
+  test changed since: scale +55.7 to +65.9 against a second runner's +52.2
+  and +54.3; verdict H1 at 220 pairs, nElo +94.1 ± 32.5, against 216 pairs
+  and +94.0 ± 32.8; symmetry −1.1 ± 3.9, measured before the slot pool and
+  therefore owed again. Item (j) does not close without this record.
+  **Release order from here:** (aa), then (w) the fastchess study and what
+  it concludes, then (ab) inside (j). Item (r), placement per platform, is
+  recommended for deferral behind the release with the limitation stated in
+  the release notes, since the reference platform is Windows; the
+  maintainer decides. Items (k) to (ab) precede (j).
 
   **Implementation evidence (Phase 10.9n):** `play_mini_match` now takes a
   slot from the run's pool per game: games are launched in schedule order
