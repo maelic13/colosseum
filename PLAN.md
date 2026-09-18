@@ -2553,7 +2553,36 @@ games" procedure at 10.10, once, on the final state.
   late-`bestmove` wait stops on a per-read fault; PGN `h=` truncates to
   milliseconds while the journal keeps nanoseconds; an SPSA resume over a
   rebuilt iteration with an unscorable game reports a checkpoint mismatch
-  instead of naming the game. Items (k) to (t) precede (j).
+  instead of naming the game.
+- **(u) A slot belongs to one game at a time.** The instrument of (t) named
+  the phase (all harness phases under 1.3 ms; every forfeiting `bestmove`
+  42–64 ms after the engine's own hard cap, a second mode and not noise)
+  and a maintainer's system monitor named the cause: cores dropping to idle
+  while others ran, where fastchess keeps every core at 100%. All four
+  drivers choose a game's CPU slot by arithmetic,
+  `(number − 1) % slots.len()` (`match_runner`, `sprt_runner`,
+  `spsa_driver`, `tournament_driver`), not by which slot is free. Games end
+  at different times, so the next game is routinely placed on a slot that
+  is still playing while a finished slot idles. Replaying that rule over a
+  real 2,000-game run reproduces its wall time and gives 7.8% of slot-time
+  double-booked, 7.6% idle, and 71% of games sharing their CPU with another
+  game at some point; two searches on one pinned CPU alternate in scheduler
+  quanta, which is the 50 ms stall. fastchess on the same host, day and
+  binaries: 0 forfeits in 2,000 games; Colosseum: 14–15. Required: one
+  free-slot pool per run, owned by the execution plan. A unit takes a slot
+  before its first engine is spawned and returns it only after both engine
+  processes of its last game have exited; the unit is a game for `match`,
+  `calibrate` and `tournament`, and a colour-reversed pair for `sprt` and
+  `spsa`, whose two games run on the same slot. Launch order, pair identity,
+  opening assignment and commit order are unchanged: only the CPU placement
+  of a unit changes, so results are reproducible from the same seed except
+  for timing. The slot a game ran on is recorded in its journal record and
+  as a PGN tag. Invariant, asserted in debug builds and tested: no two live
+  units ever hold the same slot, and no unit waits while a slot is free.
+  Test: a stub run with deliberately uneven game lengths, concurrency 4,
+  that fails on the modulo rule. Success criterion on the real host: the
+  2,000-game 3+0.03 match at 14 slots shows zero time losses and every game
+  core continuously busy. Items (k) to (u) precede (j).
 
   **Implementation evidence (Phase 10.9j):** `colosseum-uci` keeps a
   `SearchTiming` per search: the game task stamps `go` before the write, the

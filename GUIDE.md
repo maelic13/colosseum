@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9h** placement per platform research note, then **10.10 — EXIT**, which needs a real machine and the maintainer; the maintainer's 2,000-game 3+0.03 run with the 10.9j instrument is owed |
+| Next step | **10.9k** a slot belongs to one game at a time, then 10.9h, then **10.10 — EXIT**, which needs a real machine and the maintainer |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -895,6 +895,15 @@ model as well.
     overhead in `games.pgn` and the `stats` over-margin count, the late
     wait on a per-read fault, ms/ns rounding, and the SPSA unscorable
     resume message — PLAN §Phase 10(t)
+- ☐ **10.9k** — **Model: Sol High.** A slot belongs to one game at a time:
+  replace `(number − 1) % slots.len()` in `match_runner`, `sprt_runner`,
+  `spsa_driver` and `tournament_driver` with one free-slot pool per run; a
+  unit (game, or pair for `sprt`/`spsa`) takes a slot before its first spawn
+  and returns it after its last engine process exits; launch, pairing,
+  openings and commit order unchanged; slot recorded in journal and PGN;
+  invariant and uneven-length stub test that fails on the modulo rule; the
+  10.9j owed corrections land here too; maintainer's 2,000-game run shows
+  zero time losses — PLAN §Phase 10(u)
 - ☐ **10.9h** — **Model: Sol High.** Placement per platform research note:
   Linux isolated-core and IRQ-affinity detection and preference, macOS
   advisory contract, WSL excluded as evidence; implementation follows as
