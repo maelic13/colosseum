@@ -2717,7 +2717,31 @@ games" procedure at 10.10, once, on the final state.
   the wave model. The opening book is held compactly (offsets into one
   buffer rather than an owned string per field) and loads in well under a
   second. `status` on a run that has printed no block yet says when the first
-  is due. Items (k) to (y) precede (j).
+  is due.
+- **(z) Two games per physical core, as a measured experiment for tuning
+  only.** A one-thread game keeps one logical CPU busy; the core's SMT sibling
+  idles. Placing a second game on the sibling doubles the concurrent games
+  (30 on the 15 game cores of the reference host). SMT usually returns 20–25%
+  more total work, so each engine runs at roughly 60% of its speed: for the
+  engines it is the same experiment at a shorter effective time control on
+  slower hardware. It cannot bias a tune, because both arms are the same
+  binary under identical conditions, but it departs from the rule that a
+  tune runs under gate conditions, so whether its result transfers is the
+  question, not whether it is faster. Required: an explicit, recorded
+  placement mode (`--games-per-core 2`, default 1) accepted by `spsa` and
+  `match` only and refused by `sprt`, `calibrate` and `tournament`; each game
+  pinned to exactly one logical CPU, the two games of a core on its two
+  siblings, never two games on one logical CPU; refused where the sibling map
+  is unavailable or the core has no sibling; mode in the run record, PGN tag
+  and dry run. Evidence, maintainer-run on the reference host, same binaries
+  and book: (1) throughput and per-engine speed, as games per hour and the
+  nodes-per-second ratio against one game per core; (2) forfeits and the
+  late-move metric over 2,000 games; (3) transfer: the same short tune run in
+  both modes from the same seed and budget, each gated by `sprt --apply` under
+  ordinary one-game-per-core conditions. Adopt for tuning only if (3) shows
+  the sibling-mode tune gates no worse, and record the measured wall-time
+  saving; otherwise decline with the numbers. Never a gate condition. Items
+  (k) to (z) precede (j).
 
   **Implementation evidence (Phase 10.9n):** `play_mini_match` now takes a
   slot from the run's pool per game: games are launched in schedule order

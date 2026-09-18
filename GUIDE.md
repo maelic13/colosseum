@@ -930,6 +930,14 @@ model as well.
   regression test for `spsa` and `sprt` on a large synthetic book plus an audit
   of per-launch clones; `--total-games` budget; compact, fast-loading book;
   `status` says when the first block is due — PLAN §Phase 10(y)
+- ☐ **10.9p** — **Model: Sol High.** Two games per physical core, experiment for
+  tuning only: explicit `--games-per-core 2` for `spsa` and `match`, refused
+  elsewhere; one logical CPU per game, a core's two games on its two siblings;
+  recorded in run record, PGN and dry run; maintainer-run evidence of
+  throughput and per-engine speed, forfeits and late moves over 2,000 games,
+  and transfer (the same short tune in both modes, each gated under ordinary
+  conditions); adopt only if the sibling-mode tune gates no worse; never a
+  gate condition — PLAN §Phase 10(z)
 - ☐ **10.9m** — **Model: Sol High.** Residual time losses, research before any
   fix: fastchess source study in `docs/architecture/fastchess-mechanics.md`
   (process lifetime, creation flags and priority, affinity, pipes and
