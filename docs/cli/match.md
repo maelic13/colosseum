@@ -136,7 +136,8 @@ origin. Moves pre-played from an opening book carry `{book}` instead, and the
 
 A search that lost on time played no move, so it has no move to comment on.
 It is written just before the result as `{forfeit t=<ms>ms h=<ms>ms}` with the
-time its answer finally arrived, or `{forfeit}` when no answer came. The
+time its answer finally arrived, together with the usual `s=`, `d=` and `n=`
+fields when the engine reported them, or `{forfeit}` when no answer came. The
 `WhiteTimeMarginMs` and `BlackTimeMarginMs` tags name each side's time margin,
 so a PGN alone says how close each move's overhead came to a forfeit, and
 `GameSlot` names the CPU slot the game ran on, counting from zero.

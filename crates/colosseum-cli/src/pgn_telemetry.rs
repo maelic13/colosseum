@@ -5,7 +5,7 @@ use serde::Serialize;
 pub const SUPPORTED_TELEMETRY_SYNTAXES: [&str; 3] = [
     "PGN tags: [%depth N] [%emt SECONDS] [%nodes N]",
     "key/value comments: depth|d=N time|t=Nms|Ns nodes|n=N",
-    "Colosseum move comments: {s=CP|#N d=N t=Nms h=Nms n=N}, {book} and {forfeit t=Nms h=Nms}; WhiteTimeMarginMs/BlackTimeMarginMs tags",
+    "Colosseum move comments: {s=CP|#N d=N t=Nms h=Nms n=N}, {book} and {forfeit [s=CP|#N] [d=N] t=Nms [h=Nms] [n=N]} or {forfeit}; WhiteTimeMarginMs/BlackTimeMarginMs tags",
 ];
 
 const NODE_SEMANTICS_WARNING: &str = "implied NPS is comparable only when node accounting has compatible semantics, normally within the same engine lineage";

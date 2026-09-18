@@ -150,12 +150,22 @@ impl SlotPool {
     }
 }
 
+/// Microseconds since the Unix epoch, anchored once per process to the wall
+/// clock and advanced by the monotonic clock. The journal's slot spans read
+/// as a timeline, and a wall-clock step during a run (a time sync) cannot
+/// make two spans on one slot appear to overlap.
 fn unix_us() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |since| {
-            u64::try_from(since.as_micros()).unwrap_or(u64::MAX)
-        })
+    static ANCHOR: std::sync::OnceLock<(u64, std::time::Instant)> = std::sync::OnceLock::new();
+    let (wall_us, started) = ANCHOR.get_or_init(|| {
+        let wall = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| {
+                u64::try_from(since.as_micros()).unwrap_or(u64::MAX)
+            });
+        (wall, std::time::Instant::now())
+    });
+    let elapsed = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+    wall_us.saturating_add(elapsed)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

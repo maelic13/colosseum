@@ -49,7 +49,7 @@ pub const CLOCK_MODEL_VERSION: u32 = 2;
 /// Nanoseconds to the nearest millisecond, halves away from zero.
 fn round_ns_to_ms(nanos: i64) -> i64 {
     let half = if nanos < 0 { -500_000 } else { 500_000 };
-    (nanos + half) / 1_000_000
+    nanos.saturating_add(half) / 1_000_000
 }
 
 fn color_idx(color: Color) -> usize {

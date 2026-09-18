@@ -2582,7 +2582,15 @@ games" procedure at 10.10, once, on the final state.
   Test: a stub run with deliberately uneven game lengths, concurrency 4,
   that fails on the modulo rule. Success criterion on the real host: the
   2,000-game 3+0.03 match at 14 slots shows zero time losses and every game
-  core continuously busy. Items (k) to (u) precede (j).
+  core continuously busy. **Demonstrated 2026-09-18** on the 16-core host:
+  2,000 games at 14 whole-core slots, 0 time losses and 0 engine faults
+  (fastchess the same day: 0; Colosseum before the pool: 14–15, and 206 with
+  one logical CPU per game, the dose-response of double-booking); the journal
+  shows 0 overlapping slot spans and a median hand-over gap of 0 ms; the run
+  was stopped and resumed once through the journal; with under 100 ms on the
+  clock the slowest charged move was 81 ms against fastchess's 95 ms. Elo
+  +65.9 ± 11.0, nElo +93.7 ± 15.2 against fastchess's +54.3 ± 11.1 and
+  +75.6 ± 15.2 on the same binaries. Items (k) to (u) precede (j).
 
   **Implementation evidence (Phase 10.9k):** the execution plan hands each
   run a `SlotPool` (`MatchExecutionPlan::slot_pool`), and `match`
