@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::cancellation::Cancellation;
+use crate::journal::GameRecord;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -74,7 +75,7 @@ pub enum MatchSide {
 }
 
 impl MatchSide {
-    fn other(self) -> Self {
+    pub(crate) fn other(self) -> Self {
         match self {
             Self::A => Self::B,
             Self::B => Self::A,
@@ -103,7 +104,68 @@ pub struct MatchGame {
     pub fault: Option<GameFault>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The game's moves, held only from the moment the game ends until it is
+    /// committed to `games.pgn`, and never stored, reported or kept by a
+    /// driver after that. Thirty thousand games of moves in memory, and again
+    /// in every report, was most of what a long run carried.
+    #[serde(skip)]
     pub pgn: String,
+}
+
+impl MatchGame {
+    /// The journal record of this game.
+    #[must_use]
+    pub fn journal_record(&self, sample: &str, iteration: Option<u32>) -> GameRecord {
+        let side = |side: MatchSide| match side {
+            MatchSide::A => "a".to_owned(),
+            MatchSide::B => "b".to_owned(),
+        };
+        GameRecord {
+            number: self.number,
+            pair_number: self.number.div_ceil(2),
+            pair_game: if self.number % 2 == 1 { 1 } else { 2 },
+            white: side(self.white),
+            black: side(self.white.other()),
+            result: self.result,
+            scorable: self.scorable,
+            termination: self.termination,
+            opening: self.opening.clone(),
+            fault: self.fault.clone(),
+            sample: sample.to_owned(),
+            clock: self.clock_accounting.clone(),
+            iteration,
+            round: None,
+            error: self.error.clone(),
+        }
+    }
+
+    /// The game a journal record describes, without its moves. `None` when the
+    /// record is not a two-engine game.
+    #[must_use]
+    pub fn from_journal(record: &GameRecord) -> Option<Self> {
+        let white = match record.white.as_str() {
+            "a" => MatchSide::A,
+            "b" => MatchSide::B,
+            _ => return None,
+        };
+        Some(Self {
+            number: record.number,
+            white,
+            result: record.result,
+            scorable: record.scorable,
+            termination: record.termination,
+            clock_accounting: record.clock.clone(),
+            opening: record.opening.clone(),
+            fault: record.fault.clone(),
+            error: record.error.clone(),
+            pgn: String::new(),
+        })
+    }
+
+    /// Release the moves once they are committed.
+    pub fn strip_moves(&mut self) {
+        self.pgn = String::new();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -442,11 +504,6 @@ impl MatchProgress {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct MatchCheckpoint {
-    pub games: Vec<MatchGame>,
-}
-
 #[derive(Debug, Error)]
 pub enum MatchError {
     #[error("a fixed match needs at least one game")]
@@ -758,9 +815,13 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         let Some(joined) = joined else {
             break;
         };
-        let game = joined.map_err(|error| MatchError::Worker(error.to_string()))?;
+        let mut game = joined.map_err(|error| MatchError::Worker(error.to_string()))?;
         if let Some(observer) = &observer {
             observer.game_completed(&game).map_err(MatchError::Output)?;
+            // The observer committed the moves; the report keeps the summary.
+            // A match with no observer is a tournament's one-game match, whose
+            // caller commits the moves itself.
+            game.strip_moves();
         }
         progress.record(&game);
         report.games.push(game);

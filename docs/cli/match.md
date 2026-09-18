@@ -51,10 +51,13 @@ change the requested fixed work. The flag, resolved engine options and final
 report all record the condition; use the flag rather than forwarding `Ponder`
 as a generic per-engine option.
 
-Clocked searches use the recorded `go-write-to-bestmove-read` model version 1.
-The charged interval begins after the complete `go` command has been flushed
-and ends after the complete `bestmove` line has been read, using a monotonic
-clock. Position setup is outside that interval. Increment is credited only
+Clocked searches use the recorded `go-write-to-bestmove-arrival` model
+version 2. The charged interval begins as the `go` command is written and ends
+at the instant the complete `bestmove` line arrived on the engine's output
+pipe, using a monotonic clock. A thread that does nothing but read that pipe
+takes the arrival instant, so nothing the harness does after the line lands
+— committing another game, a slow disk — can be charged to the engine.
+Position setup is outside that interval. Increment is credited only
 after an accepted move: an elapsed time greater than remaining time plus margin
 forfeits; exact equality is accepted. Structured results include the model,
 version, both margins, measured monotonic resolution and per-side charged-time
@@ -133,8 +136,14 @@ node coverage.
 
 Engine and infrastructure faults are different outcomes. An engine timeout,
 disconnect, protocol failure or illegal move is a scored forfeit with explicit
-side and kind metadata. The match becomes `invalid` after more than
-`--max-engine-faults N` or `--max-time-losses N`; both limits default to zero.
+side and kind metadata. **A loss on time is an engine fault**: it counts
+towards `--max-engine-faults` as well as towards `--max-time-losses`. The
+match becomes `invalid` after more engine faults than `--max-engine-faults N`,
+which defaults to 1% of the scheduled games and at least 5 — a 30,000-game
+match tolerates 300, a 200-game match 5. `--max-time-losses N` defaults to the
+same number, so by default it adds no separate limit. Set either to `0` to
+invalidate on the first forfeit. The allowance is shown on the `faults` line of
+every progress block and of the final report.
 A pre-play spawn or harness/infrastructure failure is marked non-scorable,
 makes the match `infrastructure-error`, and never changes W/L/D. Colosseum does
 not offer selective retry or discard of already-started statistical games.
@@ -232,16 +241,17 @@ configuration is refused on resume. The directory contains:
 | Artifact | Purpose |
 |---|---|
 | `resolved-config.json` and `config.sha256` | Canonical replay identity |
-| `checkpoint.json` and `checkpoint.previous.json` | Checksummed durable game state |
+| `games.jsonl` | Append-only journal, one checksummed record per game |
+| `games.pgn` | Portable game export, appended one game at a time |
+| `checkpoint.json` and `checkpoint.previous.json` | Checksummed aggregates and the journal position they cover |
 | `run-record.json` | Versioned lifecycle and official sample |
-| `run.log` | Append-only JSON-lines event log |
-| `games.pgn` | Portable game export, rebuilt from durable state |
+| `run.log` | Append-only JSON-lines log of progress blocks, faults, stop and resume |
 | `result.json` | Final structured match report |
 | `failed-games/` | UCI traffic and stderr for abnormal games |
 
 Progress is written to stderr every `--progress-every N` games, and once more
 at the end; a match block reports the score, the Elo estimate with its 95%
-interval, faults and the rate. See the
+interval, faults against the allowance and the rate. See the
 [output contract](output.md) for the shared rules. The
 final human report names the artifact directory, the two engines' scores, the
 fault counts and how many games ended abnormally and in which way. It does not

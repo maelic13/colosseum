@@ -89,11 +89,18 @@ Total Time: 8m41s
 `--json` replaces that report with the single JSON document; progress blocks
 stay on standard error either way.
 
-Run artifacts use the common layout. The checkpoint stores official and
-post-terminal pairs separately, `games.pgn` labels both classes in a
-`ColosseumSample` tag so [statistics replay](stats.md) reaches the same
-official vector from either, `run.log` records pair commits, and both `result.json` and `run-record.json` retain the
-resolved statistical design. Resume accepts only the same resolved conditions.
+Run artifacts use the common [run-directory layout](run-directories.md). The
+journal records official and post-terminal games with their class,
+`games.pgn` labels both classes in a `ColosseumSample` tag so
+[statistics replay](stats.md) reaches the same official vector from either,
+and both `result.json` and `run-record.json` retain the resolved statistical
+design. Resume recomputes the official prefix from the journal and accepts
+only the same resolved conditions.
+
+An SPRT tolerates no engine faults by default, and a loss on time is an engine
+fault. Its unit is a colour-reversed pair, and a forfeit breaks the pair it
+lands in; `--max-engine-faults N` and `--max-time-losses N` raise the limits
+explicitly.
 
 Automation exit codes are: `0` H1, `1` H0, `2` configuration refusal, `3`
 infrastructure/runtime/persistence error, `4` cap-reached inconclusive, and `5`

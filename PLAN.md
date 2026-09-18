@@ -2474,6 +2474,78 @@ games" procedure at 10.10, once, on the final state.
   justify it, then the implementation as its own step if the note says so.
   Items (k) to (r) precede (j).
 
+  **Implementation evidence (Phase 10.9g):** the `bestmove` instant is now
+  the pipe's. A dedicated OS thread per engine owns its standard output,
+  reads it line by line with the existing length bound, and stamps each
+  line with `Instant::now()` the moment it is read off the pipe; the
+  session receives `(text, arrived)` over a channel and charges
+  `arrived − start`, where `start` is stamped before the `go` (or `stop`,
+  or `ponderhit`) is written. A deadline is judged by arrival too: a line
+  that arrived in time is in time however late the game task reads it. The
+  clock model is versioned `go-write-to-bestmove-arrival` 2, because the
+  start stamp moved from after the write to before it (a reader thread can
+  otherwise stamp a reply before the harness finished flushing the
+  command). The shared UCI session carries this, so GUI games are charged
+  the same way. A run directory now has four files with one job each.
+  `games.jsonl` holds one line per game — line version, sequence number,
+  the game record (identity, result, termination, fault, sample class,
+  clock accounting, iteration or round), the offset, length and SHA-256 of
+  its moves in `games.pgn`, and a SHA-256 over the line's canonical JSON —
+  and never PGN text. `games.pgn` is opened for append and written one
+  game at a time, moves before the journal line. `checkpoint.json`
+  (`CHECKPOINT_SCHEMA_VERSION` 2, two generations) holds aggregates only
+  and a `journal` anchor: byte offset, SHA-256 of the covered bytes, record
+  count and the PGN offset. `run.log` holds progress blocks, faults, stop,
+  resume and finish; the per-game event is gone. One writer per run
+  (`RunWriter`) runs on `spawn_blocking` and does every append, sync,
+  checkpoint, rename and final artifact; the game loop hands it a record
+  and the moves over a channel and returns, and a driver strips a game's
+  moves as soon as the observer has handed them over, so in-memory state
+  holds summaries. Appends are unsynced; the three append-only files are
+  synced together every 50 games or 1 second and at every checkpoint and
+  barrier. Checkpoints come every 50 units or 5 seconds and at every stop.
+  Resume loads the newest valid checkpoint, hashes the journal up to its
+  offset and refuses on mismatch, reads the tail line by line, drops a torn
+  last line, drops tail games whose moves are not in `games.pgn` with the
+  recorded hash, truncates the PGN to the last kept game, and replays the
+  kept records: the SPRT official prefix, a tune's iteration boundaries and
+  each command's aggregates are recomputed from them. `status` adds the
+  checkpoint's aggregates and the journal read-only (games, how many the
+  checkpoint covers, what a resume would drop, or the refusal); `stats`
+  on a run directory reads the journal. `auto` headroom now sorts the
+  eligible cores by their lowest logical CPU and leaves the lowest ones
+  free, so CPU 0 is never a game core; the placement unit tests and both
+  headroom fixtures of the recorded topology corpus moved by one core.
+  `match`, `calibrate` and `tournament` default `--max-engine-faults` to 1%
+  of the scheduled games and at least 5, `--max-time-losses` defaults to
+  the engine-fault limit because a time loss is an engine fault, and
+  `calibrate` classifies `invalid` only past that allowance; `sprt` keeps
+  zero and `spsa` still invalidates on any fault. Every progress block's
+  and final report's `faults` line states the allowance. Tests: a
+  30,000-game commit through the match observer into a real run directory
+  measured a median observer call of 900 ns at both ends, 365 ms and 371 ms
+  per 1,000 games including the writer and its syncs, and a checkpoint of
+  483 then 497 bytes; a hard kill of a real match followed by a torn last
+  journal line and a PGN cut inside the previous game resumes to the
+  uninterrupted result with the durable journal bytes unchanged; one
+  changed byte inside the covered journal is refused by resume and
+  reported by `status` without either changing the directory. The Phase
+  4B oracle fixtures, the 10.9d/10.9e run-dir-versus-PGN equality tests
+  and the kill/resume suite pass unchanged in what they assert; their
+  waits now watch the journal rather than the checkpoint. Deviations: the
+  run configuration, the run record's first write and the resume's
+  journal load happen before any game starts, synchronously for the first
+  two, since nothing is being charged yet; K is an internal constant
+  rather than a flag; a run directory written before this step is refused
+  on resume with a request to `--restart`, since its checkpoint names no
+  journal; the Phase 4C `fault-invalidity` gate in
+  `docs/fixtures/phase4c/acceptance.json` now names the allowance test that
+  replaced the any-fault test; `RUN_RECORD_SCHEMA_VERSION` is unchanged because the record's
+  shape is. Owed and maintainer-run: the real-host scramble probe (a
+  2,000-game 3+0.03 match, no move with under 100 ms remaining charged
+  above the engine's reported time plus 20 ms) and the fixed-movetime
+  outlier probe (100 ms, 14 slots, 50,000 moves, at or below fastchess).
+
   **Implementation evidence (Phase 10.9f):** one `ProgressBlock` type carries
   every report: a command, its unit count against the cap, the elapsed time
   and labelled lines. The same value is rendered to standard error, appended

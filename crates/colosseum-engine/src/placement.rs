@@ -464,16 +464,20 @@ pub fn plan_cpu_placement(
             headroom_physical_cores,
         } => {
             let cores = available_cores(topology, allowed)?;
-            let cores = highest_performance_class(&locate_cores(&cores, characteristics)?)?;
+            let mut cores = highest_performance_class(&locate_cores(&cores, characteristics)?)?;
             if *headroom_physical_cores >= cores.len() {
                 return Err(CpuPlacementError::HeadroomExhaustsTopology {
                     headroom_physical_cores: *headroom_physical_cores,
                     physical_core_count: cores.len(),
                 });
             }
-            let selected_count = cores.len() - headroom_physical_cores;
+            // Headroom is taken from the lowest-numbered cores upward. CPU 0 is
+            // where Windows services most interrupts and where the harness and
+            // the operating system are most likely to run, so it is the core a
+            // game can least count on and the first one left free.
+            cores.sort_by_key(|core| core.core.logical_cpus.iter().min().copied());
             Ok(CpuPlacementPlan::WholePhysicalCores {
-                cores: cores[..selected_count]
+                cores: cores[*headroom_physical_cores..]
                     .iter()
                     .map(|core| core.core.clone())
                     .collect(),
@@ -889,18 +893,20 @@ mod tests {
     #[test]
     fn auto_default_keeps_one_whole_physical_core_free_with_all_its_siblings() {
         let plan = plan(&smt_topology(), &CpuPlacementPolicy::default()).unwrap();
+        // The free core is the lowest-numbered one, so CPU 0 is never a game
+        // core.
         assert_eq!(
             plan,
             CpuPlacementPlan::WholePhysicalCores {
                 cores: vec![
                     PhysicalCore {
-                        logical_cpus: vec![cpu(0), cpu(4)],
-                    },
-                    PhysicalCore {
                         logical_cpus: vec![cpu(1), cpu(5)],
                     },
                     PhysicalCore {
                         logical_cpus: vec![cpu(2), cpu(6)],
+                    },
+                    PhysicalCore {
+                        logical_cpus: vec![cpu(3), cpu(7)],
                     },
                 ],
                 headroom_physical_cores: 1,
@@ -909,7 +915,7 @@ mod tests {
         // The one free core keeps both of its SMT siblings.
         assert_eq!(
             plan.logical_cpus(),
-            Some(vec![cpu(0), cpu(4), cpu(1), cpu(5), cpu(2), cpu(6)])
+            Some(vec![cpu(1), cpu(5), cpu(2), cpu(6), cpu(3), cpu(7)])
         );
     }
 
@@ -1021,7 +1027,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             plan.logical_cpus(),
-            Some(vec![cpu(0), cpu(4), cpu(1), cpu(5), cpu(2), cpu(6)])
+            Some(vec![cpu(1), cpu(5), cpu(2), cpu(6), cpu(3), cpu(7)])
         );
     }
 
@@ -1170,7 +1176,34 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(plan.logical_cpus(), Some(vec![cpu(0), cpu(1)]));
+        assert_eq!(plan.logical_cpus(), Some(vec![cpu(1), cpu(2)]));
+    }
+
+    #[test]
+    fn headroom_is_taken_from_the_bottom_whatever_order_the_host_lists_cores() {
+        // A host may enumerate its cores in any order; the free ones are
+        // still the lowest-numbered.
+        let topology = CpuTopology {
+            source: TopologySource::LinuxThreadSiblingsList,
+            physical_core_count: 4,
+            logical_cpu_count: 4,
+            sibling_mapping: SiblingMapping::Known {
+                cores: [3, 0, 2, 1]
+                    .into_iter()
+                    .map(|number| PhysicalCore {
+                        logical_cpus: vec![cpu(number)],
+                    })
+                    .collect(),
+            },
+        };
+        let plan = plan(
+            &topology,
+            &CpuPlacementPolicy::Auto {
+                headroom_physical_cores: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(plan.logical_cpus(), Some(vec![cpu(2), cpu(3)]));
     }
 
     #[test]
@@ -1361,7 +1394,9 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(plan.logical_cpus(), Some(vec![cpu(1), cpu(5), cpu(2)]));
+        // Allowed: core 1 (CPUs 1 and 5), core 2 (CPU 2 only) and core 3 (CPU
+        // 7 only). The lowest of those three is the one left free.
+        assert_eq!(plan.logical_cpus(), Some(vec![cpu(2), cpu(7)]));
     }
 
     #[test]

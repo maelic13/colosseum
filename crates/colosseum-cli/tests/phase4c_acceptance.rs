@@ -114,19 +114,22 @@ fn assert_processes_reaped(pids: (u32, u32)) {
     panic!("calibration engines remained after owner death: {pids:?}");
 }
 
-fn wait_for_checkpoint(child: &mut Child, checkpoint: &Path) {
+/// Wait until the run has committed a game: one complete journal line. That
+/// is what a resume replays; the checkpoint summarising it comes every fifty
+/// units or five seconds and need not exist yet.
+fn wait_for_committed_game(child: &mut Child, journal: &Path) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         assert!(
             child.try_wait().unwrap().is_none(),
-            "calibration ended before its resume checkpoint was observed"
+            "calibration ended before a committed game was observed"
         );
-        if checkpoint.is_file() {
+        if std::fs::read_to_string(journal).is_ok_and(|text| text.contains('\n')) {
             return;
         }
         thread::sleep(Duration::from_millis(10));
     }
-    panic!("calibration did not create a checkpoint within ten seconds");
+    panic!("calibration did not commit a game within ten seconds");
 }
 
 fn json(output: &Output) -> Value {
@@ -170,7 +173,7 @@ fn acceptance_manifest_names_every_phase_4c_exit_gate_and_test_owner() {
     }
     for symbol in [
         "calibration_refuses_nonidentical_executable_content_before_launch",
-        "calibration_marks_any_engine_fault_invalid_even_when_the_match_policy_allows_it",
+        "calibration_is_invalid_only_past_its_engine_fault_allowance",
     ] {
         assert!(COMMAND_LINE.contains(symbol), "missing CLI test {symbol}");
     }
@@ -197,27 +200,27 @@ fn every_calibration_outcome_is_deterministic_at_its_exact_boundaries() {
     };
     for (observed, expected) in [
         (
-            classify_calibration(design, Some(interval(-5.0, 5.0)), 0),
+            classify_calibration(design, Some(interval(-5.0, 5.0)), 0, 0),
             CalibrationStatus::Pass,
         ),
         (
-            classify_calibration(design, Some(interval(5.000_001, 8.0)), 0),
+            classify_calibration(design, Some(interval(5.000_001, 8.0)), 0, 0),
             CalibrationStatus::Fail,
         ),
         (
-            classify_calibration(design, Some(interval(-8.0, -5.000_001)), 0),
+            classify_calibration(design, Some(interval(-8.0, -5.000_001)), 0, 0),
             CalibrationStatus::Fail,
         ),
         (
-            classify_calibration(design, Some(interval(-4.0, 6.0)), 0),
+            classify_calibration(design, Some(interval(-4.0, 6.0)), 0, 0),
             CalibrationStatus::Inconclusive,
         ),
         (
-            classify_calibration(design, None, 0),
+            classify_calibration(design, None, 0, 0),
             CalibrationStatus::Inconclusive,
         ),
         (
-            classify_calibration(design, Some(interval(-1.0, 1.0)), 1),
+            classify_calibration(design, Some(interval(-1.0, 1.0)), 1, 0),
             CalibrationStatus::Invalid,
         ),
     ] {
@@ -235,7 +238,7 @@ fn killed_calibration_resumes_exact_configuration_and_refuses_mismatch() {
     first.stdout(Stdio::null()).stderr(Stdio::null());
     let mut child = first.spawn().unwrap();
     let initial = wait_for_pid_pair(&mut child, &a_pid_file, &b_pid_file);
-    wait_for_checkpoint(&mut child, &run.join("checkpoint.json"));
+    wait_for_committed_game(&mut child, &run.join("games.jsonl"));
     let active = wait_for_new_pid_pair(&mut child, &a_pid_file, &b_pid_file, initial);
     child.kill().unwrap();
     child.wait().unwrap();

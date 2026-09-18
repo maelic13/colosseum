@@ -107,26 +107,30 @@ pub(crate) async fn run_calibration(
         eprintln!("archived previous run at {}", archived.display());
     }
     let directory = Arc::new(opened.directory);
-    let completed_games = if opened.resumed
-        && (directory.paths().checkpoint.exists() || directory.paths().previous_checkpoint.exists())
-    {
-        match directory.read_checkpoint::<match_runner::MatchCheckpoint>() {
-            Ok(checkpoint) => checkpoint.games,
-            Err(error) => {
-                eprintln!("resume failed: {error}");
-                return ExitCode::from(3);
-            }
+    let journal = match open_journal(&directory, opened.resumed).await {
+        Ok(journal) => journal,
+        Err(error) => {
+            eprintln!("resume failed: {error}");
+            return ExitCode::from(3);
         }
-    } else {
-        Vec::new()
     };
-    let observer = match DurableMatchOutput::new(Arc::clone(&directory), completed_games.clone()) {
-        Ok(observer) => Arc::new(observer),
+    let completed_games = journal
+        .records
+        .iter()
+        .filter_map(match_runner::MatchGame::from_journal)
+        .collect::<Vec<_>>();
+    let writer = match RunWriter::start(Arc::clone(&directory), journal.resume).await {
+        Ok(writer) => writer,
         Err(error) => {
             eprintln!("calibration output failed: {error}");
             return ExitCode::from(3);
         }
     };
+    let observer = Arc::new(DurableMatchOutput::new(
+        writer.clone(),
+        ProgressUnit::Pairs,
+        &completed_games,
+    ));
     colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
     let mut recorder = match if opened.resumed {
         RunRecorder::resume(&directory)
@@ -139,6 +143,7 @@ pub(crate) async fn run_calibration(
             return ExitCode::from(3);
         }
     };
+    recorder.write_through(writer.clone());
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "calibration",
         "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
@@ -204,23 +209,31 @@ pub(crate) async fn run_calibration(
         tokio::select! {
             result = &mut calibration_future => break result,
             _ = poll.tick() => {
-                let block =
-                    calibration_progress_block(&observer, &schedule, &players, pairs_planned);
-                if schedule.due(block.done) {
-                    publish_progress(&block, &directory, &mut recorder);
+                if schedule.due(observer.units()) {
+                    let block =
+                        calibration_progress_block(&observer, &schedule, &players, pairs_planned, prepared.fault_policy);
+                    publish_progress(&block, &writer, &mut recorder);
                 }
             }
         }
     };
-    let final_block = calibration_progress_block(&observer, &schedule, &players, pairs_planned);
+    let final_block = calibration_progress_block(
+        &observer,
+        &schedule,
+        &players,
+        pairs_planned,
+        prepared.fault_policy,
+    );
     if schedule.needs_final(final_block.done) {
         schedule.mark(final_block.done);
-        publish_progress(&final_block, &directory, &mut recorder);
+        publish_progress(&final_block, &writer, &mut recorder);
     }
     let fixed_match = match outcome {
         Ok(report) => report,
         Err(error) => {
             eprintln!("calibration failed: {error}");
+            drop(recorder);
+            let _ = settle(&writer).await;
             return ExitCode::from(3);
         }
     };
@@ -247,8 +260,12 @@ pub(crate) async fn run_calibration(
                     return ExitCode::from(3);
                 }
             };
-            let status =
-                classify_calibration(prepared.design, interval, fixed_match.faults.engine_total());
+            let status = classify_calibration(
+                prepared.design,
+                interval,
+                fixed_match.faults.engine_total(),
+                prepared.fault_policy.max_engine_faults,
+            );
             let exit_code = calibration_exit_code(status);
             (status, interval, unavailable, exit_code)
         }
@@ -290,6 +307,10 @@ pub(crate) async fn run_calibration(
         eprintln!("run record failed: {error}");
         return ExitCode::from(3);
     }
+    if let Err(error) = settle(&writer).await {
+        eprintln!("calibration output failed: {error}");
+        return ExitCode::from(3);
+    }
     if machine {
         print_json(&MachineOutput::Calibration {
             run_directory: directory.paths().root.clone(),
@@ -324,10 +345,7 @@ pub(crate) fn prepare_calibration(
         _ => resolve_master_seed(conditions.seed)?,
     };
     let adjudication = resolve_adjudication(conditions);
-    let fault_policy = match_runner::FaultPolicy {
-        max_engine_faults: conditions.max_engine_faults,
-        max_time_losses: conditions.max_time_losses,
-    };
+    let fault_policy = conditions.fault_policy(forfeit_allowance(u64::from(design.games)));
     let engine_a_time_control = resolve_time_control(
         "engine A",
         conditions.a_movetime_ms,
@@ -467,12 +485,9 @@ pub(crate) fn calibration_progress_block(
     schedule: &ProgressSchedule,
     players: &str,
     pairs_planned: u64,
+    policy: FaultPolicy,
 ) -> ProgressBlock {
-    let sample = observer
-        .games
-        .lock()
-        .map(|games| PairedProgress::from_games(&games))
-        .unwrap_or_default();
+    let (sample, _) = observer.sample();
     let done = u64::from(sample.pairs);
     let mut block = ProgressBlock::new(
         "calibrate",
@@ -482,7 +497,7 @@ pub(crate) fn calibration_progress_block(
         schedule.elapsed(),
     );
     block.field("players", players);
-    sample.add_fields(&mut block);
+    sample.add_fields(&mut block, policy);
     if let Some(rate) =
         progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
     {
@@ -579,5 +594,14 @@ pub(crate) fn print_calibration(report: &CalibrationReport, run_directory: &Path
     if let Some(reason) = &report.statistics_unavailable {
         println!("interval unavailable: {reason}");
     }
+    let faults = report.fixed_match.faults;
+    println!(
+        "faults: engine {}/{}, time losses {}/{}; {}",
+        faults.engine_a,
+        faults.engine_b,
+        faults.time_losses_a,
+        faults.time_losses_b,
+        fault_allowance_text(report.fixed_match.fault_policy)
+    );
     println!("artifacts: {}", run_directory.display());
 }

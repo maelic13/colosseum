@@ -40,9 +40,9 @@ the same pentanomial vector as the run directory it came from; see
 [statistics replay](stats.md).
 
 A run directory is one evidence set. `stats <run-dir>` takes its statistics
-from the checkpoint, which stays authoritative, and its search telemetry from
+from the game journal, which stays authoritative, and its search telemetry from
 the directory's own `games.pgn`, so telemetry is never reported unavailable
-when the annotated export is sitting beside the checkpoint.
+when the annotated export is sitting beside the journal.
 
 ## Progress
 
@@ -71,7 +71,7 @@ progress [sprt]: 105/200 pairs (52%), 8m41s elapsed
   nElo            +248.0 +/- 47.0
   W/D/L           158/0/52
   Ptnml           [0, 0, 52, 0, 53]
-  faults          engine 0/0, time losses 0/0
+  faults          engine 0/0, time losses 0/0; 0 allowed
   LLR             +2.96 in [-2.94, 2.94] (accept H1)
   rate            724 pairs/hour
   time remaining  0s
@@ -82,8 +82,12 @@ An Elo estimate is a value and the half-width of its 95% interval; `Ptnml` is
 the pentanomial vector; `time remaining` extrapolates the rate observed so far
 and is `0s` once the run has stopped. A sequential test caps that estimate at
 the pairs its `--max-pairs` still allows, and takes the nearer of that and the
-pairs its LLR would need at the drift it has. A tournament reports the
-standings header with ratings and error bars; a tune reports its faults, the
+pairs its LLR would need at the drift it has. The `faults` line counts
+engine faults with losses on time among them, and states the allowance: 1% of
+the scheduled games and at least 5 for `match`, `calibrate` and `tournament`,
+zero for `sprt` and `spsa`, whose unit is a pair a forfeit breaks. A
+tournament reports the standings header with ratings and error bars and its
+faults; a tune reports its faults, the
 centres sitting on a rail and the knobs it has moved furthest since it began.
 
 A block may also carry lines it records without printing: a tune's per

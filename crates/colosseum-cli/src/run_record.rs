@@ -13,6 +13,7 @@ use thiserror::Error;
 
 use crate::RunDirectory;
 use crate::progress::ProgressBlock;
+use crate::run_writer::RunWriter;
 
 /// Bumped when the record's shape changes, including the command-specific
 /// `workflow` payload. Version 3 added the last-level cache domain to every
@@ -154,10 +155,23 @@ impl RunRecord {
 }
 
 /// Lifecycle owner. Dropping a still-running recorder persists an aborted state.
-#[derive(Debug)]
 pub struct RunRecorder {
     path: PathBuf,
     record: RunRecord,
+    /// Once a run is going, the record is written by the run's writer on its
+    /// blocking thread, in order with everything else the run writes.
+    writer: Option<RunWriter>,
+}
+
+impl std::fmt::Debug for RunRecorder {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RunRecorder")
+            .field("path", &self.path)
+            .field("record", &self.record)
+            .field("written_through", &self.writer.is_some())
+            .finish()
+    }
 }
 
 impl RunRecorder {
@@ -165,6 +179,7 @@ impl RunRecorder {
         let mut recorder = Self {
             path: directory.paths().root.join("run-record.json"),
             record: RunRecord::new(directory, command),
+            writer: None,
         };
         recorder.persist()?;
         Ok(recorder)
@@ -189,7 +204,11 @@ impl RunRecorder {
             code: "run-resumed".into(),
             message: "workflow resumed from its durable run directory".into(),
         });
-        let mut recorder = Self { path, record };
+        let mut recorder = Self {
+            path,
+            record,
+            writer: None,
+        };
         recorder.touch();
         recorder.persist()?;
         Ok(recorder)
@@ -198,6 +217,14 @@ impl RunRecorder {
     #[must_use]
     pub fn record(&self) -> &RunRecord {
         &self.record
+    }
+
+    /// From now on, write the record through the run's writer instead of
+    /// blocking the caller on a synced rename. The caller waits for the writer
+    /// before it exits, so the terminal record is durable when the process
+    /// ends.
+    pub fn write_through(&mut self, writer: RunWriter) {
+        self.writer = Some(writer);
     }
 
     pub fn update_sample(&mut self, sample: OfficialSample) -> Result<(), RunRecordError> {
@@ -259,7 +286,12 @@ impl RunRecorder {
     }
 
     fn persist(&mut self) -> Result<(), RunRecordError> {
-        write_atomic(&self.path, &self.record)
+        match &self.writer {
+            Some(writer) => writer
+                .replace(self.path.clone(), serde_json::to_vec(&self.record)?)
+                .map_err(RunRecordError::Writer),
+            None => write_atomic(&self.path, &self.record),
+        }
     }
 }
 
@@ -297,6 +329,8 @@ pub enum RunRecordError {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[error("the run directory writer failed: {0}")]
+    Writer(String),
 }
 
 fn write_atomic(path: &Path, value: &RunRecord) -> Result<(), RunRecordError> {

@@ -14,7 +14,10 @@ use thiserror::Error;
 use crate::ResolvedConfig;
 
 static UNIQUE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-const CHECKPOINT_SCHEMA_VERSION: u64 = 1;
+/// Version 2 holds aggregates and the journal position they cover, where
+/// version 1 held every game; a version 1 checkpoint is refused rather than
+/// read as something it is not.
+const CHECKPOINT_SCHEMA_VERSION: u64 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunDirectoryPaths {
@@ -391,6 +394,36 @@ fn read_generation(path: &Path) -> Result<Value, RunDirectoryError> {
         });
     }
     Ok(payload)
+}
+
+/// Replace a whole file atomically: write a synced temporary beside it, then
+/// rename it over the old one, so a reader sees the old file or the new one
+/// and never half of either.
+pub(crate) fn replace_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("file");
+    let temporary = parent.join(format!(
+        ".{name}.{}.{}.tmp",
+        std::process::id(),
+        UNIQUE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn remove_if_exists(path: &Path) -> Result<(), RunDirectoryError> {

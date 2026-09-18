@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9g** commit path off the game loop, then 10.9h, then **10.10 — EXIT**, which needs a real machine and the maintainer |
+| Next step | **10.9h** placement per platform research note, then **10.10 — EXIT**, which needs a real machine and the maintainer |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -859,7 +859,7 @@ model as well.
   header, rate and ETA; `status` prints the same block; every block is
   appended to `run.log`; tests assert the block content and the interval
   — PLAN §Phase 10(p)
-- ☐ **10.9g** — **Model: Sol High.** Commit path off the game loop:
+- ☑ **10.9g — DONE** — **Model: Sol High.** Commit path off the game loop:
   `bestmove` timestamped by the pipe reader at arrival; `games.jsonl`
   journal and appended `games.pgn`, constant-size aggregate checkpoint
   every K units or seconds and on stop, `run.log` human events only,
@@ -869,7 +869,12 @@ model as well.
   faults with a non-zero default for `calibrate`, `match` and
   `tournament`; flat per-commit wall time over a 30,000-game stub run and
   the real-host scramble and movetime probes as evidence — PLAN §Phase
-  10(q)
+  10(q). **Owed, maintainer-run on the 16-core host:** (1) scramble probe —
+  a 2,000-game 3+0.03 match whose charged-time distribution with under
+  100 ms remaining shows no move charged above the engine's reported time
+  plus 20 ms; (2) fixed-movetime outlier probe — 100 ms, 14 slots, 50,000
+  moves, at or below fastchess's outlier rate. Both are recorded in PLAN
+  §Phase 10(q) when run
 - ☐ **10.9h** — **Model: Sol High.** Placement per platform research note:
   Linux isolated-core and IRQ-affinity detection and preference, macOS
   advisory contract, WSL excluded as evidence; implementation follows as

@@ -64,7 +64,11 @@ The placement-policy resolver has three modes:
 
 The default headroom is one whole physical core with all of its SMT siblings.
 That is room for the harness and the operating system; a second free core costs
-a game slot for no measured benefit.
+a game slot for no measured benefit. The free cores are the lowest-numbered
+physical cores, counted upward, so CPU 0 is never a game core: operating
+systems route interrupts and housekeeping there first, and an engine pinned to
+it pays for them on its own clock. On a 16-core, 32-thread host the default
+leaves core 0 (CPUs 0 and 16) free and plays on cores 1–15.
 
 Placement knows nothing about any particular processor. It reads core class,
 NUMA node and last-level cache domain from the operating system and decides

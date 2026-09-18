@@ -28,9 +28,16 @@ executables without launching them. Unlike a regular match dry run, the paths
 must therefore name readable executable files.
 
 Every live calibration writes the standard self-contained run directory,
-including the resolved configuration, binary identities, checkpoint, PGN,
-JSON-lines log, run record and final result. It can resume only with the same
-resolved configuration.
+including the resolved configuration, binary identities, game journal,
+checkpoint, PGN, JSON-lines log, run record and final result. It can resume
+only with the same resolved configuration.
+
+A calibration tolerates a few engine faults, because a long run on a busy
+host meets the occasional scheduling stall and one forfeit in 30,000 games
+says nothing about either binary. The allowance is 1% of the scheduled games
+and at least 5 (300 for the default 30,000); a loss on time counts as an engine
+fault. `--max-engine-faults N` sets it, and `0` restores the strict rule. The
+`faults` line of every progress block and of the final report shows it.
 
 The result uses a fixed two-sided normalized-Elo interval:
 
@@ -39,7 +46,7 @@ The result uses a fixed two-sided normalized-Elo interval:
 | `pass` | The entire interval is within the configured tolerance. | 0 |
 | `fail` | The entire interval is above or below one tolerance edge. | 1 |
 | `inconclusive` | The interval overlaps an edge, or the sample has no estimable interval. | 4 |
-| `invalid` | Any engine-attributable fault occurred. | 5 |
+| `invalid` | More engine-attributable faults than the allowance occurred. | 5 |
 
 Infrastructure, persistence and runtime failures use exit code 3 and do not
 claim a calibration result. An inconclusive calibration is evidence of an

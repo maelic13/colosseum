@@ -19,13 +19,30 @@ run writes the explicit terminal state. If ownership ends without one, the
 guard records `aborted` and an anomaly, preserving even zero-sample attempts.
 
 `cancelled` means the run stopped cleanly on request at a committed boundary
-rather than reaching its terminal state. Its checkpoint is written, its exit
-code is `6`, and the same run directory resumes towards the stored horizon. It
-is neither a failure nor a statistical conclusion.
+rather than reaching its terminal state. Its journal is synced and its
+checkpoint written, its exit code is `6`, and the same run directory resumes
+towards the stored horizon. It is neither a failure nor a statistical
+conclusion.
 
-`colosseum-cli status <run-dir>` is common to all workflow types. It only reads
-`run-record.json`; it never resumes, repairs, checkpoints or changes the run.
-Use `--json` for the common single-document machine output.
+`colosseum-cli status <run-dir>` is common to all workflow types. It reads
+`run-record.json`, the newest valid checkpoint and the game journal after it;
+it never resumes, repairs, checkpoints or changes the run. Use `--json` for the
+common single-document machine output.
+
+For a run that plays games it adds one line about the journal, which is where
+the games are (see [run directories](run-directories.md)):
+
+```text
+journal: 1204 games committed, 4 after the last checkpoint
+```
+
+The count is what a resume would keep. If the run was killed inside its last
+sync window, a second line says how many unfinished bytes and games without
+moves a resume would drop and play again; if the journal no longer matches its
+checkpoint, the line says the resume would be refused, and why. In `--json` the
+same facts are under `durable`: `checkpoint` holds the checkpoint's aggregates,
+and `journal` holds `games`, `covered_by_checkpoint`, `after_checkpoint`,
+`torn_bytes` and `games_without_moves`, or `refused` with the reason.
 
 It ends by printing the run's most recent progress block verbatim, exactly as
 the console showed it, so closing a terminal costs nothing. `run.log` keeps
@@ -34,9 +51,9 @@ not published one yet says so. See the
 [output contract](output.md) for what a block contains and when it is printed.
 
 SPSA tunes additionally support `colosseum-cli spsa status <run-dir>`. That
-command reads the checksum-verified checkpoint generation and extends the
-common lifecycle view with trajectory, thirds, ETA and explicitly heuristic
-per-knob observations. It ends with the last committed iteration's own
+command rebuilds the committed iterations from the verified journal and
+extends the common lifecycle view with trajectory, thirds, ETA and explicitly
+heuristic per-knob observations. It ends with the last committed iteration's own
 trajectory — its mini-match score, the gain and perturbation scale it used and
 what moved in it — which the progress blocks record but deliberately do not
 print. It likewise never repairs or mutates the run.

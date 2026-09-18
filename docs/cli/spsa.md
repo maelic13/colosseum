@@ -127,9 +127,9 @@ One floating-point centre vector is retained throughout the run. For each
 iteration Colosseum derives deterministic plus/minus integer option vectors,
 plays the same openings with colours reversed, and applies an update only after
 every scheduled pair in that mini-match has completed. A crash, timeout,
-disconnect, protocol fault or illegal move invalidates the iteration and the
-tune. Its games remain as evidence, but a forfeit is never treated as a tuning
-gradient. Infrastructure and persistence failures are likewise never scored.
+disconnect, protocol fault, illegal move or loss on time invalidates the
+iteration and the tune. Its games remain as evidence, but a forfeit is never
+treated as a tuning gradient. Infrastructure and persistence failures are likewise never scored.
 
 All ordinary match conditions remain explicit: one of `--movetime-ms`,
 `--base-ms` with optional `--increment-ms`, `--nodes` or `--depth`; adjudication
@@ -210,15 +210,16 @@ one is visible. `centres at a rail` names every knob whose tuned value sits on
 a bound, where the gradient was one-sided. The paste-ready forms remain the
 three `tuned-options` artifacts below.
 
-Use `--dir PATH` for an explicitly resumable run. Each checkpoint contains only
-whole completed iterations; a hard stop during a mini-match replays that entire
-mini-match on resume and cannot advance the gain schedule. Resume requires the
+Use `--dir PATH` for an explicitly resumable run. The journal records every
+game with its iteration, and a resume rebuilds the completed iterations from
+it; only whole iterations count, so a hard stop during a mini-match replays
+that entire mini-match on resume and cannot advance the gain schedule. Resume requires the
 same resolved configuration, tune contents, engine path, schedule, book and
 conditions. The stored iterations, games-per-iteration and `r_end` are
 authoritative on resume, so repeating different values cannot silently change
 the gain schedule. The stored estimator is authoritative as well.
-Logs append, PGN is rebuilt from committed evidence, and
-`run-record.json` publishes each durable iteration after its checkpoint. Every
+Logs and `games.pgn` append, and `run-record.json` publishes each durable
+iteration. Every
 written game names its iteration in `ColosseumSpsaIteration`, and an
 invalidated iteration's games are kept marked `ColosseumSample "invalid"` so
 [statistics replay](stats.md) leaves them out of the sample.

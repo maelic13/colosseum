@@ -35,8 +35,12 @@ const FIXED_SEARCH_DEADLINE: Duration = Duration::from_secs(600);
 /// How long an engine gets to answer `stop` when its ponder prediction missed.
 const PONDER_STOP_DEADLINE: Duration = Duration::from_secs(5);
 
-pub const CLOCK_MODEL_ID: &str = "go-write-to-bestmove-read";
-pub const CLOCK_MODEL_VERSION: u32 = 1;
+/// The charged interval of one search: from the start of the `go` write to
+/// the arrival of the `bestmove` line on the pipe, as the reader thread
+/// stamped it. Version 1 ended when the game's task read the line, which let
+/// anything that delayed the task be charged to the engine.
+pub const CLOCK_MODEL_ID: &str = "go-write-to-bestmove-arrival";
+pub const CLOCK_MODEL_VERSION: u32 = 2;
 
 fn color_idx(color: Color) -> usize {
     if color == Color::White { 0 } else { 1 }

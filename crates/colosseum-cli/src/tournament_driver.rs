@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::cancellation::Cancellation;
+use crate::journal::GameRecord;
 use crate::match_runner::{
     ConfiguredTimeControl, FaultPolicy, FixedMatchRequest, MatchExecutionPlan, MatchOpenings,
     MatchProgress, OpeningAssignment, run_fixed_match,
@@ -46,10 +47,61 @@ pub struct TournamentGame {
     pub fault: Option<GameFault>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The game's moves, held only until the observer commits them to
+    /// `games.pgn`; never stored in a checkpoint, a report or the driver.
+    #[serde(skip)]
     pub pgn: String,
 }
 
+/// A participant identity as the journal writes it.
+fn participant(text: &str) -> Option<ParticipantId> {
+    serde_json::from_value(serde_json::Value::String(text.to_owned())).ok()
+}
+
 impl TournamentGame {
+    /// The journal record of this game.
+    #[must_use]
+    pub fn journal_record(&self, sample: &str) -> GameRecord {
+        GameRecord {
+            number: self.number,
+            pair_number: self.encounter,
+            pair_game: self.game_in_encounter,
+            white: self.white.to_string(),
+            black: self.black.to_string(),
+            result: self.result,
+            scorable: self.scorable,
+            termination: self.termination,
+            opening: self.opening.clone(),
+            fault: self.fault.clone(),
+            sample: sample.to_owned(),
+            clock: self.clock_accounting.clone(),
+            iteration: None,
+            round: Some(self.round),
+            error: self.error.clone(),
+        }
+    }
+
+    /// The game a journal record describes, without its moves.
+    #[must_use]
+    pub fn from_journal(record: &GameRecord) -> Option<Self> {
+        Some(Self {
+            number: record.number,
+            encounter: record.pair_number,
+            game_in_encounter: record.pair_game,
+            round: record.round?,
+            white: participant(&record.white)?,
+            black: participant(&record.black)?,
+            result: record.result,
+            scorable: record.scorable,
+            termination: record.termination,
+            clock_accounting: record.clock.clone(),
+            opening: record.opening.clone(),
+            fault: record.fault.clone(),
+            error: record.error.clone(),
+            pgn: String::new(),
+        })
+    }
+
     /// The scoring evidence of this game, which is all the rating step reads.
     pub fn evidence(&self) -> TournamentCompletedGame {
         TournamentCompletedGame {
@@ -61,11 +113,6 @@ impl TournamentGame {
             termination: self.termination,
         }
     }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct TournamentCheckpoint {
-    pub games: Vec<TournamentGame>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -81,6 +128,8 @@ pub struct TournamentReport {
     pub master_seed_generated: bool,
     pub opening_policy: crate::match_runner::OpeningPolicyReport,
     pub engine_faults: u32,
+    /// The engine faults the run tolerated before it would be invalid.
+    pub max_engine_faults: u32,
     pub infrastructure_faults: u32,
     pub games: Vec<TournamentGame>,
 }
@@ -102,7 +151,8 @@ pub struct TournamentRunRequest {
     pub master_seed: u64,
     pub master_seed_generated: bool,
     pub openings: MatchOpenings,
-    pub max_engine_faults: Option<u32>,
+    /// Invalidate after more engine faults than this; a time loss is one.
+    pub max_engine_faults: u32,
     pub completed_games: Vec<TournamentGame>,
     pub cancellation: Cancellation,
     pub observer: Option<Arc<dyn TournamentObserver>>,
@@ -305,6 +355,9 @@ pub async fn run_tournament(
                 .game_completed(&game)
                 .map_err(TournamentRunError::Output)?;
         }
+        // Committed; the driver keeps the summary.
+        let mut game = game;
+        game.pgn = String::new();
         request.cancellation.record_committed_unit();
         games.push(game);
     }
@@ -319,10 +372,7 @@ pub async fn run_tournament(
         .count() as u32;
     let status = if infrastructure_error || infrastructure_faults > 0 {
         TournamentRunStatus::InfrastructureError
-    } else if request
-        .max_engine_faults
-        .is_some_and(|limit| engine_faults > limit)
-    {
+    } else if engine_faults > request.max_engine_faults {
         TournamentRunStatus::Invalid
     } else if cancelled || request.cancellation.stopping() {
         TournamentRunStatus::Cancelled
@@ -352,6 +402,7 @@ pub async fn run_tournament(
         master_seed_generated: request.master_seed_generated,
         opening_policy: request.openings.report().clone(),
         engine_faults,
+        max_engine_faults: request.max_engine_faults,
         infrastructure_faults,
         games,
     })

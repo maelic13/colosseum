@@ -232,10 +232,9 @@ pub(crate) async fn run_sprt(
         },
     };
     let adjudication = resolve_adjudication(&command);
-    let fault_policy = match_runner::FaultPolicy {
-        max_engine_faults: command.max_engine_faults,
-        max_time_losses: command.max_time_losses,
-    };
+    // A pair is the SPRT's unit of evidence and a forfeit breaks one, so the
+    // sequential test tolerates none unless told otherwise.
+    let fault_policy = command.fault_policy(0);
     let engine_a_time_control = match resolve_time_control(
         "engine A",
         command.a_movetime_ms,
@@ -475,30 +474,33 @@ pub(crate) async fn run_sprt(
         eprintln!("archived previous run at {}", archived.display());
     }
     let directory = Arc::new(opened.directory);
-    let checkpoint = if opened.resumed
-        && (directory.paths().checkpoint.exists() || directory.paths().previous_checkpoint.exists())
-    {
-        match directory.read_checkpoint::<SprtCheckpoint>() {
-            Ok(checkpoint) => checkpoint,
-            Err(error) => {
-                eprintln!("resume failed: {error}");
-                return ExitCode::from(3);
-            }
+    let journal = match open_journal(&directory, opened.resumed).await {
+        Ok(journal) => journal,
+        Err(error) => {
+            eprintln!("resume failed: {error}");
+            return ExitCode::from(3);
         }
-    } else {
-        SprtCheckpoint::default()
     };
-    if !checkpoint.post_terminal_pairs.is_empty() {
+    if journal
+        .records
+        .iter()
+        .any(|record| record.sample == POST_TERMINAL_SAMPLE)
+    {
         eprintln!("resume failed: a terminal SPRT run cannot be extended");
         return ExitCode::from(2);
     }
-    let observer = match DurableSprtOutput::new(Arc::clone(&directory), checkpoint.clone()) {
-        Ok(observer) => Arc::new(observer),
+    // The official prefix is whatever the journal's pairs replay to. The
+    // schedule admits them in pair order and refuses a prefix that crossed a
+    // boundary it did not record, so nothing about it is taken on trust.
+    let official_pairs = pairs_from_journal(&journal.records, OFFICIAL_SAMPLE);
+    let writer = match RunWriter::start(Arc::clone(&directory), journal.resume).await {
+        Ok(writer) => writer,
         Err(error) => {
             eprintln!("SPRT output failed: {error}");
             return ExitCode::from(3);
         }
     };
+    let observer = Arc::new(DurableSprtOutput::new(writer.clone(), &official_pairs));
     colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
     let mut recorder = match if opened.resumed {
         RunRecorder::resume(&directory)
@@ -511,6 +513,7 @@ pub(crate) async fn run_sprt(
             return ExitCode::from(3);
         }
     };
+    recorder.write_through(writer.clone());
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "sprt",
         "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
@@ -533,7 +536,7 @@ pub(crate) async fn run_sprt(
         eprintln!("SPRT run directory: {}", directory.paths().root.display());
     }
     let openings_report = openings.report().clone();
-    let resumed_pairs = checkpoint.official_pairs.len() as u64;
+    let resumed_pairs = official_pairs.len() as u64;
     let players = format!(
         "{} vs. {}",
         engine_display_name(&engine_a),
@@ -552,7 +555,7 @@ pub(crate) async fn run_sprt(
         execution: execution.clone(),
         design,
         fault_policy,
-        completed_pairs: checkpoint.official_pairs,
+        completed_pairs: official_pairs,
         cancellation: cancellation.clone(),
         observer: Some(observer.clone()),
     };
@@ -565,17 +568,19 @@ pub(crate) async fn run_sprt(
         tokio::select! {
             result = &mut schedule_future => break result,
             _ = poll.tick() => {
-                let block = sprt_progress_block(&observer, &progress, design, &players, false);
-                if progress.due(block.done) {
-                    publish_progress(&block, &directory, &mut recorder);
+                if progress.due(observer.units()) {
+                    let block =
+                        sprt_progress_block(&observer, &progress, design, &players, false, fault_policy);
+                    publish_progress(&block, &writer, &mut recorder);
                 }
             }
         }
     };
-    let final_block = sprt_progress_block(&observer, &progress, design, &players, true);
+    let final_block =
+        sprt_progress_block(&observer, &progress, design, &players, true, fault_policy);
     if progress.needs_final(final_block.done) {
         progress.mark(final_block.done);
-        publish_progress(&final_block, &directory, &mut recorder);
+        publish_progress(&final_block, &writer, &mut recorder);
     }
     match outcome {
         Ok(schedule) => {
@@ -620,6 +625,10 @@ pub(crate) async fn run_sprt(
                 eprintln!("run record failed: {error}");
                 return ExitCode::from(3);
             }
+            if let Err(error) = settle(&writer).await {
+                eprintln!("SPRT output failed: {error}");
+                return ExitCode::from(3);
+            }
             if machine {
                 print_json(&MachineOutput::Sprt {
                     run_directory: directory.paths().root.clone(),
@@ -632,6 +641,8 @@ pub(crate) async fn run_sprt(
         }
         Err(error) => {
             eprintln!("SPRT failed: {error}");
+            drop(recorder);
+            let _ = settle(&writer).await;
             ExitCode::from(3)
         }
     }
@@ -687,17 +698,9 @@ pub(crate) fn sprt_progress_block(
     design: SprtDesign,
     players: &str,
     terminal: bool,
+    policy: FaultPolicy,
 ) -> ProgressBlock {
-    let (sample, post_terminal) = observer
-        .checkpoint
-        .lock()
-        .map(|checkpoint| {
-            (
-                PairedProgress::from_pairs(&checkpoint.official_pairs),
-                checkpoint.post_terminal_pairs.len(),
-            )
-        })
-        .unwrap_or_default();
+    let (sample, post_terminal) = observer.sample();
     let done = u64::from(sample.pairs);
     let mut block = ProgressBlock::new(
         "sprt",
@@ -707,7 +710,7 @@ pub(crate) fn sprt_progress_block(
         progress.elapsed(),
     );
     block.field("players", players);
-    sample.add_fields(&mut block);
+    sample.add_fields(&mut block, policy);
     if post_terminal > 0 {
         block.field(
             "post-terminal",
@@ -799,117 +802,121 @@ fn pairs_to_bound(result: &PentanomialSprtResult) -> Option<u64> {
     (drift != 0.0 && remaining.is_finite() && remaining > 0.0).then(|| remaining.ceil() as u64)
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct SprtCheckpoint {
-    pub(crate) official_pairs: Vec<CompletePair<match_runner::MatchGame>>,
-    pub(crate) post_terminal_pairs: Vec<CompletePair<match_runner::MatchGame>>,
+/// What a sequential test writes while it runs: each admitted pair as two
+/// journal lines and two appended PGN games, and a checkpoint of the official
+/// sample it has reached. The pairs themselves are the driver's to keep.
+pub(crate) struct DurableSprtOutput {
+    pub(crate) writer: RunWriter,
+    state: Mutex<SprtAggregate>,
 }
 
-pub(crate) struct DurableSprtOutput {
-    pub(crate) directory: Arc<RunDirectory>,
-    pub(crate) checkpoint: Mutex<SprtCheckpoint>,
+struct SprtAggregate {
+    sample: PairedProgress,
+    post_terminal: usize,
+    cadence: CheckpointCadence,
+}
+
+impl SprtAggregate {
+    fn checkpoint(&self) -> Value {
+        json!({
+            "command": "sprt",
+            "official_pairs": self.sample.pairs,
+            "post_terminal_pairs": self.post_terminal,
+            "wins": self.sample.wins,
+            "draws": self.sample.draws,
+            "losses": self.sample.losses,
+            "pentanomial": self.sample.vector.counts(),
+            "faults": self.sample.faults,
+        })
+    }
 }
 
 impl DurableSprtOutput {
+    /// Start from the official pairs a resume found in the journal.
     pub(crate) fn new(
-        directory: Arc<RunDirectory>,
-        checkpoint: SprtCheckpoint,
-    ) -> Result<Self, String> {
-        let output = Self {
-            directory,
-            checkpoint: Mutex::new(checkpoint),
-        };
-        output.rewrite_pgn()?;
-        Ok(output)
+        writer: RunWriter,
+        official_pairs: &[CompletePair<match_runner::MatchGame>],
+    ) -> Self {
+        Self {
+            writer,
+            state: Mutex::new(SprtAggregate {
+                sample: PairedProgress::from_pairs(official_pairs),
+                post_terminal: 0,
+                cadence: CheckpointCadence::new(),
+            }),
+        }
     }
 
-    pub(crate) fn persist_pair(
+    /// Official pairs, cheaply, for deciding whether a block is due.
+    pub(crate) fn units(&self) -> u64 {
+        self.state
+            .lock()
+            .map_or(0, |state| u64::from(state.sample.pairs))
+    }
+
+    /// The official sample and the post-terminal count, for a progress block.
+    pub(crate) fn sample(&self) -> (PairedProgress, usize) {
+        self.state.lock().map_or_else(
+            |_| (PairedProgress::default(), 0),
+            |state| (state.sample.clone(), state.post_terminal),
+        )
+    }
+
+    fn commit_pair(
         &self,
         pair: &CompletePair<match_runner::MatchGame>,
-        official: bool,
+        class: &'static str,
     ) -> Result<(), String> {
-        {
-            let mut checkpoint = self
-                .checkpoint
-                .lock()
-                .map_err(|_| "SPRT checkpoint lock poisoned")?;
-            if official {
-                checkpoint.official_pairs.push(pair.clone());
-            } else {
-                checkpoint.post_terminal_pairs.push(pair.clone());
-            }
-            self.directory
-                .write_checkpoint(&*checkpoint)
-                .map_err(|error| error.to_string())?;
+        for game in [&pair.first, &pair.second] {
+            let sample = sample_class(game.scorable, class);
+            let record = game.journal_record(sample, None);
+            log_fault(&self.writer, &record);
+            let moves = with_header_tags(game.pgn.trim_end(), &[("ColosseumSample", sample)]);
+            self.writer.game(record, moves)?;
         }
-        self.rewrite_pgn()?;
-        let mut line = serde_json::to_vec(&json!({
-            "event": if official { "official-pair" } else { "post-terminal-pair" },
-            "pair": pair,
-        }))
-        .map_err(|error| error.to_string())?;
-        line.push(b'\n');
-        self.directory
-            .append_log(&line)
-            .map_err(|error| error.to_string())
-    }
-
-    pub(crate) fn rewrite_pgn(&self) -> Result<(), String> {
-        let checkpoint = self
-            .checkpoint
-            .lock()
-            .map_err(|_| "SPRT PGN lock poisoned")?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(self.directory.paths().root.join("games.pgn"))
-            .map_err(|error| error.to_string())?;
-        for (class, pairs) in [
-            (OFFICIAL_SAMPLE, &checkpoint.official_pairs),
-            ("post-terminal", &checkpoint.post_terminal_pairs),
-        ] {
-            for pair in pairs {
-                for game in [&pair.first, &pair.second] {
-                    let tagged = with_header_tags(
-                        game.pgn.trim_end(),
-                        &[("ColosseumSample", sample_class(game.scorable, class))],
-                    );
-                    writeln!(file, "{tagged}\n").map_err(|error| error.to_string())?;
-                }
-            }
+        let mut state = self.state.lock().map_err(|_| "SPRT state lock poisoned")?;
+        if class == OFFICIAL_SAMPLE {
+            state.sample.add_pair(pair);
+        } else {
+            state.post_terminal += 1;
         }
-        file.sync_all().map_err(|error| error.to_string())
+        if state.cadence.record(1) {
+            self.writer.checkpoint(state.checkpoint())?;
+        }
+        Ok(())
     }
 
     pub(crate) fn finish(&self, report: &sprt_runner::SprtReport) -> Result<(), String> {
-        let bytes = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
-        fs::write(self.directory.paths().root.join("result.json"), bytes)
-            .map_err(|error| error.to_string())?;
-        let mut line = serde_json::to_vec(&json!({
-            "event": "sprt-finished",
-            "status": report.status,
-            "official_pairs": report.schedule.official_pairs.len(),
-            "post_terminal_pairs": report.schedule.post_terminal_pairs.len(),
-        }))
-        .map_err(|error| error.to_string())?;
-        line.push(b'\n');
-        self.directory
-            .append_log(&line)
-            .map_err(|error| error.to_string())
+        let state = self.state.lock().map_err(|_| "SPRT state lock poisoned")?;
+        self.writer.checkpoint(state.checkpoint())?;
+        drop(state);
+        self.writer.replace(
+            self.writer.root().join("result.json"),
+            serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?,
+        )?;
+        log_event(
+            &self.writer,
+            &json!({
+                "event": "sprt-finished",
+                "status": report.status,
+                "official_pairs": report.schedule.official_pairs.len(),
+                "post_terminal_pairs": report.schedule.post_terminal_pairs.len(),
+            }),
+        );
+        Ok(())
     }
 }
 
 impl sprt_runner::PairObserver for DurableSprtOutput {
     fn official_pair(&self, pair: &CompletePair<match_runner::MatchGame>) -> Result<(), String> {
-        self.persist_pair(pair, true)
+        self.commit_pair(pair, OFFICIAL_SAMPLE)
     }
 
     fn post_terminal_pair(
         &self,
         pair: &CompletePair<match_runner::MatchGame>,
     ) -> Result<(), String> {
-        self.persist_pair(pair, false)
+        self.commit_pair(pair, POST_TERMINAL_SAMPLE)
     }
 }
 

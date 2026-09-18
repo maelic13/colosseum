@@ -238,14 +238,10 @@ Options:
           Draw after this many full moves; omitted means no maximum-move cap
 
       --max-engine-faults <MAX_ENGINE_FAULTS>
-          Invalidate after more engine-attributable faults than this value
-
-          [default: 0]
+          Invalidate after more engine faults than this; a time loss is one. Omitted: 1% of the scheduled games, at least 5, for `match` and `calibrate`; zero for `sprt`
 
       --max-time-losses <MAX_TIME_LOSSES>
-          Invalidate after more time losses than this value
-
-          [default: 0]
+          Invalidate after more time losses than this. Omitted: the engine-fault allowance, which already counts them
 
       --concurrency <CONCURRENCY>
           Number of games allowed to run at once
@@ -489,14 +485,10 @@ Options:
           Draw after this many full moves; omitted means no maximum-move cap
 
       --max-engine-faults <MAX_ENGINE_FAULTS>
-          Invalidate after more engine-attributable faults than this value
-
-          [default: 0]
+          Invalidate after more engine faults than this; a time loss is one. Omitted: 1% of the scheduled games, at least 5, for `match` and `calibrate`; zero for `sprt`
 
       --max-time-losses <MAX_TIME_LOSSES>
-          Invalidate after more time losses than this value
-
-          [default: 0]
+          Invalidate after more time losses than this. Omitted: the engine-fault allowance, which already counts them
 
       --concurrency <CONCURRENCY>
           Number of games allowed to run at once
@@ -1132,14 +1124,10 @@ Options:
           Draw after this many full moves; omitted means no maximum-move cap
 
       --max-engine-faults <MAX_ENGINE_FAULTS>
-          Invalidate after more engine-attributable faults than this value
-
-          [default: 0]
+          Invalidate after more engine faults than this; a time loss is one. Omitted: 1% of the scheduled games, at least 5, for `match` and `calibrate`; zero for `sprt`
 
       --max-time-losses <MAX_TIME_LOSSES>
-          Invalidate after more time losses than this value
-
-          [default: 0]
+          Invalidate after more time losses than this. Omitted: the engine-fault allowance, which already counts them
 
       --concurrency <CONCURRENCY>
           Number of games allowed to run at once
@@ -2105,7 +2093,7 @@ Options:
           Pin a participant at a supplied rating as one-based INDEX:RATING; repeat for every member of an established field
 
       --max-engine-faults <MAX_ENGINE_FAULTS>
-          Invalidate only after more engine faults than this; omitted is non-strict
+          Invalidate after more engine faults than this; a time loss is one. Omitted: 1% of the scheduled games, at least 5
 
       --dir <RUN_DIRECTORY>
 

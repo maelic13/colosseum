@@ -88,12 +88,15 @@ pub(crate) struct MatchConditions {
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) max_moves: Option<u32>,
 
-    /// Invalidate after more engine-attributable faults than this value.
-    #[arg(long, default_value_t = 0)]
-    pub(crate) max_engine_faults: u32,
-    /// Invalidate after more time losses than this value.
-    #[arg(long, default_value_t = 0)]
-    pub(crate) max_time_losses: u32,
+    /// Invalidate after more engine faults than this; a time loss is one.
+    /// Omitted: 1% of the scheduled games, at least 5, for `match` and
+    /// `calibrate`; zero for `sprt`.
+    #[arg(long)]
+    pub(crate) max_engine_faults: Option<u32>,
+    /// Invalidate after more time losses than this. Omitted: the engine-fault
+    /// allowance, which already counts them.
+    #[arg(long)]
+    pub(crate) max_time_losses: Option<u32>,
 
     /// Number of games allowed to run at once.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
@@ -153,6 +156,48 @@ pub(crate) struct MatchConditions {
 pub(crate) enum BookOrderArg {
     Sequential,
     Random,
+}
+
+impl MatchConditions {
+    /// The fault policy these flags describe, given the command's own default
+    /// engine-fault allowance. Time losses are engine faults, so an omitted
+    /// time-loss limit is the engine-fault allowance itself.
+    pub(crate) fn fault_policy(&self, default_engine_faults: u32) -> FaultPolicy {
+        let max_engine_faults = self.max_engine_faults.unwrap_or(default_engine_faults);
+        FaultPolicy {
+            max_engine_faults,
+            max_time_losses: self.max_time_losses.unwrap_or(max_engine_faults),
+        }
+    }
+}
+
+/// The fewest forfeits a fixed-size run tolerates by default.
+pub(crate) const FORFEIT_ALLOWANCE_MINIMUM: u32 = 5;
+
+/// The engine faults a fixed-size run tolerates by default: 1% of its
+/// scheduled games, and never fewer than [`FORFEIT_ALLOWANCE_MINIMUM`].
+///
+/// A long run on a busy host meets the occasional scheduling stall however
+/// carefully it is placed, and a single forfeit in 30,000 games says nothing
+/// about either engine; a stable one-in-a-hundred rate says something is
+/// wrong. `sprt` and `spsa` keep zero: their unit is a pair, and a forfeit
+/// breaks the pair it lands in.
+pub(crate) fn forfeit_allowance(scheduled_games: u64) -> u32 {
+    u32::try_from(scheduled_games / 100)
+        .unwrap_or(u32::MAX)
+        .max(FORFEIT_ALLOWANCE_MINIMUM)
+}
+
+/// How a progress block and a final report state the allowance.
+pub(crate) fn fault_allowance_text(policy: FaultPolicy) -> String {
+    if policy.max_time_losses < policy.max_engine_faults {
+        format!(
+            "{} allowed, of which {} time losses",
+            policy.max_engine_faults, policy.max_time_losses
+        )
+    } else {
+        format!("{} allowed", policy.max_engine_faults)
+    }
 }
 
 pub(crate) fn match_engine_overrides_requested(conditions: &MatchConditions) -> bool {
@@ -320,6 +365,10 @@ pub(crate) enum MachineOutput<'a> {
     RunStatus {
         run_directory: &'a Path,
         record: RunRecord,
+        /// The checkpoint's aggregates and the journal after it, for a run
+        /// that keeps them.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        durable: Option<Value>,
     },
 }
 
@@ -519,26 +568,30 @@ pub(crate) const PROGRESS_POLL: Duration = Duration::from_millis(250);
 /// stop the run.
 pub(crate) fn publish_progress(
     block: &ProgressBlock,
-    directory: &RunDirectory,
+    writer: &RunWriter,
     recorder: &mut RunRecorder,
 ) {
-    show_progress(block, directory);
+    show_progress(block, writer);
     if let Err(error) = recorder.update_progress(block.clone()) {
         eprintln!("run record failed: {error}");
     }
 }
 
 /// The console and the trajectory, for a command whose run recorder is owned
-/// by its observer.
-pub(crate) fn show_progress(block: &ProgressBlock, directory: &RunDirectory) {
+/// by its observer. The `run.log` line goes through the run's writer, so
+/// printing a block never waits on the disk.
+pub(crate) fn show_progress(block: &ProgressBlock, writer: &RunWriter) {
     eprint!("{}", block.render());
     eprintln!("{}", progress::BLOCK_SEPARATOR);
-    let mut line =
-        serde_json::to_vec(&block.log_event()).expect("a progress block is serializable");
+    log_event(writer, &block.log_event());
+}
+
+/// Append one human event to `run.log` through the run's writer. A failed
+/// write surfaces at the next commit, which stops the run.
+pub(crate) fn log_event(writer: &RunWriter, event: &Value) {
+    let mut line = serde_json::to_vec(event).expect("a run.log event is serializable");
     line.push(b'\n');
-    if let Err(error) = directory.append_log(&line) {
-        eprintln!("run log failed: {error}");
-    }
+    let _ = writer.log(line);
 }
 
 /// The paired sample a run has committed so far.
@@ -547,7 +600,7 @@ pub(crate) fn show_progress(block: &ProgressBlock, directory: &RunDirectory) {
 /// report the numbers their own final result will report, so this is computed
 /// from the committed games with the same pairing rule and handed to the same
 /// estimator.
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct PairedProgress {
     pub(crate) pairs: u32,
     pub(crate) scored_games: u32,
@@ -556,22 +609,25 @@ pub(crate) struct PairedProgress {
     pub(crate) losses: u32,
     pub(crate) vector: PentanomialVector,
     pub(crate) faults: MatchFaultCounts,
+    /// Games waiting for the other colour of their pair: at most one per game
+    /// in flight, so the state stays the size of the concurrency, not the run.
+    halves: BTreeMap<u32, HalfPair>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HalfPair {
+    number: u32,
+    scorable: bool,
+    result: PairGameResult,
 }
 
 impl PairedProgress {
     /// Pair committed games the way the schedule played them: the odd game of
     /// a pair had engine A as White, the even one the same opening reversed.
     pub(crate) fn from_games(games: &[match_runner::MatchGame]) -> Self {
-        let mut by_pair = BTreeMap::<u32, Vec<&match_runner::MatchGame>>::new();
-        for game in games {
-            by_pair
-                .entry(game.number.div_ceil(2))
-                .or_default()
-                .push(game);
-        }
         let mut progress = Self::default();
-        for pair in by_pair.values() {
-            progress.admit(pair);
+        for game in games {
+            progress.add_game(game);
         }
         progress
     }
@@ -580,37 +636,53 @@ impl PairedProgress {
     pub(crate) fn from_pairs(pairs: &[CompletePair<match_runner::MatchGame>]) -> Self {
         let mut progress = Self::default();
         for pair in pairs {
-            progress.admit(&[&pair.first, &pair.second]);
+            progress.add_pair(pair);
         }
         progress
     }
 
-    fn admit(&mut self, pair: &[&match_runner::MatchGame]) {
-        for game in pair {
-            record_fault(&mut self.faults, game.white, game.fault.as_ref());
-            if !game.scorable {
-                continue;
-            }
+    pub(crate) fn add_pair(&mut self, pair: &CompletePair<match_runner::MatchGame>) {
+        self.add_game(&pair.first);
+        self.add_game(&pair.second);
+    }
+
+    /// Count one committed game, and close its pair if the other colour is
+    /// already in. The order games arrive in does not matter.
+    pub(crate) fn add_game(&mut self, game: &match_runner::MatchGame) {
+        record_fault(&mut self.faults, game.white, game.fault.as_ref());
+        let result = result_for_engine_a(game.white, game.result);
+        if game.scorable {
             self.scored_games += 1;
-            match result_for_engine_a(game.white, game.result) {
+            match result {
                 PairGameResult::Win => self.wins += 1,
                 PairGameResult::Draw => self.draws += 1,
                 PairGameResult::Loss => self.losses += 1,
             }
         }
-        let [first, second] = pair else { return };
+        let half = HalfPair {
+            number: game.number,
+            scorable: game.scorable,
+            result,
+        };
+        let pair = game.number.div_ceil(2);
+        let Some(other) = self.halves.remove(&pair) else {
+            self.halves.insert(pair, half);
+            return;
+        };
+        let (first, second) = if other.number < half.number {
+            (other, half)
+        } else {
+            (half, other)
+        };
         if first.scorable && second.scorable && first.number + 1 == second.number {
-            self.vector.record_pair(
-                result_for_engine_a(first.white, first.result),
-                result_for_engine_a(second.white, second.result),
-            );
+            self.vector.record_pair(first.result, second.result);
             self.pairs += 1;
         }
     }
 
     /// The lines both commands share, in the order an operator reads them:
     /// the size of the sample, what it is worth, then how it was reached.
-    pub(crate) fn add_fields(&self, block: &mut ProgressBlock) {
+    pub(crate) fn add_fields(&self, block: &mut ProgressBlock, policy: FaultPolicy) {
         // A run that counts games has the game count in its headline already;
         // what it does not say is how many of them are complete pairs, which
         // is what every figure below is computed over.
@@ -660,11 +732,12 @@ impl PairedProgress {
             .field(
                 "faults",
                 format!(
-                    "engine {}/{}, time losses {}/{}",
+                    "engine {}/{}, time losses {}/{}; {}",
                     self.faults.engine_a,
                     self.faults.engine_b,
                     self.faults.time_losses_a,
-                    self.faults.time_losses_b
+                    self.faults.time_losses_b,
+                    fault_allowance_text(policy)
                 ),
             );
     }

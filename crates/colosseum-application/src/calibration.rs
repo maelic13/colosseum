@@ -123,15 +123,17 @@ impl From<FixedNAchievedResolution> for CalibrationInterval {
 }
 
 /// Classify a completed calibration without applying a post-hoc statistical
-/// threshold. Engine faults always invalidate the result; a degenerate sample
-/// has no interval and remains inconclusive.
+/// threshold. More engine faults than the run allows invalidate the result
+/// (a time loss is an engine fault); a degenerate sample has no interval and
+/// remains inconclusive.
 #[must_use]
 pub fn classify_calibration(
     design: CalibrationDesign,
     interval: Option<CalibrationInterval>,
     engine_faults: u32,
+    allowed_engine_faults: u32,
 ) -> CalibrationStatus {
-    if engine_faults > 0 {
+    if engine_faults > allowed_engine_faults {
         return CalibrationStatus::Invalid;
     }
     let Some(interval) = interval else {
@@ -226,23 +228,32 @@ mod tests {
             upper_nelo: upper,
         };
         assert_eq!(
-            classify_calibration(design, Some(interval(-4.0, 4.0)), 0),
+            classify_calibration(design, Some(interval(-4.0, 4.0)), 0, 0),
             CalibrationStatus::Pass
         );
         assert_eq!(
-            classify_calibration(design, Some(interval(5.1, 8.0)), 0),
+            classify_calibration(design, Some(interval(5.1, 8.0)), 0, 0),
             CalibrationStatus::Fail
         );
         assert_eq!(
-            classify_calibration(design, Some(interval(-8.0, -5.1)), 0),
+            classify_calibration(design, Some(interval(-8.0, -5.1)), 0, 0),
             CalibrationStatus::Fail
         );
         assert_eq!(
-            classify_calibration(design, Some(interval(-2.0, 6.0)), 0),
+            classify_calibration(design, Some(interval(-2.0, 6.0)), 0, 0),
             CalibrationStatus::Inconclusive
         );
         assert_eq!(
-            classify_calibration(design, None, 1),
+            classify_calibration(design, None, 1, 0),
+            CalibrationStatus::Invalid
+        );
+        // Faults within the allowance leave the evidence to decide.
+        assert_eq!(
+            classify_calibration(design, Some(interval(-4.0, 4.0)), 5, 5),
+            CalibrationStatus::Pass
+        );
+        assert_eq!(
+            classify_calibration(design, Some(interval(-4.0, 4.0)), 6, 5),
             CalibrationStatus::Invalid
         );
     }

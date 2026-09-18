@@ -7,7 +7,7 @@ or plain console text.
 For a run directory, authority is fixed and visible:
 
 1. final structured `result.json`;
-2. checksum-verified current checkpoint, then its previous generation;
+2. the checksummed game journal `games.jsonl`, every verified line;
 3. portable `games.pgn`;
 4. forensic `run.log`;
 5. observational `console.txt`.
@@ -26,8 +26,9 @@ reported.
 PGN and console text do not prove Colosseum pair/opening identity, so replay
 reports labelled unpaired W/D/L and never guesses pairs from file order. Pass
 `--subject "Engine name"` to select an engine perspective for PGN; without it,
-PGN/console results use White's perspective. JSON-lines `game-completed` events
-retain structured match identity and can reconstruct pairs when complete.
+PGN/console results use White's perspective. A journal passed directly
+(`games.jsonl`) retains structured match identity and reconstructs pairs when
+complete.
 
 ## Prospective experiment planning
 

@@ -47,10 +47,21 @@ fn tournament_command(run: &Path, sleep_ms: u64) -> Command {
     command
 }
 
+/// Games the last checkpoint counted. A checkpoint holds aggregates, not
+/// games, so this is a number and not the length of a list.
 fn checkpoint_games(run: &Path) -> Option<usize> {
     let bytes = std::fs::read(run.join("checkpoint.json")).ok()?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    value["payload"]["games"].as_array().map(Vec::len)
+    value["payload"]["games_attempted"]
+        .as_u64()
+        .and_then(|games| usize::try_from(games).ok())
+}
+
+/// Games committed to the journal so far: complete lines only, since a line
+/// still being written is not a committed game.
+fn journal_games(run: &Path) -> Option<usize> {
+    let text = std::fs::read_to_string(run.join("games.jsonl")).ok()?;
+    Some(text.matches('\n').count())
 }
 
 #[test]
@@ -297,13 +308,15 @@ fn killed_tournament_resumes_only_its_missing_schedule_games() {
         .spawn()
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
+    // A game is durable once its journal line is written; the checkpoint is
+    // written every fifty games or five seconds and need not exist yet.
     let completed_before_kill = loop {
-        if let Some(completed @ 1..=5) = checkpoint_games(&run) {
+        if let Some(completed @ 1..=5) = journal_games(&run) {
             break completed;
         }
         assert!(
             Instant::now() < deadline,
-            "tournament did not publish a partial checkpoint"
+            "tournament did not journal a partial run"
         );
         thread::sleep(Duration::from_millis(20));
     };

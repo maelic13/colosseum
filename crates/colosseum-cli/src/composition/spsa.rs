@@ -384,19 +384,6 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let checkpoint = if run_directory.join("checkpoint.json").exists()
-        || run_directory.join("checkpoint.previous.json").exists()
-    {
-        match RunDirectory::read_checkpoint_snapshot::<spsa_driver::SpsaCheckpoint>(run_directory) {
-            Ok(checkpoint) => checkpoint,
-            Err(error) => {
-                eprintln!("SPSA status failed: {error}");
-                return ExitCode::FAILURE;
-            }
-        }
-    } else {
-        spsa_driver::SpsaCheckpoint::default()
-    };
     let verified_schedule = match read_and_verify_spsa_schedule(run_directory, &workflow.schedule) {
         Ok(schedule) => schedule,
         Err(error) => {
@@ -404,41 +391,38 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let durable_updates = checkpoint
-        .completed_iterations
-        .iter()
-        .map(|iteration| SpsaCommittedUpdate {
-            iteration: iteration.iteration,
-            centers_before: iteration.centers_before.clone(),
-            prepared: iteration.prepared.clone(),
-            score: iteration.score,
-            centers_after: iteration.centers_after.clone(),
-        })
-        .collect::<Vec<_>>();
-    let replayed = match SpsaTuningState::resume(
-        verified_schedule,
-        workflow.settings,
-        workflow.bound_tune.initial_centers(),
-        &durable_updates,
-    ) {
-        Ok(state) => state,
+    // The iterations are rebuilt from the journal, as a resume would, without
+    // changing a byte of a run that may still be going.
+    let records = match read_anchor(run_directory).and_then(|anchor| {
+        crate::journal::load_journal(
+            run_directory,
+            anchor.as_ref(),
+            crate::journal::LoadMode::ReadOnly,
+        )
+        .map_err(|error| error.to_string())
+    }) {
+        Ok(loaded) => loaded.records,
         Err(error) => {
-            eprintln!("SPSA status failed: checkpoint does not replay: {error}");
+            eprintln!("SPSA status failed: {error}");
             return ExitCode::FAILURE;
         }
     };
-    if let Some(invalid) = &checkpoint.invalid_iteration {
-        let prepared = replayed.prepare_next();
-        if invalid.iteration != replayed.completed_iterations()
-            || invalid.centers_before != replayed.centers()
-            || prepared.as_ref().ok().and_then(|value| value.as_ref()) != Some(&invalid.prepared)
-        {
-            eprintln!(
-                "SPSA status failed: terminal invalid iteration does not match the durable prefix"
-            );
+    let has_invalid = records.iter().any(|record| record.sample == INVALID_SAMPLE);
+    let checkpoint = match spsa_driver::replay_iterations(
+        verified_schedule,
+        workflow.settings,
+        workflow.bound_tune.initial_centers(),
+        &iterations_from_journal(&records),
+    ) {
+        Ok(completed_iterations) => spsa_driver::SpsaCheckpoint {
+            completed_iterations,
+            invalid_iteration: None,
+        },
+        Err(error) => {
+            eprintln!("SPSA status failed: the journal does not replay: {error}");
             return ExitCode::FAILURE;
         }
-    }
+    };
     let centers = checkpoint
         .completed_iterations
         .iter()
@@ -457,7 +441,7 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
             .saturating_sub(record.started_unix_ms) as f64
             / 1_000.0,
     );
-    let invalid = checkpoint.invalid_iteration.is_some() || record.status == RunStatus::Invalid;
+    let invalid = has_invalid || record.status == RunStatus::Invalid;
     let diagnostics = match diagnose_spsa(
         &workflow.bound_tune,
         &workflow.schedule,
@@ -969,19 +953,46 @@ pub(crate) async fn run_spsa_command(
             return ExitCode::from(3);
         }
     };
-    let checkpoint = if resumed
-        && (directory.paths().checkpoint.exists() || directory.paths().previous_checkpoint.exists())
-    {
-        match directory.read_checkpoint::<spsa_driver::SpsaCheckpoint>() {
-            Ok(checkpoint) => checkpoint,
-            Err(error) => {
-                eprintln!("resume failed: {error}");
-                return ExitCode::from(3);
-            }
+    let journal = match open_journal(&directory, resumed).await {
+        Ok(journal) => journal,
+        Err(error) => {
+            eprintln!("resume failed: {error}");
+            return ExitCode::from(3);
         }
-    } else {
-        spsa_driver::SpsaCheckpoint::default()
     };
+    if journal
+        .records
+        .iter()
+        .any(|record| record.sample == INVALID_SAMPLE)
+    {
+        eprintln!("resume failed: an invalidated SPSA tune cannot be extended");
+        return ExitCode::from(2);
+    }
+    // Iteration boundaries and every centre are recomputed from the games,
+    // never read back from a stored copy of the state.
+    let checkpoint = match spsa_driver::replay_iterations(
+        verified_schedule.clone(),
+        settings,
+        bound_tune.initial_centers(),
+        &iterations_from_journal(&journal.records),
+    ) {
+        Ok(completed_iterations) => spsa_driver::SpsaCheckpoint {
+            completed_iterations,
+            invalid_iteration: None,
+        },
+        Err(error) => {
+            eprintln!("resume failed: the journal does not replay: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let writer = match RunWriter::start(Arc::clone(&directory), journal.resume).await {
+        Ok(writer) => writer,
+        Err(error) => {
+            eprintln!("SPSA output failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    recorder.write_through(writer.clone());
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "spsa",
         "stop_after_iteration": command.stop_after_iteration,
@@ -1006,8 +1017,8 @@ pub(crate) async fn run_spsa_command(
         return ExitCode::from(3);
     }
     let observer = match DurableSpsaOutput::new(
-        Arc::clone(&directory),
-        checkpoint.clone(),
+        writer.clone(),
+        &checkpoint.completed_iterations,
         recorder,
         settings,
     ) {
@@ -1066,8 +1077,8 @@ pub(crate) async fn run_spsa_command(
         tokio::select! {
             result = &mut driver_future => break result,
             _ = poll.tick() => {
-                let block = spsa_progress_block(&observer, &schedule, settings, &centres);
-                if schedule.due(block.done) {
+                if schedule.due(observer.committed_iterations()) {
+                    let block = spsa_progress_block(&observer, &schedule, settings, &centres);
                     observer.publish_progress(&block);
                     centres.remember(&observer.current_centers());
                 }
@@ -1083,6 +1094,8 @@ pub(crate) async fn run_spsa_command(
         Ok(report) => report,
         Err(error) => {
             eprintln!("SPSA failed: {error}");
+            drop(observer);
+            let _ = settle(&writer).await;
             return ExitCode::from(3);
         }
     };
@@ -1132,6 +1145,10 @@ pub(crate) async fn run_spsa_command(
         driver,
     };
     if let Err(error) = observer.finish(&report) {
+        eprintln!("SPSA output failed: {error}");
+        return ExitCode::from(3);
+    }
+    if let Err(error) = settle(&writer).await {
         eprintln!("SPSA output failed: {error}");
         return ExitCode::from(3);
     }
@@ -1407,16 +1424,7 @@ pub(crate) fn spsa_progress_block(
     settings: SpsaRunSettings,
     centres: &SpsaCentreTracker,
 ) -> ProgressBlock {
-    let (done, last, faults) = observer.checkpoint.lock().map_or_else(
-        |_| (0, None, MatchFaultCounts::default()),
-        |checkpoint| {
-            (
-                checkpoint.completed_iterations.len() as u64,
-                checkpoint.completed_iterations.last().cloned(),
-                spsa_faults(&checkpoint),
-            )
-        },
-    );
+    let (done, last, faults) = observer.snapshot();
     let total = u64::from(settings.iterations);
     let mut block = ProgressBlock::new(
         "spsa",
@@ -1490,11 +1498,35 @@ fn coefficient_summary(prepared: &SpsaIteration) -> String {
     )
 }
 
+/// What a tune writes while it runs: each finished iteration's games as
+/// journal lines and appended PGN games, and a checkpoint of the iteration it
+/// reached and the centres it stands on. It keeps only the last iteration,
+/// for the progress block, and the fault count.
 pub(crate) struct DurableSpsaOutput {
-    pub(crate) directory: Arc<RunDirectory>,
-    pub(crate) checkpoint: Mutex<spsa_driver::SpsaCheckpoint>,
+    pub(crate) writer: RunWriter,
     pub(crate) recorder: Mutex<Option<RunRecorder>>,
     pub(crate) settings: SpsaRunSettings,
+    state: Mutex<SpsaAggregate>,
+}
+
+struct SpsaAggregate {
+    completed: u64,
+    last: Option<spsa_driver::SpsaCommittedIteration>,
+    faults: MatchFaultCounts,
+    invalid: Option<u32>,
+    cadence: CheckpointCadence,
+}
+
+impl SpsaAggregate {
+    fn checkpoint(&self) -> Value {
+        json!({
+            "command": "spsa",
+            "completed_iterations": self.completed,
+            "centers": self.last.as_ref().map(|iteration| iteration.centers_after.clone()),
+            "invalid_iteration": self.invalid,
+            "faults": self.faults,
+        })
+    }
 }
 
 #[derive(Serialize)]
@@ -1508,49 +1540,66 @@ pub(crate) struct SpsaRunFileEngine {
 }
 
 impl DurableSpsaOutput {
+    /// Start from the iterations a resume rebuilt from the journal.
     pub(crate) fn new(
-        directory: Arc<RunDirectory>,
-        checkpoint: spsa_driver::SpsaCheckpoint,
+        writer: RunWriter,
+        completed: &[spsa_driver::SpsaCommittedIteration],
         mut recorder: RunRecorder,
         settings: SpsaRunSettings,
     ) -> Result<Self, String> {
         recorder
-            .update_sample(spsa_official_sample(&checkpoint, settings))
+            .update_sample(spsa_official_sample(completed.len() as u64, settings))
             .map_err(|error| error.to_string())?;
-        let output = Self {
-            directory,
-            checkpoint: Mutex::new(checkpoint),
+        Ok(Self {
+            writer,
             recorder: Mutex::new(Some(recorder)),
             settings,
-        };
-        output.rewrite_pgn()?;
-        Ok(output)
+            state: Mutex::new(SpsaAggregate {
+                completed: completed.len() as u64,
+                last: completed.last().cloned(),
+                faults: MatchFaultCounts::default(),
+                invalid: None,
+                cadence: CheckpointCadence::new(),
+            }),
+        })
     }
 
-    /// Committed iterations this run already holds.
+    /// Committed iterations this run holds.
     pub(crate) fn committed_iterations(&self) -> u64 {
-        self.checkpoint
-            .lock()
-            .map_or(0, |checkpoint| checkpoint.completed_iterations.len() as u64)
+        self.state.lock().map_or(0, |state| state.completed)
     }
 
     /// The centre vector the tune currently stands on.
     pub(crate) fn current_centers(&self) -> Vec<f64> {
-        self.checkpoint.lock().map_or_else(
-            |_| Vec::new(),
-            |checkpoint| {
-                checkpoint
-                    .completed_iterations
-                    .last()
+        self.state
+            .lock()
+            .ok()
+            .and_then(|state| {
+                state
+                    .last
+                    .as_ref()
                     .map(|iteration| iteration.centers_after.clone())
-                    .unwrap_or_default()
-            },
+            })
+            .unwrap_or_default()
+    }
+
+    /// Iterations, the last one, and the faults, for a progress block.
+    pub(crate) fn snapshot(
+        &self,
+    ) -> (
+        u64,
+        Option<spsa_driver::SpsaCommittedIteration>,
+        MatchFaultCounts,
+    ) {
+        self.state.lock().map_or_else(
+            |_| (0, None, MatchFaultCounts::default()),
+            |state| (state.completed, state.last.clone(), state.faults),
         )
     }
 
     /// Publish a block through the run recorder this observer owns.
     pub(crate) fn publish_progress(&self, block: &ProgressBlock) {
-        show_progress(block, &self.directory);
+        show_progress(block, &self.writer);
         let Ok(mut recorder) = self.recorder.lock() else {
             eprintln!("run record failed: SPSA run-record lock poisoned");
             return;
@@ -1562,16 +1611,34 @@ impl DurableSpsaOutput {
         }
     }
 
-    pub(crate) fn persist_checkpoint(&self) -> Result<(), String> {
-        let checkpoint = self
-            .checkpoint
-            .lock()
-            .map_err(|_| "SPSA checkpoint lock poisoned")?;
-        self.directory
-            .write_checkpoint(&*checkpoint)
-            .map_err(|error| error.to_string())?;
-        let sample = spsa_official_sample(&checkpoint, self.settings);
-        drop(checkpoint);
+    fn commit_games(
+        &self,
+        iteration: u32,
+        pairs: &[CompletePair<match_runner::MatchGame>],
+        class: &'static str,
+    ) -> Result<MatchFaultCounts, String> {
+        let mut faults = MatchFaultCounts::default();
+        let number = iteration.to_string();
+        for pair in pairs {
+            for game in [&pair.first, &pair.second] {
+                let sample = sample_class(game.scorable, class);
+                let record = game.journal_record(sample, Some(iteration));
+                record_fault(&mut faults, game.white, game.fault.as_ref());
+                log_fault(&self.writer, &record);
+                let moves = with_header_tags(
+                    game.pgn.trim_end(),
+                    &[
+                        ("ColosseumSample", sample),
+                        ("ColosseumSpsaIteration", &number),
+                    ],
+                );
+                self.writer.game(record, moves)?;
+            }
+        }
+        Ok(faults)
+    }
+
+    fn update_sample(&self, completed: u64) -> Result<(), String> {
         let mut recorder = self
             .recorder
             .lock()
@@ -1579,76 +1646,18 @@ impl DurableSpsaOutput {
         recorder
             .as_mut()
             .ok_or("SPSA run recorder is already finished")?
-            .update_sample(sample)
-            .map_err(|error| error.to_string())
-    }
-
-    pub(crate) fn rewrite_pgn(&self) -> Result<(), String> {
-        let checkpoint = self
-            .checkpoint
-            .lock()
-            .map_err(|_| "SPSA PGN lock poisoned")?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(self.directory.paths().root.join("games.pgn"))
-            .map_err(|error| error.to_string())?;
-        for iteration in &checkpoint.completed_iterations {
-            for pair in &iteration.pairs {
-                for game in [&pair.first, &pair.second] {
-                    writeln!(
-                        file,
-                        "{tagged}\n",
-                        tagged = with_header_tags(
-                            game.pgn.trim_end(),
-                            &[
-                                (
-                                    "ColosseumSample",
-                                    sample_class(game.scorable, OFFICIAL_SAMPLE),
-                                ),
-                                ("ColosseumSpsaIteration", &iteration.iteration.to_string()),
-                            ],
-                        )
-                    )
-                    .map_err(|error| error.to_string())?;
-                }
-            }
-        }
-        if let Some(iteration) = &checkpoint.invalid_iteration {
-            for pair in &iteration.pairs {
-                for game in [&pair.first, &pair.second] {
-                    writeln!(
-                        file,
-                        "{tagged}\n",
-                        tagged = with_header_tags(
-                            game.pgn.trim_end(),
-                            &[
-                                ("ColosseumSample", sample_class(game.scorable, "invalid")),
-                                ("ColosseumSpsaIteration", &iteration.iteration.to_string()),
-                            ],
-                        )
-                    )
-                    .map_err(|error| error.to_string())?;
-                }
-            }
-        }
-        file.sync_all().map_err(|error| error.to_string())
-    }
-
-    pub(crate) fn append_event(&self, event: Value) -> Result<(), String> {
-        let mut line = serde_json::to_vec(&event).map_err(|error| error.to_string())?;
-        line.push(b'\n');
-        self.directory
-            .append_log(&line)
+            .update_sample(spsa_official_sample(completed, self.settings))
             .map_err(|error| error.to_string())
     }
 
     pub(crate) fn finish(&self, report: &SpsaReport) -> Result<(), String> {
+        let state = self.state.lock().map_err(|_| "SPSA state lock poisoned")?;
+        self.writer.checkpoint(state.checkpoint())?;
+        drop(state);
+        let root = self.writer.root();
         if let Some(result) = &report.tuned_result {
             let json = serde_json::to_vec_pretty(result).map_err(|error| error.to_string())?;
-            fs::write(self.directory.paths().root.join("tuned-options.json"), json)
-                .map_err(|error| error.to_string())?;
+            self.writer.replace(root.join("tuned-options.json"), json)?;
             let mut setoptions = String::new();
             let mut options = BTreeMap::new();
             for parameter in &result.parameters {
@@ -1658,30 +1667,28 @@ impl DurableSpsaOutput {
                 ));
                 options.insert(parameter.name.clone(), parameter.tuned);
             }
-            fs::write(
-                self.directory.paths().root.join("tuned-options.txt"),
-                setoptions,
-            )
-            .map_err(|error| error.to_string())?;
+            self.writer
+                .replace(root.join("tuned-options.txt"), setoptions.into_bytes())?;
             let fragment = toml::to_string_pretty(&SpsaRunFileFragment {
                 engine: SpsaRunFileEngine { options },
             })
             .map_err(|error| error.to_string())?;
-            fs::write(
-                self.directory.paths().root.join("tuned-options.toml"),
-                fragment,
-            )
-            .map_err(|error| error.to_string())?;
+            self.writer
+                .replace(root.join("tuned-options.toml"), fragment.into_bytes())?;
         }
-        let bytes = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
-        fs::write(self.directory.paths().root.join("result.json"), bytes)
-            .map_err(|error| error.to_string())?;
-        self.append_event(json!({
-            "event": "spsa-finished",
-            "status": report.driver.status,
-            "completed_iterations": report.driver.completed_iterations.len(),
-            "invalid_iteration": report.driver.invalid_iteration.as_ref().map(|value| value.iteration),
-        }))?;
+        self.writer.replace(
+            root.join("result.json"),
+            serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?,
+        )?;
+        log_event(
+            &self.writer,
+            &json!({
+                "event": "spsa-finished",
+                "status": report.driver.status,
+                "completed_iterations": report.driver.completed_iterations.len(),
+                "invalid_iteration": report.driver.invalid_iteration.as_ref().map(|value| value.iteration),
+            }),
+        );
         let status = match report.driver.status {
             spsa_driver::SpsaStatus::Completed => RunStatus::Completed,
             spsa_driver::SpsaStatus::Cancelled => RunStatus::Cancelled,
@@ -1702,41 +1709,49 @@ impl spsa_driver::SpsaObserver for DurableSpsaOutput {
         &self,
         iteration: &spsa_driver::SpsaCommittedIteration,
     ) -> Result<(), String> {
-        self.checkpoint
-            .lock()
-            .map_err(|_| "SPSA checkpoint lock poisoned")?
-            .completed_iterations
-            .push(iteration.clone());
-        self.persist_checkpoint()?;
-        self.rewrite_pgn()?;
-        self.append_event(json!({
-            "event": "spsa-iteration-committed",
-            "iteration": iteration,
-        }))
+        let faults = self.commit_games(iteration.iteration, &iteration.pairs, OFFICIAL_SAMPLE)?;
+        let mut state = self.state.lock().map_err(|_| "SPSA state lock poisoned")?;
+        state.completed += 1;
+        state.faults.engine_a += faults.engine_a;
+        state.faults.engine_b += faults.engine_b;
+        state.faults.time_losses_a += faults.time_losses_a;
+        state.faults.time_losses_b += faults.time_losses_b;
+        // The last iteration is kept without its moves: the block needs its
+        // score and coefficients, not its games.
+        let mut last = iteration.clone();
+        for pair in &mut last.pairs {
+            pair.first.strip_moves();
+            pair.second.strip_moves();
+        }
+        state.last = Some(last);
+        let completed = state.completed;
+        if state.cadence.record(1) {
+            self.writer.checkpoint(state.checkpoint())?;
+        }
+        drop(state);
+        self.update_sample(completed)
     }
 
     fn iteration_invalid(
         &self,
         iteration: &spsa_driver::SpsaInvalidIteration,
     ) -> Result<(), String> {
-        self.checkpoint
-            .lock()
-            .map_err(|_| "SPSA checkpoint lock poisoned")?
-            .invalid_iteration = Some(iteration.clone());
-        self.persist_checkpoint()?;
-        self.rewrite_pgn()?;
-        self.append_event(json!({
-            "event": "spsa-iteration-invalid",
-            "iteration": iteration,
-        }))
+        let faults = self.commit_games(iteration.iteration, &iteration.pairs, INVALID_SAMPLE)?;
+        let mut state = self.state.lock().map_err(|_| "SPSA state lock poisoned")?;
+        state.faults.engine_a += faults.engine_a;
+        state.faults.engine_b += faults.engine_b;
+        state.faults.time_losses_a += faults.time_losses_a;
+        state.faults.time_losses_b += faults.time_losses_b;
+        state.invalid = Some(iteration.iteration);
+        // An invalidated iteration ends the tune: record it at once.
+        self.writer.checkpoint(state.checkpoint())?;
+        let completed = state.completed;
+        drop(state);
+        self.update_sample(completed)
     }
 }
 
-pub(crate) fn spsa_official_sample(
-    checkpoint: &spsa_driver::SpsaCheckpoint,
-    settings: SpsaRunSettings,
-) -> OfficialSample {
-    let iterations = checkpoint.completed_iterations.len() as u64;
+pub(crate) fn spsa_official_sample(iterations: u64, settings: SpsaRunSettings) -> OfficialSample {
     let pairs = iterations * u64::from(settings.pairs_per_iteration());
     OfficialSample {
         committed_units: iterations,

@@ -540,12 +540,15 @@ fn complete_mini_match_is_one_durable_gradient_commit() {
             .unwrap()
             .contains("[engine.options]")
     );
+    // The checkpoint is aggregates: how far the tune got and where it stands.
     let checkpoint = checkpoint_payload(&run);
-    assert_eq!(
-        checkpoint["completed_iterations"].as_array().unwrap().len(),
-        1
-    );
-    assert!(checkpoint.get("invalid_iteration").is_none());
+    assert_eq!(checkpoint["completed_iterations"], 1);
+    assert!(checkpoint["invalid_iteration"].is_null());
+    assert_eq!(checkpoint["centers"].as_array().unwrap().len(), 1);
+    // The games are in the journal, one line each, with their iteration.
+    let journal = journal_lines(&run);
+    assert_eq!(journal.len(), 2);
+    assert!(journal.iter().all(|line| line["game"]["iteration"] == 0));
     let record: Value =
         serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
     assert_eq!(record["status"], "completed");
@@ -789,7 +792,8 @@ fn killed_tune_resumes_the_exact_rng_iteration_and_durable_prefix() {
         live_status["report"]["diagnostics"]["knobs"][0]["recent_stability"]["state"],
         "insufficient-history"
     );
-    let before = checkpoint_payload(&run)["completed_iterations"][0].clone();
+    // What was durable before the kill: the first iteration's journal lines.
+    let durable_prefix = journal_prefix(&run, 2);
     let active_engines = wait_for_active_engines(&mut child, &pid_file);
     child.kill().unwrap();
     child.wait().unwrap();
@@ -824,12 +828,53 @@ fn killed_tune_resumes_the_exact_rng_iteration_and_durable_prefix() {
         .as_array()
         .unwrap();
     assert_eq!(completed.len(), 3);
-    assert_eq!(completed[0], before);
     assert_eq!(completed[0]["iteration"], 0);
     assert_eq!(completed[1]["iteration"], 1);
     assert_eq!(completed[2]["iteration"], 2);
-    let log = std::fs::read_to_string(run.join("run.log")).unwrap();
-    assert_eq!(log.matches("spsa-iteration-committed").count(), 3);
+    // The resumed journal begins with exactly the bytes that were durable: the
+    // resume appended to them and changed none of them.
+    let after = std::fs::read(run.join("games.jsonl")).unwrap();
+    assert!(after.starts_with(&durable_prefix));
+    // The iteration the resume replayed is the one those lines describe.
+    let journal = journal_lines(&run);
+    assert_eq!(journal.len(), 6);
+    for (index, pair) in completed[0]["pairs"].as_array().unwrap().iter().enumerate() {
+        for (offset, game) in [&pair["first"], &pair["second"]].into_iter().enumerate() {
+            let line = &journal[index * 2 + offset]["game"];
+            assert_eq!(line["number"], game["number"]);
+            assert_eq!(line["result"], game["result"]);
+            assert_eq!(line["white"], game["white"]);
+        }
+    }
+    assert_eq!(
+        journal
+            .iter()
+            .map(|line| line["game"]["iteration"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        [0, 0, 1, 1, 2, 2]
+    );
+}
+
+/// Every complete journal line, parsed.
+fn journal_lines(run: &std::path::Path) -> Vec<Value> {
+    std::fs::read_to_string(run.join("games.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+/// The bytes of the journal's first `lines` complete lines.
+fn journal_prefix(run: &std::path::Path, lines: usize) -> Vec<u8> {
+    let bytes = std::fs::read(run.join("games.jsonl")).unwrap();
+    let end = bytes
+        .iter()
+        .enumerate()
+        .filter(|(_, byte)| **byte == b'\n')
+        .nth(lines - 1)
+        .map(|(index, _)| index + 1)
+        .expect("the journal holds the lines asked for");
+    bytes[..end].to_vec()
 }
 
 fn long_tune(
@@ -933,10 +978,12 @@ fn wait_for_first_commit(child: &mut Child, run: &std::path::Path) {
                 "SPSA fixture exited before it could be interrupted\nstdout: {stdout}\nstderr: {stderr}"
             );
         }
-        let has_checkpoint = run.join("checkpoint.json").is_file();
-        let has_log_commit = std::fs::read_to_string(run.join("run.log"))
-            .is_ok_and(|log| log.contains("spsa-iteration-committed"));
-        if has_checkpoint && has_log_commit {
+        // An iteration is committed once its games are in the journal: two
+        // complete lines for the two games of this fixture's mini-match. The
+        // checkpoint that summarises them may not exist yet.
+        let committed = std::fs::read_to_string(run.join("games.jsonl"))
+            .is_ok_and(|journal| journal.matches('\n').count() >= 2);
+        if committed {
             return;
         }
         std::thread::sleep(Duration::from_millis(25));

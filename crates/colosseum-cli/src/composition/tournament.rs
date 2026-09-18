@@ -171,7 +171,8 @@ pub(crate) struct TournamentRunCommand {
     /// repeat for every member of an established field.
     #[arg(long = "fixed", value_name = "INDEX:RATING")]
     pub(crate) fixed_ratings: Vec<String>,
-    /// Invalidate only after more engine faults than this; omitted is non-strict.
+    /// Invalidate after more engine faults than this; a time loss is one.
+    /// Omitted: 1% of the scheduled games, at least 5.
     #[arg(long)]
     pub(crate) max_engine_faults: Option<u32>,
     #[arg(long = "dir")]
@@ -528,6 +529,9 @@ pub(crate) async fn run_tournament_command(
             return ExitCode::from(2);
         }
     };
+    let max_engine_faults = command
+        .max_engine_faults
+        .unwrap_or_else(|| forfeit_allowance(plan.schedule.len() as u64));
     let current_directory = match std::env::current_dir() {
         Ok(directory) => directory,
         Err(error) => {
@@ -566,7 +570,7 @@ pub(crate) async fn run_tournament_command(
             "adjudication": adjudication,
             "ponder": command.ponder,
             "execution": &execution,
-            "max_engine_faults": command.max_engine_faults,
+            "max_engine_faults": max_engine_faults,
             "master_seed": master_seed,
             "master_seed_generated": master_seed_generated,
             "openings": openings.report(),
@@ -613,26 +617,39 @@ pub(crate) async fn run_tournament_command(
         eprintln!("archived previous run at {}", archived.display());
     }
     let directory = Arc::new(opened.directory);
-    let checkpoint = if opened.resumed {
-        match directory.read_checkpoint::<tournament_driver::TournamentCheckpoint>() {
-            Ok(checkpoint) => checkpoint,
-            Err(error) => {
-                eprintln!("resume failed: {error}");
+    let journal = match open_journal(&directory, opened.resumed).await {
+        Ok(journal) => journal,
+        Err(error) => {
+            eprintln!("resume failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let mut completed_games = Vec::with_capacity(journal.records.len());
+    for record in &journal.records {
+        match tournament_driver::TournamentGame::from_journal(record) {
+            Some(game) => completed_games.push(game),
+            None => {
+                eprintln!(
+                    "resume failed: journal game {} is not a tournament game",
+                    record.number
+                );
                 return ExitCode::from(3);
             }
         }
-    } else {
-        tournament_driver::TournamentCheckpoint::default()
-    };
-    let observer = match DurableTournamentOutput::new(Arc::clone(&directory), checkpoint.clone()) {
-        Ok(observer) => Arc::new(observer),
+    }
+    let writer = match RunWriter::start(Arc::clone(&directory), journal.resume).await {
+        Ok(writer) => writer,
         Err(error) => {
             eprintln!("tournament output failed: {error}");
             return ExitCode::from(3);
         }
     };
+    let observer = Arc::new(DurableTournamentOutput::new(
+        writer.clone(),
+        &completed_games,
+    ));
     let progress_observer = Arc::clone(&observer);
-    let resumed_games = checkpoint.games.len() as u64;
+    let resumed_games = completed_games.len() as u64;
     colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
     let mut recorder = match if opened.resumed {
         RunRecorder::resume(&directory)
@@ -645,6 +662,7 @@ pub(crate) async fn run_tournament_command(
             return ExitCode::from(3);
         }
     };
+    recorder.write_through(writer.clone());
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "tournament",
         "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
@@ -654,8 +672,8 @@ pub(crate) async fn run_tournament_command(
         "fixed_ratings": &fixed_ratings,
         "ponder": command.ponder,
         "fault_policy": {
-            "mode": if command.max_engine_faults.is_some() { "strict-limit" } else { "exploratory-non-strict" },
-            "max_engine_faults": command.max_engine_faults,
+            "mode": if command.max_engine_faults.is_some() { "explicit-limit" } else { "default-allowance" },
+            "max_engine_faults": max_engine_faults,
         },
         "artifacts": ["checkpoint.json", "games.pgn", "standings.csv", "crosstable.csv", "result.json"],
     })) {
@@ -680,8 +698,8 @@ pub(crate) async fn run_tournament_command(
         master_seed,
         master_seed_generated,
         openings,
-        max_engine_faults: command.max_engine_faults,
-        completed_games: checkpoint.games,
+        max_engine_faults,
+        completed_games,
         observer: Some(Arc::clone(&observer) as Arc<dyn tournament_driver::TournamentObserver>),
     };
     let run_future = tournament_driver::run_tournament(request);
@@ -697,14 +715,15 @@ pub(crate) async fn run_tournament_command(
         tokio::select! {
             result = &mut run_future => break result,
             _ = poll.tick() => {
-                let block = tournament_progress_block(
-                    &progress_observer,
-                    &schedule,
-                    &rating_inputs,
-                    scheduled_games,
-                );
-                if schedule.due(block.done) {
-                    publish_progress(&block, &directory, &mut recorder);
+                if schedule.due(progress_observer.units()) {
+                    let block = tournament_progress_block(
+                        &progress_observer,
+                        &schedule,
+                        &rating_inputs,
+                        scheduled_games,
+                        max_engine_faults,
+                    );
+                    publish_progress(&block, &writer, &mut recorder);
                 }
             }
         }
@@ -714,14 +733,15 @@ pub(crate) async fn run_tournament_command(
         &schedule,
         &rating_inputs,
         scheduled_games,
+        max_engine_faults,
     );
     if schedule.needs_final(final_block.done) {
         schedule.mark(final_block.done);
-        publish_progress(&final_block, &directory, &mut recorder);
+        publish_progress(&final_block, &writer, &mut recorder);
     }
     match outcome {
         Ok(report) => {
-            if let Err(error) = write_tournament_artifacts(&directory, &report) {
+            if let Err(error) = observer.finish(&report) {
                 eprintln!("tournament output failed: {error}");
                 return ExitCode::from(3);
             }
@@ -749,6 +769,10 @@ pub(crate) async fn run_tournament_command(
                 eprintln!("run record failed: {error}");
                 return ExitCode::from(3);
             }
+            if let Err(error) = settle(&writer).await {
+                eprintln!("tournament output failed: {error}");
+                return ExitCode::from(3);
+            }
             if machine {
                 print_json(&MachineOutput::Tournament {
                     run_directory: directory.paths().root.clone(),
@@ -762,6 +786,8 @@ pub(crate) async fn run_tournament_command(
         }
         Err(error) => {
             eprintln!("tournament failed: {error}");
+            drop(recorder);
+            let _ = settle(&writer).await;
             ExitCode::from(3)
         }
     }
@@ -820,27 +846,6 @@ pub(crate) fn tournament_configuration_error(error: &str) -> ExitCode {
     ExitCode::from(2)
 }
 
-pub(crate) fn write_tournament_artifacts(
-    directory: &RunDirectory,
-    report: &tournament_driver::TournamentReport,
-) -> Result<(), String> {
-    fs::write(
-        directory.paths().root.join("standings.csv"),
-        &report.results.standings_csv,
-    )
-    .map_err(|error| error.to_string())?;
-    fs::write(
-        directory.paths().root.join("crosstable.csv"),
-        &report.results.crosstable_csv,
-    )
-    .map_err(|error| error.to_string())?;
-    fs::write(
-        directory.paths().root.join("result.json"),
-        serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())
-}
-
 pub(crate) fn print_tournament(report: &tournament_driver::TournamentReport) {
     println!(
         "Tournament {:?}: {}/{} games scored ({} attempted)",
@@ -859,6 +864,16 @@ pub(crate) fn print_tournament(report: &tournament_driver::TournamentReport) {
             row.rank, row.name, row.rating, row.points, row.games, row.wins, row.draws, row.losses
         );
     }
+    println!(
+        "faults: engine {}; {} allowed; infrastructure {}",
+        report.engine_faults, report.max_engine_faults, report.infrastructure_faults
+    );
+}
+
+/// Whether a game ended on a fault the engine is answerable for, a time loss
+/// included.
+fn is_engine_fault(game: &tournament_driver::TournamentGame) -> bool {
+    matches!(game.fault, Some(colosseum_engine::GameFault::Engine { .. }))
 }
 
 /// The inputs the tournament's own rating step needs, kept so a progress
@@ -880,13 +895,10 @@ pub(crate) fn tournament_progress_block(
     schedule: &ProgressSchedule,
     inputs: &TournamentRatingInputs,
     scheduled_games: u64,
+    max_engine_faults: u32,
 ) -> ProgressBlock {
-    let games = observer
-        .checkpoint
-        .lock()
-        .map(|checkpoint| checkpoint.games.clone())
-        .unwrap_or_default();
-    let done = games.len() as u64;
+    let evidence = observer.evidence();
+    let done = evidence.len() as u64;
     let mut block = ProgressBlock::new(
         "tournament",
         ProgressUnit::Games,
@@ -894,10 +906,6 @@ pub(crate) fn tournament_progress_block(
         Some(scheduled_games),
         schedule.elapsed(),
     );
-    let evidence = games
-        .iter()
-        .map(tournament_driver::TournamentGame::evidence)
-        .collect::<Vec<_>>();
     match RateTournament::execute_with_fixed_field(
         &inputs.plan,
         &evidence,
@@ -930,6 +938,13 @@ pub(crate) fn tournament_progress_block(
             block.field("standings", format!("unavailable: {error}"));
         }
     }
+    block.field(
+        "faults",
+        format!(
+            "engine {}; {max_engine_faults} allowed",
+            observer.engine_faults()
+        ),
+    );
     if let Some(rate) =
         progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
     {
@@ -949,86 +964,141 @@ pub(crate) fn tournament_progress_block(
     block
 }
 
+/// What a tournament writes while it runs: each game as one journal line and
+/// one appended PGN game, and a checkpoint of how many games are in. The
+/// output keeps only each game's scoring evidence, which is what the live
+/// standings header is recomputed from.
 pub(crate) struct DurableTournamentOutput {
-    pub(crate) directory: Arc<RunDirectory>,
-    pub(crate) checkpoint: Mutex<tournament_driver::TournamentCheckpoint>,
+    pub(crate) writer: RunWriter,
+    state: Mutex<TournamentAggregate>,
+}
+
+struct TournamentAggregate {
+    evidence: Vec<TournamentCompletedGame>,
+    numbers: BTreeSet<u32>,
+    scored: u64,
+    faults: u64,
+    engine_faults: u64,
+    cadence: CheckpointCadence,
+}
+
+impl TournamentAggregate {
+    fn checkpoint(&self) -> Value {
+        json!({
+            "command": "tournament",
+            "games_attempted": self.evidence.len(),
+            "games_scored": self.scored,
+            "faulted_games": self.faults,
+            "engine_faults": self.engine_faults,
+        })
+    }
 }
 
 impl DurableTournamentOutput {
-    pub(crate) fn new(
-        directory: Arc<RunDirectory>,
-        mut checkpoint: tournament_driver::TournamentCheckpoint,
-    ) -> Result<Self, String> {
-        checkpoint.games.sort_by_key(|game| game.number);
-        let output = Self {
-            directory,
-            checkpoint: Mutex::new(checkpoint),
-        };
-        output.persist()?;
-        Ok(output)
+    /// Start from the games a resume found in the journal.
+    pub(crate) fn new(writer: RunWriter, games: &[tournament_driver::TournamentGame]) -> Self {
+        Self {
+            writer,
+            state: Mutex::new(TournamentAggregate {
+                evidence: games
+                    .iter()
+                    .map(tournament_driver::TournamentGame::evidence)
+                    .collect(),
+                numbers: games.iter().map(|game| game.number).collect(),
+                scored: games.iter().filter(|game| game.scorable).count() as u64,
+                faults: games.iter().filter(|game| game.fault.is_some()).count() as u64,
+                engine_faults: games.iter().filter(|game| is_engine_fault(game)).count() as u64,
+                cadence: CheckpointCadence::new(),
+            }),
+        }
     }
 
-    pub(crate) fn persist(&self) -> Result<(), String> {
-        let checkpoint = self
-            .checkpoint
+    /// Games committed, cheaply, for deciding whether a block is due.
+    pub(crate) fn units(&self) -> u64 {
+        self.state
             .lock()
-            .map_err(|_| "tournament checkpoint lock poisoned")?;
-        self.directory
-            .write_checkpoint(&*checkpoint)
-            .map_err(|error| error.to_string())?;
-        let mut pgn = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(self.directory.paths().root.join("games.pgn"))
-            .map_err(|error| error.to_string())?;
-        for game in &checkpoint.games {
-            // A scorable game needs no class: an untagged game is part of the
-            // sample, so the export of a run without faults is unchanged.
-            let rendered = if game.scorable {
-                game.pgn.clone()
-            } else {
-                format!(
-                    "{}\n",
-                    with_header_tags(
-                        game.pgn.trim_end(),
-                        &[("ColosseumSample", UNSCORABLE_SAMPLE)],
-                    )
-                )
-            };
-            pgn.write_all(rendered.as_bytes())
-                .and_then(|()| pgn.write_all(b"\n"))
-                .map_err(|error| error.to_string())?;
-        }
-        pgn.sync_all().map_err(|error| error.to_string())
+            .map_or(0, |state| state.evidence.len() as u64)
+    }
+
+    /// Engine faults committed so far, for the progress block.
+    pub(crate) fn engine_faults(&self) -> u64 {
+        self.state.lock().map_or(0, |state| state.engine_faults)
+    }
+
+    /// Every committed game's scoring evidence, for the standings header.
+    pub(crate) fn evidence(&self) -> Vec<TournamentCompletedGame> {
+        self.state
+            .lock()
+            .map(|state| state.evidence.clone())
+            .unwrap_or_default()
+    }
+
+    /// The final checkpoint and the artifacts, through the writer.
+    pub(crate) fn finish(
+        &self,
+        report: &tournament_driver::TournamentReport,
+    ) -> Result<(), String> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "tournament state lock poisoned")?;
+        self.writer.checkpoint(state.checkpoint())?;
+        drop(state);
+        let root = self.writer.root();
+        self.writer.replace(
+            root.join("standings.csv"),
+            report.results.standings_csv.clone().into_bytes(),
+        )?;
+        self.writer.replace(
+            root.join("crosstable.csv"),
+            report.results.crosstable_csv.clone().into_bytes(),
+        )?;
+        self.writer.replace(
+            root.join("result.json"),
+            serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?,
+        )?;
+        log_event(
+            &self.writer,
+            &json!({
+                "event": "tournament-finished",
+                "status": report.status,
+                "attempted": report.results.games_attempted,
+                "scored": report.results.games_scored,
+            }),
+        );
+        Ok(())
     }
 }
 
 impl tournament_driver::TournamentObserver for DurableTournamentOutput {
     fn game_completed(&self, game: &tournament_driver::TournamentGame) -> Result<(), String> {
-        {
-            let mut checkpoint = self
-                .checkpoint
-                .lock()
-                .map_err(|_| "tournament checkpoint lock poisoned")?;
-            if checkpoint
-                .games
-                .iter()
-                .any(|saved| saved.number == game.number)
-            {
-                return Err(format!("duplicate tournament game {}", game.number));
-            }
-            checkpoint.games.push(game.clone());
-            checkpoint.games.sort_by_key(|saved| saved.number);
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "tournament state lock poisoned")?;
+        if !state.numbers.insert(game.number) {
+            return Err(format!("duplicate tournament game {}", game.number));
         }
-        self.persist()?;
-        let event = serde_json::to_vec(&json!({
-            "event": "tournament-game-completed",
-            "game": game,
-        }))
-        .map_err(|error| error.to_string())?;
-        self.directory
-            .append_log(&[event, b"\n".to_vec()].concat())
-            .map_err(|error| error.to_string())
+        let record = game.journal_record(sample_class(game.scorable, OFFICIAL_SAMPLE));
+        // A scorable game needs no class: an untagged game is part of the
+        // sample, so the export of a run without faults is unchanged.
+        let moves = if game.scorable {
+            game.pgn.clone()
+        } else {
+            with_header_tags(
+                game.pgn.trim_end(),
+                &[("ColosseumSample", UNSCORABLE_SAMPLE)],
+            )
+        };
+        log_fault(&self.writer, &record);
+        self.writer.game(record, moves)?;
+        state.evidence.push(game.evidence());
+        state.scored += u64::from(game.scorable);
+        state.faults += u64::from(game.fault.is_some());
+        state.engine_faults += u64::from(is_engine_fault(game));
+        if state.cadence.record(1) {
+            self.writer.checkpoint(state.checkpoint())?;
+        }
+        Ok(())
     }
 }

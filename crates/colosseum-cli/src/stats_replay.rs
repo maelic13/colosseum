@@ -24,6 +24,12 @@ pub const UNSCORABLE_SAMPLE: &str = "unscorable";
 /// The `ColosseumSample` class of a game that counts.
 pub const OFFICIAL_SAMPLE: &str = "official";
 
+/// The `ColosseumSample` class of a pair an SPRT finished after its boundary.
+pub const POST_TERMINAL_SAMPLE: &str = "post-terminal";
+
+/// The `ColosseumSample` class of a game of an invalidated SPSA iteration.
+pub const INVALID_SAMPLE: &str = "invalid";
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ReplayAttempt {
     pub authority: &'static str,
@@ -143,12 +149,14 @@ pub fn replay(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, S
 }
 
 fn replay_directory(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, String> {
+    // The final result, then the journal, which is the structured record of a
+    // run still going or stopped. A checkpoint holds aggregates, not games, so
+    // it is not a source of statistics.
     let candidates = [
         ("structured-run-store", path.join("result.json")),
-        ("structured-run-store", path.join("checkpoint.json")),
         (
             "structured-run-store",
-            path.join("checkpoint.previous.json"),
+            path.join(crate::journal::JOURNAL_FILE),
         ),
         ("pgn-export", path.join("games.pgn")),
         ("forensic-log", path.join("run.log")),
@@ -213,9 +221,9 @@ fn empty_detail(excluded: &ExcludedGames) -> String {
 
 /// A run directory is one evidence set.
 ///
-/// Statistics keep checkpoint authority, but the annotations live in the
-/// directory's own `games.pgn`, so reading the checkpoint is no reason to
-/// report telemetry as unavailable when the PGN beside it carries the moves.
+/// Statistics keep structured authority, but the annotations live in the
+/// directory's own `games.pgn`, so reading the journal is no reason to report
+/// telemetry as unavailable when the PGN beside it carries the moves.
 fn directory_telemetry(
     directory: &Path,
     from_source: SearchTelemetryReport,
@@ -238,6 +246,7 @@ fn directory_telemetry(
 fn replay_file(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, String> {
     let authority = match path.extension().and_then(|value| value.to_str()) {
         Some(value) if value.eq_ignore_ascii_case("json") => "structured-run-store",
+        Some(value) if value.eq_ignore_ascii_case("jsonl") => "structured-run-store",
         Some(value) if value.eq_ignore_ascii_case("pgn") => "pgn-export",
         Some(value) if value.eq_ignore_ascii_case("log") => "forensic-log",
         _ => "console",
@@ -277,6 +286,20 @@ fn read_source(
 ) -> Result<SourceGames, String> {
     let text = fs::read_to_string(path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let journal = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("jsonl"));
+    if journal && authority == "structured-run-store" {
+        let (games, excluded) = journal_games(text.as_bytes());
+        return Ok(SourceGames {
+            games,
+            perspective: "engine A".into(),
+            paired_capable: true,
+            excluded,
+            telemetry: unavailable("the journal holds no PGN move annotations"),
+        });
+    }
     match authority {
         "structured-run-store" => structured_games(&text).map(|(games, excluded)| SourceGames {
             games,
@@ -456,17 +479,42 @@ fn structured_slot(value: &Value) -> Option<PairSlot> {
             .and_then(Value::as_u64)
             .and_then(|value| u32::try_from(value).ok())
     };
-    if let (Some(pair_number), Some(pair_game)) = (field("encounter"), field("game_in_encounter")) {
-        return Some(PairSlot {
-            pair_number,
-            pair_game,
-        });
+    // A journal record names its pair directly; a tournament result names its
+    // encounter; a match result names only the game number.
+    for (pair, game) in [
+        ("pair_number", "pair_game"),
+        ("encounter", "game_in_encounter"),
+    ] {
+        if let (Some(pair_number), Some(pair_game)) = (field(pair), field(game)) {
+            return Some(PairSlot {
+                pair_number,
+                pair_game,
+            });
+        }
     }
     let number = field("number").filter(|number| *number > 0)?;
     Some(PairSlot {
         pair_number: number.div_ceil(2),
         pair_game: if number % 2 == 1 { 1 } else { 2 },
     })
+}
+
+/// The games of a run's journal, `games.jsonl`: every verified line, with the
+/// games the run did not count set aside by the class it wrote them with.
+fn journal_games(bytes: &[u8]) -> (Vec<RawGame>, ExcludedGames) {
+    let mut games = Vec::new();
+    let mut excluded = ExcludedGames::default();
+    for record in crate::journal::read_journal_bytes(bytes) {
+        if !record.sample.eq_ignore_ascii_case(OFFICIAL_SAMPLE) {
+            excluded.record(&record.sample);
+            continue;
+        }
+        let value = serde_json::to_value(&record).expect("a journal record is serializable");
+        if let Some(game) = parse_structured_game(&value) {
+            games.push(game);
+        }
+    }
+    (games, excluded)
 }
 
 fn log_games(text: &str) -> Vec<RawGame> {
@@ -482,7 +530,7 @@ fn log_games(text: &str) -> Vec<RawGame> {
 /// A Colosseum export names the pair each game belongs to and which colour
 /// assignment it is, so the pentanomial unit survives the round trip. Without
 /// a subject the outcome is taken from the pair's first engine — the one that
-/// had White in assignment 1 — which is the perspective the checkpoint uses,
+/// had White in assignment 1 — which is the perspective the journal uses,
 /// so the two sources agree. A PGN without the tags yields no identity and the
 /// caller falls back to labelled unpaired statistics.
 fn pgn_games(text: &str, subject: Option<&str>) -> (Vec<RawGame>, bool, ExcludedGames) {
@@ -495,7 +543,7 @@ fn pgn_games(text: &str, subject: Option<&str>) -> (Vec<RawGame>, bool, Excluded
             // a game abandoned on an infrastructure fault, the pairs an SPRT
             // finished after its boundary, and the games of an invalidated
             // SPSA iteration. The official sample excludes them exactly as the
-            // checkpoint does.
+            // journal does.
             if let Some(class) = pgn_tag(game, "ColosseumSample")
                 .filter(|class| !class.eq_ignore_ascii_case(OFFICIAL_SAMPLE))
             {

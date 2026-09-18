@@ -102,13 +102,15 @@ supplied ratings are retained in the result and the run record as run inputs.
 own initial `--rating` instead of a separately supplied value. Naming the same
 participant through both is refused rather than resolved silently.
 
-Every run directory contains checksum-protected current/previous checkpoints,
-append-only `run.log`, `games.pgn`, `standings.csv`, `crosstable.csv`,
-`result.json`, the resolved configuration, and the common run record. Repeating
-the same command with an existing `--dir` resumes only schedule games absent
-from the durable checkpoint. `--restart` archives the old directory first.
+Every run directory contains the append-only game journal `games.jsonl`,
+`games.pgn` and `run.log`, checksum-protected current/previous checkpoints,
+`standings.csv`, `crosstable.csv`, `result.json`, the resolved configuration,
+and the common run record; see [run directories](run-directories.md).
+Repeating the same command with an existing `--dir` resumes only schedule games
+absent from the journal. `--restart` archives the old directory first.
 
-Engine-attributable faults remain scored forfeits. Tournaments are exploratory
-and non-strict by default; use `--max-engine-faults N` when the whole run should
-be invalidated after more than N such faults. Infrastructure failures are
-never scored and stop new scheduling.
+Engine-attributable faults, losses on time among them, remain scored forfeits.
+A tournament is invalidated after more of them than `--max-engine-faults N`,
+which defaults to 1% of the scheduled games and at least 5. The count and the
+allowance are on the `faults` line of every progress block and of the final
+report. Infrastructure failures are never scored and stop new scheduling.

@@ -228,7 +228,19 @@ fn sleeping_fixture_is_charged_and_margin_outcomes_are_attributed() {
     );
     assert_eq!(accepted["report"]["faults"]["time_losses_a"], 0);
 
-    let forfeited = clock_match(&root.path().join("forfeited"), 200, 50, 20);
+    // The fixture runs allow 100 engine faults, and an omitted time-loss
+    // limit follows that allowance; a limit of zero makes the one forfeit
+    // invalidate the match.
+    let mut forfeited = base_match(&root.path().join("forfeited"), 1);
+    forfeited.arg("--a-engine-arg=--sleep-ms=200").args([
+        "--a-movetime-ms",
+        "50",
+        "--a-margin-ms",
+        "20",
+        "--max-time-losses",
+        "0",
+    ]);
+    let forfeited = forfeited.output().unwrap();
     assert_eq!(forfeited.status.code(), Some(1));
     let forfeited: serde_json::Value = serde_json::from_slice(&forfeited.stdout).unwrap();
     assert_eq!(

@@ -63,10 +63,7 @@ pub(crate) async fn run_match(
         },
     };
     let adjudication = resolve_adjudication(&command);
-    let fault_policy = match_runner::FaultPolicy {
-        max_engine_faults: command.max_engine_faults,
-        max_time_losses: command.max_time_losses,
-    };
+    let fault_policy = command.fault_policy(forfeit_allowance(u64::from(games)));
     let engine_a_time_control = match resolve_time_control(
         "engine A",
         command.a_movetime_ms,
@@ -253,26 +250,30 @@ pub(crate) async fn run_match(
         eprintln!("archived previous run at {}", archived.display());
     }
     let directory = Arc::new(opened.directory);
-    let completed_games = if opened.resumed
-        && (directory.paths().checkpoint.exists() || directory.paths().previous_checkpoint.exists())
-    {
-        match directory.read_checkpoint::<match_runner::MatchCheckpoint>() {
-            Ok(checkpoint) => checkpoint.games,
-            Err(error) => {
-                eprintln!("resume failed: {error}");
-                return ExitCode::from(3);
-            }
+    let journal = match open_journal(&directory, opened.resumed).await {
+        Ok(journal) => journal,
+        Err(error) => {
+            eprintln!("resume failed: {error}");
+            return ExitCode::from(3);
         }
-    } else {
-        Vec::new()
     };
-    let observer = match DurableMatchOutput::new(Arc::clone(&directory), completed_games.clone()) {
-        Ok(observer) => Arc::new(observer),
+    let completed_games = journal
+        .records
+        .iter()
+        .filter_map(match_runner::MatchGame::from_journal)
+        .collect::<Vec<_>>();
+    let writer = match RunWriter::start(Arc::clone(&directory), journal.resume).await {
+        Ok(writer) => writer,
         Err(error) => {
             eprintln!("match output failed: {error}");
             return ExitCode::from(3);
         }
     };
+    let observer = Arc::new(DurableMatchOutput::new(
+        writer.clone(),
+        ProgressUnit::Games,
+        &completed_games,
+    ));
     colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
     let mut recorder = match if opened.resumed {
         RunRecorder::resume(&directory)
@@ -285,6 +286,7 @@ pub(crate) async fn run_match(
             return ExitCode::from(3);
         }
     };
+    recorder.write_through(writer.clone());
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "match",
         "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
@@ -346,17 +348,17 @@ pub(crate) async fn run_match(
         tokio::select! {
             result = &mut match_future => break result,
             _ = poll.tick() => {
-                let block = match_progress_block(&observer, &schedule, &players, games);
-                if schedule.due(block.done) {
-                    publish_progress(&block, &directory, &mut recorder);
+                if schedule.due(observer.units()) {
+                    let block = match_progress_block(&observer, &schedule, &players, games, fault_policy);
+                    publish_progress(&block, &writer, &mut recorder);
                 }
             }
         }
     };
-    let final_block = match_progress_block(&observer, &schedule, &players, games);
+    let final_block = match_progress_block(&observer, &schedule, &players, games, fault_policy);
     if schedule.needs_final(final_block.done) {
         schedule.mark(final_block.done);
-        publish_progress(&final_block, &directory, &mut recorder);
+        publish_progress(&final_block, &writer, &mut recorder);
     }
     match outcome {
         Ok(report) => {
@@ -385,6 +387,10 @@ pub(crate) async fn run_match(
                 eprintln!("run record failed: {error}");
                 return ExitCode::from(3);
             }
+            if let Err(error) = settle(&writer).await {
+                eprintln!("match output failed: {error}");
+                return ExitCode::from(3);
+            }
             if machine {
                 print_json(&MachineOutput::FixedMatch {
                     run_directory: directory.paths().root.clone(),
@@ -398,6 +404,8 @@ pub(crate) async fn run_match(
         }
         Err(error) => {
             eprintln!("match failed: {error}");
+            drop(recorder);
+            let _ = settle(&writer).await;
             ExitCode::from(3)
         }
     }
@@ -413,12 +421,9 @@ pub(crate) fn match_progress_block(
     schedule: &ProgressSchedule,
     players: &str,
     total: u32,
+    policy: FaultPolicy,
 ) -> ProgressBlock {
-    let (sample, done) = observer
-        .games
-        .lock()
-        .map(|games| (PairedProgress::from_games(&games), games.len() as u64))
-        .unwrap_or_default();
+    let (sample, done) = observer.sample();
     let mut block = ProgressBlock::new(
         "match",
         ProgressUnit::Games,
@@ -443,7 +448,7 @@ pub(crate) fn match_progress_block(
     // A fixed match plays colour-reversed pairs on one opening, exactly as a
     // sequential test does, so it has the same paired estimates and reports
     // them the same way.
-    sample.add_fields(&mut block);
+    sample.add_fields(&mut block, policy);
     if let Some(rate) =
         progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
     {
@@ -463,107 +468,149 @@ pub(crate) fn match_progress_block(
     block
 }
 
+/// What a fixed match or a calibration writes while it runs.
+///
+/// Each game is one journal line and one appended PGN game, handed to the
+/// writer and forgotten; the output keeps only the running sample. A
+/// checkpoint holds that sample and the journal position it covers, so its
+/// size is the same at the first game and the thirty-thousandth.
 pub(crate) struct DurableMatchOutput {
-    pub(crate) directory: Arc<RunDirectory>,
-    pub(crate) games: Mutex<Vec<match_runner::MatchGame>>,
+    pub(crate) writer: RunWriter,
+    /// What a checkpoint counts: games for a match, complete pairs for a
+    /// calibration.
+    unit: ProgressUnit,
+    state: Mutex<MatchAggregate>,
+}
+
+struct MatchAggregate {
+    sample: PairedProgress,
+    attempted: u64,
+    cadence: CheckpointCadence,
+}
+
+impl MatchAggregate {
+    fn checkpoint(&self, command: &str) -> Value {
+        json!({
+            "command": command,
+            "games_attempted": self.attempted,
+            "games_scored": self.sample.scored_games,
+            "wins": self.sample.wins,
+            "draws": self.sample.draws,
+            "losses": self.sample.losses,
+            "pairs": self.sample.pairs,
+            "pentanomial": self.sample.vector.counts(),
+            "faults": self.sample.faults,
+        })
+    }
 }
 
 impl DurableMatchOutput {
+    /// Start from the games a resume found in the journal.
     pub(crate) fn new(
-        directory: Arc<RunDirectory>,
-        mut games: Vec<match_runner::MatchGame>,
-    ) -> Result<Self, String> {
-        games.sort_by_key(|game| game.number);
-        let output = Self {
-            directory,
-            games: Mutex::new(games),
-        };
-        output.rewrite_pgn()?;
-        Ok(output)
+        writer: RunWriter,
+        unit: ProgressUnit,
+        games: &[match_runner::MatchGame],
+    ) -> Self {
+        Self {
+            writer,
+            unit,
+            state: Mutex::new(MatchAggregate {
+                sample: PairedProgress::from_games(games),
+                attempted: games.len() as u64,
+                cadence: CheckpointCadence::new(),
+            }),
+        }
     }
 
-    pub(crate) fn rewrite_pgn(&self) -> Result<(), String> {
-        let games = self.games.lock().map_err(|_| "PGN lock poisoned")?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(self.directory.paths().root.join("games.pgn"))
-            .map_err(|error| error.to_string())?;
-        for game in games.iter() {
-            // A scorable game needs no class: an untagged game is part of the
-            // sample, so a match export stays exactly what it was.
-            let rendered = if game.scorable {
-                game.pgn.trim_end().to_owned()
-            } else {
-                with_header_tags(
-                    game.pgn.trim_end(),
-                    &[("ColosseumSample", UNSCORABLE_SAMPLE)],
-                )
-            };
-            writeln!(file, "{rendered}").map_err(|error| error.to_string())?;
-            writeln!(file).map_err(|error| error.to_string())?;
+    fn command(&self) -> &'static str {
+        match self.unit {
+            ProgressUnit::Pairs => "calibrate",
+            _ => "match",
         }
-        file.sync_all().map_err(|error| error.to_string())
+    }
+
+    /// Units committed, cheaply, for deciding whether a block is due.
+    pub(crate) fn units(&self) -> u64 {
+        self.state.lock().map_or(0, |state| match self.unit {
+            ProgressUnit::Pairs => u64::from(state.sample.pairs),
+            _ => state.attempted,
+        })
+    }
+
+    /// The running sample and the games attempted, for a progress block.
+    pub(crate) fn sample(&self) -> (PairedProgress, u64) {
+        self.state.lock().map_or_else(
+            |_| (PairedProgress::default(), 0),
+            |state| (state.sample.clone(), state.attempted),
+        )
+    }
+
+    fn final_writes(&self, result: Vec<u8>, event: &Value) -> Result<(), String> {
+        let state = self.state.lock().map_err(|_| "match state lock poisoned")?;
+        self.writer.checkpoint(state.checkpoint(self.command()))?;
+        drop(state);
+        self.writer
+            .replace(self.writer_root().join("result.json"), result)?;
+        log_event(&self.writer, event);
+        Ok(())
+    }
+
+    fn writer_root(&self) -> PathBuf {
+        self.writer.root().to_path_buf()
     }
 
     pub(crate) fn finish(&self, report: &match_runner::FixedMatchReport) -> Result<(), String> {
-        let bytes = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
-        fs::write(self.directory.paths().root.join("result.json"), bytes)
-            .map_err(|error| error.to_string())?;
-        let mut line = serde_json::to_vec(&json!({
-            "event": "match-finished",
-            "status": report.status,
-            "attempted": report.games_attempted,
-            "scored": report.games_completed,
-        }))
-        .map_err(|error| error.to_string())?;
-        line.push(b'\n');
-        self.directory
-            .append_log(&line)
-            .map_err(|error| error.to_string())
+        self.final_writes(
+            serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?,
+            &json!({
+                "event": "match-finished",
+                "status": report.status,
+                "attempted": report.games_attempted,
+                "scored": report.games_completed,
+            }),
+        )
     }
 
     pub(crate) fn finish_calibration(&self, report: &CalibrationReport) -> Result<(), String> {
-        let bytes = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
-        fs::write(self.directory.paths().root.join("result.json"), bytes)
-            .map_err(|error| error.to_string())?;
-        let mut line = serde_json::to_vec(&json!({
-            "event": "calibration-finished",
-            "status": report.status,
-            "attempted": report.fixed_match.games_attempted,
-            "scored": report.fixed_match.games_completed,
-        }))
-        .map_err(|error| error.to_string())?;
-        line.push(b'\n');
-        self.directory
-            .append_log(&line)
-            .map_err(|error| error.to_string())
+        self.final_writes(
+            serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?,
+            &json!({
+                "event": "calibration-finished",
+                "status": report.status,
+                "attempted": report.fixed_match.games_attempted,
+                "scored": report.fixed_match.games_completed,
+            }),
+        )
     }
 }
 
 impl match_runner::MatchObserver for DurableMatchOutput {
     fn game_completed(&self, game: &match_runner::MatchGame) -> Result<(), String> {
-        {
-            let mut games = self.games.lock().map_err(|_| "checkpoint lock poisoned")?;
-            games.push(game.clone());
-            games.sort_by_key(|game| game.number);
-            self.directory
-                .write_checkpoint(&match_runner::MatchCheckpoint {
-                    games: games.clone(),
-                })
-                .map_err(|error| error.to_string())?;
+        let record = game.journal_record(sample_class(game.scorable, OFFICIAL_SAMPLE), None);
+        // A scorable game needs no class: an untagged game is part of the
+        // sample, so a match export stays exactly what it was.
+        let moves = if game.scorable {
+            game.pgn.clone()
+        } else {
+            with_header_tags(
+                game.pgn.trim_end(),
+                &[("ColosseumSample", UNSCORABLE_SAMPLE)],
+            )
+        };
+        log_fault(&self.writer, &record);
+        self.writer.game(record, moves)?;
+        let mut state = self.state.lock().map_err(|_| "match state lock poisoned")?;
+        let pairs_before = state.sample.pairs;
+        state.sample.add_game(game);
+        state.attempted += 1;
+        let units = match self.unit {
+            ProgressUnit::Pairs => u64::from(state.sample.pairs - pairs_before),
+            _ => 1,
+        };
+        if state.cadence.record(units) {
+            self.writer.checkpoint(state.checkpoint(self.command()))?;
         }
-        self.rewrite_pgn()?;
-        let mut line = serde_json::to_vec(&json!({
-            "event": "game-completed",
-            "game": game,
-        }))
-        .map_err(|error| error.to_string())?;
-        line.push(b'\n');
-        self.directory
-            .append_log(&line)
-            .map_err(|error| error.to_string())
+        Ok(())
     }
 }
 
@@ -598,12 +645,13 @@ pub(crate) fn print_fixed_match(report: &match_runner::FixedMatchReport) {
     }
     println!("Ptnml: {:?}", sample.vector.counts());
     println!(
-        "faults: A {} ({} time), B {} ({} time), infrastructure {}",
+        "faults: A {} ({} time), B {} ({} time), infrastructure {}; {}",
         report.faults.engine_a,
         report.faults.time_losses_a,
         report.faults.engine_b,
         report.faults.time_losses_b,
-        report.faults.infrastructure
+        report.faults.infrastructure,
+        fault_allowance_text(report.fault_policy)
     );
     println!("abnormal games: {}", abnormal_games(&report.games));
 }

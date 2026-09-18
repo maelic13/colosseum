@@ -155,25 +155,24 @@ pub async fn run_pair_schedule(
             break;
         };
         let pair = joined.map_err(|error| PairScheduleError::Worker(error.to_string()))??;
-        for released in commit_queue.complete(pair)? {
-            match accumulator.admit(&released)? {
+        for mut released in commit_queue.complete(pair)? {
+            let disposition = accumulator.admit(&released)?;
+            if let Some(observer) = &request.observer {
+                match disposition {
+                    PairDisposition::Official => observer.official_pair(&released),
+                    PairDisposition::PostTerminal => observer.post_terminal_pair(&released),
+                }
+                .map_err(PairScheduleError::Output)?;
+            }
+            // The observer committed the moves; the schedule keeps summaries.
+            released.first.strip_moves();
+            released.second.strip_moves();
+            match disposition {
                 PairDisposition::Official => {
-                    if let Some(observer) = &request.observer {
-                        observer
-                            .official_pair(&released)
-                            .map_err(PairScheduleError::Output)?;
-                    }
                     official_pairs.push(released);
                     request.cancellation.record_committed_unit();
                 }
-                PairDisposition::PostTerminal => {
-                    if let Some(observer) = &request.observer {
-                        observer
-                            .post_terminal_pair(&released)
-                            .map_err(PairScheduleError::Output)?;
-                    }
-                    post_terminal_pairs.push(released);
-                }
+                PairDisposition::PostTerminal => post_terminal_pairs.push(released),
             }
         }
     }

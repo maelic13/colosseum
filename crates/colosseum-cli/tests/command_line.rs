@@ -260,19 +260,26 @@ fn stats_replay_obeys_source_authority_and_never_pairs_pgn_by_guessing() {
         serde_json::json!([0, 0, 2, 0, 0])
     );
 
+    // A corrupt final result falls back to the journal, the structured record
+    // of every game; a checkpoint holds aggregates and is no source of games.
     std::fs::write(run.join("result.json"), "not json").unwrap();
-    let checkpoint = cli().arg("stats").arg(&run).arg("--json").output().unwrap();
-    assert!(checkpoint.status.success());
-    let checkpoint: serde_json::Value = serde_json::from_slice(&checkpoint.stdout).unwrap();
-    assert_eq!(checkpoint["report"]["attempts"][0]["accepted"], false);
-    assert_eq!(checkpoint["report"]["attempts"][1]["accepted"], true);
-    assert_eq!(checkpoint["report"]["complete_pairs"], 2);
+    let journal = cli().arg("stats").arg(&run).arg("--json").output().unwrap();
+    assert!(journal.status.success());
+    let journal: serde_json::Value = serde_json::from_slice(&journal.stdout).unwrap();
+    assert_eq!(journal["report"]["attempts"][0]["accepted"], false);
+    assert_eq!(journal["report"]["attempts"][1]["accepted"], true);
+    assert!(
+        journal["report"]["source"]
+            .as_str()
+            .unwrap()
+            .ends_with("games.jsonl"),
+        "{journal}"
+    );
+    assert_eq!(journal["report"]["authority"], "structured-run-store");
+    assert_eq!(journal["report"]["complete_pairs"], 2);
 
     std::fs::remove_file(run.join("result.json")).unwrap();
-    std::fs::remove_file(run.join("checkpoint.json")).unwrap();
-    if run.join("checkpoint.previous.json").exists() {
-        std::fs::remove_file(run.join("checkpoint.previous.json")).unwrap();
-    }
+    std::fs::remove_file(run.join("games.jsonl")).unwrap();
     let pgn = cli().arg("stats").arg(&run).arg("--json").output().unwrap();
     assert!(pgn.status.success());
     let pgn: serde_json::Value = serde_json::from_slice(&pgn.stdout).unwrap();
@@ -871,14 +878,40 @@ fn calibration_persists_a_degenerate_identical_binary_run_as_inconclusive() {
 }
 
 #[test]
-fn calibration_marks_any_engine_fault_invalid_even_when_the_match_policy_allows_it() {
+fn calibration_is_invalid_only_past_its_engine_fault_allowance() {
     let root = tempfile::tempdir().unwrap();
     let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
+    // The default allowance is 1% of the scheduled games and at least five,
+    // so the fixture's one fault leaves the evidence to decide.
     let output = cli()
         .arg("calibrate")
         .arg(fixture)
         .arg(fixture)
-        .args(["--games", "2", "--max-engine-faults", "2", "--dir"])
+        .args(["--games", "2", "--dir"])
+        .arg(root.path().join("allowed"))
+        .arg("--json")
+        .output()
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_ne!(value["report"]["status"], "invalid");
+    assert_eq!(
+        value["report"]["fixed_match"]["fault_policy"]["max_engine_faults"],
+        5
+    );
+    assert!(
+        value["report"]["fixed_match"]["faults"]["engine_b"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("; 5 allowed"), "{stderr}");
+    // A limit of zero makes the same fault invalidate the calibration.
+    let output = cli()
+        .arg("calibrate")
+        .arg(fixture)
+        .arg(fixture)
+        .args(["--games", "2", "--max-engine-faults", "0", "--dir"])
         .arg(root.path().join("invalid"))
         .arg("--json")
         .output()
@@ -1142,8 +1175,8 @@ fn fixed_match_accepts_the_same_ordinary_uci_path_with_different_side_options() 
     assert_eq!(value["report"]["games"][0]["white"], "a");
     assert_eq!(value["report"]["games"][1]["white"], "b");
     let clock = &value["report"]["games"][0]["clock_accounting"];
-    assert_eq!(clock["model"], "go-write-to-bestmove-read");
-    assert_eq!(clock["version"], 1);
+    assert_eq!(clock["model"], "go-write-to-bestmove-arrival");
+    assert_eq!(clock["version"], 2);
     assert!(clock["monotonic_resolution_ns"].as_u64().unwrap() > 0);
     assert!(clock["white_charged_elapsed"]["samples"].as_u64().unwrap() > 0);
     let run = root.path().join("run");
@@ -1171,11 +1204,33 @@ fn fixed_match_accepts_the_same_ordinary_uci_path_with_different_side_options() 
 }
 
 #[test]
-fn fixed_match_strict_default_invalidates_on_the_first_engine_fault() {
+fn fixed_match_default_allowance_tolerates_a_few_engine_faults() {
     let root = tempfile::tempdir().unwrap();
     let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
     let output = cli()
         .args(["match", "--games", "2"])
+        .arg(fixture)
+        .arg(fixture)
+        .arg("--dir")
+        .arg(root.path().join("allowed"))
+        .arg("--json")
+        .output()
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["report"]["status"], "completed");
+    assert_eq!(value["report"]["faults"]["engine_b"], 1);
+    // Five engine faults, time losses among them; the report says so.
+    assert_eq!(value["report"]["fault_policy"]["max_engine_faults"], 5);
+    assert_eq!(value["report"]["fault_policy"]["max_time_losses"], 5);
+    assert!(output.status.success());
+}
+
+#[test]
+fn fixed_match_with_a_zero_limit_invalidates_on_the_first_engine_fault() {
+    let root = tempfile::tempdir().unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
+    let output = cli()
+        .args(["match", "--games", "2", "--max-engine-faults", "0"])
         .arg(fixture)
         .arg(fixture)
         .arg("--dir")

@@ -34,9 +34,9 @@ use colosseum_application::{
     NpsRequest, NpsScalingInput, NpsScalingReport, NpsStatePolicy, PlanTournament, RateTournament,
     RuntimeParticipant, SPSA_TUNE_RESULT_SCHEMA_VERSION, SprtBundle, SprtDesign,
     SprtLengthPlanReport, SprtLengthPlanRequest, SprtParameters, SpsaBoundTune, SpsaCenterSample,
-    SpsaCommittedUpdate, SpsaEstimator, SpsaEstimatorPolicy, SpsaGateHashStatus, SpsaPlanReport,
-    SpsaRunSettings, SpsaStatusReport, SpsaTimingInput, SpsaTuneAudit, SpsaTuneResult,
-    SpsaTuneResultError, SpsaTuneWarning, SpsaTuningState, TournamentDesign, TournamentFixedRating,
+    SpsaEstimator, SpsaEstimatorPolicy, SpsaGateHashStatus, SpsaPlanReport, SpsaRunSettings,
+    SpsaStatusReport, SpsaTimingInput, SpsaTuneAudit, SpsaTuneResult, SpsaTuneResultError,
+    SpsaTuneWarning, TournamentCompletedGame, TournamentDesign, TournamentFixedRating,
     TournamentParticipant, TournamentPlan, UciOptionSchema, UciOptionValue, classify_calibration,
     diagnose_spsa, plan_fixed, plan_sprt_length, plan_spsa, scaling_hash_mb, summarize_nps_scaling,
 };
@@ -58,18 +58,22 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::cancellation::{Cancellation, DEFAULT_STOP_GRACE_SECONDS};
-use crate::match_runner::{MatchFaultCounts, record_fault};
+use crate::match_runner::{FaultPolicy, MatchFaultCounts, record_fault};
 use crate::progress::{self, ProgressBlock, ProgressSchedule, ProgressUnit};
+use crate::run_writer::RunWriter;
 
 // The sample classes a written game may carry are the reader's vocabulary:
 // naming them once is what keeps a writer from drifting from the replay that
 // honours it.
-use crate::stats_replay::{OFFICIAL_SAMPLE, UNSCORABLE_SAMPLE};
+use crate::stats_replay::{
+    INVALID_SAMPLE, OFFICIAL_SAMPLE, POST_TERMINAL_SAMPLE, UNSCORABLE_SAMPLE,
+};
 use crate::versioned_artifact::require_schema_version;
 
 mod book;
 mod calibrate;
 mod capabilities_command;
+mod durable;
 mod engine;
 mod match_command;
 mod nps;
@@ -84,6 +88,7 @@ mod tournament;
 use book::*;
 use calibrate::*;
 use capabilities_command::*;
+use durable::*;
 use engine::*;
 use match_command::*;
 use nps::*;
@@ -271,8 +276,55 @@ fn unsupported_dry_run(command: &str) -> ExitCode {
 }
 
 #[cfg(test)]
+mod commit_path_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_default_forfeit_allowance_is_one_percent_and_at_least_five() {
+        assert_eq!(forfeit_allowance(2), 5);
+        assert_eq!(forfeit_allowance(599), 5);
+        assert_eq!(forfeit_allowance(600), 6);
+        assert_eq!(forfeit_allowance(30_000), 300);
+    }
+
+    #[test]
+    fn an_omitted_time_loss_limit_is_the_engine_fault_allowance() {
+        let conditions = |engine: Option<u32>, time: Option<u32>| {
+            let mut command = Cli::try_parse_from(["colosseum", "match", "--games", "2", "a", "b"])
+                .map(|cli| match cli.command {
+                    Command::Match(command) => command.conditions,
+                    _ => unreachable!("parsed a match"),
+                })
+                .unwrap();
+            command.max_engine_faults = engine;
+            command.max_time_losses = time;
+            command
+        };
+        assert_eq!(
+            conditions(None, None).fault_policy(7),
+            FaultPolicy {
+                max_engine_faults: 7,
+                max_time_losses: 7
+            }
+        );
+        assert_eq!(
+            conditions(Some(3), None).fault_policy(7),
+            FaultPolicy {
+                max_engine_faults: 3,
+                max_time_losses: 3
+            }
+        );
+        assert_eq!(
+            conditions(None, Some(1)).fault_policy(0),
+            FaultPolicy {
+                max_engine_faults: 0,
+                max_time_losses: 1
+            }
+        );
+    }
 
     #[test]
     fn time_control_resolution_covers_every_supported_mode_and_default() {

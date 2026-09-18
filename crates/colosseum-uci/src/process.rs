@@ -13,8 +13,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use colosseum_core::UciOption;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::sync::mpsc;
 use tokio::time::timeout;
 
 use crate::error::UciError;
@@ -101,7 +102,11 @@ pub struct EngineProcess {
     containment: ProcessContainment,
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    /// Engine output, one line at a time, each stamped with the instant its
+    /// newline arrived. A dedicated reader thread owns the pipe, so a line is
+    /// timed when the engine sent it and not when a busy harness got round to
+    /// reading it.
+    lines: mpsc::UnboundedReceiver<PipeEvent>,
     info: HandshakeInfo,
     /// Recent protocol traffic ("> sent" / "< received"), for incident
     /// reports. Consecutive `info` lines are collapsed to the latest so the
@@ -175,7 +180,7 @@ impl EngineProcess {
         containment.resume(&child)?;
         let stdin = child.stdin.take().ok_or(UciError::Terminated)?;
         let stdout = child.stdout.take().ok_or(UciError::Terminated)?;
-        let stdout = BufReader::new(stdout);
+        let lines = spawn_pipe_reader(stdout)?;
 
         // Drain stderr in the background into a small tail buffer — engines
         // print crash/assert messages there, which is exactly what an
@@ -192,7 +197,7 @@ impl EngineProcess {
             containment,
             child,
             stdin,
-            stdout,
+            lines,
             info: HandshakeInfo::default(),
             transcript: VecDeque::new(),
             stderr_tail,
@@ -259,7 +264,8 @@ impl EngineProcess {
         loop {
             let line = self
                 .read_line_until(until, UciError::HandshakeTimeout)
-                .await?;
+                .await?
+                .text;
             let line = line.trim();
             if line == "uciok" {
                 break;
@@ -284,7 +290,8 @@ impl EngineProcess {
         loop {
             let line = self
                 .read_line_until(until, UciError::HandshakeTimeout)
-                .await?;
+                .await?
+                .text;
             if line.trim() == "readyok" {
                 return Ok(());
             }
@@ -318,11 +325,14 @@ impl EngineProcess {
         on_info: impl FnMut(&parse::InfoLine),
     ) -> Result<SearchOutput, UciError> {
         self.send(&position.to_command()).await?;
-        self.send(&limits.to_command()).await?;
-        // The binding clock model begins only after the complete `go` command
-        // has been written and flushed. Position setup is deliberately outside
-        // the charged interval.
+        // The charged interval begins as the `go` is written and ends when the
+        // `bestmove` arrives. Position setup stays outside it. The start is
+        // taken before the write, not after it: the reader thread stamps an
+        // answer the moment it lands, and a fast engine can answer before this
+        // task returns from the write, which would otherwise make the interval
+        // end before it began.
         let charged_from = Instant::now();
+        self.send(&limits.to_command()).await?;
         self.await_bestmove(charged_from, deadline, on_info).await
     }
 
@@ -344,8 +354,9 @@ impl EngineProcess {
         deadline: Duration,
         on_info: impl FnMut(&parse::InfoLine),
     ) -> Result<SearchOutput, UciError> {
+        let charged_from = Instant::now();
         self.send("stop").await?;
-        self.await_bestmove(Instant::now(), deadline, on_info).await
+        self.await_bestmove(charged_from, deadline, on_info).await
     }
 
     /// Start pondering: set the position (played move + predicted reply
@@ -378,7 +389,7 @@ impl EngineProcess {
             let far = Instant::now() + Duration::from_secs(24 * 3600);
             match self.read_line_until(far, UciError::MoveTimeout).await {
                 Ok(line) => {
-                    let line = line.trim();
+                    let line = line.text.trim();
                     if let Some(best) = parse::parse_bestmove_ponder(line) {
                         self.ponder_early = Some(best);
                         break;
@@ -417,8 +428,9 @@ impl EngineProcess {
                 elapsed: Duration::ZERO,
             });
         }
+        let charged_from = Instant::now();
         self.send("ponderhit").await?;
-        self.await_bestmove(Instant::now(), deadline, on_info).await
+        self.await_bestmove(charged_from, deadline, on_info).await
     }
 
     /// The prediction missed: abort the ponder search and discard its result.
@@ -430,7 +442,7 @@ impl EngineProcess {
         let until = Instant::now() + deadline;
         loop {
             let line = self.read_line_until(until, UciError::MoveTimeout).await?;
-            if parse::parse_bestmove(line.trim()).is_some() {
+            if parse::parse_bestmove(line.text.trim()).is_some() {
                 return Ok(());
             }
         }
@@ -453,12 +465,14 @@ impl EngineProcess {
 
         loop {
             let line = self.read_line_until(until, UciError::MoveTimeout).await?;
-            // Capture the end of the charged interval immediately after the
-            // complete protocol line has been read, before parsing or reporting.
-            let read_finished = Instant::now();
-            let line = line.trim();
+            // The charged interval ends when the `bestmove` line arrived on the
+            // pipe, as stamped by the reader thread. Whatever the harness did
+            // between that instant and now — another game's commit, a slow
+            // disk, a busy runtime — is the harness's time, not the engine's.
+            let arrived = line.arrived;
+            let line = line.text.trim();
             if let Some((best_move, ponder)) = parse::parse_bestmove_ponder(line) {
-                let elapsed = charged_elapsed(start, read_finished);
+                let elapsed = charged_elapsed(start, arrived);
                 // Some engines report a literal `nps 0` on every info line
                 // (Fruit 2.1 does) — treat that as unreported and derive the
                 // real speed from nodes over wall-clock time instead.
@@ -543,39 +557,109 @@ impl EngineProcess {
 
     /// Read the next line, enforcing an absolute deadline. Maps a timeout to
     /// `timeout_err`, EOF to [`UciError::Terminated`].
+    ///
+    /// The deadline is judged by when a line arrived, not by when it is
+    /// looked at: a `bestmove` the engine sent in time is in time even if the
+    /// harness only reaches it after the deadline, and a line that arrived
+    /// after the deadline is late however early the harness asks.
     async fn read_line_until(
         &mut self,
         until: Instant,
         timeout_err: UciError,
-    ) -> Result<String, UciError> {
-        // On the `None` path we diverge by returning, so `timeout_err` is only ever
-        // moved once and needs no `Clone`.
-        let Some(remaining) = until.checked_duration_since(Instant::now()) else {
-            return Err(timeout_err);
+    ) -> Result<ArrivedLine, UciError> {
+        let event = match self.lines.try_recv() {
+            Ok(event) => event,
+            Err(mpsc::error::TryRecvError::Disconnected) => return Err(UciError::Terminated),
+            Err(mpsc::error::TryRecvError::Empty) => {
+                // On the `None` path we diverge by returning, so `timeout_err`
+                // is only ever moved once and needs no `Clone`.
+                let Some(remaining) = until.checked_duration_since(Instant::now()) else {
+                    return Err(timeout_err);
+                };
+                match timeout(remaining, self.lines.recv()).await {
+                    Err(_elapsed) => return Err(timeout_err),
+                    Ok(None) => return Err(UciError::Terminated),
+                    Ok(Some(event)) => event,
+                }
+            }
         };
-        match timeout(remaining, read_bounded_line(&mut self.stdout)).await {
-            Err(_elapsed) => Err(timeout_err),
-            Ok(Ok(Some(line))) => {
-                tracing::trace!(target: "uci", direction = "recv", "{line}");
-                self.record("<", &line);
+        match event {
+            PipeEvent::Line(line) => {
+                if line.arrived > until {
+                    return Err(timeout_err);
+                }
+                tracing::trace!(target: "uci", direction = "recv", "{}", line.text);
+                self.record("<", &line.text);
                 Ok(line)
             }
-            Ok(Ok(None)) => Err(UciError::Terminated),
-            Ok(Err(err)) => Err(err),
+            PipeEvent::Eof => Err(UciError::Terminated),
+            PipeEvent::Failed(error) => Err(error),
         }
     }
 }
 
-fn charged_elapsed(start: Instant, read_finished: Instant) -> Duration {
-    read_finished.saturating_duration_since(start)
+fn charged_elapsed(start: Instant, arrived: Instant) -> Duration {
+    arrived.saturating_duration_since(start)
 }
 
-async fn read_bounded_line(
-    reader: &mut BufReader<ChildStdout>,
-) -> Result<Option<String>, UciError> {
+/// One protocol line and the instant its newline arrived on the pipe.
+#[derive(Debug)]
+struct ArrivedLine {
+    text: String,
+    arrived: Instant,
+}
+
+/// What the reader thread reports.
+#[derive(Debug)]
+enum PipeEvent {
+    Line(ArrivedLine),
+    Eof,
+    Failed(UciError),
+}
+
+/// Move the engine's stdout onto a thread that does nothing but read it.
+///
+/// A thread blocked in `read` wakes when the engine writes, whatever the async
+/// runtime is doing, so the instant it records is the instant the line
+/// arrived. It exits when the pipe closes, which the engine's containment
+/// guarantees when the process ends.
+fn spawn_pipe_reader(stdout: ChildStdout) -> Result<mpsc::UnboundedReceiver<PipeEvent>, UciError> {
+    #[cfg(unix)]
+    let file = std::fs::File::from(stdout.into_owned_fd()?);
+    #[cfg(windows)]
+    let file = std::fs::File::from(stdout.into_owned_handle()?);
+    let (sender, receiver) = mpsc::unbounded_channel();
+    std::thread::Builder::new()
+        .name("uci-stdout".into())
+        .spawn(move || read_pipe(std::io::BufReader::new(file), &sender))?;
+    Ok(receiver)
+}
+
+fn read_pipe(mut reader: impl std::io::BufRead, sender: &mpsc::UnboundedSender<PipeEvent>) {
+    loop {
+        let event = match read_bounded_line(&mut reader) {
+            Ok(Some(text)) => PipeEvent::Line(ArrivedLine {
+                text,
+                arrived: Instant::now(),
+            }),
+            Ok(None) => PipeEvent::Eof,
+            Err(error) => PipeEvent::Failed(error),
+        };
+        let last = !matches!(event, PipeEvent::Line(_));
+        // A closed receiver means the engine handle is gone; nobody is
+        // listening, so the thread has nothing left to do.
+        if sender.send(event).is_err() || last {
+            return;
+        }
+    }
+}
+
+/// Read one line of at most [`MAX_PROTOCOL_LINE_BYTES`], without its newline.
+/// `None` is end of stream.
+fn read_bounded_line(reader: &mut impl std::io::BufRead) -> Result<Option<String>, UciError> {
     let mut bytes = Vec::new();
     loop {
-        let available = reader.fill_buf().await?;
+        let available = reader.fill_buf()?;
         if available.is_empty() {
             return if bytes.is_empty() {
                 Ok(None)
@@ -840,6 +924,42 @@ fn install_process_tree_guard_platform() -> Result<(), UciError> {
 mod clock_tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn a_line_is_stamped_when_it_arrives_not_when_it_is_read() {
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let before = Instant::now();
+        read_pipe(
+            std::io::Cursor::new(b"info depth 1\nbestmove e2e4\r\n".to_vec()),
+            &sender,
+        );
+        let after = Instant::now();
+        // The consumer only looks now, long after the reader stamped both.
+        std::thread::sleep(Duration::from_millis(50));
+        let mut lines = Vec::new();
+        while let Ok(event) = receiver.try_recv() {
+            lines.push(event);
+        }
+        let PipeEvent::Line(bestmove) = &lines[1] else {
+            panic!("{lines:?}");
+        };
+        assert_eq!(bestmove.text, "bestmove e2e4");
+        assert!(bestmove.arrived >= before && bestmove.arrived <= after);
+        assert!(matches!(lines[2], PipeEvent::Eof));
+    }
+
+    #[test]
+    fn an_overlong_line_is_a_protocol_error_not_a_hang() {
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        read_pipe(
+            std::io::Cursor::new(vec![b'x'; MAX_PROTOCOL_LINE_BYTES + 1]),
+            &sender,
+        );
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PipeEvent::Failed(UciError::Protocol(_)))
+        ));
+    }
 
     #[test]
     fn charged_search_time_is_independent_of_a_mid_search_wall_clock_jump() {

@@ -199,10 +199,12 @@ fn tournament_command(run: &Path, format: &str, sleep_ms: u64) -> Command {
     command
 }
 
-fn checkpoint_games(run: &Path) -> Option<usize> {
-    let bytes = std::fs::read(run.join("checkpoint.json")).ok()?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    value["payload"]["games"].as_array().map(Vec::len)
+/// Games committed to the journal so far. A game is durable from its journal
+/// line; the checkpoint that summarises the journal comes every fifty games or
+/// five seconds and need not exist yet in a run this short.
+fn journal_games(run: &Path) -> Option<usize> {
+    let text = std::fs::read_to_string(run.join("games.jsonl")).ok()?;
+    Some(text.matches('\n').count())
 }
 
 fn run_json(run: &Path, format: &str, sleep_ms: u64) -> serde_json::Value {
@@ -225,10 +227,10 @@ fn assert_resume_matches_uninterrupted(root: &Path, format: &str, total_games: u
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        if checkpoint_games(&resumed_dir).is_some_and(|games| (1..total_games).contains(&games)) {
+        if journal_games(&resumed_dir).is_some_and(|games| (1..total_games).contains(&games)) {
             break;
         }
-        assert!(Instant::now() < deadline, "no partial {format} checkpoint");
+        assert!(Instant::now() < deadline, "no partial {format} journal");
         thread::sleep(Duration::from_millis(10));
     }
     child.kill().unwrap();

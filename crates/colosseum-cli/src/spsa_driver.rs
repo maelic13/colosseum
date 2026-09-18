@@ -216,6 +216,8 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
                     .iteration_invalid(&invalid)
                     .map_err(SpsaDriverError::Output)?;
             }
+            let mut invalid = invalid;
+            strip_moves(&mut invalid.pairs);
             return Ok(SpsaDriverReport {
                 status: SpsaStatus::Invalid,
                 settings: request.settings,
@@ -243,6 +245,9 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
                 .iteration_committed(&committed)
                 .map_err(SpsaDriverError::Output)?;
         }
+        // The observer committed the moves; the driver keeps summaries.
+        let mut committed = committed;
+        strip_moves(&mut committed.pairs);
         completed_iterations.push(committed);
         request.cancellation.record_committed_unit();
         request
@@ -258,6 +263,61 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
         invalid_iteration: None,
         final_centers: state.centers().to_vec(),
     })
+}
+
+fn strip_moves(pairs: &mut [CompletePair<MatchGame>]) {
+    for pair in pairs {
+        pair.first.strip_moves();
+        pair.second.strip_moves();
+    }
+}
+
+/// Rebuild the committed iterations of a tune from their journalled games.
+///
+/// Nothing about an iteration is stored except its games. Its perturbation,
+/// its gains and the centres it moved to are recomputed from the verified
+/// schedule exactly as the driver computed them the first time, so a resumed
+/// tune and a status report stand on the same arithmetic as the run that
+/// wrote the games. An iteration whose games are not all present was cut by a
+/// kill: it and anything after it are dropped, to be played again.
+pub fn replay_iterations(
+    schedule: VerifiedSpsaSchedule,
+    settings: SpsaRunSettings,
+    initial_centers: Vec<f64>,
+    iterations: &std::collections::BTreeMap<u32, Vec<CompletePair<MatchGame>>>,
+) -> Result<Vec<SpsaCommittedIteration>, SpsaDriverError> {
+    let mut state = SpsaTuningState::resume(schedule, settings, initial_centers, &[])?;
+    let mut committed = Vec::new();
+    for iteration in 0..settings.iterations {
+        let Some(pairs) = iterations.get(&iteration) else {
+            break;
+        };
+        if pairs.len() != settings.pairs_per_iteration() as usize {
+            break;
+        }
+        validate_pair_ids(iteration, settings, pairs)?;
+        if pairs.iter().any(pair_has_fault) || pairs.iter().any(pair_is_unscorable) {
+            return Err(SpsaDriverError::CheckpointMismatch { iteration });
+        }
+        let Some(prepared) = state.prepare_next()? else {
+            return Err(SpsaDriverError::CheckpointBeyondHorizon);
+        };
+        let score = score_mini_match(pairs)?;
+        let SpsaIterationTransition::Committed(update) =
+            state.commit_iteration(prepared, pairs.len() as u32, Some(score), 0)?
+        else {
+            return Err(SpsaDriverError::CheckpointMismatch { iteration });
+        };
+        committed.push(SpsaCommittedIteration {
+            iteration: update.iteration,
+            centers_before: update.centers_before,
+            prepared: update.prepared,
+            pairs: pairs.clone(),
+            score: update.score,
+            centers_after: update.centers_after,
+        });
+    }
+    Ok(committed)
 }
 
 fn arm_launches(

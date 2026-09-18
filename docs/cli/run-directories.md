@@ -7,33 +7,114 @@ resume, and its stored configuration hash must match exactly.
 
 Selecting restart never deletes or overwrites an earlier attempt. The complete
 old directory is renamed to a unique adjacent `.archive-…` path before a fresh
-directory is initialized. Logs are opened append-only and synced; resume does
-not truncate prior diagnostics.
+directory is initialized. Logs are opened append-only; resume does not
+truncate prior diagnostics.
 
 The run stores canonical `resolved-config.json`, `config.sha256` and
-`config-origins.json`. Checkpoints are atomic JSON envelopes containing their
-schema version, payload and SHA-256 payload checksum. `checkpoint.json` is the
-current generation and `checkpoint.previous.json` is the last generation. If
-the current file is missing, torn, invalid or fails its checksum, recovery uses
-the previous generation. If neither validates, resume fails rather than
-inventing state.
+`config-origins.json`, and `run-record.json` (see [status](status.md)).
 
-For fixed matches, `run.log` is an append-only JSON-lines event stream,
-`games.pgn` is rebuilt from the authoritative checkpoint, `result.json` is the
-final structured report, and `failed-games/` retains UCI stdout/stderr traffic
-for abnormal games. A resumed match schedules only game numbers absent from the
-verified checkpoint and retains deterministic report order.
+## What a run writes while it plays
+
+Four files carry a running `match`, `calibrate`, `sprt`, `spsa` or
+`tournament run`, and each has one job (a position `suite` plays no games and
+keeps its completed positions in its checkpoint):
+
+| File | Written | Holds |
+|---|---|---|
+| `games.jsonl` | appended, one line per game | the journal: every game's record |
+| `games.pgn` | appended, one game at a time | every game's moves, for other tools |
+| `checkpoint.json` | replaced every 50 units or 5 seconds, and on stop | aggregates only, and how much of the journal they cover |
+| `run.log` | appended | human events: progress blocks, faults, stop and resume |
+
+**`games.jsonl`** is the run's evidence. Each line is one JSON object: a line
+version `v`, a sequence number `seq` counting from 1, the `game` record, the
+position of its moves in `games.pgn` (`pgn`: `offset`, `length` and the
+`sha256` of those bytes) and a `sha256` of the line itself, computed over the
+line's other fields. The game record names the game (`number`, `pair_number`,
+`pair_game`, `white`, `black`, the `opening`, and for a tournament its
+`round`, for a tune its `iteration`), its `result`, `termination`, whether it
+is `scorable`, its `fault` with the fault kind, its `sample` class (the same
+class `games.pgn` carries as `ColosseumSample`: `official`, `post-terminal`,
+`invalid` or `unscorable`) and its clock accounting. It never holds moves.
+Nothing is ever rewritten: a game is committed by appending its line.
+
+**`games.pgn`** is appended one game at a time and never rewritten. Its tags
+and annotations are the ones described in [output](output.md). A game's moves
+are written before its journal line, so a journal line always points at moves
+that were written first.
+
+**`checkpoint.json`** is small and stays the same size however long the run
+is. It holds what the command's summary needs — games attempted and scored,
+W/D/L, the pentanomial counts and faults; for an SPRT the official pair count
+and the post-terminal count; for a tune the completed iterations, the current
+centre vector and the last iteration; for a tournament the attempted, scored
+and faulted games — and `journal`: the byte `offset` of the journal it covers,
+the `sha256` of those bytes, the number of `records` in them, and the
+`pgn_offset` where `games.pgn` ended at the same moment. It is an atomic JSON
+envelope with its schema version, payload and payload checksum, kept in two
+generations: `checkpoint.json` is the current one and
+`checkpoint.previous.json` the one before. If the current file is missing,
+torn or fails its checksum, the previous generation is used. If neither
+validates, resume fails rather than inventing state.
+
+**`run.log`** is an append-only JSON-lines stream of what a person wants to
+read: the progress blocks as printed, each fault with the game it ended, and
+the stop, resume and finish of the run. It does not repeat games; the journal
+has them.
+
+When the run finishes, `result.json` holds the final structured report, and
+`failed-games/` keeps the UCI traffic of every abnormal game.
+
+### Durability
+
+Appends are not synced one by one. The journal, `games.pgn` and `run.log` are
+synced together every 50 games or every second, whichever comes first, and at
+every checkpoint and every stop. **A hard kill — a power cut, a killed
+process, a crashed host — loses at most the games of that last window.** A
+resume does not have those games and plays them again; nothing else is lost,
+and nothing already synced changes.
+
+All of this writing happens off the thread that drives games, so a slow disk
+delays the files, never an engine's clock.
+
+### Resume
+
+A resume loads the newest valid checkpoint and verifies the journal up to the
+offset it names against the hash it recorded. It then reads the lines after
+that offset one by one, each against its own checksum:
+
+- an unfinished or unverifiable **last** line is a write the kill interrupted.
+  It is dropped and its game is played again;
+- a journal line whose moves are not in `games.pgn` with the hash the line
+  recorded belongs to the unsynced window. It and everything after it are
+  dropped and played again;
+- anything in `games.pgn` after the last kept game is cut off.
+
+The resume says on standard error what it dropped. What it keeps is replayed
+from the journal: the SPRT official prefix and a tune's iteration boundaries
+are recomputed from the kept games, never taken from memory or from the
+checkpoint. A resumed run appends after the kept bytes and changes none of
+them.
+
+**A journal that does not match its checkpoint is refused, not repaired.** A
+hash mismatch inside the covered bytes, a damaged line followed by a valid
+one, or a `games.pgn` shorter than the checkpoint says was synced means the
+directory changed after the checkpoint was written; the resume stops and says
+so, and leaves the directory as it found it. A run directory written by an
+earlier version, whose checkpoint names no journal, is refused the same way;
+start it again with `--restart`.
+
+A resumed match schedules only the game numbers absent from the journal and
+keeps deterministic report order. SPRT journals complete official and
+post-terminal pairs with their class; only the official prefix enters
+statistics, and a run that already reached its terminal state cannot be
+extended.
 
 A game the harness abandoned on an infrastructure fault — an engine that never
 spawned, a processor-affinity call the operating system refused — is still
-written to `games.pgn` and the checkpoint, because the abandoned game is the
+journalled and written to `games.pgn`, because the abandoned game is the
 evidence for the abort. It is marked `ColosseumSample "unscorable"` and no
 statistic counts it; see [statistics replay](stats.md).
-
-SPRT checkpoints store complete official and post-terminal pairs in separate
-arrays. Only the official prefix enters statistics. Its PGN labels both sample
-classes, while the run record and final result retain the explicit model,
-hypotheses, error rates, cap, terminal pair and fault policy.
 
 Completed SPSA runs additionally write the verified schedule and three views of
 the frozen final-window vector: `tuned-options.txt`, `tuned-options.json` and
@@ -51,9 +132,9 @@ again and the games in flight are abandoned immediately instead of waiting.
 
 Either way the run is recoverable, and every command stops the same way:
 `match`, `sprt`, `calibrate`, `spsa`, `tournament run` and `suite` share one
-cancellation path rather than each inventing its own. Work already committed to
-the checkpoint is kept; work that had not been committed is simply replayed
-when you resume the same `--dir`. For SPSA that means the mini-match in flight
+cancellation path rather than each inventing its own. A stop syncs the journal
+and writes the checkpoint, so every committed game is kept; work that had not
+been committed is simply replayed when you resume the same `--dir`. For SPSA that means the mini-match in flight
 is replayed as a whole, which is what keeps a gain schedule from advancing on a
 partial iteration.
 
