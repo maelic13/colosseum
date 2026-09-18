@@ -248,26 +248,19 @@ pub(crate) fn book_stats(input: &BookInput) -> Result<BookStatsReport, String> {
     let audit = audit_opening_book(&book).map_err(|error| error.to_string())?;
     let openings = load_openings_named(&book, 0).map_err(|error| error.to_string())?;
     let hash = hash_file_report(&input.input)?;
-    let unique = openings
-        .iter()
-        .map(|opening| format!("{:?}\0{}", opening.start_fen, opening.moves.join(" ")))
-        .collect::<std::collections::BTreeSet<_>>()
+    // Read in place from the compact list: an opening's identity is its start
+    // FEN and its move text, borrowed, so a large book is never copied.
+    let unique = (0..openings.len())
+        .map(|index| (openings.start_fen(index), openings.moves_text(index)))
+        .collect::<std::collections::HashSet<_>>()
         .len();
-    let min_plies = openings
-        .iter()
-        .map(|opening| opening.moves.len())
-        .min()
-        .unwrap_or(0);
-    let max_plies = openings
-        .iter()
-        .map(|opening| opening.moves.len())
-        .max()
-        .unwrap_or(0);
-    let mean_plies = openings
-        .iter()
-        .map(|opening| opening.moves.len() as f64)
-        .sum::<f64>()
-        / openings.len() as f64;
+    let (min_plies, max_plies, total_plies) = (0..openings.len())
+        .map(|index| openings.moves(index).count())
+        .fold((usize::MAX, 0, 0), |(low, high, total), plies| {
+            (low.min(plies), high.max(plies), total + plies)
+        });
+    let min_plies = if openings.is_empty() { 0 } else { min_plies };
+    let mean_plies = total_plies as f64 / openings.len() as f64;
     let text = fs::read_to_string(&input.input)
         .map_err(|error| format!("cannot read book {}: {error}", input.input.display()))?;
     let (eval_values, eval_unit) = book_eval_values(&text, book.format);

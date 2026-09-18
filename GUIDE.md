@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9q** corrections, **10.9s** uncharged harness time, **10.9m** the fastchess study, **10.9t** overlapped SPSA (study first, may follow the release), **10.9r** qualification on a real engine (maintainer-run), then **10.10 — EXIT**; 10.9p deferred, 10.9h recommended for deferral |
+| Next step | **10.9s** uncharged harness time, **10.9m** the fastchess study, **10.9t** overlapped SPSA (study first, may follow the release), **10.9r** qualification on a real engine (maintainer-run), then **10.10 — EXIT**; 10.9p deferred, 10.9h recommended for deferral |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -930,7 +930,7 @@ model as well.
   regression test for `spsa` and `sprt` on a large synthetic book plus an audit
   of per-launch clones; `--total-games` budget; compact, fast-loading book;
   `status` says when the first block is due — PLAN §Phase 10(y)
-- ☐ **10.9q** — **Model: Terra High.** Corrections from review of 10.9o: drop
+- ☑ **10.9q — DONE** — **Model: Terra High.** Corrections from review of 10.9o: drop
   the replayed journal records on a resumed tune and cover resume in the
   scale test; `result.json` keeps centres, pair score and faults per
   iteration, not derivable vectors and coefficients (schema bump, `spsa

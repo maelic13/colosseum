@@ -29,7 +29,7 @@ use colosseum_uci::SpawnOptions;
 
 use crate::error::EngineError;
 use crate::live::{LiveGameHandle, LiveGameState};
-use crate::openings::{ResolvedOpening, load_openings};
+use crate::openings::{OpeningList, load_openings};
 use crate::runner::{EngineGameSpec, GameSpec, run_game};
 use crate::store::{self, Store, TournamentRow};
 
@@ -276,8 +276,10 @@ pub fn create_tournament(
     // (a run of `games_per_pair` consecutive games), so both colours are played
     // from the same position; the book cycles if there are more encounters than
     // openings.
-    let openings: Vec<ResolvedOpening> = match &config.start_position {
-        StartPosition::Startpos => Vec::new(),
+    // The book stays compact; only the openings the schedule draws are
+    // materialised, one per scheduled game.
+    let openings = match &config.start_position {
+        StartPosition::Startpos => OpeningList::default(),
         StartPosition::Book(book) => load_openings(book)?,
     };
     let games_per_pair = config.games_per_pair.max(1) as usize;
@@ -291,8 +293,8 @@ pub fn create_tournament(
         let (start_fen, opening_moves) = if openings.is_empty() {
             (None, Vec::new())
         } else {
-            let opening = &openings[(i / games_per_pair) % openings.len()];
-            (opening.start_fen.clone(), opening.moves.clone())
+            let opening = openings.get((i / games_per_pair) % openings.len());
+            (opening.start_fen, opening.moves)
         };
         schedule.push(ScheduledGame {
             game_id,

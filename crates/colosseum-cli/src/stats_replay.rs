@@ -243,7 +243,20 @@ fn directory_telemetry(
     }
 }
 
+/// The run directory whose journal a result names in place of its games, as
+/// a tune's `result.json` does.
+fn directory_of_named_journal(path: &Path) -> Option<&Path> {
+    let document: serde_json::Value = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+    let directory = path.parent()?;
+    (document.get("games")?.as_str()? == crate::journal::JOURNAL_FILE
+        && directory.join(crate::journal::JOURNAL_FILE).is_file())
+    .then_some(directory)
+}
+
 fn replay_file(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, String> {
+    if let Some(directory) = directory_of_named_journal(path) {
+        return replay_directory(directory, subject);
+    }
     let authority = match path.extension().and_then(|value| value.to_str()) {
         Some(value) if value.eq_ignore_ascii_case("json") => "structured-run-store",
         Some(value) if value.eq_ignore_ascii_case("jsonl") => "structured-run-store",

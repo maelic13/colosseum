@@ -462,22 +462,20 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
         }
     };
     let has_invalid = records.iter().any(|record| record.sample == INVALID_SAMPLE);
-    let checkpoint = match spsa_driver::replay_iterations(
+    let replay = match spsa_driver::replay_iterations(
         verified_schedule,
         workflow.settings,
         workflow.bound_tune.initial_centers(),
         &iterations_from_journal(&records),
     ) {
-        Ok(completed_iterations) => spsa_driver::SpsaCheckpoint {
-            completed_iterations,
-            invalid_iteration: None,
-        },
+        Ok(replay) => replay,
         Err(error) => {
             eprintln!("SPSA status failed: the journal does not replay: {error}");
             return ExitCode::FAILURE;
         }
     };
-    let centers = checkpoint
+    drop(records);
+    let centers = replay
         .completed_iterations
         .iter()
         .map(|iteration| SpsaCenterSample {
@@ -542,7 +540,7 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
     } else {
         print_spsa_status(&output, run_directory);
         // The trajectory the console deliberately does not print every block.
-        if let Some(iteration) = checkpoint.completed_iterations.last() {
+        if let Some(iteration) = &replay.last {
             for (label, value) in spsa_iteration_detail(
                 iteration,
                 SpsaCentreTracker::new(&workflow.schedule.knobs, &iteration.centers_before)
@@ -1034,15 +1032,17 @@ pub(crate) async fn run_spsa_command(
             return ExitCode::from(3);
         }
     };
-    let journal = match open_journal(&directory, resumed).await {
+    let OpenedJournal {
+        records: journal_records,
+        resume: journal_resume,
+    } = match open_journal(&directory, resumed).await {
         Ok(journal) => journal,
         Err(error) => {
             eprintln!("resume failed: {error}");
             return ExitCode::from(3);
         }
     };
-    if journal
-        .records
+    if journal_records
         .iter()
         .any(|record| record.sample == INVALID_SAMPLE)
     {
@@ -1051,22 +1051,22 @@ pub(crate) async fn run_spsa_command(
     }
     // Iteration boundaries and every centre are recomputed from the games,
     // never read back from a stored copy of the state.
-    let checkpoint = match spsa_driver::replay_iterations(
+    let replay = match spsa_driver::replay_iterations(
         verified_schedule.clone(),
         settings,
         bound_tune.initial_centers(),
-        &iterations_from_journal(&journal.records),
+        &iterations_from_journal(&journal_records),
     ) {
-        Ok(completed_iterations) => spsa_driver::SpsaCheckpoint {
-            completed_iterations,
-            invalid_iteration: None,
-        },
+        Ok(replay) => replay,
         Err(error) => {
             eprintln!("resume failed: the journal does not replay: {error}");
             return ExitCode::from(3);
         }
     };
-    let writer = match RunWriter::start(Arc::clone(&directory), journal.resume).await {
+    // The replayed games have given their summaries; a long tune would
+    // otherwise carry every game it resumed over to its end.
+    drop(journal_records);
+    let writer = match RunWriter::start(Arc::clone(&directory), journal_resume).await {
         Ok(writer) => writer,
         Err(error) => {
             eprintln!("SPSA output failed: {error}");
@@ -1100,7 +1100,8 @@ pub(crate) async fn run_spsa_command(
     }
     let observer = match DurableSpsaOutput::new(
         writer.clone(),
-        &checkpoint.completed_iterations,
+        &replay.completed_iterations,
+        replay.last,
         recorder,
         settings,
     ) {
@@ -1116,7 +1117,7 @@ pub(crate) async fn run_spsa_command(
         if resumed {
             eprintln!(
                 "resuming {} complete durable iteration(s); the stored schedule remains authoritative",
-                checkpoint.completed_iterations.len()
+                replay.completed_iterations.len()
             );
         }
     }
@@ -1141,7 +1142,10 @@ pub(crate) async fn run_spsa_command(
         },
         execution: execution.clone(),
         fault_policy,
-        checkpoint,
+        checkpoint: spsa_driver::SpsaCheckpoint {
+            completed_iterations: replay.completed_iterations,
+            invalid_iteration: None,
+        },
         stop_after_iteration: command.stop_after_iteration,
         progress: progress.clone(),
         cancellation: cancellation.clone(),
@@ -1260,10 +1264,11 @@ pub(crate) async fn run_spsa_command(
     }
 }
 
-/// Version 2 carries one summary per iteration and names the journal for the
-/// games; version 1 carried every game's full record, about 100 KB per
-/// iteration.
-pub(crate) const SPSA_RESULT_SCHEMA_VERSION: u32 = 2;
+/// Version 3 keeps per iteration only what the schedule cannot give again:
+/// the centres after it, its pair score and faults. Version 2 also stored the
+/// arm vectors, perturbation signs and gains, about 16 KB per iteration at 82
+/// knobs; version 1 carried every game's full record.
+pub(crate) const SPSA_RESULT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct SpsaReport {
@@ -1459,18 +1464,6 @@ impl SpsaCentreTracker {
     }
 }
 
-/// Every engine fault a tune has committed, across every iteration it kept.
-pub(crate) fn spsa_faults(checkpoint: &spsa_driver::SpsaCheckpoint) -> MatchFaultCounts {
-    let mut faults = MatchFaultCounts::default();
-    for iteration in &checkpoint.completed_iterations {
-        faults.absorb(iteration.faults);
-    }
-    if let Some(invalid) = &checkpoint.invalid_iteration {
-        faults.absorb(invalid.faults);
-    }
-    faults
-}
-
 /// What one committed iteration says about the search: the mini-match it
 /// played, the gain and perturbation scale it used, and what moved.
 ///
@@ -1659,7 +1652,8 @@ impl DurableSpsaOutput {
     /// Start from the iterations a resume rebuilt from the journal.
     pub(crate) fn new(
         writer: RunWriter,
-        completed: &[spsa_driver::SpsaCommittedIteration],
+        completed: &[spsa_driver::SpsaIterationSummary],
+        last: Option<spsa_driver::SpsaCommittedIteration>,
         mut recorder: RunRecorder,
         settings: SpsaRunSettings,
     ) -> Result<Self, String> {
@@ -1672,11 +1666,8 @@ impl DurableSpsaOutput {
             settings,
             state: Mutex::new(SpsaAggregate {
                 completed: completed.len() as u64,
-                last: completed.last().cloned(),
-                faults: spsa_faults(&spsa_driver::SpsaCheckpoint {
-                    completed_iterations: completed.to_vec(),
-                    invalid_iteration: None,
-                }),
+                last,
+                faults: spsa_driver::tune_faults(completed, None),
                 invalid: None,
                 cadence: CheckpointCadence::new(),
             }),
@@ -2030,10 +2021,10 @@ pub(crate) fn print_spsa(report: &SpsaReport, run_directory: &Path) {
     let settings = report.driver.settings;
     let committed = report.driver.completed_iterations.len() as u64;
     let games = committed * u64::from(settings.games_per_iteration);
-    let faults = spsa_faults(&spsa_driver::SpsaCheckpoint {
-        completed_iterations: report.driver.completed_iterations.clone(),
-        invalid_iteration: report.driver.invalid_iteration.clone(),
-    });
+    let faults = spsa_driver::tune_faults(
+        &report.driver.completed_iterations,
+        report.driver.invalid_iteration.as_ref(),
+    );
     let games_played = (committed + u64::from(report.driver.invalid_iteration.is_some()))
         * u64::from(settings.games_per_iteration);
     let fault_line = format!(

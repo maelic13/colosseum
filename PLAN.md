@@ -2822,7 +2822,50 @@ games" procedure at 10.10, once, on the final state.
   surface 3,720; Colosseum before (x) and the shared book 2,745); slot
   occupancy inside an iteration 83% against 81% modelled; all 15 launches of
   a wave within a millisecond; no gap between iterations; no overlapping
-  slot spans; no time loss or other fault at 15 slots.
+  slot spans; no time loss or other fault at 15 slots. **Qualified
+  2026-09-18:** every one of its 1,800 journalled games ran at the default
+  2,000 ms margin (`--margin-ms` was not given), so its zero time losses
+  are not comparable with a 20 ms run and say nothing about (w).
+
+  **Implementation evidence (Phase 10.9q):** the driver keeps, and
+  `result.json` stores, one `SpsaIterationSummary` per committed iteration
+  (iteration, centres after, pair score, faults, journal game range) and an
+  `SpsaInvalidSummary` (iteration, faults, reason, game range);
+  `SPSA_RESULT_SCHEMA_VERSION` is 3. The arm vectors, signs, gains and
+  centres before still reach the observer once, in the full
+  `SpsaCommittedIteration`, for the journal and the progress block; the
+  replay returns the last iteration in full for `spsa status`. Measured on
+  the real 82-knob Rarog tune: 26.1 KB per iteration pretty-printed in
+  version 2 (the 15-slot run's `result.json`), 2.2 KB in version 3; the
+  5,000-iteration one-knob stub result fell from 5.66 MB to 2.46 MB. The
+  dead self-comparison was the resume check: summaries rebuilt by the
+  replay were compared with game ranges computed by the same function, and
+  then replayed through `SpsaTuningState::resume` against histories that
+  replay had just produced. Resume now recomputes each summarised iteration
+  from the schedule and its stored score and refuses one whose centres
+  after, score or number it does not reproduce (unit test: a moved centre,
+  a changed score and a renumbered iteration are each refused at the
+  iteration where they diverge). A resumed tune drops the journal records
+  once the replay has built its summaries; the scale test gained a resume
+  case (stop at 4,500 of 5,000 iterations, resume, same summaries as an
+  uninterrupted tune from the same seed) that measured the resumed process
+  2.8 MB above the uninterrupted one and 13.7 MB above it with the records
+  kept, and asserts 8 MB. `load_openings` returns the compact
+  `OpeningList`; the desktop scheduler materialises only the opening each
+  scheduled game draws, `summarize` reads the first label in place, and
+  `book stats` counts duplicates over borrowed (FEN, move text) pairs and
+  plies in one pass; `into_resolved` is gone. `stats` given a result that
+  names its journal (`"games": "games.jsonl"`) reads the run directory it
+  belongs to, and a test requires the same report from the file and the
+  directory. A run file's `iterations` yields to `--total-games` on the
+  command line and `total-games` to `--iterations`, as a repeated option
+  does. Real smoke on the release build: an 82-knob tune of 3 iterations of
+  30 games at 15 slots and 1+0.01, stopped after 1 and resumed; 90
+  journalled games, no fault, no overlapping slot span, `stats` identical
+  on `result.json` and on the directory. Found in passing and left for
+  10.10: `killed_match_resumes_missing_games_in_deterministic_schedule_order`
+  fails about one run in eight at this commit and at its parent alike,
+  when the match completes between the test's liveness check and its kill.
 - **(ab) Qualification on a real engine is part of the release, and lives
   here.** A project that adopts the harness must be able to trust a
   released binary without re-testing it, so the evidence that the harness

@@ -12,6 +12,14 @@ use crate::{ValueOrigin, resolve_config};
 const RUN_FILE_FLAG: &str = "--run-file";
 const UNSET_FLAG: &str = "--unset-run-option";
 
+/// Run-file options that the command line replaces when it gives their
+/// alternative: `(run-file option, command-line flag)`. The two state one
+/// quantity two ways and the parser refuses both, so a run file's horizon in
+/// iterations yields to a budget in games given for this invocation, and the
+/// other way round, as a repeated option does.
+const ALTERNATIVE_OPTIONS: &[(&str, &str)] =
+    &[("iterations", "total-games"), ("total-games", "iterations")];
+
 #[derive(Debug, Error)]
 pub enum RunFileInvocationError {
     #[error("{RUN_FILE_FLAG} requires a path")]
@@ -76,7 +84,11 @@ pub fn expand_arguments(
         .collect::<Vec<_>>();
     if let Some(options) = first.value().get("options").and_then(Value::as_object) {
         for name in options.keys() {
-            if explicit_flags.contains(name) {
+            let replaced_by_alternative =
+                ALTERNATIVE_OPTIONS.iter().any(|(option, alternative)| {
+                    option == name && explicit_flags.contains(*alternative)
+                });
+            if explicit_flags.contains(name) || replaced_by_alternative {
                 unsets.push(option_pointer(name));
             }
         }
@@ -524,6 +536,54 @@ mod tests {
         assert!(text.windows(2).any(|pair| pair == ["--movetime-ms", "100"]));
         assert!(!text.iter().any(|value| value == "Hash=64"));
         assert!(text.iter().any(|value| value == "Hash=128"));
+    }
+
+    #[test]
+    fn a_budget_on_the_command_line_replaces_the_run_files_horizon_and_back() {
+        let root = tempfile::tempdir().unwrap();
+        let expand = |file: &str, extra: [&str; 2]| {
+            let run = root.path().join("tune.toml");
+            fs::write(&run, file).unwrap();
+            expand_arguments(
+                [
+                    OsString::from("colosseum-cli"),
+                    OsString::from("--run-file"),
+                    run.into_os_string(),
+                ]
+                .into_iter()
+                .chain(extra.map(OsString::from)),
+            )
+            .unwrap()
+            .iter()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+        };
+        let text = expand(
+            "command = [\"spsa\"]\n[options]\niterations = 5000\ngames-per-iteration = 32\n",
+            ["--total-games", "168000"],
+        );
+        assert!(
+            !text.iter().any(|value| value == "--iterations"),
+            "{text:?}"
+        );
+        assert!(
+            text.windows(2)
+                .any(|pair| pair == ["--total-games", "168000"])
+        );
+        assert!(
+            text.windows(2)
+                .any(|pair| pair == ["--games-per-iteration", "32"])
+        );
+
+        let text = expand(
+            "command = [\"spsa\"]\n[options]\ntotal-games = 168000\n",
+            ["--iterations", "10"],
+        );
+        assert!(
+            !text.iter().any(|value| value == "--total-games"),
+            "{text:?}"
+        );
+        assert!(text.windows(2).any(|pair| pair == ["--iterations", "10"]));
     }
 
     #[test]

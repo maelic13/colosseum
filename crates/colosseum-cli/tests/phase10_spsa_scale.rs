@@ -6,7 +6,8 @@
 //! cost that grows with the run shows. Per-iteration commit time must be flat
 //! from the first iterations to the last, the process's resident memory must
 //! not grow with the iterations committed, and the result must stay small:
-//! each iteration is a summary, and the games are in the journal.
+//! each iteration is a summary, and the games are in the journal. A resumed
+//! tune must not keep the games it replayed.
 
 use std::collections::BTreeMap;
 use std::process::{Command, Stdio};
@@ -16,11 +17,14 @@ use serde_json::Value;
 
 const ITERATIONS: u64 = 5_000;
 const GAMES_PER_ITERATION: u64 = 4;
-/// About 1.1 KB of pretty-printed summary per iteration of a one-knob tune;
+/// About 0.5 KB of pretty-printed summary per iteration of a one-knob tune;
 /// the old result carried every game, about 100 KB per iteration.
 const RESULT_LIMIT_BYTES: u64 = 8 * 1024 * 1024;
 /// Resident growth tolerated from early in the run to its end.
 const MEMORY_GROWTH_LIMIT_BYTES: u64 = 16 * 1024 * 1024;
+/// What a resumed tune may hold beyond one that never stopped: measured 2.8 MB
+/// with the replayed games dropped and 13.7 MB with them kept.
+const REPLAY_RESIDUE_LIMIT_BYTES: u64 = 8 * 1024 * 1024;
 
 #[cfg(windows)]
 fn resident_bytes(pid: u32) -> Option<u64> {
@@ -70,16 +74,38 @@ fn median(mut values: Vec<u64>) -> u64 {
     values[values.len() / 2]
 }
 
-#[test]
-fn a_five_thousand_iteration_tune_commits_its_last_iteration_as_cheaply_as_its_first() {
-    let root = tempfile::tempdir().unwrap();
-    let tune = root.path().join("tune.toml");
+/// One invocation of the synthetic tune: its exit code, the resident memory
+/// sampled while it ran, and its wall time.
+struct Invocation {
+    code: Option<i32>,
+    samples: Vec<(Duration, u64)>,
+    wall: Duration,
+}
+
+impl Invocation {
+    /// The median resident memory over the part of the run between two
+    /// fractions of its wall time, when enough samples were taken.
+    fn resident(&self, from: u32, to: u32, of: u32) -> Option<u64> {
+        if self.samples.len() < 20 {
+            return None;
+        }
+        let window = self
+            .samples
+            .iter()
+            .filter(|(at, _)| *at >= self.wall * from / of && *at < self.wall * to / of)
+            .map(|(_, bytes)| *bytes)
+            .collect::<Vec<_>>();
+        (!window.is_empty()).then(|| median(window))
+    }
+}
+
+fn synthetic_tune(root: &std::path::Path, run: &std::path::Path, extra: &[&str]) -> Invocation {
+    let tune = root.join("tune.toml");
     std::fs::write(
         &tune,
         "[[parameters]]\nname = \"Hash\"\ninitial = 16\nmin = 1\nmax = 1024\nc_end = 1.0\n",
     )
     .unwrap();
-    let run = root.path().join("run");
     let executable = env!("CARGO_BIN_EXE_colosseum-cli");
     let mut child = Command::new(executable)
         .arg("--json")
@@ -100,9 +126,12 @@ fn a_five_thousand_iteration_tune_commits_its_last_iteration_as_cheaply_as_its_f
             "--progress-every",
             "1000",
             "--__synthetic-games",
-            "--dir",
+            "--seed",
+            "7",
         ])
-        .arg(&run)
+        .args(extra)
+        .arg("--dir")
+        .arg(run)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -120,8 +149,20 @@ fn a_five_thousand_iteration_tune_commits_its_last_iteration_as_cheaply_as_its_f
         }
         std::thread::sleep(Duration::from_millis(50));
     };
-    assert!(status.success(), "the synthetic tune failed");
-    let wall = started.elapsed();
+    Invocation {
+        code: status.code(),
+        samples,
+        wall: started.elapsed(),
+    }
+}
+
+#[test]
+fn a_five_thousand_iteration_tune_commits_its_last_iteration_as_cheaply_as_its_first() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("run");
+    let invocation = synthetic_tune(root.path(), &run, &[]);
+    assert_eq!(invocation.code, Some(0), "the synthetic tune failed");
+    let wall = invocation.wall;
 
     // Commit time per iteration, from the journal: each iteration ends when
     // its last game does, and the next begins after the commit.
@@ -153,23 +194,11 @@ fn a_five_thousand_iteration_tune_commits_its_last_iteration_as_cheaply_as_its_f
         serde_json::from_slice(&std::fs::read(run.join("result.json")).unwrap()).unwrap();
     let completed = result["driver"]["completed_iterations"].as_array().unwrap();
 
-    let growth = if samples.len() >= 20 {
-        // Early: the second tenth of the run, once the tune is under way.
-        // Late: its last fifth.
-        let early = samples
-            .iter()
-            .filter(|(at, _)| *at >= wall / 10 && *at < wall / 5)
-            .map(|(_, bytes)| *bytes)
-            .collect::<Vec<_>>();
-        let late = samples
-            .iter()
-            .filter(|(at, _)| *at >= wall * 4 / 5)
-            .map(|(_, bytes)| *bytes)
-            .collect::<Vec<_>>();
-        (!early.is_empty() && !late.is_empty()).then(|| (median(early), median(late)))
-    } else {
-        None
-    };
+    // Early: the second tenth of the run, once the tune is under way. Late:
+    // its last fifth.
+    let growth = invocation
+        .resident(1, 2, 10)
+        .zip(invocation.resident(4, 5, 5));
     eprintln!(
         "{ITERATIONS} iterations in {wall:?}; median cycle {first} us early, {last} us late; result {result_bytes} bytes; resident {growth:?}"
     );
@@ -193,6 +222,55 @@ fn a_five_thousand_iteration_tune_commits_its_last_iteration_as_cheaply_as_its_f
         assert!(
             late <= early + MEMORY_GROWTH_LIMIT_BYTES,
             "resident memory grew from {early} to {late} bytes"
+        );
+    }
+}
+
+/// A tune stopped late and resumed replays thousands of games from its
+/// journal to rebuild its iterations. Those games are only an input to the
+/// replay: once the summaries are rebuilt, the resumed process must hold no
+/// more than a tune that never stopped, and must finish the same tune.
+#[test]
+fn a_resumed_tune_does_not_keep_the_games_it_replayed() {
+    const STOP_AT: u64 = ITERATIONS * 9 / 10;
+    let root = tempfile::tempdir().unwrap();
+    let whole = synthetic_tune(root.path(), &root.path().join("whole"), &[]);
+    assert_eq!(whole.code, Some(0), "the uninterrupted tune failed");
+
+    let run = root.path().join("resumed");
+    let stop = STOP_AT.to_string();
+    let first = synthetic_tune(root.path(), &run, &["--stop-after-iteration", &stop]);
+    assert_eq!(first.code, Some(6), "the tune did not stop at {STOP_AT}");
+    let resumed = synthetic_tune(root.path(), &run, &[]);
+    assert_eq!(resumed.code, Some(0), "the resumed tune failed");
+
+    let journal = std::fs::read_to_string(run.join("games.jsonl")).unwrap();
+    assert_eq!(
+        journal.lines().count() as u64,
+        ITERATIONS * GAMES_PER_ITERATION
+    );
+    let result = |name: &str| -> Value {
+        serde_json::from_slice(&std::fs::read(root.path().join(name).join("result.json")).unwrap())
+            .unwrap()
+    };
+    let (whole_result, resumed_result) = (result("whole"), result("resumed"));
+    assert_eq!(
+        resumed_result["driver"]["completed_iterations"],
+        whole_result["driver"]["completed_iterations"],
+        "the resumed tune is not the same tune"
+    );
+
+    // The resumed run's whole life against the uninterrupted run's last
+    // fifth, which holds as many summaries.
+    let resident = resumed.resident(0, 1, 1).zip(whole.resident(4, 5, 5));
+    eprintln!(
+        "resumed at {STOP_AT} of {ITERATIONS}: resident {resident:?} (resumed, uninterrupted) in {:?}",
+        resumed.wall
+    );
+    if let Some((resumed, whole)) = resident {
+        assert!(
+            resumed <= whole + REPLAY_RESIDUE_LIMIT_BYTES,
+            "the resumed tune holds {resumed} bytes against {whole} for one that never stopped"
         );
     }
 }

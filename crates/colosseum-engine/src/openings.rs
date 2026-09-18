@@ -122,10 +122,16 @@ impl OpeningList {
 
     /// The opening's pre-played UCI moves.
     pub fn moves(&self, index: usize) -> impl Iterator<Item = &str> {
-        let entry = self.entries[index];
-        self.part(entry.start + entry.fen_len as usize, entry.moves_len)
+        self.moves_text(index)
             .split(' ')
             .filter(|mv| !mv.is_empty())
+    }
+
+    /// The opening's pre-played UCI moves as stored: one space between moves.
+    #[must_use]
+    pub fn moves_text(&self, index: usize) -> &str {
+        let entry = self.entries[index];
+        self.part(entry.start + entry.fen_len as usize, entry.moves_len)
     }
 
     /// The opening's label: its FEN, or its SAN line.
@@ -155,12 +161,6 @@ impl OpeningList {
     /// Every opening, materialised one at a time.
     pub fn iter(&self) -> impl Iterator<Item = ResolvedOpening> + '_ {
         (0..self.len()).map(|index| self.get(index))
-    }
-
-    /// Every opening, materialised.
-    #[must_use]
-    pub fn into_resolved(self) -> Vec<ResolvedOpening> {
-        self.iter().collect()
     }
 
     fn push(&mut self, fen: Option<&str>, moves: &[String], label: Option<&str>) {
@@ -202,14 +202,13 @@ impl OpeningList {
 /// Returns an error if the file cannot be read, or if it parses to zero usable
 /// openings (so the caller can surface a clear message instead of silently
 /// falling back to the start position).
-pub fn load_openings(book: &OpeningBook) -> Result<Vec<ResolvedOpening>, OpeningError> {
+pub fn load_openings(book: &OpeningBook) -> Result<OpeningList, OpeningError> {
     load_openings_with_order(book, |entries| {
         if book.order == OpeningOrder::Random {
             shuffle(entries, book.seed);
         }
         Ok(())
     })
-    .map(OpeningList::into_resolved)
 }
 
 /// Load openings using the versioned named RNG contract used by CLI runs.
@@ -592,7 +591,7 @@ pub fn summarize(book: &OpeningBook) -> Result<OpeningSummary, OpeningError> {
     let openings = load_openings(book)?;
     Ok(OpeningSummary {
         count: openings.len(),
-        first_label: openings.first().map(|o| o.label.clone()),
+        first_label: (!openings.is_empty()).then(|| openings.label(0).to_owned()),
     })
 }
 
@@ -729,7 +728,11 @@ mod tests {
             let compact = load_openings_named(&book, 42).unwrap();
             let reference = owned_reference(&book, 42);
             assert_eq!(compact.len(), reference.len());
-            assert_eq!(compact.into_resolved(), reference, "{order:?} {count:?}");
+            assert_eq!(
+                compact.iter().collect::<Vec<_>>(),
+                reference,
+                "{order:?} {count:?}"
+            );
         }
         let pgn = "[Event \"a\"]\n\n1. e4 e5 2. Nf3 Nc6 1-0\n\n[Event \"b\"]\n[FEN \"8/8/8/8/8/8/K7/7k w - - 0 1\"]\n\n1. Ka3 Kg1 1/2-1/2\n\n[Event \"c\"]\n\n1. d4 d5 0-1\n";
         let mut book = OpeningBook::new(write_temp("identity.pgn", pgn));
@@ -737,7 +740,10 @@ mod tests {
         book.plies = 3;
         book.order = OpeningOrder::Random;
         assert_eq!(
-            load_openings_named(&book, 7).unwrap().into_resolved(),
+            load_openings_named(&book, 7)
+                .unwrap()
+                .iter()
+                .collect::<Vec<_>>(),
             owned_reference(&book, 7)
         );
     }
@@ -783,16 +789,10 @@ r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - bm Nf6;
         let book = OpeningBook::new(path);
         let openings = load_openings(&book).unwrap();
         assert_eq!(openings.len(), 2);
-        assert!(
-            openings[0]
-                .start_fen
-                .as_deref()
-                .unwrap()
-                .starts_with("rnbqkbnr")
-        );
-        assert!(openings[0].moves.is_empty());
+        assert!(openings.start_fen(0).unwrap().starts_with("rnbqkbnr"));
+        assert!(openings.get(0).moves.is_empty());
         // The second line's trailing opcode is ignored; FEN is still valid.
-        assert!(position_from_fen(openings[1].start_fen.as_deref().unwrap()).is_some());
+        assert!(position_from_fen(openings.start_fen(1).unwrap()).is_some());
     }
 
     #[test]
@@ -828,10 +828,11 @@ r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - bm Nf6;
         let openings = load_openings(&book).unwrap();
         assert_eq!(openings.len(), 2);
         // First game, first 4 plies.
-        assert_eq!(openings[0].moves, vec!["e2e4", "e7e5", "g1f3", "b8c6"]);
-        assert!(openings[0].start_fen.is_none());
+        assert_eq!(openings.get(0).moves, vec!["e2e4", "e7e5", "g1f3", "b8c6"]);
+        assert_eq!(openings.moves_text(0), "e2e4 e7e5 g1f3 b8c6");
+        assert!(openings.start_fen(0).is_none());
         // Second game has only 3 plies available -> truncated to what's there.
-        assert_eq!(openings[1].moves, vec!["d2d4", "d7d5", "c2c4"]);
+        assert_eq!(openings.get(1).moves, vec!["d2d4", "d7d5", "c2c4"]);
     }
 
     #[test]

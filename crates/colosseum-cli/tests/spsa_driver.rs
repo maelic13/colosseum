@@ -498,18 +498,20 @@ fn complete_mini_match_is_one_durable_gradient_commit() {
         1
     );
     // The result carries a summary per iteration and names the journal for
-    // its games: one pair, games 1 and 2.
-    assert_eq!(value["report"]["schema_version"], 2);
+    // its games: one pair, games 1 and 2. What the schedule gives again (arm
+    // vectors, signs, gains, the centres before) is not stored.
+    assert_eq!(value["report"]["schema_version"], 3);
     assert_eq!(value["report"]["games"], "games.jsonl");
     let iteration = &value["report"]["driver"]["completed_iterations"][0];
     assert!(iteration.get("pairs").is_none(), "{iteration}");
     assert_eq!(iteration["games"]["first"], 1);
     assert_eq!(iteration["games"]["last"], 2);
     assert_eq!(iteration["score"]["difference"], 0);
-    assert_eq!(iteration["centers_before"][0], 16.0);
     assert_eq!(iteration["centers_after"][0], 16.0);
-    assert_eq!(iteration["prepared"]["plus"][0]["sent"], 17);
-    assert_eq!(iteration["prepared"]["minus"][0]["sent"], 15);
+    assert!(iteration["faults"].is_object(), "{iteration}");
+    for derivable in ["centers_before", "prepared"] {
+        assert!(iteration.get(derivable).is_none(), "{iteration}");
+    }
 
     for artifact in [
         "spsa-schedule.json",
@@ -555,6 +557,27 @@ fn complete_mini_match_is_one_durable_gradient_commit() {
     let journal = journal_lines(&run);
     assert_eq!(journal.len(), 2);
     assert!(journal.iter().all(|line| line["game"]["iteration"] == 0));
+    // The result names the journal, so `stats` on it reads the run it belongs
+    // to, exactly as `stats` on the directory does.
+    let stats = |path: &std::path::Path| {
+        let output = cli().arg("stats").arg(path).arg("--json").output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["report"].clone()
+    };
+    let (from_result, from_directory) = (stats(&run.join("result.json")), stats(&run));
+    assert_eq!(from_result, from_directory);
+    assert!(
+        from_result["source"]
+            .as_str()
+            .unwrap()
+            .ends_with("games.jsonl"),
+        "{from_result}"
+    );
+    assert_eq!(from_result["complete_pairs"], 1);
     let record: Value =
         serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
     assert_eq!(record["status"], "completed");
@@ -752,8 +775,9 @@ fn engine_fault_commits_invalid_evidence_but_never_a_gradient() {
             .is_empty()
     );
     assert_eq!(driver["final_centers"][0], 16.0);
-    assert_eq!(driver["invalid_iteration"]["centers_before"][0], 16.0);
-    assert!(driver["invalid_iteration"].get("centers_after").is_none());
+    for derivable in ["centers_before", "prepared", "centers_after"] {
+        assert!(driver["invalid_iteration"].get(derivable).is_none());
+    }
     assert!(
         driver["invalid_iteration"]["faults"]["engine_a"]
             .as_u64()

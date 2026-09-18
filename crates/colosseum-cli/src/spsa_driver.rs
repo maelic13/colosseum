@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use colosseum_application::{
-    CompletePair, PairCommitQueue, SpsaCommittedUpdate, SpsaIterationTransition,
-    SpsaMiniMatchScore, SpsaRunSettings, SpsaTuningState, VerifiedSpsaSchedule,
+    CompletePair, PairCommitQueue, SpsaIterationTransition, SpsaMiniMatchScore, SpsaRunSettings,
+    SpsaTuningState, VerifiedSpsaSchedule,
 };
 use colosseum_core::{GameResult, PairGameResult, SpsaIteration};
 use colosseum_engine::GameFault;
@@ -33,11 +33,9 @@ pub enum SpsaStatus {
     Invalid,
 }
 
-/// What a tune keeps of a committed iteration once its games are in the
-/// journal: the centres before and after, the two arm vectors, the pair score
-/// and its faults. The games themselves are the journal's lines named by
-/// `games`; carrying every game's record through the whole run made a
-/// 60-iteration result 6 MB and a real tune's hundreds.
+/// A committed iteration as the observer receives it, once: the centres before
+/// and after, the two arm vectors with their gains, the pair score and its
+/// faults. Only its [`SpsaIterationSummary`] outlives the call.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpsaCommittedIteration {
     /// Zero-based schedule iteration.
@@ -50,14 +48,64 @@ pub struct SpsaCommittedIteration {
     pub games: SpsaJournalGames,
 }
 
-/// An iteration that completed but may not update SPSA, summarised the same
-/// way.
+impl SpsaCommittedIteration {
+    #[must_use]
+    pub fn summary(&self) -> SpsaIterationSummary {
+        SpsaIterationSummary {
+            iteration: self.iteration,
+            centers_after: self.centers_after.clone(),
+            score: self.score,
+            faults: self.faults,
+            games: self.games,
+        }
+    }
+}
+
+/// What a tune keeps of a committed iteration: the centres it moved to, its
+/// pair score and faults, and where its games are in the journal. The arm
+/// vectors, perturbation signs, gains and the centres before are not kept:
+/// the verified schedule and the previous centres give them again, and
+/// storing them cost about 16 KB per iteration at 82 knobs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpsaIterationSummary {
+    /// Zero-based schedule iteration.
+    pub iteration: u32,
+    pub centers_after: Vec<f64>,
+    pub score: SpsaMiniMatchScore,
+    pub faults: MatchFaultCounts,
+    pub games: SpsaJournalGames,
+}
+
+/// An iteration that completed but may not update SPSA, as the observer
+/// receives it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpsaInvalidIteration {
     /// Zero-based schedule iteration that completed but may not update SPSA.
     pub iteration: u32,
     pub centers_before: Vec<f64>,
     pub prepared: SpsaIteration,
+    pub faults: MatchFaultCounts,
+    pub reason: String,
+    pub games: SpsaJournalGames,
+}
+
+impl SpsaInvalidIteration {
+    #[must_use]
+    pub fn summary(&self) -> SpsaInvalidSummary {
+        SpsaInvalidSummary {
+            iteration: self.iteration,
+            faults: self.faults,
+            reason: self.reason.clone(),
+            games: self.games,
+        }
+    }
+}
+
+/// What a tune keeps of the iteration that invalidated it, which stood on the
+/// last committed centres.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpsaInvalidSummary {
+    pub iteration: u32,
     pub faults: MatchFaultCounts,
     pub reason: String,
     pub games: SpsaJournalGames,
@@ -91,18 +139,42 @@ impl SpsaJournalGames {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SpsaCheckpoint {
-    pub completed_iterations: Vec<SpsaCommittedIteration>,
+    pub completed_iterations: Vec<SpsaIterationSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub invalid_iteration: Option<SpsaInvalidIteration>,
+    pub invalid_iteration: Option<SpsaInvalidSummary>,
+}
+
+/// Every engine fault a tune has committed, the invalid iteration's included.
+#[must_use]
+pub fn tune_faults(
+    completed: &[SpsaIterationSummary],
+    invalid: Option<&SpsaInvalidSummary>,
+) -> MatchFaultCounts {
+    let mut faults = MatchFaultCounts::default();
+    for iteration in completed {
+        faults.absorb(iteration.faults);
+    }
+    if let Some(invalid) = invalid {
+        faults.absorb(invalid.faults);
+    }
+    faults
+}
+
+/// A tune rebuilt from its journal: a summary per committed iteration, and the
+/// last one in full for the reports that show its gains.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SpsaReplay {
+    pub completed_iterations: Vec<SpsaIterationSummary>,
+    pub last: Option<SpsaCommittedIteration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SpsaDriverReport {
     pub status: SpsaStatus,
     pub settings: SpsaRunSettings,
-    pub completed_iterations: Vec<SpsaCommittedIteration>,
+    pub completed_iterations: Vec<SpsaIterationSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub invalid_iteration: Option<SpsaInvalidIteration>,
+    pub invalid_iteration: Option<SpsaInvalidSummary>,
     pub final_centers: Vec<f64>,
 }
 
@@ -191,12 +263,11 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
         return Err(SpsaDriverError::TerminalCheckpoint);
     }
     let artifact = request.schedule.artifact().clone();
-    let history = validate_checkpoint_evidence(&request.checkpoint, request.settings)?;
-    let mut state = SpsaTuningState::resume(
+    let mut state = resume_state(
         request.schedule,
         request.settings,
         request.initial_centers,
-        &history,
+        &request.checkpoint.completed_iterations,
     )?;
     let mut completed_iterations = request.checkpoint.completed_iterations;
     // Faults over every committed game, a resumed run's included: the
@@ -278,7 +349,7 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
                 status: SpsaStatus::Invalid,
                 settings: request.settings,
                 completed_iterations,
-                invalid_iteration: Some(invalid),
+                invalid_iteration: Some(invalid.summary()),
                 final_centers: state.centers().to_vec(),
             });
         }
@@ -307,7 +378,7 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
         // The observer committed the games to the journal; the driver keeps
         // the summary and lets the games go.
         drop(pairs);
-        completed_iterations.push(committed);
+        completed_iterations.push(committed.summary());
         request.cancellation.record_committed_unit();
         request
             .progress
@@ -332,15 +403,16 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
 /// tune and a status report stand on the same arithmetic as the run that
 /// wrote the games. An iteration whose games are not all present was cut by a
 /// kill: it and anything after it are dropped, to be played again. What is
-/// returned is the summaries; the games stay in the journal.
+/// returned is the summaries and the last iteration in full; the games stay
+/// in the journal.
 pub fn replay_iterations(
     schedule: VerifiedSpsaSchedule,
     settings: SpsaRunSettings,
     initial_centers: Vec<f64>,
     iterations: &std::collections::BTreeMap<u32, Vec<CompletePair<MatchGame>>>,
-) -> Result<Vec<SpsaCommittedIteration>, SpsaDriverError> {
+) -> Result<SpsaReplay, SpsaDriverError> {
     let mut state = SpsaTuningState::resume(schedule, settings, initial_centers, &[])?;
-    let mut committed = Vec::new();
+    let mut replay = SpsaReplay::default();
     for iteration in 0..settings.iterations {
         let Some(pairs) = iterations.get(&iteration) else {
             break;
@@ -365,7 +437,7 @@ pub fn replay_iterations(
         else {
             return Err(SpsaDriverError::CheckpointMismatch { iteration });
         };
-        committed.push(SpsaCommittedIteration {
+        let committed = SpsaCommittedIteration {
             iteration: update.iteration,
             centers_before: update.centers_before,
             prepared: update.prepared,
@@ -373,9 +445,11 @@ pub fn replay_iterations(
             centers_after: update.centers_after,
             faults: fault_counts(pairs),
             games: SpsaJournalGames::of(iteration, settings)?,
-        });
+        };
+        replay.completed_iterations.push(committed.summary());
+        replay.last = Some(committed);
     }
-    Ok(committed)
+    Ok(replay)
 }
 
 fn arm_launches(
@@ -502,34 +576,38 @@ async fn play_mini_match(
     Ok(pairs)
 }
 
-fn validate_checkpoint_evidence(
-    checkpoint: &SpsaCheckpoint,
+/// The tuning state after the summarised iterations, recomputed from their
+/// scores: each iteration is prepared from the schedule again and must move
+/// the centres exactly where its summary says they went.
+fn resume_state(
+    schedule: VerifiedSpsaSchedule,
     settings: SpsaRunSettings,
-) -> Result<Vec<SpsaCommittedUpdate>, SpsaDriverError> {
-    if checkpoint.completed_iterations.len() > settings.iterations as usize {
+    initial_centers: Vec<f64>,
+    summaries: &[SpsaIterationSummary],
+) -> Result<SpsaTuningState, SpsaDriverError> {
+    if summaries.len() > settings.iterations as usize {
         return Err(SpsaDriverError::CheckpointBeyondHorizon);
     }
-    let mut history = Vec::with_capacity(checkpoint.completed_iterations.len());
-    for (index, record) in checkpoint.completed_iterations.iter().enumerate() {
-        let iteration =
-            u32::try_from(index).map_err(|_| SpsaDriverError::IterationCountOverflow)?;
-        // The games behind each summary were verified when it was rebuilt
-        // from the journal; here the summaries must be the schedule's own
-        // iterations, in order, over the games the schedule gives them.
-        if record.iteration != iteration
-            || record.games != SpsaJournalGames::of(iteration, settings)?
-        {
+    let mut state = SpsaTuningState::resume(schedule, settings, initial_centers, &[])?;
+    for summary in summaries {
+        let iteration = state.completed_iterations();
+        let Some(prepared) = state.prepare_next()? else {
+            return Err(SpsaDriverError::CheckpointBeyondHorizon);
+        };
+        let SpsaIterationTransition::Committed(update) = state.commit_iteration(
+            prepared,
+            settings.pairs_per_iteration(),
+            Some(summary.score),
+            0,
+        )?
+        else {
+            return Err(SpsaDriverError::CheckpointMismatch { iteration });
+        };
+        if summary.iteration != iteration || update.centers_after != summary.centers_after {
             return Err(SpsaDriverError::CheckpointMismatch { iteration });
         }
-        history.push(SpsaCommittedUpdate {
-            iteration: record.iteration,
-            centers_before: record.centers_before.clone(),
-            prepared: record.prepared.clone(),
-            score: record.score,
-            centers_after: record.centers_after.clone(),
-        });
     }
-    Ok(history)
+    Ok(state)
 }
 
 fn validate_pair_ids(
@@ -650,8 +728,6 @@ pub enum SpsaDriverError {
     PreparedDimensionMismatch,
     #[error("SPSA pair identity overflow")]
     PairIdentityOverflow,
-    #[error("SPSA iteration count is not representable")]
-    IterationCountOverflow,
     #[error("SPSA mini-match {iteration} completed {completed_pairs}/{expected_pairs} pairs")]
     IncompleteMiniMatch {
         iteration: u32,
@@ -707,6 +783,111 @@ mod tests {
             pgn: String::new(),
             slot: None,
         }
+    }
+
+    fn one_knob_schedule() -> (VerifiedSpsaSchedule, SpsaRunSettings) {
+        let artifact = colosseum_core::SpsaScheduleArtifact::derive(
+            4,
+            0.01,
+            7,
+            &[colosseum_core::SpsaEndSpec {
+                name: "Tempo".into(),
+                min: -100,
+                max: 100,
+                c_end: 4.0,
+            }],
+        )
+        .unwrap();
+        let verified = VerifiedSpsaSchedule::verify_written(&artifact, artifact.clone()).unwrap();
+        (verified, SpsaRunSettings::new(4, 2).unwrap())
+    }
+
+    fn scored(difference: i32) -> SpsaMiniMatchScore {
+        let (plus_wins, plus_losses, draws) = match difference {
+            1 => (1, 0, 1),
+            -1 => (0, 1, 1),
+            _ => (0, 0, 2),
+        };
+        SpsaMiniMatchScore {
+            plus_wins,
+            plus_losses,
+            draws,
+            difference,
+        }
+    }
+
+    /// Summaries of three iterations as the driver would commit them.
+    fn committed_summaries() -> Vec<SpsaIterationSummary> {
+        let (schedule, settings) = one_knob_schedule();
+        let mut state = SpsaTuningState::resume(schedule, settings, vec![10.0], &[]).unwrap();
+        (0..3)
+            .map(|iteration| {
+                let prepared = state.prepare_next().unwrap().unwrap();
+                let score = scored([1, -1, 1][iteration as usize]);
+                let SpsaIterationTransition::Committed(update) =
+                    state.commit_iteration(prepared, 1, Some(score), 0).unwrap()
+                else {
+                    panic!("a scored iteration commits");
+                };
+                SpsaIterationSummary {
+                    iteration,
+                    centers_after: update.centers_after,
+                    score,
+                    faults: MatchFaultCounts::default(),
+                    games: SpsaJournalGames::of(iteration, settings).unwrap(),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_resume_recomputes_each_iteration_and_refuses_a_summary_it_does_not_reproduce() {
+        let (schedule, settings) = one_knob_schedule();
+        let summaries = committed_summaries();
+        let state = resume_state(schedule.clone(), settings, vec![10.0], &summaries).unwrap();
+        assert_eq!(state.completed_iterations(), 3);
+        assert_eq!(state.centers(), summaries[2].centers_after.as_slice());
+
+        // A centre that the scores do not lead to is refused where it first
+        // diverges, and so is a score changed under it.
+        let mut moved = summaries.clone();
+        moved[1].centers_after[0] += 0.5;
+        assert!(matches!(
+            resume_state(schedule.clone(), settings, vec![10.0], &moved),
+            Err(SpsaDriverError::CheckpointMismatch { iteration: 1 })
+        ));
+        let mut rescored = summaries.clone();
+        rescored[0].score = scored(-1);
+        assert!(matches!(
+            resume_state(schedule.clone(), settings, vec![10.0], &rescored),
+            Err(SpsaDriverError::CheckpointMismatch { iteration: 0 })
+        ));
+        let mut renumbered = summaries;
+        renumbered[2].iteration = 5;
+        assert!(matches!(
+            resume_state(schedule, settings, vec![10.0], &renumbered),
+            Err(SpsaDriverError::CheckpointMismatch { iteration: 2 })
+        ));
+    }
+
+    #[test]
+    fn each_arm_is_sent_its_own_perturbed_value() {
+        let (schedule, settings) = one_knob_schedule();
+        let artifact = schedule.artifact().clone();
+        let state = SpsaTuningState::resume(schedule, settings, vec![10.0], &[]).unwrap();
+        let prepared = state.prepare_next().unwrap().unwrap();
+        let base = colosseum_application::EngineLaunchSpec::path_only("engine".into());
+        let (plus, minus) = arm_launches(&base, &artifact, &prepared).unwrap();
+        let sent = |spec: &colosseum_application::EngineLaunchSpec| match spec.options["Tempo"] {
+            colosseum_application::UciOptionValue::Spin(value) => value,
+            ref other => panic!("{other:?}"),
+        };
+        assert_eq!(sent(&plus), prepared.plus[0].sent);
+        assert_eq!(sent(&minus), prepared.minus[0].sent);
+        // Symmetric about the centre, in the direction of the drawn sign.
+        let sign = i64::from(prepared.perturbations[0]);
+        assert_eq!(sent(&plus) + sent(&minus), 20);
+        assert!((sent(&plus) - sent(&minus)) * sign > 0);
     }
 
     #[test]
