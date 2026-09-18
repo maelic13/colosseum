@@ -2434,12 +2434,25 @@ games" procedure at 10.10, once, on the final state.
   it, because charged time is read when the game task reaches the line,
   not when the line arrived. Required: (1) the `bestmove` timestamp is
   taken by the pipe reader at line arrival, in the UCI session, so no
-  harness work after arrival can be charged to an engine; (2) per-game
-  durability is an append (one journal record and one appended PGN game),
-  the two-generation checkpoint is written every K units or on stop and
-  resume replays the journal tail, so commit cost is O(1) per game rather
-  than O(n); (3) every file write, sync and rename runs on a blocking
-  thread (`spawn_blocking`), never on a runtime worker; (4) `auto`
+  harness work after arrival can be charged to an engine; (2) a run
+  directory holds four files with distinct jobs: `games.jsonl`, an
+  append-only journal with one checksummed record per game (identity,
+  result, termination, fault kind, clock summary; never a PGN);
+  `games.pgn`, appended one game at a time and never rewritten;
+  `checkpoint.json`, constant size, aggregates only (counts, official
+  prefix, LLR, SPSA centre and iteration, the journal offset and running
+  hash it covers), two generations, written every K units or every few
+  seconds and on stop; and `run.log`, human events only (progress blocks,
+  faults, stop and resume), never a game. Resume loads the checkpoint,
+  verifies the journal to the recorded offset by hash, drops a torn last
+  line and replays only the tail, so commit cost is O(1) per game and the
+  official prefix and iteration boundaries are recomputed, never pooled.
+  Durability is group-committed: appends without sync, one `fsync` of the
+  journal and PGN every K units or one second and at every checkpoint and
+  stop; a hard kill loses at most that window, which resume simply does
+  not have. In-memory driver state holds summaries, not PGN text; (3)
+  every file write, sync and rename runs on a blocking thread
+  (`spawn_blocking`), never on a runtime worker; (4) `auto`
   headroom is taken from the lowest-numbered cores upward, so CPU 0, where
   Windows services most interrupts, is never a game core; (5) the fault
   policy documents that time losses count inside engine faults, and the

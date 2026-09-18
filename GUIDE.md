@@ -860,9 +860,11 @@ model as well.
   appended to `run.log`; tests assert the block content and the interval
   — PLAN §Phase 10(p)
 - ☐ **10.9g** — **Model: Sol High.** Commit path off the game loop:
-  `bestmove` timestamped by the pipe reader at arrival; per-game append
-  journal plus appended PGN, checkpoint every K units or on stop, resume
-  replays the journal tail; all file I/O on blocking threads; `auto`
+  `bestmove` timestamped by the pipe reader at arrival; `games.jsonl`
+  journal and appended `games.pgn`, constant-size aggregate checkpoint
+  every K units or seconds and on stop, `run.log` human events only,
+  group-committed fsync, resume verifies the journal by hash and replays
+  the tail; all file I/O on blocking threads; `auto`
   headroom taken from CPU 0 upward; time losses documented inside engine
   faults with a non-zero default for `calibrate`, `match` and
   `tournament`; flat per-commit wall time over a 30,000-game stub run and
