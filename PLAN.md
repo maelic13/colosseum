@@ -2964,9 +2964,21 @@ games" procedure at 10.10, once, on the final state.
   processes, the candidate, were not built: the remaining start-up is the
   operating system's own cost of starting two processes, about 0.2 s of a
   9 s game, and the target is met without giving up per-game isolation.
-  They stay a discriminating test of (w). Owed and maintainer-run: a tune at
-  15 slots, 30 games per iteration, 3+0.03 and a 20 ms margin, read for
-  uncharged time per game, the `h=` distribution and the fault rate.
+  They stay a discriminating test of (w). **Confirmed 2026-09-18** by the
+  maintainer's tune at 15 slots, 30 games per iteration, 3+0.03 and a 20 ms
+  margin, otherwise the 15-slot run of (aa) repeated (same engine, tune,
+  seed 1530, book and schedule): uncharged time per game from slot span less
+  charged time median 231 ms, mean 241 ms, max 934 ms against 1,378, 1,224
+  and 2,792 ms; start-up mean 150 ms, p99 285 ms; uncharged play 19 ms and
+  teardown 12 ms per game; 22.0 s per iteration and 4,910 games per hour
+  against 23.9 s and 4,517; `h=` p50 1 ms and p99 21 ms per arm in both
+  runs, p999 139–159 ms against 142–147 ms, maximum 597 against 584 ms; 0
+  time losses and 0 other faults in 1,800 games, now at a 20 ms margin; no
+  overlapping slot span. About 1% of moves (1,137 and 1,132 per arm of some
+  108,500) carried an overhead above the 20 ms margin and forfeited nothing,
+  since none of them spent the whole clock; the same overhead tail was
+  present before this step and is evidence for (w), where `h=` also holds
+  the engine's own time after its last reported `time`.
 - **(ad) Overlapped SPSA iterations, a recorded mode that is off until its
   evidence is in.** The iteration tail is the last structural loss: 17% of
   slot-time at 30 games on 15 slots, because the next iteration may not
