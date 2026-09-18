@@ -875,6 +875,12 @@ model as well.
   plus 20 ms; (2) fixed-movetime outlier probe — 100 ms, 14 slots, 50,000
   moves, at or below fastchess's outlier rate. Both are recorded in PLAN
   §Phase 10(q) when run
+- ☐ **10.9i** — **Model: Terra High.** Writer hardening: bounded writer
+  queue with off-runtime back-pressure; terminal run record written directly
+  when the writer has failed; pre-10.9g directories refused with the
+  `--restart` guidance; over-long protocol line a per-read fault; unscorable
+  games keep their pair or iteration class in the journal; regression test
+  per item — PLAN §Phase 10(s)
 - ☐ **10.9h** — **Model: Sol High.** Placement per platform research note:
   Linux isolated-core and IRQ-affinity detection and preference, macOS
   advisory contract, WSL excluded as evidence; implementation follows as

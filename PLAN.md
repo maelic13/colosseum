@@ -798,9 +798,12 @@ is pipeline evidence, not a full tolerance measurement. See
   — the fraction of openings played more than once is reported, because reuse
   narrows error bars misleadingly.
 - **Failure policy separates cause.** An engine-attributable crash, timeout,
-  disconnect or illegal move is a forfeit and anomaly; statistical commands are
-  invalid once their configurable engine-fault threshold is exceeded (default
-  zero). An infrastructure/harness failure is never scored: pause or invalidate
+  disconnect or illegal move is a forfeit and anomaly; a command is invalid
+  once its configurable engine-fault threshold is exceeded (time losses count
+  inside it; since Phase 10(q) the default is zero for the pair-atomic `sprt`
+  and `spsa`, and 1% of scheduled games with a minimum of 5 for `match`,
+  `calibrate` and `tournament`). An infrastructure/harness failure is never
+  scored: pause or invalidate
   the run. Retry is allowed only for a failure proved to occur before play or
   independently of either arm. Statistical runs never silently discard a game.
   Exploratory tournaments may opt into a recorded non-strict policy.
@@ -1936,10 +1939,13 @@ per-side forfeit margin. The shared runner now chooses limits and clock state
 from the side to move; the GUI scheduler maps its existing symmetric control
 to both sides, preserving desktop behaviour.
 
-**Implemented clock accounting (4A.2a):** the runner uses clock model
-`go-write-to-bestmove-read` version 1. The monotonic charged interval excludes
-position setup, begins immediately after the flushed `go` write and ends after
-the complete `bestmove` read. The explicit `E > R + M` boundary forfeits before
+**Implemented clock accounting (4A.2a, superseded by Phase 10(q)):** the
+runner used clock model `go-write-to-bestmove-read` version 1 through 10.9f;
+since 10.9g the model is `go-write-to-bestmove-arrival` version 2, in which
+the interval ends at the instant the pipe reader received the complete
+`bestmove` line rather than when the game task read it. The monotonic charged
+interval excludes position setup and begins immediately after the flushed
+`go` write. The explicit `E > R + M` boundary forfeits before
 increment, equality is accepted, and every structured game result records the
 model/version, margins, probed resolution and per-side charged elapsed
 min/median/max without inventing an engine-versus-harness split.
@@ -2472,7 +2478,17 @@ games" procedure at 10.10, once, on the final state.
   latency evidence; the Linux evidence needs a native boot. Deliverable: a
   research note with the per-platform contract and the measurements that
   justify it, then the implementation as its own step if the note says so.
-  Items (k) to (r) precede (j).
+- **(s) Writer hardening**, from review of (q): the writer queue is bounded
+  so the game loop cannot run unboundedly ahead of the disk (a full queue
+  blocks the committing task off the runtime, never a runtime worker); a
+  writer failure still leaves a terminal run record on disk through a
+  direct atomic write, never `running`; a pre-10.9g run directory is refused
+  with the `--restart` guidance rather than a bare schema message; an
+  over-long protocol line is a per-read fault that keeps the session
+  draining, not a permanent termination; an unscorable game keeps its pair
+  or iteration class in the journal beside the `unscorable` mark so replay
+  cannot drop the rest of an iteration. Each with a regression test.
+  Items (k) to (s) precede (j).
 
   **Implementation evidence (Phase 10.9g):** the `bestmove` instant is now
   the pipe's. A dedicated OS thread per engine owns its standard output,
