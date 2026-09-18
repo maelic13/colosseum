@@ -2419,7 +2419,47 @@ games" procedure at 10.10, once, on the final state.
   same block is what `status` prints for the run. The append-only `run.log`
   records every block so a console can be closed and the trajectory
   recovered. Found when a maintainer stopped a real SPRT because the console
-  showed only pair counts. Items (k) to (p) precede (j).
+  showed only pair counts.
+- **(q) Commit path off the game loop, and headroom from the bottom.**
+  Found on 2026-09-18 by a 30,000-game identical-binary calibration and a
+  2,000-game fixed match on the 16-core host: 57 and 14 time forfeits where
+  fastchess had produced none for the same engine at the same control. In
+  every forfeit the engine's last `info` line reported 14–17 ms of search
+  while the harness charged 165–608 ms (median 327 ms). The cause is the
+  per-game commit: the driver's synchronous completion callback rewrites
+  the whole checkpoint with `fsync` and truncates and rewrites the whole
+  `games.pgn`, on the async runtime thread, after every game; both files
+  reached 167 MB, so late in a long run each commit blocks the runtime for
+  hundreds of milliseconds and the `bestmove` of another game waits behind
+  it, because charged time is read when the game task reaches the line,
+  not when the line arrived. Required: (1) the `bestmove` timestamp is
+  taken by the pipe reader at line arrival, in the UCI session, so no
+  harness work after arrival can be charged to an engine; (2) per-game
+  durability is an append (one journal record and one appended PGN game),
+  the two-generation checkpoint is written every K units or on stop and
+  resume replays the journal tail, so commit cost is O(1) per game rather
+  than O(n); (3) every file write, sync and rename runs on a blocking
+  thread (`spawn_blocking`), never on a runtime worker; (4) `auto`
+  headroom is taken from the lowest-numbered cores upward, so CPU 0, where
+  Windows services most interrupts, is never a game core; (5) the fault
+  policy documents that time losses count inside engine faults, and the
+  default for `calibrate`, `match` and `tournament` becomes a documented
+  non-zero fraction with the count reported, while `sprt` and `spsa` keep
+  invalidation because their samples are pair-atomic. Success criteria: a
+  30,000-game stub run's per-commit wall time is flat from first to last
+  game; the charged-time distribution in scrambles (remaining under 100 ms)
+  on the real host shows no move charged above the engine's reported time
+  plus 20 ms in a 2,000-game 3+0.03 match; the fixed-movetime outlier
+  probe (100 ms, 14 slots, 50,000 moves) is at or below fastchess's rate.
+- **(r) Placement per platform.** Linux can reserve cores where Windows can
+  only restrict: detect `/sys/devices/system/cpu/isolated`, `nohz_full` and
+  IRQ affinity, prefer isolated cores in `auto` when present, never require
+  them, and record what was found. macOS stays advisory as recorded. WSL is
+  a virtual machine with synthetic topology and cannot supply placement or
+  latency evidence; the Linux evidence needs a native boot. Deliverable: a
+  research note with the per-platform contract and the measurements that
+  justify it, then the implementation as its own step if the note says so.
+  Items (k) to (r) precede (j).
 
   **Implementation evidence (Phase 10.9f):** one `ProgressBlock` type carries
   every report: a command, its unit count against the cap, the elapsed time

@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.10 — EXIT**, the release acceptance repeat, which needs a real machine and the maintainer |
+| Next step | **10.9g** commit path off the game loop, then 10.9h, then **10.10 — EXIT**, which needs a real machine and the maintainer |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -859,6 +859,19 @@ model as well.
   header, rate and ETA; `status` prints the same block; every block is
   appended to `run.log`; tests assert the block content and the interval
   — PLAN §Phase 10(p)
+- ☐ **10.9g** — **Model: Sol High.** Commit path off the game loop:
+  `bestmove` timestamped by the pipe reader at arrival; per-game append
+  journal plus appended PGN, checkpoint every K units or on stop, resume
+  replays the journal tail; all file I/O on blocking threads; `auto`
+  headroom taken from CPU 0 upward; time losses documented inside engine
+  faults with a non-zero default for `calibrate`, `match` and
+  `tournament`; flat per-commit wall time over a 30,000-game stub run and
+  the real-host scramble and movetime probes as evidence — PLAN §Phase
+  10(q)
+- ☐ **10.9h** — **Model: Sol High.** Placement per platform research note:
+  Linux isolated-core and IRQ-affinity detection and preference, macOS
+  advisory contract, WSL excluded as evidence; implementation follows as
+  its own step if the note calls for it — PLAN §Phase 10(r)
 - ☐ **10.10 — EXIT** — **Model: Sol High.** Release acceptance repeat:
   regenerate the command reference, update `CHANGELOG-CLI.md` under 0.1.0,
   Phase 4B oracle replay and Phase 8.1 parity matrix on the corrected source,
