@@ -1475,11 +1475,11 @@ pub(crate) fn spsa_progress_block(
         .field(
             "faults",
             format!(
-                "engine {}/{}, time losses {}/{}; {}",
-                faults.engine_a,
-                faults.engine_b,
+                "time {}/{}, other {}/{}; {}",
                 faults.time_losses_a,
                 faults.time_losses_b,
+                faults.engine_a.saturating_sub(faults.time_losses_a),
+                faults.engine_b.saturating_sub(faults.time_losses_b),
                 fault_allowance_text(
                     fault_policy,
                     faults,
@@ -2002,11 +2002,11 @@ pub(crate) fn print_spsa(report: &SpsaReport, run_directory: &Path) {
     let games_played = (committed as u64 + u64::from(report.driver.invalid_iteration.is_some()))
         * u64::from(report.driver.settings.games_per_iteration);
     println!(
-        "faults: engine {}/{}, time losses {}/{}; {}",
-        faults.engine_a,
-        faults.engine_b,
+        "faults: time {}/{}, other {}/{}; {}",
         faults.time_losses_a,
         faults.time_losses_b,
+        faults.engine_a.saturating_sub(faults.time_losses_a),
+        faults.engine_b.saturating_sub(faults.time_losses_b),
         fault_allowance_text(report.fault_policy, faults, games_played)
     );
     if let Some(invalid) = &report.driver.invalid_iteration {

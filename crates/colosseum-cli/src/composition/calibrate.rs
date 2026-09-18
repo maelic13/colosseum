@@ -596,11 +596,11 @@ pub(crate) fn print_calibration(report: &CalibrationReport, run_directory: &Path
     }
     let faults = report.fixed_match.faults;
     println!(
-        "faults: engine {}/{}, time losses {}/{}; {}",
-        faults.engine_a,
-        faults.engine_b,
+        "faults: time {}/{}, other {}/{}; {}",
         faults.time_losses_a,
         faults.time_losses_b,
+        faults.engine_a.saturating_sub(faults.time_losses_a),
+        faults.engine_b.saturating_sub(faults.time_losses_b),
         fault_allowance_text(
             report.fixed_match.fault_policy,
             faults,

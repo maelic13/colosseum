@@ -905,7 +905,7 @@ fn calibration_is_invalid_only_past_its_engine_fault_allowance() {
             > 0
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("; 5 allowed"), "{stderr}");
+    assert!(stderr.contains(" of 5 allowed"), "{stderr}");
     // A limit of zero makes the same fault invalidate the calibration.
     let output = cli()
         .arg("calibrate")

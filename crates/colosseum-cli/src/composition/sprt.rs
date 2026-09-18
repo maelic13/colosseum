@@ -775,7 +775,12 @@ pub(crate) fn sprt_progress_block(
             progress.elapsed(),
             remaining,
         ) {
-            Some(left) => progress::format_duration(left.as_secs_f64()),
+            // The estimate assumes the LLR keeps moving as it has so far.
+            Some(left) if terminal => progress::format_duration(left.as_secs_f64()),
+            Some(left) => format!(
+                "{} if the trend holds",
+                progress::format_duration(left.as_secs_f64())
+            ),
             None => "unknown".to_owned(),
         },
     );
@@ -979,11 +984,11 @@ pub(crate) fn print_sprt(
     );
     let faults = report.schedule.faults;
     println!(
-        "faults: engine {}/{}, time losses {}/{}; {}",
-        faults.engine_a,
-        faults.engine_b,
+        "faults: time {}/{}, other {}/{}; {}",
         faults.time_losses_a,
         faults.time_losses_b,
+        faults.engine_a.saturating_sub(faults.time_losses_a),
+        faults.engine_b.saturating_sub(faults.time_losses_b),
         fault_allowance_text(
             report.fault_policy,
             faults,

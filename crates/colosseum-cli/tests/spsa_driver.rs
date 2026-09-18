@@ -824,10 +824,7 @@ fn a_rare_forfeit_is_scored_into_the_gradient_until_the_allowance_is_exceeded() 
     );
     // The count, its rate and the allowance are in the progress block.
     let log = std::fs::read_to_string(run.join("run.log")).unwrap();
-    assert!(
-        log.contains("4 in 4 games (100.00%); 3 allowed (0.5% of games played, at least 3)"),
-        "{log}"
-    );
+    assert!(log.contains("4 of 3 allowed"), "{log}");
 }
 
 #[test]

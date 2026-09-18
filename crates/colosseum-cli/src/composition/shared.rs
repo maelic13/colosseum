@@ -202,27 +202,16 @@ pub(crate) fn fault_allowance_text(
     faults: MatchFaultCounts,
     games: u64,
 ) -> String {
+    // One short clause: the rule behind the allowance is documented, and the
+    // per-side counts already stand beside it on the same line.
     let engine = u64::from(faults.engine_total());
-    let rate = if games == 0 {
-        String::new()
-    } else {
-        format!(" ({:.2}%)", 100.0 * engine as f64 / games as f64)
-    };
     let engine_limit = policy.engine_limit(games);
     let time_limit = policy.time_limit(games);
-    let mut allowed = if time_limit < engine_limit {
-        format!("{engine_limit} allowed, of which {time_limit} time losses")
+    if time_limit < engine_limit {
+        format!("{engine} of {engine_limit} allowed, time losses max {time_limit}")
     } else {
-        format!("{engine_limit} allowed")
-    };
-    if let Some(rate) = policy.rate.filter(|rate| rate.engine_faults) {
-        allowed.push_str(&format!(
-            " ({}% of games played, at least {})",
-            f64::from(rate.per_mille) / 10.0,
-            policy.max_engine_faults
-        ));
+        format!("{engine} of {engine_limit} allowed")
     }
-    format!("{engine} in {games} games{rate}; {allowed}")
 }
 
 pub(crate) fn match_engine_overrides_requested(conditions: &MatchConditions) -> bool {
@@ -776,11 +765,15 @@ impl PairedProgress {
             .field(
                 "faults",
                 format!(
-                    "engine {}/{}, time losses {}/{}; {}",
-                    self.faults.engine_a,
-                    self.faults.engine_b,
+                    "time {}/{}, other {}/{}; {}",
                     self.faults.time_losses_a,
                     self.faults.time_losses_b,
+                    self.faults
+                        .engine_a
+                        .saturating_sub(self.faults.time_losses_a),
+                    self.faults
+                        .engine_b
+                        .saturating_sub(self.faults.time_losses_b),
                     fault_allowance_text(policy, self.faults, u64::from(self.scored_games))
                 ),
             );

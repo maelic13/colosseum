@@ -178,7 +178,7 @@ Progress is written to stderr every `--progress-every N` committed iterations
 ```text
 progress [spsa]: 400/2000 iterations (20%), 41m12s elapsed
   time remaining          2h44m
-  faults                  engine 1/0, time losses 1/0; 1 in 12800 games (0.01%); 64 allowed (0.5% of games played, at least 3)
+  faults                  time 1/0, other 0/0; 1 of 64 allowed
   at a rail               none
   moved most since start  Hash +0.1840, Threads -0.0625, MoveOverhead +0.0090
 ```
@@ -204,7 +204,7 @@ Hash               16    204  203.6412   +188  1..1024
 Threads             4      3    3.4410     -1    1..16
 estimator: rounded centre vector after iteration 1999
 iterations: 2000 of 2000 committed; games: 64000
-faults: engine 0/0, time losses 0/0; 0 in 64000 games (0.00%); 320 allowed (0.5% of games played, at least 3)
+faults: time 0/0, other 0/0; 0 of 320 allowed
 centres at a rail: none
 artifacts: ./colosseum-runs/spsa-...
 ```
