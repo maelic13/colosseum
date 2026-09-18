@@ -437,7 +437,11 @@ pub enum OpeningPolicyReport {
 
 #[derive(Debug, Clone)]
 pub struct MatchOpenings {
-    entries: Vec<ResolvedOpening>,
+    // Shared, never copied: a book holds millions of openings and these
+    // settings are cloned once per launched game or pair. A deep copy cost
+    // about half a second on the one task that launches games, which
+    // serialised every SPSA iteration and every SPRT pair behind it.
+    entries: Arc<Vec<ResolvedOpening>>,
     report: OpeningPolicyReport,
 }
 
@@ -504,7 +508,7 @@ impl MatchOpenings {
         };
         (
             Self {
-                entries: vec![opening],
+                entries: Arc::new(vec![opening]),
                 report: OpeningPolicyReport::Startpos {
                     warning: "opening preselected by the tournament encounter".into(),
                 },
@@ -531,7 +535,7 @@ pub fn resolve_openings(
 ) -> Result<MatchOpenings, MatchError> {
     let Some(mut book) = book else {
         return Ok(MatchOpenings {
-            entries: Vec::new(),
+            entries: Arc::new(Vec::new()),
             report: OpeningPolicyReport::Startpos {
                 warning:
                     "no opening book: every game starts from startpos; opening diversity is absent"
@@ -582,7 +586,10 @@ pub fn resolve_openings(
         reused_openings,
         reuse_fraction,
     };
-    Ok(MatchOpenings { entries, report })
+    Ok(MatchOpenings {
+        entries: Arc::new(entries),
+        report,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
