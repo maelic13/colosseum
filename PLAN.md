@@ -2611,7 +2611,60 @@ games" procedure at 10.10, once, on the final state.
   0.5% of games played, minimum 3, evaluated continuously), with the count
   and rate in every progress block and the final report; `--max-time-losses
   0` restores strict invalidation. Infrastructure faults stay unscored and
-  still invalidate the pair. Items (k) to (v) precede (j).
+  still invalidate the pair.
+- **(w) Residual time losses: parity with fastchess.** The record so far, all
+  on one 16-core host, the same two binaries, `3+0.03`, one thread, 14
+  concurrent games, 20 ms margin: fastchess 0 time losses in about 4,400
+  games and 0 in its 30,000-game identical-binary run; Colosseum 14–15 per
+  2,000 before (u), 206 in 529 with double-booked single logical CPUs, and
+  2 in about 2,500 since (u). If fastchess had Colosseum's present rate,
+  its zero would be roughly a 3% event, so a residue probably remains.
+  **Ruled out by measurement:** the engine's search (every forfeit position
+  replayed against the bare engine answers inside its limit, and ordinary
+  aborted iterations land within half a millisecond of the engine's own
+  hard cap); the harness round trip (`go` write, first `info`, arrival lag
+  and consumption all under 1.3 ms across 4,000 game-sides); the commit
+  path (q); double-booked slots (u); process start and exit storms (no
+  other boundary within 950 ms of a post-(u) forfeit); core sharing (3
+  against 4 per 1,000 at 7 disjoint and 7 shared slots, measured before
+  (u)); harness thread starvation (pinning the harness to the spare core
+  changed nothing). **Not the cause, and kept:** CPU placement. With
+  placement off the fixed-movetime probe showed more late moves, not fewer
+  (6.2 against 4.2–4.7 per 1,000), and an unpinned host carries a hidden
+  per-run offset of about ±10 nElo, which biases verdicts silently where a
+  forfeit is counted and visible. **The signature:** a `bestmove` that
+  arrives 40–60 ms after the engine's own hard cap, a second mode and not
+  scatter, with the engine process itself held. **Untested differences
+  from the engine's point of view:** Colosseum starts fresh engine
+  processes for every game where fastchess keeps them alive between games
+  (cold caches, first-touch faults on the hash, image and heap setup on
+  every game); engines run inside a kill-on-close job object; the mask
+  allows both SMT siblings where fastchess pins one logical CPU; process
+  creation flags, priority class and pipe construction (anonymous against
+  named, buffer sizes, overlapped against blocking reads); the clock
+  messages themselves (Colosseum games spend far fewer moves under 100 ms
+  than fastchess games, 8,600 against 32,000 per 2,000 games, so the two
+  harnesses do not hand the engine the same clock trajectory). The
+  desktop application, unpinned and on the older clock model, is reported
+  never to forfeit the same engines; its incident logs are evidence to
+  count, not an explanation. **Required, as research before any fix:**
+  (1) a source study of fastchess recorded in
+  `docs/architecture/fastchess-mechanics.md`: engine process lifetime and
+  restart policy, process creation and priority, affinity application,
+  pipe and reader design, exactly where its clock starts and stops, how
+  `timemargin` is applied, what it sends between games, and every
+  mechanism a match runner of this kind has that Colosseum lacks, each
+  marked adopt, decline with a reason, or test; (2) a count of time
+  forfeits in the desktop application's incident logs over a large pool;
+  (3) a discriminating run for each untested difference above, 2,000 games
+  each and maintainer-run, changing one thing at a time, with the late-mode
+  metric (scramble moves charged 25 ms past the engine's hard cap) and the
+  forfeit count as the two readings; (4) only then the fix, as its own
+  step. Success criterion: 0 time losses in 10,000 games at 14 slots on the
+  reference host, or a documented operating-system floor that fastchess
+  shares. This does not block use: a symmetric forfeit per thousand games
+  moves an estimate by a small fraction of its error bar, and (v) keeps a
+  sequential test alive through one. Items (k) to (w) precede (j).
 
   **Implementation evidence (Phase 10.9l):** `FaultPolicy` gained an
   optional `rate` (`FaultRate`: per mille, and which of the engine-fault and
@@ -2940,7 +2993,15 @@ the CLI release is never held by GUI work.
   directories under the application data directory. SQLite remains the
   GUI-owned history index (tournament list, names, status, participant
   correlation and the mapping to run directories for resume); it is no longer
-  the game store. The live view reads the observer port.
+  the game store. The live view reads the observer port. **Everything Phase
+  10 established reaches the desktop tournaments through this step, with no
+  second implementation:** the free-slot pool (u), the arrival-stamped clock
+  model and group-committed journal (q), class-aware whole-core placement
+  with CPU 0 left free (c), shared or disjoint game slots (k), per-move
+  annotations with harness overhead (d, t), pair identity and sample classes
+  in the PGN (l, n, o), the fault allowance (q, v), the fixed rating field
+  (g), progress blocks (p) and whatever (w) concludes. The desktop keeps its
+  own presentation of them; it does not keep its own mechanics.
 - **(c) Retire the duplicate scheduler.** Remove `engine::scheduler` and the
   `tournament` feature's game-store execution path. Pre-existing SQLite game
   history stays readable through a read-only migration so the History tab

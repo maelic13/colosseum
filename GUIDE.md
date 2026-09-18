@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9h** placement per platform research note, then **10.10 — EXIT**, which needs a real machine and the maintainer |
+| Next step | **10.9m** residual time losses (research), 10.9h, then **10.10 — EXIT**, which needs a real machine and the maintainer |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -913,6 +913,18 @@ model as well.
   documented fault rate (default 0.5% of games, minimum 3); count and rate in
   every block and the final report; `--max-time-losses 0` restores strict
   behaviour; infrastructure faults unchanged — PLAN §Phase 10(v)
+- ☐ **10.9m** — **Model: Sol High.** Residual time losses, research before any
+  fix: fastchess source study in `docs/architecture/fastchess-mechanics.md`
+  (process lifetime, creation flags and priority, affinity, pipes and
+  readers, where its clock starts and stops, `timemargin`, between-game
+  traffic, every mechanism Colosseum lacks marked adopt, decline or test);
+  forfeit count from the desktop application's incident logs; one
+  maintainer-run 2,000-game discriminating run per untested difference
+  (persistent against fresh engine processes, job object, one logical CPU
+  against whole core, creation flags and priority, pipe construction, clock
+  trajectory), read by the late-mode metric and the forfeit count; the fix
+  is its own later step; target 0 time losses in 10,000 games or a documented
+  floor fastchess shares; does not block use — PLAN §Phase 10(w)
 - ☐ **10.9h** — **Model: Sol High.** Placement per platform research note:
   Linux isolated-core and IRQ-affinity detection and preference, macOS
   advisory contract, WSL excluded as evidence; implementation follows as
@@ -944,7 +956,11 @@ model as well.
   driver: placement, adjudication default, fault classification, annotated
   `games.pgn` and run directories under the app data directory; SQLite stays
   the GUI-owned history index and resume mapping, not the game store; live
-  view reads the observer port — PLAN §Phase 11(b)
+  view reads the observer port; every Phase 10 mechanism (slot pool, arrival
+  clock model and journal, placement, annotations and overhead, pair
+  identity, fault allowance, fixed field, progress, the 10.9m outcome)
+  reaches desktop tournaments here with no second implementation — PLAN
+  §Phase 11(b)
 - ☐ **11.3** — **Model: Sol High.** Retire `engine::scheduler` and the
   `tournament` feature's game-store execution path; read-only migration keeps
   old SQLite history openable; `CLAUDE.md`, architecture docs and a new ADR
