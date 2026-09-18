@@ -5,7 +5,7 @@ use serde::Serialize;
 pub const SUPPORTED_TELEMETRY_SYNTAXES: [&str; 3] = [
     "PGN tags: [%depth N] [%emt SECONDS] [%nodes N]",
     "key/value comments: depth|d=N time|t=Nms|Ns nodes|n=N",
-    "Colosseum move comments: {s=CP|#N d=N t=Nms h=Nms n=N} and {book}; WhiteTimeMarginMs/BlackTimeMarginMs tags",
+    "Colosseum move comments: {s=CP|#N d=N t=Nms h=Nms n=N}, {book} and {forfeit t=Nms h=Nms}; WhiteTimeMarginMs/BlackTimeMarginMs tags",
 ];
 
 const NODE_SEMANTICS_WARNING: &str = "implied NPS is comparable only when node accounting has compatible semantics, normally within the same engine lineage";
@@ -93,6 +93,10 @@ struct MoveTelemetry {
 struct ParsedMove {
     white: bool,
     telemetry: MoveTelemetry,
+    /// Not a move: the search that lost on time without playing one. It
+    /// counts towards the overhead of the side that forfeited and nothing
+    /// else.
+    forfeit: bool,
 }
 
 #[derive(Debug, Default)]
@@ -142,11 +146,26 @@ pub fn analyze_pgn(text: &str) -> SearchTelemetryReport {
             .into_iter()
             .enumerate()
         {
+            let engine = if parsed.white { &white } else { &black };
+            if parsed.forfeit {
+                let samples = by_engine.entry(engine.clone()).or_default();
+                if let Some(overhead) = parsed.telemetry.overhead_ms {
+                    samples.overhead_ms.push(overhead);
+                    if let Some(margin) = if parsed.white {
+                        white_margin
+                    } else {
+                        black_margin
+                    } {
+                        samples.moves_with_margin += 1;
+                        samples.over_margin += u32::from(overhead > margin);
+                    }
+                }
+                continue;
+            }
             if index < tagged_opening_plies || parsed.telemetry.is_book {
                 excluded_opening_moves = excluded_opening_moves.saturating_add(1);
                 continue;
             }
-            let engine = if parsed.white { &white } else { &black };
             let samples = by_engine.entry(engine.clone()).or_default();
             samples.eligible += 1;
             if parsed.telemetry.depth.is_some()
@@ -351,7 +370,16 @@ fn parse_mainline_moves(game: &str, starts_white: bool) -> Vec<ParsedMove> {
                     }
                     comment.push(value);
                 }
-                if variation_depth == 0
+                if variation_depth == 0 && is_forfeit_comment(&comment) {
+                    // The side to move searched and lost on time.
+                    let mut telemetry = MoveTelemetry::default();
+                    merge_comment(&mut telemetry, &comment);
+                    moves.push(ParsedMove {
+                        white,
+                        telemetry,
+                        forfeit: true,
+                    });
+                } else if variation_depth == 0
                     && let Some(last) = moves.last_mut()
                 {
                     merge_comment(&mut last.telemetry, &comment);
@@ -393,6 +421,7 @@ fn flush_move(
         moves.push(ParsedMove {
             white: *white,
             telemetry: MoveTelemetry::default(),
+            forfeit: false,
         });
         *white = !*white;
     }
@@ -414,6 +443,11 @@ fn is_move_token(token: &str) -> bool {
         && token
             .chars()
             .all(|value| value.is_ascii_digit() || value == '.'))
+}
+
+/// `{forfeit …}`: Colosseum's comment for a search that lost on time.
+fn is_forfeit_comment(comment: &str) -> bool {
+    comment.split_whitespace().next() == Some("forfeit")
 }
 
 fn merge_comment(telemetry: &mut MoveTelemetry, comment: &str) {
@@ -602,6 +636,8 @@ mod tests {
             opening_plies: 0,
             identity: None,
             time_margins_ms: Some([20, 5]),
+            slot: None,
+            forfeited_search: None,
         };
         let moves = ["e4", "e5", "Nf3", "Nc6", "Bb5", "a6"].map(String::from);
         let annotations = [
@@ -637,6 +673,36 @@ mod tests {
         assert_eq!(b.p50, Some(5.0));
         // Black's margin is 5 ms: 6 exceeds it, 5 does not, -1 does not.
         assert_eq!((b.moves_with_margin, b.over_margin), (3, 1));
+    }
+
+    #[test]
+    fn a_forfeited_search_counts_for_the_side_that_forfeited_and_only_in_overhead() {
+        let pgn = "[Event \"x\"]\n[White \"A\"]\n[Black \"B\"]\n[Result \"1-0\"]\n[WhiteTimeMarginMs \"20\"]\n[BlackTimeMarginMs \"20\"]\n\n1. e4 {t=30ms h=2ms} e5 {t=30ms h=1ms} 2. Nf3 {t=30ms h=3ms} {forfeit t=164ms h=150ms} 1-0\n";
+        let report = analyze_pgn(pgn);
+        let engine = |name: &str| {
+            report
+                .engines
+                .iter()
+                .find(|engine| engine.engine == name)
+                .unwrap()
+                .clone()
+        };
+        let black = engine("B");
+        // Black's one move and its forfeited search.
+        assert_eq!(black.eligible_moves, 1);
+        assert_eq!(black.harness_overhead_ms.samples, 2);
+        assert_eq!(black.harness_overhead_ms.max, Some(150.0));
+        assert_eq!(
+            (
+                black.harness_overhead_ms.moves_with_margin,
+                black.harness_overhead_ms.over_margin
+            ),
+            (2, 1)
+        );
+        // White's last move keeps its own comment, not the forfeit's.
+        let white = engine("A");
+        assert_eq!(white.harness_overhead_ms.max, Some(3.0));
+        assert_eq!(white.harness_overhead_ms.over_margin, 0);
     }
 
     #[test]

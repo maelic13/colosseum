@@ -46,8 +46,11 @@ nanoseconds — `go_write_ns` (the harness writing `go`), `to_first_info_ns`
 `info`), `last_info_to_bestmove_ns` (last `info` until `bestmove` arrived),
 `bestmove_to_consumed_ns` (until the game task took it; not charged),
 `last_info_lag_ns` (the last `info`'s arrival minus the time it reported) and
-`overhead_ns` (charged time minus the engine's reported time). It never holds
-moves.
+`overhead_ns` (charged time minus the engine's reported time). `slot` names
+the CPU slot the game ran on (`index`, counting from zero) and when it held
+it, in microseconds since the Unix epoch: `started_unix_us` before its first
+engine was spawned, `ended_unix_us` after both had exited. Two games' spans on
+one slot never overlap. It never holds moves.
 Nothing is ever rewritten: a game is committed by appending its line.
 
 **`games.pgn`** is appended one game at a time and never rewritten. Its tags

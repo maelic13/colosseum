@@ -313,6 +313,7 @@ mod tests {
             fault: None,
             error: None,
             pgn: String::new(),
+            slot: None,
         };
         // One iteration of two pairs; the third game could not be scored.
         let entries = [game(1, true), game(2, true), game(3, false), game(4, true)]

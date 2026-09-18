@@ -24,6 +24,11 @@ pub struct StubArgs {
     /// Deterministic search delay used by kill/resume acceptance tests.
     #[arg(long, default_value_t = 0)]
     sleep_ms: u64,
+    /// An extra search delay of this many milliseconds times a factor from 1
+    /// to 6 drawn from the process identifier, so games run to uneven
+    /// lengths. Slot-placement tests use it.
+    #[arg(long, default_value_t = 0)]
+    uneven_sleep_ms: u64,
     #[arg(long)]
     pid_file: Option<PathBuf>,
     /// Deliberately untrusted NPS diagnostic used by harness tests.
@@ -144,8 +149,12 @@ pub async fn run(args: StubArgs) -> std::io::Result<()> {
                 if line.starts_with("go ponder ") || line.contains("movetime 10000") {
                     searching = true;
                 } else {
-                    if args.sleep_ms > 0 {
-                        tokio::time::sleep(std::time::Duration::from_millis(args.sleep_ms)).await;
+                    let uneven = args.uneven_sleep_ms * (1 + u64::from(std::process::id()) % 6);
+                    if args.sleep_ms + uneven > 0 {
+                        tokio::time::sleep(std::time::Duration::from_millis(
+                            args.sleep_ms + uneven,
+                        ))
+                        .await;
                     }
                     let nodes = line
                         .split_whitespace()

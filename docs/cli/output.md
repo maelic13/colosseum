@@ -33,6 +33,9 @@ its dry-run or suite report explicitly.
 Every game Colosseum writes carries its schedule identity in the PGN header:
 `GameNumber`, `PairNumber`, `PairGame`, `OpeningIndex` where a book supplied
 one, and `OpeningLabel`, beside the standard seven tags and `OpeningPlyCount`.
+It also names the CPU slot the game ran on, `GameSlot`, counting from zero, and
+each side's time margin, `WhiteTimeMarginMs` and `BlackTimeMarginMs`; a forfeit
+forensic names the slot too.
 A game the run recorded but did not count — one abandoned on an infrastructure
 fault, or a pair played after a sequential test had already concluded — also
 carries `ColosseumSample`. Together they are what lets an exported PGN be replayed into

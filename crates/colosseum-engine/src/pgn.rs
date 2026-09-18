@@ -10,7 +10,7 @@ use colosseum_core::{GameResult, Termination};
 /// A reader that knows this identifier knows exactly which fields a comment
 /// can contain and how they are spelled, so a PGN taken months apart stays
 /// interpretable. It is recorded in every run record.
-pub const PGN_ANNOTATION_WRITER: &str = "colosseum-move-comment/2";
+pub const PGN_ANNOTATION_WRITER: &str = "colosseum-move-comment/3";
 
 /// A score as the mover reported it, from the mover's own point of view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,8 +41,10 @@ pub struct SearchAnnotation {
     pub depth: Option<u32>,
     /// Harness-charged elapsed milliseconds, per the recorded clock model.
     pub time_ms: Option<u64>,
-    /// Harness overhead: the charged milliseconds minus the time the engine
-    /// reported. Absent when the engine reported no time.
+    /// Harness overhead: the charged time minus the time the engine reported,
+    /// rounded to the nearest millisecond. Absent when the engine reported no
+    /// time, or when its clock did not start where the charge did (a
+    /// `ponderhit`).
     pub overhead_ms: Option<i64>,
     pub nodes: Option<u64>,
 }
@@ -56,6 +58,42 @@ pub enum MoveAnnotation {
     Search(SearchAnnotation),
 }
 
+impl SearchAnnotation {
+    /// The `key=value` fields of this search, in the order they are written.
+    fn fields(self) -> Vec<String> {
+        let search = self;
+        let mut fields = Vec::new();
+        if let Some(score) = search.score {
+            fields.push(format!("s={}", score.render()));
+        }
+        if let Some(depth) = search.depth {
+            fields.push(format!("d={depth}"));
+        }
+        if let Some(time_ms) = search.time_ms {
+            fields.push(format!("t={time_ms}ms"));
+        }
+        if let Some(overhead_ms) = search.overhead_ms {
+            fields.push(format!("h={overhead_ms}ms"));
+        }
+        if let Some(nodes) = search.nodes {
+            fields.push(format!("n={nodes}"));
+        }
+        fields
+    }
+
+    /// Render the search that lost on time and played no move:
+    /// `{forfeit t=…ms h=…ms}`, with whatever is known of when its answer
+    /// came, or `{forfeit}` when it never came.
+    fn render_forfeit(self) -> String {
+        let fields = self.fields();
+        if fields.is_empty() {
+            "{forfeit}".into()
+        } else {
+            format!("{{forfeit {}}}", fields.join(" "))
+        }
+    }
+}
+
 impl MoveAnnotation {
     /// Render `{book}` or `{s=… d=… t=…ms h=…ms n=…}`, or nothing when an
     /// engine move carries no reported field at all.
@@ -63,22 +101,7 @@ impl MoveAnnotation {
         match self {
             Self::Book => Some("{book}".into()),
             Self::Search(search) => {
-                let mut fields = Vec::new();
-                if let Some(score) = search.score {
-                    fields.push(format!("s={}", score.render()));
-                }
-                if let Some(depth) = search.depth {
-                    fields.push(format!("d={depth}"));
-                }
-                if let Some(time_ms) = search.time_ms {
-                    fields.push(format!("t={time_ms}ms"));
-                }
-                if let Some(overhead_ms) = search.overhead_ms {
-                    fields.push(format!("h={overhead_ms}ms"));
-                }
-                if let Some(nodes) = search.nodes {
-                    fields.push(format!("n={nodes}"));
-                }
+                let fields = search.fields();
                 (!fields.is_empty()).then(|| format!("{{{}}}", fields.join(" ")))
             }
         }
@@ -128,6 +151,11 @@ pub struct PgnTags {
     /// move's charged time may exceed the clock before it forfeits. With the
     /// per-move `h=`, they say how close each move came.
     pub time_margins_ms: Option<[u64; 2]>,
+    /// The CPU slot the game ran on, counting from zero.
+    pub slot: Option<usize>,
+    /// The search that lost on time without playing a move, written as a
+    /// `{forfeit …}` comment before the result so its overhead is not lost.
+    pub forfeited_search: Option<SearchAnnotation>,
 }
 
 /// Render a complete PGN game (header + movetext + result token).
@@ -176,6 +204,9 @@ pub fn build_pgn(tags: &PgnTags, san_moves: &[String], annotations: &[MoveAnnota
         tag("WhiteTimeMarginMs", &white.to_string());
         tag("BlackTimeMarginMs", &black.to_string());
     }
+    if let Some(slot) = tags.slot {
+        tag("GameSlot", &slot.to_string());
+    }
 
     let (start_move, black_first) = fen_move_context(tags.fen.as_deref());
 
@@ -183,6 +214,7 @@ pub fn build_pgn(tags: &PgnTags, san_moves: &[String], annotations: &[MoveAnnota
     out.push_str(&movetext(
         san_moves,
         annotations,
+        tags.forfeited_search,
         tags.result,
         start_move,
         black_first,
@@ -212,6 +244,7 @@ fn fen_move_context(fen: Option<&str>) -> (u32, bool) {
 fn movetext(
     san_moves: &[String],
     annotations: &[MoveAnnotation],
+    forfeited_search: Option<SearchAnnotation>,
     result: GameResult,
     start_move: u32,
     black_first: bool,
@@ -239,6 +272,9 @@ fn movetext(
             move_no += 1;
         }
         white_to_move = !white_to_move;
+    }
+    if let Some(search) = forfeited_search {
+        tokens.push(search.render_forfeit());
     }
     tokens.push(result.pgn().to_string());
 
@@ -297,6 +333,8 @@ mod tests {
             identity: None,
             opening_plies: 2,
             time_margins_ms: Some([20, 25]),
+            slot: Some(3),
+            forfeited_search: None,
         };
         let pgn = build_pgn(&tags, &["e4".into(), "e5".into(), "Qh5".into()], &[]);
         assert!(pgn.contains("[White \"Stockfish\"]"));
@@ -305,6 +343,7 @@ mod tests {
         assert!(pgn.contains("[OpeningPlyCount \"2\"]"));
         assert!(pgn.contains("[WhiteTimeMarginMs \"20\"]"));
         assert!(pgn.contains("[BlackTimeMarginMs \"25\"]"));
+        assert!(pgn.contains("[GameSlot \"3\"]"));
         assert!(pgn.contains("1. e4 e5 2. Qh5"));
         assert!(pgn.trim_end().ends_with("1-0"));
     }
@@ -326,6 +365,8 @@ mod tests {
             identity: None,
             opening_plies: 0,
             time_margins_ms: None,
+            slot: None,
+            forfeited_search: None,
         };
         let pgn = build_pgn(&tags, &["Nc6".into(), "Bb5".into(), "a6".into()], &[]);
         // Black moves first at move 2, then White's move 3, then Black's move 3.
@@ -350,11 +391,45 @@ mod tests {
             identity: None,
             opening_plies: 0,
             time_margins_ms: None,
+            slot: None,
+            forfeited_search: None,
         };
         let pgn = build_pgn(&tags, &[], &[]);
         assert!(pgn.contains("[White \"Engine \\\"X\\\"\"]"));
         assert!(!pgn.contains("[TimeControl"));
         assert!(!pgn.contains("MarginMs"));
+        assert!(!pgn.contains("GameSlot"));
+        assert!(!pgn.contains("forfeit"));
+    }
+
+    #[test]
+    fn a_forfeited_search_is_written_before_the_result_with_what_is_known_of_it() {
+        let mut tags = PgnTags {
+            event: "E".into(),
+            site: "S".into(),
+            date: "2026.01.01".into(),
+            round: 1,
+            white: "W".into(),
+            black: "B".into(),
+            result: GameResult::WhiteWin,
+            time_control: String::new(),
+            termination: Some(Termination::TimeForfeit),
+            fen: None,
+            identity: None,
+            opening_plies: 0,
+            time_margins_ms: None,
+            slot: None,
+            forfeited_search: Some(SearchAnnotation {
+                time_ms: Some(164),
+                overhead_ms: Some(150),
+                ..SearchAnnotation::default()
+            }),
+        };
+        let pgn = build_pgn(&tags, &["e4".into()], &[]);
+        assert!(pgn.contains("1. e4 {forfeit t=164ms h=150ms} 1-0"), "{pgn}");
+        tags.forfeited_search = Some(SearchAnnotation::default());
+        let pgn = build_pgn(&tags, &["e4".into()], &[]);
+        assert!(pgn.contains("1. e4 {forfeit} 1-0"), "{pgn}");
     }
 
     #[test]

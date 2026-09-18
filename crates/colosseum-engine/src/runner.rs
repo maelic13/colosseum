@@ -46,6 +46,12 @@ const LATE_BESTMOVE_WINDOW: Duration = Duration::from_secs(1);
 pub const CLOCK_MODEL_ID: &str = "go-write-to-bestmove-arrival";
 pub const CLOCK_MODEL_VERSION: u32 = 2;
 
+/// Nanoseconds to the nearest millisecond, halves away from zero.
+fn round_ns_to_ms(nanos: i64) -> i64 {
+    let half = if nanos < 0 { -500_000 } else { 500_000 };
+    (nanos + half) / 1_000_000
+}
+
 fn color_idx(color: Color) -> usize {
     if color == Color::White { 0 } else { 1 }
 }
@@ -169,6 +175,9 @@ pub struct GameSpec {
     /// Schedule identity written into the exported game; `None` for callers
     /// that do not schedule colour-reversed pairs.
     pub identity: Option<GamePairIdentity>,
+    /// The CPU slot this game holds, counting from zero; `None` for callers
+    /// that do not place games on slots.
+    pub slot: Option<usize>,
 }
 
 /// The outcome of a finished game.
@@ -475,6 +484,9 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
     let mut black_move_time = MoveTimeAccumulator::default();
     // Per colour, where each search's time went.
     let mut round_trips = [RoundTripRecorder::default(), RoundTripRecorder::default()];
+    // The search that lost on time, for the PGN: it played no move, but its
+    // overhead is the one that mattered.
+    let mut forfeited_search: Option<SearchAnnotation> = None;
     // Per color: the predicted reply the engine is currently pondering on
     // (canonical UCI) and when that ponder search started. `Some` means a
     // `go ponder` is outstanding and must be resolved before the engine's
@@ -606,13 +618,27 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         if matches!(search, Err(UciError::MoveTimeout)) {
             engine.await_late_bestmove(LATE_BESTMOVE_WINDOW).await;
         }
-        if let Some(timing) = engine.take_search_timing() {
+        let timing = engine.take_search_timing();
+        // One rounding for the PGN and the journal: the journal keeps the
+        // nanoseconds, the PGN the same value to the nearest millisecond.
+        let overhead_ms = timing
+            .as_ref()
+            .and_then(colosseum_uci::SearchTiming::overhead_ns)
+            .map(round_ns_to_ms);
+        if let Some(timing) = timing {
             round_trips[color_idx(mover)].record(san_moves.len() + 1, timing);
         }
 
         let output = match search {
             Ok(output) => output,
             Err(UciError::MoveTimeout) => {
+                forfeited_search = Some(SearchAnnotation {
+                    time_ms: timing
+                        .and_then(|timing| timing.charged())
+                        .and_then(|charged| u64::try_from(charged.as_millis()).ok()),
+                    overhead_ms,
+                    ..SearchAnnotation::default()
+                });
                 break Outcome::engine_loss(
                     mover,
                     Termination::TimeForfeit,
@@ -648,6 +674,16 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             output.elapsed,
             time_margin_for(&spec, mover),
         ) {
+            forfeited_search = Some(SearchAnnotation {
+                score: output.score.map(|score| match score {
+                    colosseum_uci::Score::Cp(cp) => AnnotationScore::Centipawns(cp),
+                    colosseum_uci::Score::Mate(moves) => AnnotationScore::MateIn(moves),
+                }),
+                depth: output.depth,
+                time_ms: u64::try_from(output.elapsed.as_millis()).ok(),
+                overhead_ms,
+                nodes: output.reported_nodes,
+            });
             break Outcome::engine_loss(
                 mover,
                 Termination::TimeForfeit,
@@ -686,10 +722,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             }),
             depth: output.depth,
             time_ms: u64::try_from(output.elapsed.as_millis()).ok(),
-            overhead_ms: output.reported_time_ms.and_then(|engine_ms| {
-                let charged_ms = i64::try_from(output.elapsed.as_millis()).ok()?;
-                Some(charged_ms - i64::try_from(engine_ms).ok()?)
-            }),
+            overhead_ms,
             nodes: output.reported_nodes,
         }));
         // Store the CANONICAL encoding, not the engine's raw text: the move
@@ -858,6 +891,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         &annotations,
         outcome.result,
         outcome.termination,
+        forfeited_search,
     );
 
     GameReport {
@@ -940,6 +974,9 @@ fn incident_report(
         spec.black.spawn.path.display()
     );
     let _ = writeln!(s, "time control: {}", spec.time_control_label);
+    if let Some(slot) = spec.slot {
+        let _ = writeln!(s, "slot:        {slot}");
+    }
     let _ = writeln!(s, "termination: {:?}", outcome.termination);
     let _ = writeln!(s, "result:      {}", outcome.result.pgn());
     if let Some(err) = &outcome.error {
@@ -1219,15 +1256,20 @@ async fn handle_setup_failure(
                 let _ = engine.quit(Duration::from_millis(500)).await;
                 (None, None)
             }
-            Prepared::Failed(err, engine) => (
-                Some((err, false)),
-                Some((engine.transcript(), engine.stderr_tail())),
-            ),
+            // A game returns only once its engines are gone: the slot it
+            // held is then free for the next game, and nothing is left
+            // running on it.
+            Prepared::Failed(err, mut engine) => {
+                let forensics = (engine.transcript(), engine.stderr_tail());
+                let _ = engine.kill().await;
+                (Some((err, false)), Some(forensics))
+            }
             Prepared::NoSpawn(err) => (Some((err, true)), None),
-            Prepared::Infrastructure(message, engine) => (
-                Some((UciError::Protocol(message), true)),
-                Some((engine.transcript(), engine.stderr_tail())),
-            ),
+            Prepared::Infrastructure(message, mut engine) => {
+                let forensics = (engine.transcript(), engine.stderr_tail());
+                let _ = engine.kill().await;
+                (Some((UciError::Protocol(message), true)), Some(forensics))
+            }
         }
     }
 
@@ -1262,7 +1304,7 @@ async fn handle_setup_failure(
         stats: GameStats::default(),
         san_moves: Vec::new(),
         uci_moves: Vec::new(),
-        pgn: render_pgn(spec, &[], &[], outcome.result, outcome.termination),
+        pgn: render_pgn(spec, &[], &[], outcome.result, outcome.termination, None),
         clock_accounting: clock_accounting_report(spec, monotonic_resolution_ns, None, None, None),
         fault: outcome.fault,
         error: outcome.error,
@@ -1364,6 +1406,7 @@ fn render_pgn(
     annotations: &[MoveAnnotation],
     result: GameResult,
     termination: Termination,
+    forfeited_search: Option<SearchAnnotation>,
 ) -> String {
     let tags = PgnTags {
         event: spec.event.clone(),
@@ -1382,6 +1425,8 @@ fn render_pgn(
             u64::try_from(spec.white_time_margin.as_millis()).unwrap_or(u64::MAX),
             u64::try_from(spec.black_time_margin.as_millis()).unwrap_or(u64::MAX),
         ]),
+        slot: spec.slot,
+        forfeited_search,
     };
     build_pgn(&tags, san_moves, annotations)
 }
@@ -1543,6 +1588,15 @@ mod tests {
         ));
         assert_eq!(clocks.white, Duration::ZERO);
         assert_eq!(clocks.black, Duration::ZERO);
+    }
+
+    #[test]
+    fn overhead_rounds_to_the_nearest_millisecond_both_ways() {
+        assert_eq!(round_ns_to_ms(3_499_999), 3);
+        assert_eq!(round_ns_to_ms(3_500_000), 4);
+        assert_eq!(round_ns_to_ms(-1_499_999), -1);
+        assert_eq!(round_ns_to_ms(-1_500_000), -2);
+        assert_eq!(round_ns_to_ms(0), 0);
     }
 
     #[test]

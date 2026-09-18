@@ -125,6 +125,7 @@ pub async fn run_pair_schedule(
     let mut next_to_schedule = next_pair_id;
 
     let mut cancelled = false;
+    let mut pool = request.execution.slot_pool()?;
     while (!accumulator.stopped()
         && !request.cancellation.stopping()
         && next_to_schedule <= request.design.max_pairs)
@@ -137,11 +138,14 @@ pub async fn run_pair_schedule(
         {
             let pair_id = next_to_schedule;
             next_to_schedule += 1;
-            let slot = request.execution.slots
-                [(pair_id as usize - 1) % request.execution.slots.len()]
-            .clone();
+            // A pair holds one slot for both of its games.
+            let position = pool
+                .take()
+                .expect("a run keeps no more pairs live than it has slots");
+            debug_assert_eq!(pool.held(), workers.len() + 1);
+            let slot = request.execution.slots[position].clone();
             let settings = request.settings.clone();
-            workers.spawn(async move { play_pair(pair_id, &slot, settings).await });
+            workers.spawn(async move { (position, play_pair(pair_id, &slot, settings).await) });
         }
         let joined = tokio::select! {
             joined = workers.join_next() => joined,
@@ -154,7 +158,10 @@ pub async fn run_pair_schedule(
         let Some(joined) = joined else {
             break;
         };
-        let pair = joined.map_err(|error| PairScheduleError::Worker(error.to_string()))??;
+        let (position, pair) =
+            joined.map_err(|error| PairScheduleError::Worker(error.to_string()))?;
+        pool.give_back(position);
+        let pair = pair?;
         for mut released in commit_queue.complete(pair)? {
             let disposition = accumulator.admit(&released)?;
             if let Some(observer) = &request.observer {
@@ -385,6 +392,7 @@ mod tests {
             fault,
             error: None,
             pgn: String::new(),
+            slot: None,
         }
     }
 

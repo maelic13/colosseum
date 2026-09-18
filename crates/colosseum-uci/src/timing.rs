@@ -43,6 +43,11 @@ pub struct SearchTiming {
     /// The `bestmove` arrived after the deadline, and was read only to learn
     /// when it came.
     pub late: bool,
+    /// The engine's clock started at an earlier command than the charge did:
+    /// `go ponder` before `ponderhit`, or `go` before `stop`. Its reported
+    /// time then shares no origin with the charged interval, and neither the
+    /// overhead nor the last `info`'s lag can be computed from the two.
+    pub earlier_origin: bool,
 }
 
 /// One phase of a search's round trip, named for the report.
@@ -79,6 +84,7 @@ impl SearchTiming {
             bestmove_arrived: None,
             consumed: None,
             late: false,
+            earlier_origin: false,
         }
     }
 
@@ -122,6 +128,9 @@ impl SearchTiming {
     /// engine reported more than it was charged, which rounding can do.
     #[must_use]
     pub fn overhead_ns(&self) -> Option<i64> {
+        if self.earlier_origin {
+            return None;
+        }
         let charged = self.charged()?;
         let engine = self.engine_time_ms?;
         Some(signed_ns(charged) - i64::try_from(engine).ok()?.saturating_mul(1_000_000))
@@ -133,6 +142,9 @@ impl SearchTiming {
     /// was written shows up here, together with the pipe's delivery time.
     #[must_use]
     pub fn last_info_lag_ns(&self) -> Option<i64> {
+        if self.earlier_origin {
+            return None;
+        }
         let arrived = self.since_go(self.last_info?);
         let reported = self.last_info_time_ms?;
         Some(signed_ns(arrived) - i64::try_from(reported).ok()?.saturating_mul(1_000_000))
@@ -188,6 +200,19 @@ mod tests {
         assert_eq!(timing.overhead_ns(), None);
         assert_eq!(timing.phase(RoundTripPhase::LastInfoToBestmove), None);
         assert_eq!(timing.last_info_lag_ns(), Some(20_000_000));
+    }
+
+    #[test]
+    fn a_search_timed_from_ponderhit_has_no_overhead_against_a_clock_started_at_go_ponder() {
+        let go = Instant::now();
+        let mut timing = SearchTiming::new(go, go, go + ms(500));
+        // The engine has been pondering for 400 ms and reports that.
+        timing.info(go + ms(10), Some(410));
+        timing.bestmove_arrived = Some(go + ms(12));
+        timing.earlier_origin = true;
+        assert_eq!(timing.charged(), Some(ms(12)));
+        assert_eq!(timing.overhead_ns(), None);
+        assert_eq!(timing.last_info_lag_ns(), None);
     }
 
     #[test]

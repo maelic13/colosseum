@@ -124,15 +124,22 @@ engine move the comment is:
 `s` is the score from the mover’s own point of view, a signed integer in
 centipawns or `#<n>` / `#-<n>` for mate in `n`. `d` is the reported depth, `t`
 is the harness-charged elapsed milliseconds under the recorded clock model, `h`
-is the harness overhead — `t` minus the search time the engine itself reported,
-which can be slightly negative from rounding — and `n` is the reported node
-count. A field the engine did not report is left out entirely rather than
-written as zero, so an absent value and a reported zero stay distinguishable;
-`h` is absent when the engine reported no time. Moves pre-played from an
-opening book carry `{book}` instead, and the `OpeningPlyCount` tag still marks
-how many there were. The `WhiteTimeMarginMs` and `BlackTimeMarginMs` tags name
-each side's time margin, so a PGN alone says how close each move's overhead
-came to a forfeit.
+is the harness overhead — the charged time minus the search time the engine
+itself reported, rounded to the nearest millisecond, which can be slightly
+negative — and `n` is the reported node count. A field the engine did not
+report is left out entirely rather than written as zero, so an absent value and
+a reported zero stay distinguishable. `h` is absent when the engine reported
+no time, and after a `ponderhit` under `--ponder`, where the engine's clock
+started at `go ponder` and the charge at `ponderhit`, so the two share no
+origin. Moves pre-played from an opening book carry `{book}` instead, and the
+`OpeningPlyCount` tag still marks how many there were.
+
+A search that lost on time played no move, so it has no move to comment on.
+It is written just before the result as `{forfeit t=<ms>ms h=<ms>ms}` with the
+time its answer finally arrived, or `{forfeit}` when no answer came. The
+`WhiteTimeMarginMs` and `BlackTimeMarginMs` tags name each side's time margin,
+so a PGN alone says how close each move's overhead came to a forfeit, and
+`GameSlot` names the CPU slot the game ran on, counting from zero.
 
 The writer form is versioned and every run record names the version it used, so
 a PGN read months later can be interpreted against the exact form that produced

@@ -439,6 +439,7 @@ mod tests {
             iteration: None,
             round: None,
             error: None,
+            slot: None,
         }
     }
 

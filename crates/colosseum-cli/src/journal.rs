@@ -29,7 +29,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::match_runner::OpeningAssignment;
+use crate::match_runner::{OpeningAssignment, SlotOccupancy};
 
 pub const JOURNAL_FILE: &str = "games.jsonl";
 pub const PGN_FILE: &str = "games.pgn";
@@ -68,6 +68,9 @@ pub struct GameRecord {
     pub round: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The CPU slot the game ran on and when it held it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<SlotOccupancy>,
 }
 
 /// Where a game's moves sit in `games.pgn`.
@@ -556,6 +559,7 @@ mod tests {
             iteration: None,
             round: None,
             error: None,
+            slot: None,
         }
     }
 

@@ -23,6 +23,8 @@ struct Phases {
     between_info_ms: u64,
     bestmove_after_info_ms: u64,
     report_time_ms: u64,
+    /// Write a line longer than the protocol allows just before `bestmove`.
+    overlong_before_bestmove: bool,
 }
 
 fn arguments() -> FixtureArgs {
@@ -36,6 +38,11 @@ fn arguments() -> FixtureArgs {
             parsed.hang_on_go = true;
         } else if argument == "--legal-sequence" {
             parsed.legal_sequence = true;
+        } else if argument == "--overlong-before-bestmove" {
+            parsed
+                .phases
+                .get_or_insert_with(Phases::default)
+                .overlong_before_bestmove = true;
         } else if argument == "--append-pid-file" {
             parsed.append_pid_file = true;
         } else if let Some(value) = argument.strip_prefix("--pid-file=") {
@@ -143,6 +150,9 @@ fn write_timed_search(output: &mut impl Write, phases: Phases) -> std::io::Resul
     )?;
     output.flush()?;
     std::thread::sleep(Duration::from_millis(phases.bestmove_after_info_ms));
+    if phases.overlong_before_bestmove {
+        writeln!(output, "info string {}", "x".repeat(70 * 1024))?;
+    }
     Ok(())
 }
 

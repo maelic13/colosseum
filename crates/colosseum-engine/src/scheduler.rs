@@ -1032,6 +1032,7 @@ fn build_game_spec(driver: &Driver, scheduled: &ScheduledGame) -> GameSpec {
         // The GUI schedules rounds, not colour-reversed pairs; Phase 11 gives
         // it the harness scheduler and its identity with it.
         identity: None,
+        slot: None,
     }
 }
 

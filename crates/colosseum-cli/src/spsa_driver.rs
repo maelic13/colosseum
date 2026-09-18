@@ -296,8 +296,12 @@ pub fn replay_iterations(
             break;
         }
         validate_pair_ids(iteration, settings, pairs)?;
-        if pairs.iter().any(pair_has_fault) || pairs.iter().any(pair_is_unscorable) {
-            return Err(SpsaDriverError::CheckpointMismatch { iteration });
+        if let Some((game, reason)) = unusable_game(pairs) {
+            return Err(SpsaDriverError::UnusableJournalGame {
+                iteration,
+                game,
+                reason,
+            });
         }
         let Some(prepared) = state.prepare_next()? else {
             return Err(SpsaDriverError::CheckpointBeyondHorizon);
@@ -382,18 +386,28 @@ async fn play_mini_match(
     let mut workers = tokio::task::JoinSet::new();
     let mut next_pair = first_pair;
     let mut pairs = Vec::with_capacity(pairs_per_iteration as usize);
+    let mut pool = execution.slot_pool()?;
     while next_pair <= last_pair || !workers.is_empty() {
         while next_pair <= last_pair && workers.len() < execution.concurrency {
             let pair_id = next_pair;
             next_pair += 1;
-            let slot = execution.slots[(pair_id as usize - 1) % execution.slots.len()].clone();
+            // A pair holds one slot for both of its games.
+            let position = pool
+                .take()
+                .expect("a mini-match keeps no more pairs live than it has slots");
+            debug_assert_eq!(pool.held(), workers.len() + 1);
+            let slot = execution.slots[position].clone();
             let game_settings = game_settings.clone();
-            workers.spawn(async move { play_pair(pair_id, &slot, game_settings).await });
+            workers
+                .spawn(async move { (position, play_pair(pair_id, &slot, game_settings).await) });
         }
         let Some(joined) = workers.join_next().await else {
             break;
         };
-        let pair = joined.map_err(|error| SpsaDriverError::Worker(error.to_string()))??;
+        let (position, pair) =
+            joined.map_err(|error| SpsaDriverError::Worker(error.to_string()))?;
+        pool.give_back(position);
+        let pair = pair?;
         progress.completed_pairs.fetch_add(1, Ordering::Relaxed);
         pairs.extend(queue.complete(pair)?);
     }
@@ -511,6 +525,23 @@ fn fault_counts(pairs: &[CompletePair<MatchGame>]) -> MatchFaultCounts {
     counts
 }
 
+/// The first game of a rebuilt iteration that no committed iteration can hold,
+/// and why.
+fn unusable_game(pairs: &[CompletePair<MatchGame>]) -> Option<(u32, &'static str)> {
+    pairs
+        .iter()
+        .flat_map(|pair| [&pair.first, &pair.second])
+        .find_map(|game| {
+            if !game.scorable || matches!(game.fault, Some(GameFault::Infrastructure { .. })) {
+                Some((game.number, "could not be scored"))
+            } else if game.fault.is_some() {
+                Some((game.number, "ended on an engine fault"))
+            } else {
+                None
+            }
+        })
+}
+
 fn pair_has_fault(pair: &CompletePair<MatchGame>) -> bool {
     pair.first.fault.is_some() || pair.second.fault.is_some()
 }
@@ -536,6 +567,14 @@ pub enum SpsaDriverError {
     CheckpointBeyondHorizon,
     #[error("SPSA checkpoint does not reproduce iteration {iteration}")]
     CheckpointMismatch { iteration: u32 },
+    #[error(
+        "SPSA iteration {iteration} in the journal holds game {game}, which {reason}; a tune commits no iteration with such a game, so this run directory cannot be resumed as it is: run the same command with --restart"
+    )]
+    UnusableJournalGame {
+        iteration: u32,
+        game: u32,
+        reason: &'static str,
+    },
     #[error("SPSA prepared arm vector does not match the persisted knob vector")]
     PreparedDimensionMismatch,
     #[error("SPSA pair identity overflow")]
@@ -558,4 +597,75 @@ pub enum SpsaDriverError {
     Worker(String),
     #[error("durable SPSA output failed: {0}")]
     Output(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use colosseum_core::Termination;
+    use colosseum_engine::ClockAccountingReport;
+
+    fn game(number: u32, scorable: bool, fault: Option<GameFault>) -> MatchGame {
+        MatchGame {
+            number,
+            white: if number % 2 == 1 {
+                MatchSide::A
+            } else {
+                MatchSide::B
+            },
+            result: GameResult::Draw,
+            scorable,
+            termination: Termination::FiftyMove,
+            clock_accounting: ClockAccountingReport {
+                model: "test".into(),
+                version: 1,
+                white_margin_ms: 0,
+                black_margin_ms: 0,
+                monotonic_resolution_ns: 1,
+                white_charged_elapsed: None,
+                black_charged_elapsed: None,
+                white_round_trip: None,
+                black_round_trip: None,
+            },
+            opening: crate::match_runner::OpeningAssignment {
+                book_index: None,
+                label: "startpos".into(),
+            },
+            fault,
+            error: None,
+            pgn: String::new(),
+            slot: None,
+        }
+    }
+
+    #[test]
+    fn a_rebuilt_iteration_with_an_unscorable_game_names_that_game() {
+        let pairs = vec![
+            CompletePair {
+                pair_id: 1,
+                first: game(1, true, None),
+                second: game(2, true, None),
+            },
+            CompletePair {
+                pair_id: 2,
+                first: game(3, false, None),
+                second: game(4, true, None),
+            },
+        ];
+        let (number, reason) = unusable_game(&pairs).unwrap();
+        assert_eq!((number, reason), (3, "could not be scored"));
+        let message = SpsaDriverError::UnusableJournalGame {
+            iteration: 0,
+            game: number,
+            reason,
+        }
+        .to_string();
+        assert!(
+            message.contains("iteration 0")
+                && message.contains("game 3")
+                && message.contains("--restart"),
+            "{message}"
+        );
+        assert!(unusable_game(&pairs[..1]).is_none());
+    }
 }

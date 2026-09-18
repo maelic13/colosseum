@@ -95,6 +95,8 @@ async fn stockfish_self_play_one_game() {
         white_time_margin: Duration::from_secs(2),
         black_time_margin: Duration::from_secs(2),
         handshake_timeout: Duration::from_secs(5),
+        identity: None,
+        slot: None,
     };
 
     let live = live_for(&game);
@@ -167,6 +169,8 @@ async fn game_pre_plays_opening_moves() {
         white_time_margin: Duration::from_secs(2),
         black_time_margin: Duration::from_secs(2),
         handshake_timeout: Duration::from_secs(5),
+        identity: None,
+        slot: None,
     };
 
     let live = live_for(&game);
@@ -232,6 +236,8 @@ async fn game_starts_from_fen() {
         white_time_margin: Duration::from_secs(2),
         black_time_margin: Duration::from_secs(2),
         handshake_timeout: Duration::from_secs(5),
+        identity: None,
+        slot: None,
     };
 
     let live = live_for(&game);
@@ -284,6 +290,8 @@ async fn setup_failure_writes_incident() {
         white_time_margin: Duration::from_secs(2),
         black_time_margin: Duration::from_secs(2),
         handshake_timeout: Duration::from_secs(3),
+        identity: None,
+        slot: None,
     };
 
     let live = live_for(&game);

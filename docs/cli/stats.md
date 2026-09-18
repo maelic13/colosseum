@@ -113,9 +113,11 @@ Engine A: harness overhead p50 3 ms, p99 11 ms, p999 164 ms, max 320 ms over 581
 ```
 
 A move over the margin is a move that would have forfeited had the engine
-spent its whole remaining clock: overhead is time the engine never saw. A PGN
-without the margin tags still gets the distribution, and says the margin was
-not recorded. Percentiles use the nearest rank, so a quantile finer than the
+spent its whole remaining clock: overhead is time the engine never saw. A
+search that lost on time, written `{forfeit t=…ms h=…ms}` before the result,
+counts towards the side that forfeited — it is the move that mattered — and
+towards nothing but the overhead. A PGN without the margin tags still gets the
+distribution, and says the margin was not recorded. Percentiles use the nearest rank, so a quantile finer than the
 sample can resolve is the largest value.
 
 ## Pair identity in a Colosseum PGN
@@ -140,6 +142,12 @@ encounter played with four games per pair is two pentanomial units, and one
 game per pair is none at all, whatever the games are numbered. Without a
 subject the outcome is taken from the pair's first engine — the one that had
 White in assignment `1` — which is the perspective the checkpoint uses.
+
+A Colosseum PGN also names, per game, the CPU slot the game ran on
+(`GameSlot`, counting from zero) and each side's time margin
+(`WhiteTimeMarginMs`, `BlackTimeMarginMs`). Statistics never depend on the
+slot; it is there so a game can be placed on the machine it ran on, and the
+run directory's journal records when the game held it.
 
 ## Games a run kept but did not count
 

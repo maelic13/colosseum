@@ -58,6 +58,8 @@ fn stub_game(number: u32) -> MatchGame {
         fault: None,
         error: None,
         pgn,
+
+        slot: None,
     }
 }
 

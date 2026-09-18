@@ -115,6 +115,44 @@ fn each_injected_delay_lands_in_its_own_phase() {
     });
 }
 
+#[test]
+fn a_ponderhit_search_has_no_overhead_against_a_clock_started_at_go_ponder() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let mut options = SpawnOptions::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+        options.args = vec!["__uci-stub".into(), "--ponder-hints".into()];
+        let mut engine = EngineProcess::spawn(options).await.unwrap();
+        engine.handshake(Duration::from_secs(5)).await.unwrap();
+        engine.is_ready(Duration::from_secs(5)).await.unwrap();
+        engine
+            .start_ponder(
+                &UciPosition::StartPos {
+                    moves: vec!["e2e4".into()],
+                },
+                &GoLimits::MoveTime(ms(500)),
+            )
+            .await
+            .unwrap();
+        tokio::time::sleep(ms(50)).await;
+        engine
+            .ponderhit(Duration::from_secs(5), |_| {})
+            .await
+            .unwrap();
+        let timing = engine
+            .take_search_timing()
+            .expect("the ponderhit was timed");
+        // The engine's clock started at `go ponder`, the charge at
+        // `ponderhit`: there is no overhead to speak of, and none is claimed.
+        assert!(timing.earlier_origin);
+        assert!(timing.charged().is_some());
+        assert_eq!(timing.overhead_ns(), None);
+        let _ = engine.quit(Duration::from_secs(1)).await;
+    });
+}
+
 fn run_match(run: &Path, extra: &[&str]) -> std::process::Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_colosseum-cli"));
     command
@@ -208,8 +246,9 @@ fn a_match_journals_each_sides_phase_maxima_and_writes_the_overhead_beside_the_t
         assert!(millis(&b["last_info_to_bestmove_ns"]) < ms(20), "{game}");
     }
 
-    // Every searched move carries h= beside t=, and h is t minus the 35 ms
-    // engine A reported.
+    // Every searched move carries h= beside t=, and h is the charged time
+    // minus the 35 ms engine A reported: `t` is truncated to the millisecond
+    // and `h` rounded to the nearest, so the two agree to within one.
     let pgn = std::fs::read_to_string(run.join("games.pgn")).unwrap();
     assert!(pgn.contains("[WhiteTimeMarginMs \""), "{pgn}");
     let mut checked = 0;
@@ -224,11 +263,41 @@ fn a_match_journals_each_sides_phase_maxima_and_writes_the_overhead_beside_the_t
         if let (Some(time), Some(overhead)) = (field("t="), field("h="))
             && time > 100
         {
-            assert_eq!(overhead, time - 35, "{comment}");
+            assert!((overhead - (time - 35)).abs() <= 1, "{comment}");
             checked += 1;
         }
     }
     assert!(checked > 0, "no delayed move carried h=:\n{pgn}");
+
+    // One rounding: each game's largest h= for engine A is its journal
+    // maximum in nanoseconds, to the nearest millisecond.
+    for game in journal(&run) {
+        let number = game["number"].as_u64().unwrap();
+        let text = pgn
+            .split("[Event ")
+            .find(|text| text.contains(&format!("[GameNumber \"{number}\"]")))
+            .unwrap();
+        let a_is_white = game["white"] == "a";
+        let largest = text
+            .split('{')
+            .skip(1)
+            .enumerate()
+            .filter(|(index, _)| (index % 2 == 0) == a_is_white)
+            .filter_map(|(_, comment)| {
+                comment[..comment.find('}').unwrap()]
+                    .split_whitespace()
+                    .find_map(|field| field.strip_prefix("h="))
+                    .map(|value| value.trim_end_matches("ms").parse::<i64>().unwrap())
+            })
+            .max()
+            .unwrap();
+        let nanos = round_trip(&game, "a")["overhead_ns"].as_i64().unwrap();
+        assert_eq!(
+            largest,
+            (nanos + 500_000).div_euclid(1_000_000),
+            "game {number}: PGN and journal round differently"
+        );
+    }
 
     // `stats` reads the h= back into a distribution per engine.
     let stats = Command::new(env!("CARGO_BIN_EXE_colosseum-cli"))
@@ -270,11 +339,14 @@ fn a_forfeit_forensic_prints_the_last_searches_and_when_the_late_answer_came() {
     let root = tempfile::tempdir().unwrap();
     let run = root.path().join("run");
     // Engine A answers 300 ms after its last info, far past a 100 ms move
-    // with a 20 ms margin: its first search forfeits.
-    let phases = phase_arguments(300)
+    // with a 20 ms margin: its first search forfeits. Just before the late
+    // answer it writes a line longer than the protocol allows; that fails
+    // one read, and the wait for the answer goes on past it.
+    let mut phases = phase_arguments(300)
         .into_iter()
         .map(|argument| format!("--a-engine-arg={argument}"))
         .collect::<Vec<_>>();
+    phases.push("--a-engine-arg=--overlong-before-bestmove".into());
     let mut extra = phases.iter().map(String::as_str).collect::<Vec<_>>();
     extra.extend([
         "--a-movetime-ms",
@@ -306,6 +378,7 @@ fn a_forfeit_forensic_prints_the_last_searches_and_when_the_late_answer_came() {
         .find(|text| text.contains("termination: TimeForfeit"))
         .expect("a forfeit forensic was written");
     assert!(forensic.contains("round trip, last"), "{forensic}");
+    assert!(forensic.contains("\nslot:        0\n"), "{forensic}");
     for column in [
         "written", "1st info", "lst info", "engine t", "bestmove", "consumed", "overhead",
         "deadline",
@@ -325,4 +398,39 @@ fn a_forfeit_forensic_prints_the_last_searches_and_when_the_late_answer_came() {
         .parse::<f64>()
         .unwrap();
     assert!(arrived >= 360.0, "{late}");
+
+    // The forfeited search played no move, but its overhead is in the PGN,
+    // on the side that forfeited, and `stats` counts it over the margin.
+    let pgn = std::fs::read_to_string(run.join("games.pgn")).unwrap();
+    let forfeit_comment = pgn
+        .split('{')
+        .find_map(|comment| comment.strip_prefix("forfeit "))
+        .map(|comment| &comment[..comment.find('}').unwrap()])
+        .unwrap_or_else(|| panic!("no forfeit comment:\n{pgn}"));
+    let overhead = forfeit_comment
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("h="))
+        .unwrap()
+        .trim_end_matches("ms")
+        .parse::<i64>()
+        .unwrap();
+    assert!(overhead >= 290, "{forfeit_comment}");
+    let stats = Command::new(env!("CARGO_BIN_EXE_colosseum-cli"))
+        .args(["stats", "--json"])
+        .arg(&run)
+        .output()
+        .unwrap();
+    let value: Value = serde_json::from_slice(&stats.stdout).unwrap();
+    let most = value["report"]["telemetry"]["engines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|engine| {
+            engine["harness_overhead_ms"]["over_margin"]
+                .as_u64()
+                .unwrap()
+        })
+        .max()
+        .unwrap();
+    assert!(most >= 1, "{value}");
 }

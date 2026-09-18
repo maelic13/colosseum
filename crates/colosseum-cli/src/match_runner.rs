@@ -91,6 +91,73 @@ pub struct MatchScore {
     pub draws: u32,
 }
 
+/// Which CPU slot a game ran on, and when it held it.
+///
+/// The span runs from before the game's first engine was spawned to after both
+/// of its engine processes had exited, in microseconds since the Unix epoch.
+/// Two games on one slot never overlap; a run's journal is the record of that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SlotOccupancy {
+    /// The slot, counting from zero, as the execution plan numbers it.
+    pub index: usize,
+    pub started_unix_us: u64,
+    pub ended_unix_us: u64,
+}
+
+/// The slots of a run's execution plan that no unit holds.
+///
+/// A unit — a game, or a colour-reversed pair — takes a slot before its first
+/// engine is spawned and gives it back only after the engine processes of its
+/// last game have exited. Choosing a slot by arithmetic on the game number
+/// placed a new game on a slot still playing while a finished one idled: two
+/// games on one pinned CPU, whose searches then alternate in scheduler quanta.
+/// Taking a free slot cannot do that, and a run keeps exactly as many units
+/// live as it has slots.
+#[derive(Debug)]
+pub struct SlotPool {
+    held: Vec<bool>,
+}
+
+impl SlotPool {
+    fn new(slots: usize) -> Self {
+        Self {
+            held: vec![false; slots],
+        }
+    }
+
+    /// Take the lowest-numbered free slot, or `None` when every slot is held.
+    pub fn take(&mut self) -> Option<usize> {
+        let position = self.held.iter().position(|held| !held)?;
+        self.held[position] = true;
+        Some(position)
+    }
+
+    /// Give a slot back. Its unit's engines have exited.
+    pub fn give_back(&mut self, position: usize) {
+        debug_assert!(
+            self.held.get(position).copied().unwrap_or(false),
+            "slot {position} given back while free"
+        );
+        if let Some(held) = self.held.get_mut(position) {
+            *held = false;
+        }
+    }
+
+    /// Slots currently held: the number of live units.
+    #[must_use]
+    pub fn held(&self) -> usize {
+        self.held.iter().filter(|held| **held).count()
+    }
+}
+
+fn unix_us() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            u64::try_from(since.as_micros()).unwrap_or(u64::MAX)
+        })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MatchGame {
     pub number: u32,
@@ -110,6 +177,9 @@ pub struct MatchGame {
     /// in every report, was most of what a long run carried.
     #[serde(skip)]
     pub pgn: String,
+    /// The CPU slot the game ran on and when it held it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<SlotOccupancy>,
 }
 
 impl MatchGame {
@@ -136,6 +206,7 @@ impl MatchGame {
             iteration,
             round: None,
             error: self.error.clone(),
+            slot: self.slot,
         }
     }
 
@@ -159,6 +230,7 @@ impl MatchGame {
             fault: record.fault.clone(),
             error: record.error.clone(),
             pgn: String::new(),
+            slot: record.slot,
         })
     }
 
@@ -426,6 +498,21 @@ pub struct MatchExecutionPlan {
     pub hash_memory: HashMemoryReport,
 }
 
+impl MatchExecutionPlan {
+    /// The free-slot pool of one run of this plan. A plan whose slots do not
+    /// match its concurrency is refused: sharing a slot is the defect the
+    /// pool exists to prevent.
+    pub fn slot_pool(&self) -> Result<SlotPool, MatchError> {
+        if self.slots.len() != self.concurrency {
+            return Err(MatchError::SlotCountMismatch {
+                slots: self.slots.len(),
+                concurrency: self.concurrency,
+            });
+        }
+        Ok(SlotPool::new(self.slots.len()))
+    }
+}
+
 #[derive(Clone)]
 pub struct FixedMatchRequest {
     pub engine_a: EngineLaunchSpec,
@@ -542,6 +629,10 @@ pub enum MatchError {
     Output(String),
     #[error("pair identity {0} cannot be represented as two game numbers")]
     PairIdentityOutOfRange(u32),
+    #[error(
+        "the execution plan has {slots} CPU slots for {concurrency} concurrent games; every live game needs a slot of its own"
+    )]
+    SlotCountMismatch { slots: usize, concurrency: usize },
 }
 
 /// Execute both colours of one opening as a single scheduler value. The second
@@ -552,6 +643,7 @@ pub async fn play_pair(
     slot: &GameSlotCpuAllocation,
     settings: PairGameSettings,
 ) -> Result<CompletePair<MatchGame>, MatchError> {
+    // Both games of a pair run on the one slot the pair holds.
     let first_number = pair_id
         .checked_mul(2)
         .and_then(|value| value.checked_sub(1))
@@ -571,6 +663,7 @@ pub async fn play_pair(
     let (first_opening, first_assignment) = settings.openings.assignment(first_number);
     let first = play_game(GameRequest {
         number: first_number,
+        slot: slot.slot_index,
         identity_override: None,
         engine_a: engine_a.clone(),
         engine_b: engine_b.clone(),
@@ -585,6 +678,7 @@ pub async fn play_pair(
     let (second_opening, second_assignment) = settings.openings.assignment(second_number);
     let second = play_game(GameRequest {
         number: second_number,
+        slot: slot.slot_index,
         identity_override: None,
         engine_a,
         engine_b,
@@ -653,6 +747,12 @@ pub fn plan_execution(
         allocate_game_slots(&plan, &characteristics, concurrency, allocation)
             .map_err(|error| MatchError::Placement(error.to_string()))?
     };
+    if slots.len() != concurrency {
+        return Err(MatchError::SlotCountMismatch {
+            slots: slots.len(),
+            concurrency,
+        });
+    }
     let engine_a_hash_mb = configured_hash_mb(engine_a);
     let engine_b_hash_mb = configured_hash_mb(engine_b);
     let lower_bound_mb = engine_a_hash_mb
@@ -778,20 +878,26 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
     for game in &report.games {
         progress.record(game);
     }
+    let mut pool = execution.slot_pool()?;
     while (!pending.is_empty() && !cancellation.stopping()) || !workers.is_empty() {
         while !pending.is_empty()
             && !cancellation.stopping()
             && workers.len() < execution.concurrency
         {
             let number = pending.pop_front().expect("pending is not empty");
-            let slot = &execution.slots[(number as usize - 1) % execution.slots.len()];
+            let position = pool
+                .take()
+                .expect("a run keeps no more units live than it has slots");
+            debug_assert_eq!(pool.held(), workers.len() + 1);
+            let slot = &execution.slots[position];
             let mut engine_a = engine_a.clone();
             let mut engine_b = engine_b.clone();
             engine_a.allocated_cpus = slot.engine_a.allocation.clone();
             engine_b.allocated_cpus = slot.engine_b.allocation.clone();
             let (opening, opening_assignment) = openings.assignment(number);
-            workers.spawn(play_game(GameRequest {
+            let game = play_game(GameRequest {
                 number,
+                slot: slot.slot_index,
                 identity_override: identity_override.clone(),
                 engine_a,
                 engine_b,
@@ -801,7 +907,8 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
                 ponder,
                 opening,
                 opening_assignment,
-            }));
+            });
+            workers.spawn(async move { (position, game.await) });
         }
         // One cancellation path: stop launching, then give the games in flight
         // their bounded grace before abandoning them.
@@ -815,7 +922,9 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         let Some(joined) = joined else {
             break;
         };
-        let mut game = joined.map_err(|error| MatchError::Worker(error.to_string()))?;
+        let (position, mut game) = joined.map_err(|error| MatchError::Worker(error.to_string()))?;
+        // The game's engines have exited: `play_game` returns only then.
+        pool.give_back(position);
         if let Some(observer) = &observer {
             observer.game_completed(&game).map_err(MatchError::Output)?;
             // The observer committed the moves; the report keeps the summary.
@@ -858,6 +967,8 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
 
 struct GameRequest {
     number: u32,
+    /// The slot index recorded with the game.
+    slot: usize,
     identity_override: Option<GamePairIdentity>,
     engine_a: EngineGameSpec,
     engine_b: EngineGameSpec,
@@ -872,6 +983,7 @@ struct GameRequest {
 async fn play_game(request: GameRequest) -> MatchGame {
     let GameRequest {
         number,
+        slot,
         identity_override,
         engine_a,
         engine_b,
@@ -935,6 +1047,7 @@ async fn play_game(request: GameRequest) -> MatchGame {
             opening_index: opening_assignment.book_index,
             opening_label: opening_assignment.label.clone(),
         })),
+        slot: Some(slot),
     };
     let live = LiveGameState::new_handle(
         game_id,
@@ -944,7 +1057,10 @@ async fn play_game(request: GameRequest) -> MatchGame {
         spec.start_fen.clone(),
         white_time_control.control,
     );
+    let started_unix_us = unix_us();
+    // `run_game` returns once both engine processes have exited.
     let game = run_game(spec, live).await;
+    let ended_unix_us = unix_us();
     MatchGame {
         number,
         white: white_side,
@@ -956,6 +1072,11 @@ async fn play_game(request: GameRequest) -> MatchGame {
         fault: game.fault,
         error: game.error,
         pgn: game.pgn,
+        slot: Some(SlotOccupancy {
+            index: slot,
+            started_unix_us,
+            ended_unix_us,
+        }),
     }
 }
 
@@ -1040,6 +1161,74 @@ fn record_score(report: &mut FixedMatchReport, white: MatchSide, result: GameRes
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The invariant: no two live units hold the same slot, and a unit waits
+    /// only when every slot is held. Units here finish in an arbitrary order,
+    /// as games of different lengths do.
+    #[test]
+    fn a_slot_is_held_by_one_unit_at_a_time_and_none_waits_while_one_is_free() {
+        let mut pool = SlotPool::new(4);
+        let mut live: Vec<(u32, usize)> = Vec::new();
+        let finishing_order = [2, 0, 3, 1, 1, 0, 2, 0, 1, 0];
+        let mut next_unit = 1;
+        for finishing in finishing_order {
+            while let Some(slot) = pool.take() {
+                assert!(
+                    live.iter().all(|(_, held)| *held != slot),
+                    "slot {slot} handed to unit {next_unit} while held: {live:?}"
+                );
+                live.push((next_unit, slot));
+                next_unit += 1;
+            }
+            // Nothing waits while a slot is free: the pool is exhausted
+            // exactly when every slot is held.
+            assert_eq!(live.len(), 4);
+            assert_eq!(pool.held(), 4);
+            let (_, slot) = live.remove(finishing % live.len());
+            pool.give_back(slot);
+            assert_eq!(pool.held(), 3);
+        }
+        // The freed slot is the one handed out next, whatever the unit's
+        // number: arithmetic on the number would pick another.
+        let (_, slot) = live.remove(0);
+        pool.give_back(slot);
+        assert_eq!(pool.take(), Some(slot));
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "given back while free")]
+    fn giving_back_a_free_slot_is_a_bug_caught_in_debug_builds() {
+        let mut pool = SlotPool::new(2);
+        pool.give_back(1);
+    }
+
+    #[test]
+    fn a_plan_whose_slots_differ_from_its_concurrency_is_refused() {
+        let mut plan = plan_execution(
+            &EngineLaunchSpec::path_only("a".into()),
+            &EngineLaunchSpec::path_only("b".into()),
+            3,
+            SlotAllocation::Shared { cores_per_game: 1 },
+            CpuPlacementPolicy::Off,
+            None,
+        )
+        .unwrap();
+        assert_eq!(plan.slots.len(), 3);
+        assert!(plan.slot_pool().is_ok());
+        plan.slots.pop();
+        let error = plan.slot_pool().unwrap_err();
+        assert!(
+            matches!(
+                error,
+                MatchError::SlotCountMismatch {
+                    slots: 2,
+                    concurrency: 3
+                }
+            ),
+            "{error}"
+        );
+    }
 
     #[test]
     fn scores_are_from_the_named_side_not_the_current_colour() {

@@ -106,6 +106,19 @@ cores are divided between its two engines is the allocation mode:
 | Shared (default) | `--cores-per-game N` (default 1) | `game-slots × cores-per-game` |
 | Disjoint | `--cores-per-engine N` | `game-slots × 2 × cores-per-engine` |
 
+**A slot belongs to one game at a time.** A game takes a free slot before its
+first engine is spawned and gives it back only after both of its engine
+processes have exited; an `sprt` or `spsa` pair holds one slot for both of its
+games, which run on it one after the other. The next game goes to whichever
+slot is free, never to a slot chosen by its number: games end at different
+times, and two games on one pinned CPU make their searches alternate in
+scheduler quanta, which costs whichever engine is thinking its clock. A run
+keeps exactly as many games live as it has slots, so no game waits while a
+slot is free, and the number of slots always equals `--concurrency`; a plan
+where they differ is refused rather than shared. With placement `off` the
+slots are unrestricted and the same rule decides which slot a game is counted
+on. Every game's journal record and PGN name its slot.
+
 **Sharing is the default because it is what the games actually need.** Without
 pondering, only one engine of a game searches at any moment; the other is
 blocked reading a pipe. Pinning the two engines to separate cores therefore

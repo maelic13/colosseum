@@ -2584,6 +2584,60 @@ games" procedure at 10.10, once, on the final state.
   2,000-game 3+0.03 match at 14 slots shows zero time losses and every game
   core continuously busy. Items (k) to (u) precede (j).
 
+  **Implementation evidence (Phase 10.9k):** the execution plan hands each
+  run a `SlotPool` (`MatchExecutionPlan::slot_pool`), and `match`
+  (and so `calibrate`), `sprt`, `spsa` and `tournament` take the
+  lowest-numbered free slot before spawning a unit and give it back when the
+  unit's worker returns. A worker returns after `run_game`, which returns
+  only once both engine processes have exited: the normal path quits and
+  waits, and the setup-failure path now kills and reaps an engine that had
+  spawned instead of dropping it. A pair (`sprt`, `spsa`) holds one slot for
+  both games. Launch order, pair identity, openings, commit order and the
+  official prefix are untouched; only which slot a unit is placed on
+  changed. `plan_execution` and `slot_pool` refuse a plan whose slot count
+  differs from its concurrency (`SlotCountMismatch`). Debug builds assert
+  that a slot handed out is free, that a slot given back was held, and that
+  the held count equals the live units after each launch. Every game records
+  `slot: {index, started_unix_us, ended_unix_us}` in its journal record and
+  report (from before the first spawn to after both exits), `GameSlot` in
+  its PGN and `slot:` in its forensic. Tests: a pool unit test drives units
+  finishing in arbitrary order and checks that no slot is held twice and
+  none waits while a slot is free, plus the debug assertion and the
+  slot-count refusal; `phase10_slot_pool` runs `match` (32 games), `sprt`
+  (16 pairs), `spsa` (2 iterations of 6 pairs) and a tournament (3 engines,
+  4 games per pair) at concurrency 4 with stub engines whose per-process
+  delay factor makes games uneven, and checks from the journal that no two
+  spans on one slot overlap, that every slot is used, that a pair's games
+  share a slot, and that the PGN tag matches. With the modulo rule restored
+  in `match_runner` the match case failed three runs of three (game 5 put on
+  slot 0 while game 1 still ran), and in `sprt_runner` two of two.
+
+  The corrections owed from review of (t) landed with it. A `ponderhit` or
+  `stop` search is marked `earlier_origin`: the engine's clock started at
+  an earlier command, so neither overhead nor last-`info` lag is computed
+  and `h=` is omitted for it. `h=` is now the journal's nanosecond overhead
+  rounded to the nearest millisecond (halves away from zero), so a game's
+  largest `h=` per side equals its journal maximum rounded; `t=` stays
+  truncated, so `h` and `t − engine time` agree to within one. A search that
+  lost on time is written before the result as `{forfeit t=…ms h=…ms}`, or
+  `{forfeit}` when no answer came, and `stats` counts it towards the side
+  that forfeited in the overhead distribution and over-margin count and in
+  nothing else (`colosseum-move-comment/3`). The late-`bestmove` wait
+  continues past a per-read protocol fault; the regression puts an
+  over-long line just before a late answer and still times the answer. An
+  SPSA resume over a rebuilt iteration holding an unscorable or faulted game
+  now names the iteration and the game (`UnusableJournalGame`) and gives the
+  `--restart` remedy. Deviations: the pool is created per run by the
+  execution plan rather than stored inside it, since the plan is a
+  serialized report; the slot spans use wall-clock microseconds so a run's
+  journal can be read as a timeline, which a clock step during the run
+  would distort; the stub's unevenness comes from its process identifier,
+  so the lengths are uneven but not reproducible run to run; the
+  real-engine smoke test's `GameSpec` literals, missing `identity` since an
+  earlier step, were repaired. Owed and maintainer-run: the 2,000-game
+  3+0.03 match at 14 slots with zero time losses and every game core
+  continuously busy.
+
   **Implementation evidence (Phase 10.9j):** `colosseum-uci` keeps a
   `SearchTiming` per search: the game task stamps `go` before the write, the
   write's return, and the moment it takes each line off the reader's

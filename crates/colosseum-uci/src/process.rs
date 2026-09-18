@@ -371,8 +371,11 @@ impl EngineProcess {
         let charged_from = Instant::now();
         self.send("stop").await?;
         let write_returned = Instant::now();
-        self.await_bestmove(charged_from, write_returned, deadline, on_info)
-            .await
+        let result = self
+            .await_bestmove(charged_from, write_returned, deadline, on_info)
+            .await;
+        self.mark_earlier_origin();
+        result
     }
 
     /// Start pondering: set the position (played move + predicted reply
@@ -449,8 +452,19 @@ impl EngineProcess {
         let charged_from = Instant::now();
         self.send("ponderhit").await?;
         let write_returned = Instant::now();
-        self.await_bestmove(charged_from, write_returned, deadline, on_info)
-            .await
+        let result = self
+            .await_bestmove(charged_from, write_returned, deadline, on_info)
+            .await;
+        self.mark_earlier_origin();
+        result
+    }
+
+    /// The search just timed was charged from a later command than the one
+    /// that started the engine's clock.
+    fn mark_earlier_origin(&mut self) {
+        if let Some(timing) = self.last_timing.as_mut() {
+            timing.earlier_origin = true;
+        }
     }
 
     /// The prediction missed: abort the ponder search and discard its result.
@@ -492,12 +506,19 @@ impl EngineProcess {
                 timing.late = true;
             } else {
                 let until = Instant::now() + window;
-                while let Ok(line) = self.read_line_until(until, UciError::MoveTimeout).await {
-                    if parse::parse_bestmove(line.text.trim()).is_some() {
-                        timing.bestmove_arrived = Some(line.arrived);
-                        timing.consumed = Some(self.last_consumed);
-                        timing.late = true;
-                        break;
+                loop {
+                    match self.read_line_until(until, UciError::MoveTimeout).await {
+                        Ok(line) if parse::parse_bestmove(line.text.trim()).is_some() => {
+                            timing.bestmove_arrived = Some(line.arrived);
+                            timing.consumed = Some(self.last_consumed);
+                            timing.late = true;
+                            break;
+                        }
+                        Ok(_) => {}
+                        // One bad line fails one read; the answer may still
+                        // come behind it.
+                        Err(UciError::Protocol(_)) => {}
+                        Err(_) => break,
                     }
                 }
             }

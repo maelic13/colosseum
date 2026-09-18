@@ -51,6 +51,9 @@ pub struct TournamentGame {
     /// `games.pgn`; never stored in a checkpoint, a report or the driver.
     #[serde(skip)]
     pub pgn: String,
+    /// The CPU slot the game ran on and when it held it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<crate::match_runner::SlotOccupancy>,
 }
 
 /// A participant identity as the journal writes it.
@@ -78,6 +81,7 @@ impl TournamentGame {
             iteration: None,
             round: Some(self.round),
             error: self.error.clone(),
+            slot: self.slot,
         }
     }
 
@@ -99,6 +103,7 @@ impl TournamentGame {
             fault: record.fault.clone(),
             error: record.error.clone(),
             pgn: String::new(),
+            slot: record.slot,
         })
     }
 
@@ -235,6 +240,10 @@ pub async fn run_tournament(
     let mut workers = tokio::task::JoinSet::new();
     let mut infrastructure_error = false;
     let mut cancelled = false;
+    let mut pool = request
+        .execution
+        .slot_pool()
+        .map_err(|error| TournamentRunError::Game(error.to_string()))?;
     while (!pending.is_empty() && !request.cancellation.stopping()) || !workers.is_empty() {
         while !infrastructure_error
             && !request.cancellation.stopping()
@@ -250,9 +259,11 @@ pub async fn run_tournament(
                 .get(&scheduled.black)
                 .cloned()
                 .ok_or(TournamentRunError::MissingParticipant(scheduled.black))?;
-            let slot = request.execution.slots
-                [(scheduled.number as usize - 1) % request.execution.slots.len()]
-            .clone();
+            let position = pool
+                .take()
+                .expect("a tournament keeps no more games live than it has slots");
+            debug_assert_eq!(pool.held(), workers.len() + 1);
+            let slot = request.execution.slots[position].clone();
             let execution = MatchExecutionPlan {
                 concurrency: 1,
                 allocation: request.execution.allocation,
@@ -264,7 +275,7 @@ pub async fn run_tournament(
             let time_control = request.time_control;
             let adjudication = request.adjudication;
             let master_seed = request.master_seed;
-            workers.spawn(async move {
+            let game = async move {
                 let report = run_fixed_match(FixedMatchRequest {
                     engine_a: white,
                     engine_b: black,
@@ -332,8 +343,10 @@ pub async fn run_tournament(
                     fault: game.fault,
                     error: game.error,
                     pgn,
+                    slot: game.slot,
                 })
-            });
+            };
+            workers.spawn(async move { (position, game.await) });
         }
         let joined = tokio::select! {
             joined = workers.join_next() => joined,
@@ -346,9 +359,11 @@ pub async fn run_tournament(
         let Some(joined) = joined else {
             break;
         };
-        let game = joined
-            .map_err(|error| TournamentRunError::Worker(error.to_string()))?
-            .map_err(TournamentRunError::Game)?;
+        let (position, game) =
+            joined.map_err(|error| TournamentRunError::Worker(error.to_string()))?;
+        // The one-game match returned: its engines have exited.
+        pool.give_back(position);
+        let game = game.map_err(TournamentRunError::Game)?;
         infrastructure_error |= matches!(game.fault, Some(GameFault::Infrastructure { .. }));
         if let Some(observer) = &request.observer {
             observer
