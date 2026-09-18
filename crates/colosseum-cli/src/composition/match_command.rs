@@ -653,7 +653,11 @@ pub(crate) fn print_fixed_match(report: &match_runner::FixedMatchReport) {
         report.faults.engine_b,
         report.faults.time_losses_b,
         report.faults.infrastructure,
-        fault_allowance_text(report.fault_policy)
+        fault_allowance_text(
+            report.fault_policy,
+            report.faults,
+            u64::from(report.games_attempted)
+        )
     );
     println!("abnormal games: {}", abnormal_games(&report.games));
 }

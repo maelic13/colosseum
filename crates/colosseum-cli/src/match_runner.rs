@@ -261,10 +261,97 @@ pub enum MatchStatus {
     InfrastructureError,
 }
 
+/// When engine faults make a run invalid.
+///
+/// A fixed-size run has fixed limits. A sequential run cannot know its length,
+/// so a limit it was not given explicitly grows with the games it has played:
+/// at every commit it is the larger of the floor and a rate of those games. A
+/// rare forfeit — an operating system holding a process for tens of
+/// milliseconds — is then scored as the loss it is and the test goes on, while
+/// an engine that keeps faulting still voids it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct FaultPolicy {
+    /// Engine faults tolerated, or the floor of the growing limit.
     pub max_engine_faults: u32,
+    /// Time losses tolerated, or the floor of the growing limit. A time loss
+    /// is also an engine fault.
     pub max_time_losses: u32,
+    /// Which limits grow with the games played, and at what rate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate: Option<FaultRate>,
+}
+
+/// A fault limit that rises with the games played.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct FaultRate {
+    /// Faults tolerated per thousand games played.
+    pub per_mille: u32,
+    /// The engine-fault limit grows.
+    pub engine_faults: bool,
+    /// The time-loss limit grows.
+    pub time_losses: bool,
+}
+
+/// The fewest engine faults a sequential run tolerates by default.
+pub const SEQUENTIAL_FAULT_FLOOR: u32 = 3;
+/// Engine faults a sequential run tolerates per thousand games played: 0.5%.
+pub const SEQUENTIAL_FAULT_PER_MILLE: u32 = 5;
+
+impl FaultPolicy {
+    /// A sequential run's policy from its two flags. An omitted engine-fault
+    /// limit grows from [`SEQUENTIAL_FAULT_FLOOR`] at
+    /// [`SEQUENTIAL_FAULT_PER_MILLE`]; an omitted time-loss limit follows it,
+    /// since a time loss is an engine fault. A limit given explicitly stays
+    /// fixed, so `0` invalidates on the first fault of its kind.
+    #[must_use]
+    pub fn sequential(max_engine_faults: Option<u32>, max_time_losses: Option<u32>) -> Self {
+        let engine_grows = max_engine_faults.is_none();
+        let time_grows = max_time_losses.is_none() && engine_grows;
+        let max_engine_faults = max_engine_faults.unwrap_or(SEQUENTIAL_FAULT_FLOOR);
+        Self {
+            max_engine_faults,
+            max_time_losses: max_time_losses.unwrap_or(max_engine_faults),
+            rate: (engine_grows || time_grows).then_some(FaultRate {
+                per_mille: SEQUENTIAL_FAULT_PER_MILLE,
+                engine_faults: engine_grows,
+                time_losses: time_grows,
+            }),
+        }
+    }
+
+    /// Engine faults tolerated after `games` games.
+    #[must_use]
+    pub fn engine_limit(&self, games: u64) -> u64 {
+        grown(
+            self.max_engine_faults,
+            self.rate.filter(|rate| rate.engine_faults),
+            games,
+        )
+    }
+
+    /// Time losses tolerated after `games` games.
+    #[must_use]
+    pub fn time_limit(&self, games: u64) -> u64 {
+        grown(
+            self.max_time_losses,
+            self.rate.filter(|rate| rate.time_losses),
+            games,
+        )
+    }
+
+    /// Whether `faults` over `games` games make the run invalid.
+    #[must_use]
+    pub fn exceeded(&self, faults: MatchFaultCounts, games: u64) -> bool {
+        u64::from(faults.engine_total()) > self.engine_limit(games)
+            || u64::from(faults.time_total()) > self.time_limit(games)
+    }
+}
+
+fn grown(floor: u32, rate: Option<FaultRate>, games: u64) -> u64 {
+    let floor = u64::from(floor);
+    rate.map_or(floor, |rate| {
+        floor.max(games.saturating_mul(u64::from(rate.per_mille)) / 1000)
+    })
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -277,6 +364,15 @@ pub struct MatchFaultCounts {
 }
 
 impl MatchFaultCounts {
+    /// Add another count to this one.
+    pub(crate) fn absorb(&mut self, other: Self) {
+        self.engine_a += other.engine_a;
+        self.engine_b += other.engine_b;
+        self.time_losses_a += other.time_losses_a;
+        self.time_losses_b += other.time_losses_b;
+        self.infrastructure += other.infrastructure;
+    }
+
     pub(crate) fn engine_total(self) -> u32 {
         self.engine_a + self.engine_b
     }
@@ -962,9 +1058,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         .any(|game| matches!(game.fault, Some(GameFault::Infrastructure { .. })))
     {
         report.status = MatchStatus::InfrastructureError;
-    } else if report.faults.engine_total() > fault_policy.max_engine_faults
-        || report.faults.time_total() > fault_policy.max_time_losses
-    {
+    } else if fault_policy.exceeded(report.faults, report.games.len() as u64) {
         report.status = MatchStatus::Invalid;
     } else if cancellation.stopping() && report.games.len() < games as usize {
         // A stop is only a stop when work was actually left undone. An
@@ -1203,6 +1297,37 @@ mod tests {
         let (_, slot) = live.remove(0);
         pool.give_back(slot);
         assert_eq!(pool.take(), Some(slot));
+    }
+
+    #[test]
+    fn a_sequential_allowance_is_the_larger_of_three_and_half_a_percent_of_games_played() {
+        let faults = |engine: u32, time: u32| MatchFaultCounts {
+            engine_a: engine,
+            time_losses_a: time,
+            ..MatchFaultCounts::default()
+        };
+        let policy = FaultPolicy::sequential(None, None);
+        assert_eq!(policy.engine_limit(0), 3);
+        assert_eq!(policy.engine_limit(799), 3);
+        assert_eq!(policy.engine_limit(1_000), 5);
+        assert_eq!(policy.engine_limit(20_000), 100);
+        // Time losses are engine faults and follow the same limit.
+        assert_eq!(policy.time_limit(20_000), 100);
+        assert!(!policy.exceeded(faults(3, 3), 4));
+        assert!(policy.exceeded(faults(4, 4), 4));
+        assert!(!policy.exceeded(faults(5, 5), 1_000));
+        assert!(policy.exceeded(faults(6, 0), 1_100));
+
+        // An explicit zero is strict, whatever the games played.
+        let strict = FaultPolicy::sequential(Some(0), None);
+        assert!(strict.rate.is_none());
+        assert!(strict.exceeded(faults(1, 1), 20_000));
+        // A strict time-loss limit leaves other engine faults to the rate.
+        let time_strict = FaultPolicy::sequential(None, Some(0));
+        assert_eq!(time_strict.engine_limit(20_000), 100);
+        assert_eq!(time_strict.time_limit(20_000), 0);
+        assert!(time_strict.exceeded(faults(1, 1), 20_000));
+        assert!(!time_strict.exceeded(faults(1, 0), 20_000));
     }
 
     #[test]

@@ -1106,6 +1106,36 @@ fn sprt_live_exit_distinguishes_invalid_and_infrastructure_error() {
     assert_eq!(invalid.status.code(), Some(5));
     let value: serde_json::Value = serde_json::from_slice(&invalid.stdout).unwrap();
     assert_eq!(value["report"]["status"], "invalid");
+    // The fixture forfeits every game. The first pair's two faults are within
+    // the allowance of three; the second pair's take the count to four,
+    // above the larger of 3 and 0.5% of four games.
+    assert_eq!(value["report"]["schedule"]["invalid_pair"], 2);
+    let faults = &value["report"]["schedule"]["faults"];
+    assert_eq!(
+        faults["engine_a"].as_u64().unwrap() + faults["engine_b"].as_u64().unwrap(),
+        4
+    );
+
+    // An explicit limit of zero restores strict invalidation.
+    let strict = cli()
+        .arg("sprt")
+        .arg(fixture)
+        .arg(fixture)
+        .args([
+            "--max-pairs",
+            "10",
+            "--preset",
+            "gainer",
+            "--max-engine-faults",
+            "0",
+            "--dir",
+        ])
+        .arg(root.path().join("strict"))
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(strict.status.code(), Some(5));
+    let value: serde_json::Value = serde_json::from_slice(&strict.stdout).unwrap();
     assert_eq!(value["report"]["schedule"]["invalid_pair"], 1);
 
     let error = cli()

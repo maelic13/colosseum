@@ -90,7 +90,7 @@ pub(crate) struct MatchConditions {
 
     /// Invalidate after more engine faults than this; a time loss is one.
     /// Omitted: 1% of the scheduled games, at least 5, for `match` and
-    /// `calibrate`; zero for `sprt`.
+    /// `calibrate`; for `sprt`, 0.5% of the games played so far, at least 3.
     #[arg(long)]
     pub(crate) max_engine_faults: Option<u32>,
     /// Invalidate after more time losses than this. Omitted: the engine-fault
@@ -167,7 +167,13 @@ impl MatchConditions {
         FaultPolicy {
             max_engine_faults,
             max_time_losses: self.max_time_losses.unwrap_or(max_engine_faults),
+            rate: None,
         }
+    }
+
+    /// The fault policy of a sequential test: see [`FaultPolicy::sequential`].
+    pub(crate) fn sequential_fault_policy(&self) -> FaultPolicy {
+        FaultPolicy::sequential(self.max_engine_faults, self.max_time_losses)
     }
 }
 
@@ -180,24 +186,43 @@ pub(crate) const FORFEIT_ALLOWANCE_MINIMUM: u32 = 5;
 /// A long run on a busy host meets the occasional scheduling stall however
 /// carefully it is placed, and a single forfeit in 30,000 games says nothing
 /// about either engine; a stable one-in-a-hundred rate says something is
-/// wrong. `sprt` and `spsa` keep zero: their unit is a pair, and a forfeit
-/// breaks the pair it lands in.
+/// wrong. `sprt` and `spsa` do not know their length in advance, so their
+/// allowance grows with the games played instead; see
+/// [`FaultPolicy::sequential`].
 pub(crate) fn forfeit_allowance(scheduled_games: u64) -> u32 {
     u32::try_from(scheduled_games / 100)
         .unwrap_or(u32::MAX)
         .max(FORFEIT_ALLOWANCE_MINIMUM)
 }
 
-/// How a progress block and a final report state the allowance.
-pub(crate) fn fault_allowance_text(policy: FaultPolicy) -> String {
-    if policy.max_time_losses < policy.max_engine_faults {
-        format!(
-            "{} allowed, of which {} time losses",
-            policy.max_engine_faults, policy.max_time_losses
-        )
+/// How a progress block and a final report state the faults so far: their
+/// rate over the games played and the allowance at that point.
+pub(crate) fn fault_allowance_text(
+    policy: FaultPolicy,
+    faults: MatchFaultCounts,
+    games: u64,
+) -> String {
+    let engine = u64::from(faults.engine_total());
+    let rate = if games == 0 {
+        String::new()
     } else {
-        format!("{} allowed", policy.max_engine_faults)
+        format!(" ({:.2}%)", 100.0 * engine as f64 / games as f64)
+    };
+    let engine_limit = policy.engine_limit(games);
+    let time_limit = policy.time_limit(games);
+    let mut allowed = if time_limit < engine_limit {
+        format!("{engine_limit} allowed, of which {time_limit} time losses")
+    } else {
+        format!("{engine_limit} allowed")
+    };
+    if let Some(rate) = policy.rate.filter(|rate| rate.engine_faults) {
+        allowed.push_str(&format!(
+            " ({}% of games played, at least {})",
+            f64::from(rate.per_mille) / 10.0,
+            policy.max_engine_faults
+        ));
     }
+    format!("{engine} in {games} games{rate}; {allowed}")
 }
 
 pub(crate) fn match_engine_overrides_requested(conditions: &MatchConditions) -> bool {
@@ -756,7 +781,7 @@ impl PairedProgress {
                     self.faults.engine_b,
                     self.faults.time_losses_a,
                     self.faults.time_losses_b,
-                    fault_allowance_text(policy)
+                    fault_allowance_text(policy, self.faults, u64::from(self.scored_games))
                 ),
             );
     }

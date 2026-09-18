@@ -180,6 +180,8 @@ and every one of them is overridable on the command line or in a run file.
 | SPSA estimator | the final centre vector, rounded | No checkpoint is selected after the fact; a tail-window mean is optional (S5.5) |
 | SPSA horizon | 5,000 iterations | A useful default, not a floor; freely configurable |
 | SPSA mini-match | 32 games/iteration | Same |
+| Engine-fault allowance, fixed-size runs | 1% of the scheduled games, at least 5 (`match`, `calibrate`, `tournament`) | A long run meets the occasional scheduling stall; one forfeit in thousands says nothing about an engine, a steady rate does |
+| Engine-fault allowance, sequential runs | 0.5% of the games played so far, at least 3, checked at every commit (`sprt`, `spsa`) | A forfeit is scored as the loss it is, as fishtest and fastchess score it; the length is unknown, so the limit grows with the evidence. `--max-engine-faults 0` / `--max-time-losses 0` restore strict invalidation |
 | Opening book | none | The tool ships no book and assumes no path |
 
 **Adjudication is off by default** because every adjudication rule ends games
@@ -2610,6 +2612,40 @@ games" procedure at 10.10, once, on the final state.
   and rate in every progress block and the final report; `--max-time-losses
   0` restores strict invalidation. Infrastructure faults stay unscored and
   still invalidate the pair. Items (k) to (v) precede (j).
+
+  **Implementation evidence (Phase 10.9l):** `FaultPolicy` gained an
+  optional `rate` (`FaultRate`: per mille, and which of the engine-fault and
+  time-loss limits grow) and three methods, `engine_limit(games)`,
+  `time_limit(games)` and `exceeded(faults, games)`, through which every
+  check now passes. `FaultPolicy::sequential(engine, time)` is the policy of
+  `sprt` and `spsa`: an omitted engine-fault limit grows as
+  max(3, ⌊games × 5 / 1000⌋); an omitted time-loss limit follows it, because a
+  time loss is an engine fault; a limit given explicitly stays fixed, so `0`
+  invalidates on the first fault of its kind (and an explicit engine limit
+  also fixes the defaulted time limit). `match`, `calibrate` and `tournament`
+  keep their fixed 10.9g allowance. `sprt` already scored a forfeit as a
+  result and kept its pair in the official sample; it now evaluates the
+  allowance at each admitted pair over the games of the official sample so
+  far, this pair's included, and marks the pair invalid only past it. `spsa`
+  gained `--max-engine-faults` and `--max-time-losses`; the driver sums faults
+  over every committed iteration (a resumed tune's included) and, within the
+  allowance, commits an iteration containing forfeits with its score and
+  gradient like any other; the iteration that crosses the limit is kept as
+  invalid evidence as before. A rebuilt iteration may now hold engine
+  faults; only an unscorable game is refused on resume. Every progress block
+  and final report states the count, its rate over the games played and the
+  allowance at that point, for example `2 in 812 games (0.25%); 4 allowed
+  (0.5% of games played, at least 3)`; the policy is in the resolved
+  configuration and the report. Tests: the policy arithmetic (floor, rate,
+  boundaries, strict and time-only explicit limits); an SPRT against a
+  fixture that forfeits every game becomes invalid at pair 2 (four faults
+  over four games) and at pair 1 with `--max-engine-faults 0`; an SPSA tune
+  with the same fixture commits iteration 0 with its two forfeits scored and
+  becomes invalid at iteration 1; the two acceptance tests that assert
+  invalidation on the first fault now pass `--max-engine-faults 0`.
+  Deviation: the fault policy's serialized shape changed, so an `sprt` or
+  `spsa` run directory from before this step no longer matches its resolved
+  configuration on resume and must be restarted.
 
   **Implementation evidence (Phase 10.9k):** the execution plan hands each
   run a `SlotPool` (`MatchExecutionPlan::slot_pool`), and `match`

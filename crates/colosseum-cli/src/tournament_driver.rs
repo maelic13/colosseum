@@ -287,6 +287,7 @@ pub async fn run_tournament(
                     fault_policy: FaultPolicy {
                         max_engine_faults: u32::MAX,
                         max_time_losses: u32::MAX,
+                        rate: None,
                     },
                     execution,
                     master_seed,

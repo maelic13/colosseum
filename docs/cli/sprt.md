@@ -97,10 +97,27 @@ and both `result.json` and `run-record.json` retain the resolved statistical
 design. Resume recomputes the official prefix from the journal and accepts
 only the same resolved conditions.
 
-An SPRT tolerates no engine faults by default, and a loss on time is an engine
-fault. Its unit is a colour-reversed pair, and a forfeit breaks the pair it
-lands in; `--max-engine-faults N` and `--max-time-losses N` raise the limits
-explicitly.
+An engine fault — a loss on time, a crash, an illegal move, a disconnect — is
+scored as the loss it is. Its pair stays in the official sample in pair order,
+and the LLR counts it like any other result, as fishtest and fastchess do. An
+operating system occasionally holds a process for tens of milliseconds, and a
+test that died on the first such forfeit could not run long at all.
+
+The test becomes `invalid` only when engine faults exceed the larger of 3 and
+0.5% of the games played so far. The limit is checked at every committed pair,
+so an engine that keeps faulting still voids the test, and early. The fault
+count, its rate over the games played and the allowance at that point are on
+the `faults` line of every progress block and of the final report:
+
+```text
+faults: engine 0/2, time losses 0/2; 2 in 812 games (0.25%); 4 allowed (0.5% of games played, at least 3)
+```
+
+`--max-engine-faults N` and `--max-time-losses N` set fixed limits instead, and
+`0` restores strict invalidation on the first fault of that kind. A loss on
+time is an engine fault, so an omitted time-loss limit follows the engine-fault
+allowance. An infrastructure fault — an engine that never started, a refused
+CPU placement — is never scored and still invalidates the run.
 
 Automation exit codes are: `0` H1, `1` H0, `2` configuration refusal, `3`
 infrastructure/runtime/persistence error, `4` cap-reached inconclusive, and `5`

@@ -703,6 +703,7 @@ fn engine_fault_commits_invalid_evidence_but_never_a_gradient() {
     let root = tempfile::tempdir().unwrap();
     let tune = write_tune(root.path());
     let run = root.path().join("invalid");
+    // A strict limit: the first fault voids the iteration and the tune.
     let output = cli()
         .arg("spsa")
         .arg(env!("CARGO_BIN_EXE_colosseum-uci-fixture"))
@@ -719,6 +720,8 @@ fn engine_fault_commits_invalid_evidence_but_never_a_gradient() {
             "1",
             "--max-moves",
             "2",
+            "--max-engine-faults",
+            "0",
             "--seed",
             "7",
             "--dir",
@@ -758,6 +761,73 @@ fn engine_fault_commits_invalid_evidence_but_never_a_gradient() {
         serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
     assert_eq!(record["status"], "invalid");
     assert_eq!(record["official_sample"]["committed_units"], 0);
+}
+
+/// Under the default allowance a forfeit is a result: the iteration it lands in
+/// is scored and committed, and the tune goes on until the faults outrun the
+/// larger of 3 and 0.5% of the games played.
+#[test]
+fn a_rare_forfeit_is_scored_into_the_gradient_until_the_allowance_is_exceeded() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = write_tune(root.path());
+    let run = root.path().join("allowed");
+    // The fixture forfeits every game it plays as Black: two faults per
+    // two-game iteration.
+    let output = cli()
+        .arg("spsa")
+        .arg(env!("CARGO_BIN_EXE_colosseum-uci-fixture"))
+        .arg("--tune")
+        .arg(&tune)
+        .args([
+            "--r-end",
+            "0.002",
+            "--iterations",
+            "3",
+            "--games-per-iteration",
+            "2",
+            "--depth",
+            "1",
+            "--max-moves",
+            "2",
+            "--seed",
+            "7",
+            "--dir",
+        ])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|error| panic!("{error}: {}", String::from_utf8_lossy(&output.stderr)));
+    let driver = &value["report"]["driver"];
+    // Iteration 0: two faults in two games, within the floor of three. It is
+    // committed with its forfeits scored as the losses they are.
+    let completed = driver["completed_iterations"].as_array().unwrap();
+    assert_eq!(completed.len(), 1, "{driver}");
+    let score = &completed[0]["score"];
+    assert_eq!(
+        score["plus_wins"].as_u64().unwrap()
+            + score["plus_losses"].as_u64().unwrap()
+            + score["draws"].as_u64().unwrap(),
+        2
+    );
+    assert!(completed[0].get("centers_after").is_some());
+    let first = &completed[0]["pairs"][0];
+    assert!(first["first"]["fault"].is_object() || first["second"]["fault"].is_object());
+    // Iteration 1 takes the count to four in four games: over the allowance.
+    assert_eq!(driver["status"], "invalid");
+    assert_eq!(driver["invalid_iteration"]["iteration"], 1);
+    assert_eq!(output.status.code(), Some(5));
+    assert_eq!(
+        value["report"]["fault_policy"]["rate"]["per_mille"], 5,
+        "{value}"
+    );
+    // The count, its rate and the allowance are in the progress block.
+    let log = std::fs::read_to_string(run.join("run.log")).unwrap();
+    assert!(
+        log.contains("4 in 4 games (100.00%); 3 allowed (0.5% of games played, at least 3)"),
+        "{log}"
+    );
 }
 
 #[test]

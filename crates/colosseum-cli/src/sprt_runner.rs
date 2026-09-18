@@ -254,9 +254,11 @@ impl SprtAccumulator {
             pair.second.white,
             pair.second.fault.as_ref(),
         );
-        if self.faults.engine_total() > self.fault_policy.max_engine_faults
-            || self.faults.time_total() > self.fault_policy.max_time_losses
-        {
+        // A forfeit is a result like any other: the pair stays in the sample
+        // and the LLR counts it. Only a fault count above the allowance for the
+        // games played so far, this pair's included, voids the test.
+        let games = (u64::from(self.sample.pairs()) + 1) * 2;
+        if self.fault_policy.exceeded(self.faults, games) {
             self.invalid_pair = Some(pair.pair_id);
             self.sample
                 .record_pair(result_for_a(&pair.first), result_for_a(&pair.second));

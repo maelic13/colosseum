@@ -601,7 +601,11 @@ pub(crate) fn print_calibration(report: &CalibrationReport, run_directory: &Path
         faults.engine_b,
         faults.time_losses_a,
         faults.time_losses_b,
-        fault_allowance_text(report.fixed_match.fault_policy)
+        fault_allowance_text(
+            report.fixed_match.fault_policy,
+            faults,
+            u64::from(report.fixed_match.games_attempted)
+        )
     );
     println!("artifacts: {}", run_directory.display());
 }

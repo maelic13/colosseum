@@ -173,6 +173,15 @@ pub(crate) struct SpsaConditions {
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) max_moves: Option<u32>,
 
+    /// Invalidate the tune after more engine faults than this; a time loss is
+    /// one. Omitted: 0.5% of the games played so far, at least 3.
+    #[arg(long)]
+    pub(crate) max_engine_faults: Option<u32>,
+    /// Invalidate the tune after more time losses than this. Omitted: the
+    /// engine-fault allowance, which already counts them.
+    #[arg(long)]
+    pub(crate) max_time_losses: Option<u32>,
+
     /// Number of games allowed to run at once.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     pub(crate) concurrency: u32,
@@ -796,6 +805,13 @@ pub(crate) async fn run_spsa_command(
     if conditions.book.is_some() {
         path_pointers.push("/openings/path".into());
     }
+    // A forfeit is scored as the loss it is and moves the gradient like any
+    // other result; the tune is void only when faults outrun 0.5% of the
+    // games played, and never fewer than three.
+    let fault_policy = match_runner::FaultPolicy::sequential(
+        conditions.max_engine_faults,
+        conditions.max_time_losses,
+    );
     let resolved = match resolve_config(
         built_in_defaults(),
         None,
@@ -819,6 +835,7 @@ pub(crate) async fn run_spsa_command(
             "master_seed": master_seed,
             "master_seed_generated": master_seed_generated,
             "openings": openings.report(),
+            "fault_policy": fault_policy,
         }),
         &[],
         &current_directory,
@@ -1011,7 +1028,7 @@ pub(crate) async fn run_spsa_command(
         "master_seed": master_seed,
         "master_seed_generated": master_seed_generated,
         "openings": openings.report(),
-        "fault_policy": "any engine fault invalidates the iteration and tune"
+        "fault_policy": fault_policy
     })) {
         eprintln!("run record failed: {error}");
         return ExitCode::from(3);
@@ -1057,6 +1074,7 @@ pub(crate) async fn run_spsa_command(
             openings: openings.clone(),
         },
         execution: execution.clone(),
+        fault_policy,
         checkpoint,
         stop_after_iteration: command.stop_after_iteration,
         progress: progress.clone(),
@@ -1078,14 +1096,20 @@ pub(crate) async fn run_spsa_command(
             result = &mut driver_future => break result,
             _ = poll.tick() => {
                 if schedule.due(observer.committed_iterations()) {
-                    let block = spsa_progress_block(&observer, &schedule, settings, &centres);
+                    let block = spsa_progress_block(
+                        &observer,
+                        &schedule,
+                        settings,
+                        &centres,
+                        fault_policy,
+                    );
                     observer.publish_progress(&block);
                     centres.remember(&observer.current_centers());
                 }
             }
         }
     };
-    let final_block = spsa_progress_block(&observer, &schedule, settings, &centres);
+    let final_block = spsa_progress_block(&observer, &schedule, settings, &centres, fault_policy);
     if schedule.needs_final(final_block.done) {
         schedule.mark(final_block.done);
         observer.publish_progress(&final_block);
@@ -1142,6 +1166,7 @@ pub(crate) async fn run_spsa_command(
         master_seed,
         master_seed_generated,
         openings: openings.report().clone(),
+        fault_policy,
         driver,
     };
     if let Err(error) = observer.finish(&report) {
@@ -1183,6 +1208,7 @@ pub(crate) struct SpsaReport {
     pub(crate) master_seed: u64,
     pub(crate) master_seed_generated: bool,
     pub(crate) openings: match_runner::OpeningPolicyReport,
+    pub(crate) fault_policy: match_runner::FaultPolicy,
     pub(crate) driver: spsa_driver::SpsaDriverReport,
 }
 
@@ -1423,6 +1449,7 @@ pub(crate) fn spsa_progress_block(
     schedule: &ProgressSchedule,
     settings: SpsaRunSettings,
     centres: &SpsaCentreTracker,
+    fault_policy: match_runner::FaultPolicy,
 ) -> ProgressBlock {
     let (done, last, faults) = observer.snapshot();
     let total = u64::from(settings.iterations);
@@ -1448,8 +1475,16 @@ pub(crate) fn spsa_progress_block(
         .field(
             "faults",
             format!(
-                "engine {}/{}, time losses {}/{}",
-                faults.engine_a, faults.engine_b, faults.time_losses_a, faults.time_losses_b
+                "engine {}/{}, time losses {}/{}; {}",
+                faults.engine_a,
+                faults.engine_b,
+                faults.time_losses_a,
+                faults.time_losses_b,
+                fault_allowance_text(
+                    fault_policy,
+                    faults,
+                    observer.iterations_played() * u64::from(settings.games_per_iteration)
+                )
             ),
         );
     match &last {
@@ -1595,6 +1630,14 @@ impl DurableSpsaOutput {
             |_| (0, None, MatchFaultCounts::default()),
             |state| (state.completed, state.last.clone(), state.faults),
         )
+    }
+
+    /// Iterations whose games are in the fault count: the committed ones and
+    /// an invalid one.
+    pub(crate) fn iterations_played(&self) -> u64 {
+        self.state.lock().map_or(0, |state| {
+            state.completed + u64::from(state.invalid.is_some())
+        })
     }
 
     /// Publish a block through the run recorder this observer owns.
@@ -1956,9 +1999,15 @@ pub(crate) fn print_spsa(report: &SpsaReport, run_directory: &Path) {
         completed_iterations: report.driver.completed_iterations.clone(),
         invalid_iteration: report.driver.invalid_iteration.clone(),
     });
+    let games_played = (committed as u64 + u64::from(report.driver.invalid_iteration.is_some()))
+        * u64::from(report.driver.settings.games_per_iteration);
     println!(
-        "faults: engine {}/{}, time losses {}/{}",
-        faults.engine_a, faults.engine_b, faults.time_losses_a, faults.time_losses_b
+        "faults: engine {}/{}, time losses {}/{}; {}",
+        faults.engine_a,
+        faults.engine_b,
+        faults.time_losses_a,
+        faults.time_losses_b,
+        fault_allowance_text(report.fault_policy, faults, games_played)
     );
     if let Some(invalid) = &report.driver.invalid_iteration {
         println!(

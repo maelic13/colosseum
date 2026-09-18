@@ -19,8 +19,8 @@ use thiserror::Error;
 
 use crate::cancellation::Cancellation;
 use crate::match_runner::{
-    MatchError, MatchExecutionPlan, MatchFaultCounts, MatchGame, MatchSide, PairGameSettings,
-    play_pair, record_fault,
+    FaultPolicy, MatchError, MatchExecutionPlan, MatchFaultCounts, MatchGame, MatchSide,
+    PairGameSettings, play_pair, record_fault,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -85,6 +85,9 @@ pub struct SpsaDriverRequest {
     pub base_engine: colosseum_application::EngineLaunchSpec,
     pub game_settings: PairGameSettings,
     pub execution: MatchExecutionPlan,
+    /// When engine faults void the tune. A forfeit within it is scored as the
+    /// loss it is and moves the gradient like any other result.
+    pub fault_policy: FaultPolicy,
     pub checkpoint: SpsaCheckpoint,
     pub progress: SpsaProgress,
     /// Stop cleanly once this many iterations are committed. This is a request
@@ -151,6 +154,13 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
         &history,
     )?;
     let mut completed_iterations = request.checkpoint.completed_iterations;
+    // Faults over every committed game, a resumed run's included: the
+    // allowance is judged over the whole tune.
+    let mut run_faults = MatchFaultCounts::default();
+    for iteration in &completed_iterations {
+        run_faults.absorb(fault_counts(&iteration.pairs));
+    }
+    let games_per_iteration = u64::from(request.settings.pairs_per_iteration()) * 2;
     let resumed_iterations = state.completed_iterations();
     request.progress.initialize(
         resumed_iterations,
@@ -193,12 +203,15 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
         if faults.infrastructure > 0 || pairs.iter().any(pair_is_unscorable) {
             return Err(SpsaDriverError::InfrastructureMiniMatch { iteration });
         }
-        if faults.engine_total() > 0 {
+        run_faults.absorb(faults);
+        let games_played =
+            (u64::from(state.completed_iterations()) + 1).saturating_mul(games_per_iteration);
+        if request.fault_policy.exceeded(run_faults, games_played) {
             let SpsaIterationTransition::Invalid(policy) = state.commit_iteration(
                 prepared,
                 pairs.len() as u32,
                 None,
-                faults.engine_total(),
+                faults.engine_total().max(1),
             )?
             else {
                 unreachable!("an engine fault cannot produce a committed update")
@@ -226,11 +239,13 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
                 final_centers: state.centers().to_vec(),
             });
         }
+        // Within the allowance a forfeit is a result: the game it ended is
+        // scored as the loss it is and the gradient uses it.
         let score = score_mini_match(&pairs)?;
         let SpsaIterationTransition::Committed(update) =
             state.commit_iteration(prepared, pairs.len() as u32, Some(score), 0)?
         else {
-            unreachable!("a fault-free complete mini-match cannot invalidate")
+            unreachable!("a scored complete mini-match cannot invalidate")
         };
         let committed = SpsaCommittedIteration {
             iteration: update.iteration,
@@ -436,7 +451,7 @@ fn validate_checkpoint_evidence(
             return Err(SpsaDriverError::CheckpointMismatch { iteration });
         }
         validate_pair_ids(iteration, settings, &record.pairs)?;
-        if record.pairs.iter().any(pair_has_fault) || record.pairs.iter().any(pair_is_unscorable) {
+        if record.pairs.iter().any(pair_is_unscorable) {
             return Err(SpsaDriverError::CheckpointMismatch { iteration });
         }
         let score = score_mini_match(&record.pairs)?;
@@ -532,18 +547,11 @@ fn unusable_game(pairs: &[CompletePair<MatchGame>]) -> Option<(u32, &'static str
         .iter()
         .flat_map(|pair| [&pair.first, &pair.second])
         .find_map(|game| {
-            if !game.scorable || matches!(game.fault, Some(GameFault::Infrastructure { .. })) {
-                Some((game.number, "could not be scored"))
-            } else if game.fault.is_some() {
-                Some((game.number, "ended on an engine fault"))
-            } else {
-                None
-            }
+            // An engine fault is a scored result and belongs in the iteration;
+            // a game nobody could score does not.
+            (!game.scorable || matches!(game.fault, Some(GameFault::Infrastructure { .. })))
+                .then_some((game.number, "could not be scored"))
         })
-}
-
-fn pair_has_fault(pair: &CompletePair<MatchGame>) -> bool {
-    pair.first.fault.is_some() || pair.second.fault.is_some()
 }
 
 fn pair_is_unscorable(pair: &CompletePair<MatchGame>) -> bool {

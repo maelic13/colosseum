@@ -232,9 +232,9 @@ pub(crate) async fn run_sprt(
         },
     };
     let adjudication = resolve_adjudication(&command);
-    // A pair is the SPRT's unit of evidence and a forfeit breaks one, so the
-    // sequential test tolerates none unless told otherwise.
-    let fault_policy = command.fault_policy(0);
+    // A forfeit is scored as the loss it is; the test is void only when the
+    // faults outrun 0.5% of the games played, and never fewer than three.
+    let fault_policy = command.sequential_fault_policy();
     let engine_a_time_control = match resolve_time_control(
         "engine A",
         command.a_movetime_ms,
@@ -976,6 +976,19 @@ pub(crate) fn print_sprt(
         "official sample: {}; post-terminal: {}",
         progress::plural(report.schedule.official_pairs.len() as u64, "pair"),
         progress::plural(report.schedule.post_terminal_pairs.len() as u64, "pair")
+    );
+    let faults = report.schedule.faults;
+    println!(
+        "faults: engine {}/{}, time losses {}/{}; {}",
+        faults.engine_a,
+        faults.engine_b,
+        faults.time_losses_a,
+        faults.time_losses_b,
+        fault_allowance_text(
+            report.fault_policy,
+            faults,
+            report.schedule.official_pairs.len() as u64 * 2
+        )
     );
     println!(
         "model {}: alpha {}, beta {}, cap {}",

@@ -434,8 +434,8 @@ fn spsa_games_name_their_iteration_and_sample_class() {
     assert_eq!(pgn.matches("[ColosseumSpsaIteration \"1\"]").count(), 2);
     assert_eq!(replay(&committed.join("games.pgn"))["complete_pairs"], 2);
 
-    // An engine-attributable fault invalidates the whole mini-match, and the
-    // games it played are kept but marked.
+    // Under a strict fault limit an engine-attributable fault invalidates the
+    // whole mini-match, and the games it played are kept but marked.
     let invalid = root.path().join("invalid");
     let refused = cli()
         .arg("spsa")
@@ -451,6 +451,8 @@ fn spsa_games_name_their_iteration_and_sample_class() {
             "2",
             "--depth",
             "1",
+            "--max-engine-faults",
+            "0",
             "--seed",
             "7",
             "--dir",

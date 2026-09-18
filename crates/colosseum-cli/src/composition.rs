@@ -366,21 +366,24 @@ mod tests {
             conditions(None, None).fault_policy(7),
             FaultPolicy {
                 max_engine_faults: 7,
-                max_time_losses: 7
+                max_time_losses: 7,
+                rate: None
             }
         );
         assert_eq!(
             conditions(Some(3), None).fault_policy(7),
             FaultPolicy {
                 max_engine_faults: 3,
-                max_time_losses: 3
+                max_time_losses: 3,
+                rate: None
             }
         );
         assert_eq!(
             conditions(None, Some(1)).fault_policy(0),
             FaultPolicy {
                 max_engine_faults: 0,
-                max_time_losses: 1
+                max_time_losses: 1,
+                rate: None
             }
         );
     }

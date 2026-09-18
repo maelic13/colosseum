@@ -126,10 +126,16 @@ same way you would name a larger checkpoint to stop at.
 One floating-point centre vector is retained throughout the run. For each
 iteration Colosseum derives deterministic plus/minus integer option vectors,
 plays the same openings with colours reversed, and applies an update only after
-every scheduled pair in that mini-match has completed. A crash, timeout,
-disconnect, protocol fault, illegal move or loss on time invalidates the
-iteration and the tune. Its games remain as evidence, but a forfeit is never
-treated as a tuning gradient. Infrastructure and persistence failures are likewise never scored.
+every scheduled pair in that mini-match has completed. An engine fault — a
+crash, a loss on time, a disconnect, a protocol fault or an illegal move — is
+scored as the loss it is, and the iteration it lands in is committed and moves
+the gradient like any other. The tune becomes `invalid` only when engine faults
+exceed the larger of 3 and 0.5% of the games played so far, checked as each
+iteration is committed; the iteration that crosses the limit is kept as
+evidence and applies no gradient. `--max-engine-faults N` and
+`--max-time-losses N` set fixed limits instead, and `0` invalidates on the
+first fault of that kind. Infrastructure and persistence failures are never
+scored and still stop the tune.
 
 All ordinary match conditions remain explicit: one of `--movetime-ms`,
 `--base-ms` with optional `--increment-ms`, `--nodes` or `--depth`; adjudication
@@ -172,7 +178,7 @@ Progress is written to stderr every `--progress-every N` committed iterations
 ```text
 progress [spsa]: 400/2000 iterations (20%), 41m12s elapsed
   time remaining          2h44m
-  faults                  engine 0/0, time losses 0/0
+  faults                  engine 1/0, time losses 1/0; 1 in 12800 games (0.01%); 64 allowed (0.5% of games played, at least 3)
   at a rail               none
   moved most since start  Hash +0.1840, Threads -0.0625, MoveOverhead +0.0090
 ```
@@ -198,7 +204,7 @@ Hash               16    204  203.6412   +188  1..1024
 Threads             4      3    3.4410     -1    1..16
 estimator: rounded centre vector after iteration 1999
 iterations: 2000 of 2000 committed; games: 64000
-faults: engine 0/0, time losses 0/0
+faults: engine 0/0, time losses 0/0; 0 in 64000 games (0.00%); 320 allowed (0.5% of games played, at least 3)
 centres at a rail: none
 artifacts: ./colosseum-runs/spsa-...
 ```
@@ -241,6 +247,6 @@ but the mismatch is printed prominently and retained in the SPRT result,
 resolved configuration and run record.
 
 Exit code `0` means the requested horizon completed, `2` is a configuration
-refusal, `3` is an infrastructure/runtime/persistence failure, and `5` means an
-engine fault invalidated the tune. With `--json`, a terminal completed or
+refusal, `3` is an infrastructure/runtime/persistence failure, and `5` means
+engine faults exceeded their allowance and invalidated the tune. With `--json`, a terminal completed or
 invalid tune emits one document; failures before a report keep stdout empty.

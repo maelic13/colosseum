@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9l** rare forfeits in sequential tests, then 10.9h, then **10.10 — EXIT**, which needs a real machine and the maintainer |
+| Next step | **10.9h** placement per platform research note, then **10.10 — EXIT**, which needs a real machine and the maintainer |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -907,7 +907,7 @@ model as well.
   16-core host:** the 2,000-game 3+0.03 match at 14 slots showing zero time
   losses, and every game core continuously busy as read from the journal's
   slot spans
-- ☐ **10.9l** — **Model: Sol High.** A rare forfeit must not void a sequential
+- ☑ **10.9l — DONE** — **Model: Sol High.** A rare forfeit must not void a sequential
   test: `sprt` and `spsa` score an engine-attributable forfeit as a loss, keep
   the pair in the official sample in order, and invalidate only above a
   documented fault rate (default 0.5% of games, minimum 3); count and rate in
