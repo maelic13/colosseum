@@ -120,6 +120,33 @@ towards nothing but the overhead. A PGN without the margin tags still gets the
 distribution, and says the margin was not recorded. Percentiles use the nearest rank, so a quantile finer than the
 sample can resolve is the largest value.
 
+## Where a game's time went
+
+Given a run directory, or its `games.jsonl`, `stats` also reports how each
+game's wall time divided, over every journalled game, counted or not:
+
+```text
+game phases over 90 games, ms mean / p50 / p90 / p99 / max:
+  startup               149.8      86.0     273.4     289.7     289.7
+  play                 2516.2    2661.1    3243.0    4043.6    4043.6
+  charged              2502.2    2649.2    3225.0    4011.7    4011.7
+  uncharged-play         14.0      13.6      20.9      31.9      31.9
+  between-searches        2.4       2.2       3.9       7.2       7.2
+  position-write          9.7       9.5      14.7      20.9      20.9
+  after-bestmove          1.8       1.7       2.7       4.0       4.0
+  teardown               12.1      11.6      14.0      20.1      20.1
+  outside-runner          0.3       0.2       0.4       0.6       0.6
+```
+
+`startup` runs from the game starting to its first search: both engines
+spawned, handshaken, configured and readied. `play` runs from the first search
+to the end of the last, and is `charged` (both clocks) plus `uncharged-play`,
+which divides into the harness's own work between searches, the `position`
+written before each `go`, and each `bestmove`'s arrival to its search
+returning. `teardown` runs to both engine processes having exited, and
+`outside-runner` is what the CPU slot's span holds beyond those three. None of
+this is charged to an engine; it is the time a run spends on neither clock.
+
 ## Pair identity in a Colosseum PGN
 
 The seven-tag roster says who played and how a game ended. It cannot say which

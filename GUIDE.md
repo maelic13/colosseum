@@ -964,7 +964,7 @@ model as well.
   Linux isolated-core and IRQ-affinity detection and preference, macOS
   advisory contract, WSL excluded as evidence; implementation follows as
   its own step if the note calls for it — PLAN §Phase 10(r)
-- ☐ **10.9s** — **Model: Sol High.** Harness time that belongs to neither
+- ◐ **10.9s — IN PROGRESS** — **Model: Sol High.** Harness time that belongs to neither
   clock: per-game start-up, play, uncharged play and teardown in the journal
   and in `stats`; reduce the largest phase, with persistent engine processes
   per slot as the candidate (fresh processes stay selectable); target under

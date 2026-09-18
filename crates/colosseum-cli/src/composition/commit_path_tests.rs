@@ -50,6 +50,7 @@ fn stub_game(number: u32) -> MatchGame {
             black_charged_elapsed: None,
             white_round_trip: None,
             black_round_trip: None,
+            phases: None,
         },
         opening: OpeningAssignment {
             book_index: Some(number.div_ceil(2) as usize - 1),

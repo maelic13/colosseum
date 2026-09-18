@@ -386,6 +386,7 @@ mod tests {
                 black_charged_elapsed: None,
                 white_round_trip: None,
                 black_round_trip: None,
+                phases: None,
             },
             opening: crate::match_runner::OpeningAssignment {
                 book_index: None,

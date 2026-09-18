@@ -883,6 +883,7 @@ fn synthetic_game(
             black_charged_elapsed: None,
             white_round_trip: None,
             black_round_trip: None,
+            phases: None,
         },
         opening,
         fault: None,

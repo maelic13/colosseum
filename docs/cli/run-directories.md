@@ -46,7 +46,13 @@ nanoseconds — `go_write_ns` (the harness writing `go`), `to_first_info_ns`
 `info`), `last_info_to_bestmove_ns` (last `info` until `bestmove` arrived),
 `bestmove_to_consumed_ns` (until the game task took it; not charged),
 `last_info_lag_ns` (the last `info`'s arrival minus the time it reported) and
-`overhead_ns` (charged time minus the engine's reported time). `slot` names
+`overhead_ns` (charged time minus the engine's reported time). Its `phases`
+say where the game's wall time went, in nanoseconds: `startup_ns` (to the
+first search), `play_ns` (first search to the end of the last), `charged_ns`
+(both clocks), `uncharged_play_ns` (play less charged), its parts
+`between_searches_ns`, `position_write_ns` and `after_bestmove_ns`, and
+`teardown_ns` (until both engines had exited); `stats` reports their
+distribution. `slot` names
 the CPU slot the game ran on (`index`, counting from zero) and when it held
 it, in microseconds since the Unix epoch: `started_unix_us` before its first
 engine was spawned, `ended_unix_us` after both had exited. Two games' spans on

@@ -65,6 +65,108 @@ pub struct StatsReplayReport {
     pub attempts: Vec<ReplayAttempt>,
     pub warnings: Vec<String>,
     pub telemetry: SearchTelemetryReport,
+    /// Where each game's wall time went, from a run's journal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub game_phases: Option<GamePhaseReport>,
+}
+
+/// The distribution over a run's games of each phase of a game's wall time,
+/// in milliseconds. Every journalled game that reached its first search
+/// counts, in or out of the official sample: this is about the harness, not
+/// the result.
+#[derive(Debug, Clone, Serialize)]
+pub struct GamePhaseReport {
+    pub games: u32,
+    pub phases: Vec<PhaseDistribution>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PhaseDistribution {
+    pub phase: &'static str,
+    pub mean_ms: f64,
+    pub p50_ms: f64,
+    pub p90_ms: f64,
+    pub p99_ms: f64,
+    pub max_ms: f64,
+}
+
+/// The phases, in the order a game passes through them. `outside-runner` is
+/// the slot span less start-up, play and teardown: what the driver spends on
+/// a game before the runner starts and after it returns.
+const PHASES: [&str; 9] = [
+    "startup",
+    "play",
+    "charged",
+    "uncharged-play",
+    "between-searches",
+    "position-write",
+    "after-bestmove",
+    "teardown",
+    "outside-runner",
+];
+
+fn game_phase_report(journal: &Path) -> Option<GamePhaseReport> {
+    let bytes = fs::read(journal).ok()?;
+    let mut columns: [Vec<f64>; PHASES.len()] = Default::default();
+    let mut games = 0_u32;
+    let ms = |ns: u64| ns as f64 / 1e6;
+    for record in crate::journal::read_journal_bytes(&bytes) {
+        let Some(phases) = record.clock.phases else {
+            continue;
+        };
+        games += 1;
+        let values = [
+            phases.startup_ns,
+            phases.play_ns,
+            phases.charged_ns,
+            phases.uncharged_play_ns,
+            phases.between_searches_ns,
+            phases.position_write_ns,
+            phases.after_bestmove_ns,
+            phases.teardown_ns,
+        ];
+        for (column, value) in columns.iter_mut().zip(values) {
+            column.push(ms(value));
+        }
+        if let Some(slot) = &record.slot {
+            let span_ns = slot
+                .ended_unix_us
+                .saturating_sub(slot.started_unix_us)
+                .saturating_mul(1_000);
+            let runner_ns = phases
+                .startup_ns
+                .saturating_add(phases.play_ns)
+                .saturating_add(phases.teardown_ns);
+            // Wall-clock microseconds against monotonic nanoseconds: a small
+            // negative residue is resolution, not time, and reads as zero.
+            columns[8].push(ms(span_ns.saturating_sub(runner_ns)));
+        }
+    }
+    (games > 0).then(|| GamePhaseReport {
+        games,
+        phases: PHASES
+            .iter()
+            .zip(columns)
+            .filter(|(_, values)| !values.is_empty())
+            .map(|(phase, values)| distribution(phase, values))
+            .collect(),
+    })
+}
+
+fn distribution(phase: &'static str, mut values: Vec<f64>) -> PhaseDistribution {
+    values.sort_by(f64::total_cmp);
+    let quantile = |fraction: f64| {
+        let rank = (fraction * values.len() as f64).ceil() as usize;
+        values[rank.clamp(1, values.len()) - 1]
+    };
+    PhaseDistribution {
+        phase,
+        mean_ms: values.iter().sum::<f64>() / values.len() as f64,
+        p50_ms: quantile(0.5),
+        p90_ms: quantile(0.9),
+        p99_ms: quantile(0.99),
+        max_ms: values[values.len() - 1],
+    }
 }
 
 /// Games a source recorded outside its own official sample, counted by the
@@ -142,9 +244,21 @@ struct RawGame {
 
 pub fn replay(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, String> {
     if path.is_dir() {
-        replay_directory(path, subject)
+        let mut report = replay_directory(path, subject)?;
+        report.game_phases = game_phase_report(&path.join(crate::journal::JOURNAL_FILE));
+        Ok(report)
+    } else if let Some(directory) = directory_of_named_journal(path) {
+        replay(directory, subject)
     } else {
-        replay_file(path, subject)
+        let mut report = replay_file(path, subject)?;
+        let journal = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case("jsonl"));
+        if journal {
+            report.game_phases = game_phase_report(path);
+        }
+        Ok(report)
     }
 }
 
@@ -254,9 +368,6 @@ fn directory_of_named_journal(path: &Path) -> Option<&Path> {
 }
 
 fn replay_file(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, String> {
-    if let Some(directory) = directory_of_named_journal(path) {
-        return replay_directory(directory, subject);
-    }
     let authority = match path.extension().and_then(|value| value.to_str()) {
         Some(value) if value.eq_ignore_ascii_case("json") => "structured-run-store",
         Some(value) if value.eq_ignore_ascii_case("jsonl") => "structured-run-store",
@@ -804,6 +915,7 @@ fn build_report(
         attempts,
         warnings,
         telemetry,
+        game_phases: None,
     }
 }
 

@@ -253,6 +253,93 @@ pub struct ClockAccountingReport {
     pub white_round_trip: Option<RoundTripMaxima>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub black_round_trip: Option<RoundTripMaxima>,
+    /// Where the game's wall time went, charged or not. Absent when the game
+    /// never reached its first search.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phases: Option<GamePhases>,
+}
+
+/// A game's wall time by phase, in nanoseconds of the monotonic clock.
+///
+/// Start-up, play and teardown follow each other: the game runner starting to
+/// the first search, the first search to the end of the last, and that end to
+/// both engine processes having exited. Play is the charged time of both
+/// sides plus `uncharged_play_ns`, which the last three fields divide: the
+/// runner's own work between one search returning and the next starting, the
+/// `position` written before each `go`, and each `bestmove` arriving to its
+/// search returning to the runner.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GamePhases {
+    pub startup_ns: u64,
+    pub play_ns: u64,
+    pub charged_ns: u64,
+    pub uncharged_play_ns: u64,
+    pub between_searches_ns: u64,
+    pub position_write_ns: u64,
+    pub after_bestmove_ns: u64,
+    pub teardown_ns: u64,
+}
+
+/// Stamps a game takes to build its [`GamePhases`].
+#[derive(Debug, Default)]
+struct PhaseClock {
+    first_search: Option<std::time::Instant>,
+    last_return: Option<std::time::Instant>,
+    charged: std::time::Duration,
+    between_searches: std::time::Duration,
+    position_write: std::time::Duration,
+    after_bestmove: std::time::Duration,
+}
+
+impl PhaseClock {
+    /// A search is about to be issued at `begin`.
+    fn search_begins(&mut self, begin: std::time::Instant) {
+        self.first_search.get_or_insert(begin);
+        if let Some(returned) = self.last_return {
+            self.between_searches += begin.saturating_duration_since(returned);
+        }
+    }
+
+    /// The search issued at `begin` returned at `returned`, with the timing
+    /// its engine recorded.
+    fn search_returned(
+        &mut self,
+        begin: std::time::Instant,
+        returned: std::time::Instant,
+        timing: Option<&colosseum_uci::SearchTiming>,
+    ) {
+        self.last_return = Some(returned);
+        let Some(timing) = timing else {
+            return;
+        };
+        self.position_write += timing.go_stamped.saturating_duration_since(begin);
+        if let Some(arrived) = timing.bestmove_arrived {
+            self.charged += arrived.saturating_duration_since(timing.go_stamped);
+            self.after_bestmove += returned.saturating_duration_since(arrived);
+        }
+    }
+
+    fn phases(
+        &self,
+        game_start: std::time::Instant,
+        play_end: std::time::Instant,
+        exited: std::time::Instant,
+    ) -> Option<GamePhases> {
+        let first = self.first_search?;
+        let ns =
+            |duration: std::time::Duration| u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX);
+        let play = play_end.saturating_duration_since(first);
+        Some(GamePhases {
+            startup_ns: ns(first.saturating_duration_since(game_start)),
+            play_ns: ns(play),
+            charged_ns: ns(self.charged),
+            uncharged_play_ns: ns(play.saturating_sub(self.charged)),
+            between_searches_ns: ns(self.between_searches),
+            position_write_ns: ns(self.position_write),
+            after_bestmove_ns: ns(self.after_bestmove),
+            teardown_ns: ns(exited.saturating_duration_since(play_end)),
+        })
+    }
 }
 
 /// Per-side running average of reported nps.
@@ -368,6 +455,7 @@ fn clock_accounting_report(
     white: Option<&MoveTimeAccumulator>,
     black: Option<&MoveTimeAccumulator>,
     round_trips: Option<&[RoundTripRecorder; 2]>,
+    phases: Option<GamePhases>,
 ) -> ClockAccountingReport {
     ClockAccountingReport {
         model: CLOCK_MODEL_ID.to_owned(),
@@ -379,6 +467,7 @@ fn clock_accounting_report(
         black_charged_elapsed: black.and_then(MoveTimeAccumulator::summary),
         white_round_trip: round_trips.and_then(|sides| sides[0].maxima()),
         black_round_trip: round_trips.and_then(|sides| sides[1].maxima()),
+        phases,
     }
 }
 
@@ -493,6 +582,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
     // The search that lost on time, for the PGN: it played no move, but its
     // overhead is the one that mattered.
     let mut forfeited_search: Option<SearchAnnotation> = None;
+    let mut phase_clock = PhaseClock::default();
     // Per color: the predicted reply the engine is currently pondering on
     // (canonical UCI) and when that ponder search started. `Some` means a
     // `go ponder` is outstanding and must be resolved before the engine's
@@ -585,6 +675,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             }
         }
         let search_begin = std::time::Instant::now();
+        phase_clock.search_begins(search_begin);
         let mover_search = async {
             let sink = live_info_sink(&live, mover == Color::White, search_begin);
             if hit {
@@ -617,6 +708,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             }
             None => mover_search.await,
         };
+        let search_returned = std::time::Instant::now();
 
         // Whatever the search's outcome, its stamps say where its time went.
         // A search that missed its deadline is given a moment more to show
@@ -625,6 +717,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             engine.await_late_bestmove(LATE_BESTMOVE_WINDOW).await;
         }
         let timing = engine.take_search_timing();
+        phase_clock.search_returned(search_begin, search_returned, timing.as_ref());
         // One rounding for the PGN and the journal: the journal keeps the
         // nanoseconds, the PGN the same value to the nearest millisecond.
         let overhead_ms = timing
@@ -841,6 +934,8 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         }
     };
 
+    let play_end = std::time::Instant::now();
+
     // Abnormal end: write a forensic incident report while the engines'
     // transcripts are still available, and point the error text at it.
     let mut outcome = outcome;
@@ -880,6 +975,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
     // Shut engines down gracefully (kill_on_drop covers anything left).
     let _ = white.quit(Duration::from_millis(500)).await;
     let _ = black.quit(Duration::from_millis(500)).await;
+    let exited = std::time::Instant::now();
 
     let stats = GameStats {
         plies: san_moves.len() as u32,
@@ -917,6 +1013,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             Some(&white_move_time),
             Some(&black_move_time),
             Some(&round_trips),
+            phase_clock.phases(game_start, play_end, exited),
         ),
         fault: outcome.fault,
         error: outcome.error,
@@ -1311,7 +1408,14 @@ async fn handle_setup_failure(
         san_moves: Vec::new(),
         uci_moves: Vec::new(),
         pgn: render_pgn(spec, &[], &[], outcome.result, outcome.termination, None),
-        clock_accounting: clock_accounting_report(spec, monotonic_resolution_ns, None, None, None),
+        clock_accounting: clock_accounting_report(
+            spec,
+            monotonic_resolution_ns,
+            None,
+            None,
+            None,
+            None,
+        ),
         fault: outcome.fault,
         error: outcome.error,
     };

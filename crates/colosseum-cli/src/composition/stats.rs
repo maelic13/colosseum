@@ -151,6 +151,23 @@ pub(crate) fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
                         println!("{}: {line}", engine.engine);
                     }
                 }
+                if let Some(phases) = &report.game_phases {
+                    println!(
+                        "game phases over {} games, ms mean / p50 / p90 / p99 / max:",
+                        phases.games
+                    );
+                    for phase in &phases.phases {
+                        println!(
+                            "  {:<17} {:>9.1} {:>9.1} {:>9.1} {:>9.1} {:>9.1}",
+                            phase.phase,
+                            phase.mean_ms,
+                            phase.p50_ms,
+                            phase.p90_ms,
+                            phase.p99_ms,
+                            phase.max_ms
+                        );
+                    }
+                }
             }
             ExitCode::SUCCESS
         }

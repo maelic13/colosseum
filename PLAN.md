@@ -2926,6 +2926,47 @@ games" procedure at 10.10, once, on the final state.
   processes per game remaining selectable for crash isolation. Success
   criterion on the reference host: uncharged time under 0.3 s per game at
   15 slots, and no change in the `h=` distribution or the fault rate.
+
+  **Implementation evidence (Phase 10.9s):** `run_game` stamps the game's
+  start, each search's start and return, the end of play and both engines'
+  exit, and the clock accounting carries `phases` (`GamePhases`): start-up,
+  play, charged, uncharged play and its three parts (the runner's work
+  between searches, the `position` written before each `go`, a `bestmove`'s
+  arrival to its search returning), and teardown. The journal records them
+  per game and `stats` on a run directory or journal reports each phase's
+  mean, p50, p90, p99 and maximum, with `outside-runner` (slot span less the
+  three) beside them. The instrument named the phase at once: 30 games of
+  b22core against b22base at 3+0.03 on 15 slots gave start-up mean 1,537 ms
+  (the fifteen games of the first wave 2,661–2,835 ms each, later single
+  starts 171–557 ms), uncharged play 16 ms and teardown 10 ms per game. A
+  bare start of the same engine outside the harness took 25 ms alone and
+  218–224 ms median in a burst of thirty, so the harness, not the engine,
+  held most of it. Stamps inside the start then put 0.5–0.8 s of each
+  engine's start in applying its CPU affinity, and none in process
+  creation, the job object, resume or the reader thread (under 0.1 s
+  together): the check that the engine's threads sit in the requested
+  processor group took a system-wide thread snapshot
+  (`CreateToolhelp32Snapshot`) per engine, synchronously on a runtime
+  worker, so thirty at once serialised and held up other games' handshakes
+  (half the handshakes read 0 ms, the other half 0.7–1.0 s). The check now
+  asks the process itself (`GetProcessGroupAffinity`, which the allowed-CPU
+  detection already used for the harness's own process); the requirement
+  is unchanged. The same burst after the change: affinity 0.0 ms, start-up
+  211–222 ms mean, which is the bare engines' own figure. On the real
+  82-knob tune (3 iterations of 30 games at 15 slots, 1+0.01, 20 ms margin,
+  seed 11), uncharged time per game from slot span less charged time fell
+  from median 1,537 ms, mean 1,417 ms to median 215 ms, mean 236 ms, and
+  the three iterations from about 30.6 s to 21.7 s. Test: a fixture engine
+  that waits before `uciok` and after `quit` puts those delays in start-up
+  and teardown, play equals charged plus uncharged exactly, and `stats`
+  reports all nine phases; with the exit stamp moved before the quits the
+  test fails on teardown (0.8 ms against 120 ms injected). Persistent engine
+  processes, the candidate, were not built: the remaining start-up is the
+  operating system's own cost of starting two processes, about 0.2 s of a
+  9 s game, and the target is met without giving up per-game isolation.
+  They stay a discriminating test of (w). Owed and maintainer-run: a tune at
+  15 slots, 30 games per iteration, 3+0.03 and a 20 ms margin, read for
+  uncharged time per game, the `h=` distribution and the fault rate.
 - **(ad) Overlapped SPSA iterations, a recorded mode that is off until its
   evidence is in.** The iteration tail is the last structural loss: 17% of
   slot-time at 30 games on 15 slots, because the next iteration may not

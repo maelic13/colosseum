@@ -11,6 +11,10 @@ struct FixtureArgs {
     legal_sequence: bool,
     append_pid_file: bool,
     pid_file: Option<std::path::PathBuf>,
+    /// Wait this long before answering `uci`: time spent starting up.
+    uciok_after_ms: u64,
+    /// Wait this long after `quit` before exiting: time spent shutting down.
+    exit_after_quit_ms: u64,
     /// A search in timed phases: wait, first `info`, wait, last `info`
     /// reporting `report_time_ms`, wait, `bestmove`. Each line is flushed as
     /// it is written, so each delay lands in exactly one round-trip phase.
@@ -47,6 +51,12 @@ fn arguments() -> FixtureArgs {
             parsed.append_pid_file = true;
         } else if let Some(value) = argument.strip_prefix("--pid-file=") {
             parsed.pid_file = Some(value.into());
+        } else if let Some(value) = argument.strip_prefix("--uciok-after-ms=") {
+            parsed.uciok_after_ms = value.parse().expect("--uciok-after-ms needs an integer");
+        } else if let Some(value) = argument.strip_prefix("--exit-after-quit-ms=") {
+            parsed.exit_after_quit_ms = value
+                .parse()
+                .expect("--exit-after-quit-ms needs an integer");
         } else if let Some((name, value)) = argument
             .strip_prefix("--")
             .and_then(|rest| rest.split_once('='))
@@ -95,6 +105,7 @@ fn main() -> std::io::Result<()> {
         let line = line.trim();
         match line {
             "uci" => {
+                std::thread::sleep(Duration::from_millis(arguments.uciok_after_ms));
                 writeln!(stdout, "id name Colosseum path-only fixture")?;
                 writeln!(stdout, "id author Colosseum")?;
                 writeln!(
@@ -104,7 +115,10 @@ fn main() -> std::io::Result<()> {
                 writeln!(stdout, "uciok")?;
             }
             "isready" => writeln!(stdout, "readyok")?,
-            "quit" => break,
+            "quit" => {
+                std::thread::sleep(Duration::from_millis(arguments.exit_after_quit_ms));
+                break;
+            }
             "stop" if searching => {
                 writeln!(stdout, "bestmove e2e4")?;
                 searching = false;

@@ -306,6 +306,7 @@ mod tests {
                 black_charged_elapsed: None,
                 white_round_trip: None,
                 black_round_trip: None,
+                phases: None,
             },
             opening: match_runner::OpeningAssignment {
                 book_index: Some(number.div_ceil(2) as usize - 1),
