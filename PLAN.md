@@ -2488,7 +2488,27 @@ games" procedure at 10.10, once, on the final state.
   draining, not a permanent termination; an unscorable game keeps its pair
   or iteration class in the journal beside the `unscorable` mark so replay
   cannot drop the rest of an iteration. Each with a regression test.
-  Items (k) to (s) precede (j).
+- **(t) Round-trip latency instrument.** After (q) the commit stall is gone
+  and the run directory stays small, but the real-host 3+0.03 forfeits did
+  not move (15 in 2,000 games at 14 shared slots; 3 and 4 in 1,000 at 7
+  disjoint and 7 shared; fastchess 0 in 2,000). Every forfeit position
+  replayed directly against the bare engine answers inside its limit, and
+  in each forfeit no `bestmove` reached the reader before the deadline, so
+  the time is lost in the harness-to-engine round trip, not in the search
+  and not in core sharing. Guessing stops here. Required: per move, the
+  runner records a phase breakdown with monotonic stamps taken by the
+  thread that performs each step: `go` stamped, `go` write returned, first
+  `info` arrived, last `info` arrived with the engine's own reported
+  `time`, `bestmove` arrived, `bestmove` consumed by the game task. The
+  journal record keeps per-side maxima of each phase and of
+  `charged − engine time`; `games.pgn` gains `h=<ms>` (harness overhead,
+  charged minus engine-reported time) beside `t=`; a forfeit forensic
+  prints the full breakdown of its last five moves. `stats` reports the
+  overhead distribution per engine (p50/p99/p999/max) and the count of
+  moves whose overhead exceeded the margin. Success criterion: on the
+  16-core host at 14 slots, a 2,000-game 3+0.03 match names the phase
+  that carries every overhead above 20 ms; the fix for that phase is its
+  own step and is not guessed here. Items (k) to (t) precede (j).
 
   **Implementation evidence (Phase 10.9g):** the `bestmove` instant is now
   the pipe's. A dedicated OS thread per engine owns its standard output,

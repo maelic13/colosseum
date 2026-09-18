@@ -881,6 +881,14 @@ model as well.
   `--restart` guidance; over-long protocol line a per-read fault; unscorable
   games keep their pair or iteration class in the journal; regression test
   per item — PLAN §Phase 10(s)
+- ☐ **10.9j** — **Model: Sol High.** Round-trip latency instrument: per-move
+  phase stamps (`go` stamped, write returned, first and last `info` with
+  the engine's reported time, `bestmove` arrived, consumed) taken by the
+  thread doing each step; per-side maxima in the journal, `h=<ms>` overhead
+  in `games.pgn`, full breakdown of the last five moves in a forfeit
+  forensic, overhead distribution and over-margin count in `stats`; the
+  maintainer's 2,000-game 3+0.03 run then names the guilty phase — PLAN
+  §Phase 10(t)
 - ☐ **10.9h** — **Model: Sol High.** Placement per platform research note:
   Linux isolated-core and IRQ-affinity detection and preference, macOS
   advisory contract, WSL excluded as evidence; implementation follows as
