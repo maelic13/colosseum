@@ -434,3 +434,50 @@ fn a_forfeit_forensic_prints_the_last_searches_and_when_the_late_answer_came() {
         .unwrap();
     assert!(most >= 1, "{value}");
 }
+
+/// The held time is charged time the engine's process spent not running. A
+/// fixture that sleeps through its search is held for about the sleep; one
+/// that spins is held for almost none of it. Only Windows on x86-64 reads a
+/// process's CPU time precisely enough to say.
+#[cfg(all(windows, target_arch = "x86_64"))]
+#[test]
+fn a_sleeping_engine_is_held_and_a_spinning_one_is_not() {
+    const SEARCH_MS: u64 = 80;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let held = |argument: String| {
+        runtime.block_on(async {
+            let mut options = SpawnOptions::new(fixture());
+            options.args = vec![argument];
+            let mut engine = EngineProcess::spawn(options).await.unwrap();
+            engine.handshake(Duration::from_secs(5)).await.unwrap();
+            engine.is_ready(Duration::from_secs(5)).await.unwrap();
+            engine
+                .search(
+                    &UciPosition::StartPos { moves: Vec::new() },
+                    &GoLimits::MoveTime(ms(500)),
+                    Duration::from_secs(5),
+                    |_| {},
+                )
+                .await
+                .unwrap();
+            let timing = engine.take_search_timing().expect("the search was timed");
+            let _ = engine.quit(Duration::from_secs(1)).await;
+            Duration::from_nanos(
+                u64::try_from(timing.held_ns().expect("held time read")).unwrap_or(0),
+            )
+        })
+    };
+    let sleeping = held(format!("--sleep-ms={SEARCH_MS}"));
+    let spinning = held(format!("--busy-ms={SEARCH_MS}"));
+    assert!(
+        sleeping >= ms(SEARCH_MS - 10),
+        "a sleeping engine was held {sleeping:?} of {SEARCH_MS} ms"
+    );
+    assert!(
+        spinning < ms(SEARCH_MS / 4),
+        "a spinning engine was held {spinning:?} of {SEARCH_MS} ms"
+    );
+}

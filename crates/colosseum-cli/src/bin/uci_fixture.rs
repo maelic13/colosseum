@@ -6,6 +6,8 @@ use std::time::Duration;
 #[derive(Debug, Default)]
 struct FixtureArgs {
     sleep_ms: u64,
+    /// Spin this long on each `go`, consuming CPU the way a search does.
+    busy_ms: u64,
     crash_on_go: bool,
     hang_on_go: bool,
     legal_sequence: bool,
@@ -36,6 +38,8 @@ fn arguments() -> FixtureArgs {
     for argument in std::env::args().skip(1) {
         if let Some(value) = argument.strip_prefix("--sleep-ms=") {
             parsed.sleep_ms = value.parse().expect("--sleep-ms needs an integer");
+        } else if let Some(value) = argument.strip_prefix("--busy-ms=") {
+            parsed.busy_ms = value.parse().expect("--busy-ms needs an integer");
         } else if argument == "--crash-on-go" {
             parsed.crash_on_go = true;
         } else if argument == "--hang-on-go" {
@@ -136,6 +140,10 @@ fn main() -> std::io::Result<()> {
                     continue;
                 }
                 std::thread::sleep(Duration::from_millis(arguments.sleep_ms));
+                let spin = std::time::Instant::now();
+                while spin.elapsed() < Duration::from_millis(arguments.busy_ms) {
+                    std::hint::spin_loop();
+                }
                 if let Some(phases) = arguments.phases {
                     write_timed_search(&mut stdout, phases)?;
                 }

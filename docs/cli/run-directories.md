@@ -46,7 +46,13 @@ nanoseconds — `go_write_ns` (the harness writing `go`), `to_first_info_ns`
 `info`), `last_info_to_bestmove_ns` (last `info` until `bestmove` arrived),
 `bestmove_to_consumed_ns` (until the game task took it; not charged),
 `last_info_lag_ns` (the last `info`'s arrival minus the time it reported) and
-`overhead_ns` (charged time minus the engine's reported time). Its `phases`
+`overhead_ns` (charged time minus the engine's reported time), and on
+Windows x86-64 `held_ns` (charged time minus the CPU time the engine's
+process consumed: how long it was not running while its clock ran) with
+`held_over_10ms` and `held_over_25ms`, how many searches were held longer
+than that. For an engine that reports only at the end of each iteration,
+`overhead_ns` also holds its own search time since that report; `held_ns`
+depends on nothing the engine says. Its `phases`
 say where the game's wall time went, in nanoseconds: `startup_ns` (to the
 first search), `play_ns` (first search to the end of the last), `charged_ns`
 (both clocks), `uncharged_play_ns` (play less charged), its parts

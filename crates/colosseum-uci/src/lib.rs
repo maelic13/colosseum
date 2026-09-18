@@ -7,6 +7,7 @@
 //! - [`UciPosition`] / [`GoLimits`]: the `position` and `go` command builders.
 //! - [`Score`]: engine score reporting.
 
+mod cpu_time;
 pub mod error;
 pub mod parse;
 pub mod position;

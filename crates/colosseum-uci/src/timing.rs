@@ -48,6 +48,11 @@ pub struct SearchTiming {
     /// time then shares no origin with the charged interval, and neither the
     /// overhead nor the last `info`'s lag can be computed from the two.
     pub earlier_origin: bool,
+    /// The engine process's consumed CPU time just before the `go` was
+    /// stamped, in nanoseconds, where the platform can read it precisely.
+    pub cpu_at_go_ns: Option<u64>,
+    /// The same, read when the game task took the `bestmove`.
+    pub cpu_at_answer_ns: Option<u64>,
 }
 
 /// One phase of a search's round trip, named for the report.
@@ -85,6 +90,8 @@ impl SearchTiming {
             consumed: None,
             late: false,
             earlier_origin: false,
+            cpu_at_go_ns: None,
+            cpu_at_answer_ns: None,
         }
     }
 
@@ -148,6 +155,20 @@ impl SearchTiming {
         let arrived = self.since_go(self.last_info?);
         let reported = self.last_info_time_ms?;
         Some(signed_ns(arrived) - i64::try_from(reported).ok()?.saturating_mul(1_000_000))
+    }
+}
+
+impl SearchTiming {
+    /// Charged time minus the CPU time the engine's process consumed over
+    /// the search, in nanoseconds: how long the engine was not running while
+    /// its clock ran. It needs nothing from the engine. For an engine
+    /// searching on several threads its CPU time exceeds wall time and the
+    /// value is negative, which says nothing about a stall.
+    #[must_use]
+    pub fn held_ns(&self) -> Option<i64> {
+        let charged = self.charged()?;
+        let consumed = self.cpu_at_answer_ns?.checked_sub(self.cpu_at_go_ns?)?;
+        Some(signed_ns(charged) - i64::try_from(consumed).ok()?)
     }
 }
 
