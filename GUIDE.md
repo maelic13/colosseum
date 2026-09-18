@@ -948,7 +948,7 @@ model as well.
   conditions); adopt only if the sibling-mode tune gates no worse; never a
   gate condition; **DEFERRED behind the release** by maintainer decision
   2026-09-18, with a no-code ten-minute pre-check recorded — PLAN §Phase 10(z)
-- ☐ **10.9m** — **Model: Sol High.** Residual time losses, research before any
+- ◐ **10.9m — IN PROGRESS** — **Model: Sol High.** Residual time losses, research before any
   fix: fastchess source study in `docs/architecture/fastchess-mechanics.md`
   (process lifetime, creation flags and priority, affinity, pipes and
   readers, where its clock starts and stops, `timemargin`, between-game
