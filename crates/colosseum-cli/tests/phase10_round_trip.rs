@@ -213,6 +213,11 @@ fn a_match_journals_each_sides_phase_maxima_and_writes_the_overhead_beside_the_t
         "20",
         "--b-movetime-ms",
         "1000",
+        // End inside the fixture's scripted moves: its closing illegal move is
+        // timed into the journal's maxima but never annotated in the PGN, so
+        // when it was the slowest search the two could not agree.
+        "--max-moves",
+        "2",
     ]);
     let output = run_match(&run, &extra);
     assert!(
