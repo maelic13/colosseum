@@ -167,11 +167,7 @@ pub(crate) async fn run_calibration(
     }
     let progress = match_runner::MatchProgress::default();
     let resumed_pairs = PairedProgress::from_games(&completed_games).pairs.into();
-    let players = format!(
-        "{} vs. {}",
-        engine_display_name(&prepared.engine_a),
-        engine_display_name(&prepared.engine_b)
-    );
+    let players = Players::new(&prepared.engine_a, &prepared.engine_b);
     let request = match_runner::FixedMatchRequest {
         engine_a: prepared.engine_a,
         engine_b: prepared.engine_b,
@@ -485,7 +481,7 @@ pub(crate) fn prepare_calibration(
 pub(crate) fn calibration_progress_block(
     observer: &DurableMatchOutput,
     schedule: &ProgressSchedule,
-    players: &str,
+    players: &Players,
     pairs_planned: u64,
     policy: FaultPolicy,
 ) -> ProgressBlock {
@@ -498,8 +494,8 @@ pub(crate) fn calibration_progress_block(
         Some(pairs_planned),
         schedule.elapsed(),
     );
-    block.field("players", players);
-    sample.add_fields(&mut block, policy);
+    block.field("players", players.to_string());
+    sample.add_fields(&mut block, policy, players);
     if let Some(rate) =
         progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
     {
@@ -597,12 +593,13 @@ pub(crate) fn print_calibration(report: &CalibrationReport, run_directory: &Path
         println!("interval unavailable: {reason}");
     }
     let faults = report.fixed_match.faults;
+    let players = Players {
+        a: report.fixed_match.engine_a.name.clone(),
+        b: report.fixed_match.engine_b.name.clone(),
+    };
     println!(
-        "faults: time {}/{}, other {}/{}; {}",
-        faults.time_losses_a,
-        faults.time_losses_b,
-        faults.engine_a.saturating_sub(faults.time_losses_a),
-        faults.engine_b.saturating_sub(faults.time_losses_b),
+        "faults: {}; {}",
+        fault_counts_text(faults, &players),
         fault_allowance_text(
             report.fixed_match.fault_policy,
             faults,

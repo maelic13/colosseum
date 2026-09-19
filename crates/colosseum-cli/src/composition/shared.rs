@@ -195,6 +195,41 @@ pub(crate) fn forfeit_allowance(scheduled_games: u64) -> u32 {
         .max(FORFEIT_ALLOWANCE_MINIMUM)
 }
 
+/// The two sides of a paired run, by the names a reader knows them by.
+#[derive(Debug, Clone)]
+pub(crate) struct Players {
+    pub(crate) a: String,
+    pub(crate) b: String,
+}
+
+impl Players {
+    pub(crate) fn new(a: &EngineLaunchSpec, b: &EngineLaunchSpec) -> Self {
+        Self {
+            a: engine_display_name(a),
+            b: engine_display_name(b),
+        }
+    }
+}
+
+impl std::fmt::Display for Players {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{} vs. {}", self.a, self.b)
+    }
+}
+
+/// Faults per side, each count named for its engine: a bare `0/2` reads as
+/// "none of two" rather than "none for A, two for B".
+pub(crate) fn fault_counts_text(faults: MatchFaultCounts, players: &Players) -> String {
+    let (a, b) = (&players.a, &players.b);
+    format!(
+        "time: {a} {}, {b} {}; other: {a} {}, {b} {}",
+        faults.time_losses_a,
+        faults.time_losses_b,
+        faults.engine_a.saturating_sub(faults.time_losses_a),
+        faults.engine_b.saturating_sub(faults.time_losses_b),
+    )
+}
+
 /// How a progress block and a final report state the faults so far: their
 /// rate over the games played and the allowance at that point.
 pub(crate) fn fault_allowance_text(
@@ -718,7 +753,12 @@ impl PairedProgress {
 
     /// The lines both commands share, in the order an operator reads them:
     /// the size of the sample, what it is worth, then how it was reached.
-    pub(crate) fn add_fields(&self, block: &mut ProgressBlock, policy: FaultPolicy) {
+    pub(crate) fn add_fields(
+        &self,
+        block: &mut ProgressBlock,
+        policy: FaultPolicy,
+        players: &Players,
+    ) {
         // A run that counts games has the game count in its headline already;
         // what it does not say is how many of them are complete pairs, which
         // is what every figure below is computed over.
@@ -768,15 +808,8 @@ impl PairedProgress {
             .field(
                 "faults",
                 format!(
-                    "time {}/{}, other {}/{}; {}",
-                    self.faults.time_losses_a,
-                    self.faults.time_losses_b,
-                    self.faults
-                        .engine_a
-                        .saturating_sub(self.faults.time_losses_a),
-                    self.faults
-                        .engine_b
-                        .saturating_sub(self.faults.time_losses_b),
+                    "{}; {}",
+                    fault_counts_text(self.faults, players),
                     fault_allowance_text(policy, self.faults, u64::from(self.scored_games))
                 ),
             );
@@ -844,4 +877,29 @@ pub(crate) fn print_json(output: &MachineOutput<'_>) {
         "{}",
         serde_json::to_string(output).expect("machine output is serializable")
     );
+}
+
+#[cfg(test)]
+mod fault_text_tests {
+    use super::*;
+
+    #[test]
+    fn each_fault_count_is_named_for_its_engine() {
+        let faults = MatchFaultCounts {
+            engine_a: 1,
+            engine_b: 3,
+            time_losses_a: 0,
+            time_losses_b: 2,
+            infrastructure: 0,
+        };
+        let players = Players {
+            a: "b22core".into(),
+            b: "b22base".into(),
+        };
+        assert_eq!(
+            fault_counts_text(faults, &players),
+            "time: b22core 0, b22base 2; other: b22core 1, b22base 1"
+        );
+        assert_eq!(players.to_string(), "b22core vs. b22base");
+    }
 }

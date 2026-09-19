@@ -74,7 +74,7 @@ progress [sprt]: 105/200 pairs (52%), 8m41s elapsed
   nElo            +248.0 +/- 47.0
   W/D/L           158/0/52
   Ptnml           [0, 0, 52, 0, 53]
-  faults          time 0/0, other 0/0; 0 of 3 allowed
+  faults          time: candidate 0, baseline 0; other: candidate 0, baseline 0; 0 of 3 allowed
   LLR             +2.96 in [-2.94, 2.94] (accept H1)
   rate            724 pairs/hour
   time remaining  0s

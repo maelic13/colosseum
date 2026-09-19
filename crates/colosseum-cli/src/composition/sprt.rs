@@ -539,11 +539,7 @@ pub(crate) async fn run_sprt(
     }
     let openings_report = openings.report().clone();
     let resumed_pairs = official_pairs.len() as u64;
-    let players = format!(
-        "{} vs. {}",
-        engine_display_name(&engine_a),
-        engine_display_name(&engine_b)
-    );
+    let players = Players::new(&engine_a, &engine_b);
     let request = sprt_runner::PairScheduleRequest {
         settings: match_runner::PairGameSettings {
             engine_a,
@@ -638,7 +634,12 @@ pub(crate) async fn run_sprt(
                     report,
                 });
             } else {
-                print_sprt(&report, &directory.paths().root, progress.elapsed());
+                print_sprt(
+                    &report,
+                    &directory.paths().root,
+                    progress.elapsed(),
+                    &players,
+                );
             }
             ExitCode::from(sprt_exit_code(status))
         }
@@ -699,7 +700,7 @@ pub(crate) fn sprt_progress_block(
     observer: &DurableSprtOutput,
     progress: &ProgressSchedule,
     design: SprtDesign,
-    players: &str,
+    players: &Players,
     terminal: bool,
     policy: FaultPolicy,
 ) -> ProgressBlock {
@@ -712,8 +713,8 @@ pub(crate) fn sprt_progress_block(
         Some(u64::from(design.max_pairs)),
         progress.elapsed(),
     );
-    block.field("players", players);
-    sample.add_fields(&mut block, policy);
+    block.field("players", players.to_string());
+    sample.add_fields(&mut block, policy, players);
     if post_terminal > 0 {
         block.field(
             "post-terminal",
@@ -966,6 +967,7 @@ pub(crate) fn print_sprt(
     report: &sprt_runner::SprtReport,
     run_directory: &Path,
     elapsed: Duration,
+    players: &Players,
 ) {
     if let Some(apply) = &report.apply {
         println!(
@@ -987,11 +989,8 @@ pub(crate) fn print_sprt(
     );
     let faults = report.schedule.faults;
     println!(
-        "faults: time {}/{}, other {}/{}; {}",
-        faults.time_losses_a,
-        faults.time_losses_b,
-        faults.engine_a.saturating_sub(faults.time_losses_a),
-        faults.engine_b.saturating_sub(faults.time_losses_b),
+        "faults: {}; {}",
+        fault_counts_text(faults, players),
         fault_allowance_text(
             report.fault_policy,
             faults,

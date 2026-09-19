@@ -307,11 +307,7 @@ pub(crate) async fn run_match(
     }
     let progress = match_runner::MatchProgress::default();
     let resumed_games = completed_games.len();
-    let players = format!(
-        "{} vs. {}",
-        engine_display_name(&engine_a),
-        engine_display_name(&engine_b)
-    );
+    let players = Players::new(&engine_a, &engine_b);
     let request = match_runner::FixedMatchRequest {
         engine_a,
         engine_b,
@@ -421,7 +417,7 @@ pub(crate) async fn run_match(
 pub(crate) fn match_progress_block(
     observer: &DurableMatchOutput,
     schedule: &ProgressSchedule,
-    players: &str,
+    players: &Players,
     total: u32,
     policy: FaultPolicy,
 ) -> ProgressBlock {
@@ -433,7 +429,7 @@ pub(crate) fn match_progress_block(
         Some(u64::from(total)),
         schedule.elapsed(),
     );
-    block.field("players", players);
+    block.field("players", players.to_string());
     let points = f64::from(sample.wins) + 0.5 * f64::from(sample.draws);
     if sample.scored_games > 0 {
         block.field(
@@ -450,7 +446,7 @@ pub(crate) fn match_progress_block(
     // A fixed match plays colour-reversed pairs on one opening, exactly as a
     // sequential test does, so it has the same paired estimates and reports
     // them the same way.
-    sample.add_fields(&mut block, policy);
+    sample.add_fields(&mut block, policy, players);
     if let Some(rate) =
         progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
     {
@@ -648,12 +644,13 @@ pub(crate) fn print_fixed_match(report: &match_runner::FixedMatchReport) {
         Err(error) => println!("Elo and nElo unavailable: {error}"),
     }
     println!("Ptnml: {:?}", sample.vector.counts());
+    let players = Players {
+        a: report.engine_a.name.clone(),
+        b: report.engine_b.name.clone(),
+    };
     println!(
-        "faults: A {} ({} time), B {} ({} time), infrastructure {}; {}",
-        report.faults.engine_a,
-        report.faults.time_losses_a,
-        report.faults.engine_b,
-        report.faults.time_losses_b,
+        "faults: {}; infrastructure {}; {}",
+        fault_counts_text(report.faults, &players),
         report.faults.infrastructure,
         fault_allowance_text(
             report.fault_policy,
