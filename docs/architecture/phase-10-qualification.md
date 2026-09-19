@@ -20,14 +20,16 @@ adjudication.
 |---|---|---|
 | `22782ec` | `cb324c221edfe4be438204c815bd05e28ddd36417de81bd6e22e4b70d80f77c1` | scale |
 | `9f7fafc` | `6998bf8dde5a88fac971f4d5f7a3bdeaa342892df250a0b099c710db6428bc85` | verdict |
-| `99091bc` | `9bb751e045654413881c35f2e5776e4cc3dd9cfb27214450714e9b4ed79344d8` | ratings onward |
+| `99091bc` | `9bb751e045654413881c35f2e5776e4cc3dd9cfb27214450714e9b4ed79344d8` | ratings |
+| `9f94aa9` | `da248afc4a3debc2b71f3a05987ff20de9b2a72a15ecd55c34ff695bd4ae40d0` | tuning onward |
 
 Between them: the text of the `faults` line (`time: 0-2` for `time: b22core
 0, b22base 2`), at the maintainer's request; the SPRT progress block's time
 remaining once the LLR has crossed a bound (it showed the whole cap); and the
-default time margin, 2,000 ms to 20 ms, by maintainer decision. Every run here
-states its 20 ms margin explicitly, so none of these changes what they
-measured.
+default time margin, 2,000 ms to 20 ms, by maintainer decision; the
+tournament report's text for a pinned rating (`[fixed]` for
+`unavailable [fixed]`). Every run here states its margin explicitly, so none
+of these changes what they measured.
 
 ## 1. Scale — passed
 
@@ -100,3 +102,58 @@ on the openings drawn. Sixteen pairs finished after the terminal pair and are
 kept outside the official sample. 5,402 games per hour, a pair holding its
 slot for both colours. The run's last progress block showed "time remaining
 2h52m" beside "accept H1": a display defect, fixed in `22637fd`.
+
+## 3. Ratings — passed
+
+A newcomer placed in a pool whose ratings are held fixed, reproducing a
+rating the desktop application measured. The reference is Rarog's RAR-M57: a
+desktop gauntlet (tournament `8791a27e`, 2026-09-19) of
+`rarog-v2.5.0-dev-fit3900-windows-pext-native-pgo.exe` (sha256
+`1F73D5C9…`) against ten opponents at their Super Rating Tournament ratings,
+600 games each, which rated it **3191**. Here the same binary plays six of
+those opponents, 400 games each, their ratings pinned at the same values,
+under the desktop event's conditions (Hash 128, one thread — `Max CPUs 1` for
+Fritz 16 and Rybka 4.1 — Critter's `OwnBook` and Shredder's `Use
+Shredderbases` off, a 2,000 ms margin as the desktop charges, fresh engine
+processes per game as a tournament starts them). Placement differs by design:
+pinned cores here, unpinned in the desktop event.
+
+```text
+colosseum-cli tournament run --format gauntlet --seeds 1 --games-per-pair 2 --cycles 200 \
+  --engine rarog-v2.5.0-dev-fit3900-windows-pext-native-pgo.exe --label "Rarog 2.5.0-dev" \
+  --engine Houdini_15a_x64.exe --label "Houdini 1.5a" \
+  --engine Critter_1.6a_64bit.exe --label "Critter 1.6a" \
+  --engine EngineDeepShredder13UCIx64.exe --label "Shredder 13" \
+  --engine "Fritz 16.exe" --label "Fritz 16" \
+  --engine "Deep Rybka 4.1 SSE42 x64.exe" --label "Rybka 4.1" \
+  --engine stockfish-5-x64-modern.exe --label "Stockfish 5" \
+  --rating 3100 --rating 3211 --rating 3192 --rating 3201 --rating 3173 --rating 3111 --rating 3221 \
+  --fixed 2:3211 --fixed 3:3192 --fixed 4:3201 --fixed 5:3173 --fixed 6:3111 --fixed 7:3221 \
+  --option Hash=128 --engine-option 1:Threads=1 --engine-option 2:Threads=1 \
+  --engine-option 3:Threads=1 --engine-option 3:OwnBook=false --engine-option 4:Threads=1 \
+  "--engine-option=4:Use Shredderbases=false" "--engine-option=5:Max CPUs=1" \
+  "--engine-option=6:Max CPUs=1" --engine-option 7:Threads=1 \
+  --base-ms 3000 --increment-ms 30 --margin-ms 2000 --book UHO_Lichess_4852_v1.epd \
+  --book-order random --seed 42 --placement auto --concurrency 14 --dir colosseum-qual-ratings
+```
+
+With the field pinned, the newcomer's rating is in effect the mean of its
+performances against the opponents, so the six kept here predict 3190.7 from
+RAR-M57's own per-opponent results; the four left out average 3191 too.
+
+| Opponent (pinned) | Rarog, CLI, 400 games | Rarog, RAR-M57, 600 games | Performance, CLI / RAR-M57 |
+|---|---|---|---|
+| Houdini 1.5a (3211) | 50.6% | 50.5% | 3215 / 3215 |
+| Shredder 13 (3201) | 49.8% | 50.5% | 3199 / 3205 |
+| Stockfish 5 (3221) | 50.3% | 46.3% | 3223 / 3195 |
+| Critter 1.6a (3192) | 49.8% | 46.1% | 3190 / 3165 |
+| Fritz 16 (3173) | 53.4% | 52.3% | 3197 / 3189 |
+| Rybka 4.1 (3111) | 60.9% | 59.1% | 3188 / 3175 |
+| **Rating** | **3201.9 ± 14.0** | **3191** | |
+
+The interval (3187.9–3215.9) contains the reference, and every opponent's
+score is within the noise of 400 and 600 games (largest difference 4.0
+points, Stockfish 5). 2,400 official games, W-D-L 937-643-820 for Rarog, no
+fault of any kind, 14 slots with no overlapping span, 5,066 games per hour.
+The report printed a pinned rating as "3192.0 unavailable [fixed]"; a display
+defect, fixed in `9f94aa9`.
