@@ -19,11 +19,15 @@ adjudication.
 | Colosseum source | CLI binary sha256 | Used for |
 |---|---|---|
 | `22782ec` | `cb324c221edfe4be438204c815bd05e28ddd36417de81bd6e22e4b70d80f77c1` | scale |
-| `9f7fafc` | `6998bf8dde5a88fac971f4d5f7a3bdeaa342892df250a0b099c710db6428bc85` | verdict onward |
+| `9f7fafc` | `6998bf8dde5a88fac971f4d5f7a3bdeaa342892df250a0b099c710db6428bc85` | verdict |
+| `99091bc` | `9bb751e045654413881c35f2e5776e4cc3dd9cfb27214450714e9b4ed79344d8` | ratings onward |
 
-The two differ only in the text of the `faults` line (`time: 0-2` for
-`time: b22core 0, b22base 2`), changed at the maintainer's request between
-the runs; nothing measured depends on it.
+Between them: the text of the `faults` line (`time: 0-2` for `time: b22core
+0, b22base 2`), at the maintainer's request; the SPRT progress block's time
+remaining once the LLR has crossed a bound (it showed the whole cap); and the
+default time margin, 2,000 ms to 20 ms, by maintainer decision. Every run here
+states its 20 ms margin explicitly, so none of these changes what they
+measured.
 
 ## 1. Scale — passed
 
@@ -61,3 +65,38 @@ by more than 10 ms (21 in the baseline): the KPK bitbase these pre-fix
 binaries build on first use is now built at most once per process. The
 largest time a search was held off its CPU was 27.7 ms (p99 of the per-side
 maxima 8.2 ms).
+
+## 2. Verdict — passed
+
+An SPRT of a pair fastchess has gated, under its conditions: normalized
+`[0, 10]`, α = β = 0.05, at most 8,000 pairs.
+
+```text
+colosseum-cli sprt rarog-b24a-core-pext-pgo.exe rarog-b24a-base-pext-pgo.exe \
+  --a-label b24a-core --b-label b24a-base --model normalized --elo0 0 --elo1 10 \
+  --alpha 0.05 --beta 0.05 --max-pairs 8000 \
+  --a-base-ms 3000 --a-increment-ms 30 --b-base-ms 3000 --b-increment-ms 30 \
+  --a-option Hash=64 --a-option Threads=1 --b-option Hash=64 --b-option Threads=1 \
+  --a-margin-ms 20 --b-margin-ms 20 --book UHO_Lichess_4852_v1.epd \
+  --book-order random --seed 45 --placement auto --concurrency 14 \
+  --dir colosseum-qual-verdict
+```
+
+Engines: `rarog-b24a-core-pext-pgo.exe` (sha256 `9206A59884D0…`) and
+`rarog-b24a-base-pext-pgo.exe` (`4EC72F0FA40F…`), the hashes fastchess's
+manifest records.
+
+| | Colosseum 0.1.0 | fastchess, same binaries and design |
+|---|---|---|
+| Verdict | **H1 accepted** | H1 accepted |
+| Pairs to the decision | 241 | 216 |
+| nElo | +83.0 ± 31.0 | +94.0 ± 32.8 |
+| Elo | +60.4 ± 23.1 | |
+| LLR at the stop | 2.951 of 2.944 | |
+| Time losses | **0** | 0 |
+
+Same decision, intervals overlapping; where a sequential test stops depends
+on the openings drawn. Sixteen pairs finished after the terminal pair and are
+kept outside the official sample. 5,402 games per hour, a pair holding its
+slot for both colours. The run's last progress block showed "time remaining
+2h52m" beside "accept H1": a display defect, fixed in `22637fd`.
