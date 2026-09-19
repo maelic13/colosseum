@@ -166,7 +166,7 @@ Options:
 
 
       --a-margin-ms <A_MARGIN_MS>
-          [default: 2000]
+          [default: 20]
 
       --b-label <B_LABEL>
 
@@ -205,7 +205,7 @@ Options:
 
 
       --b-margin-ms <B_MARGIN_MS>
-          [default: 2000]
+          [default: 20]
 
       --ponder
           Let engines think on the opponent's clock through the UCI ponder protocol. Both engines then search at once, so each needs its own cores
@@ -422,7 +422,7 @@ Options:
 
 
       --a-margin-ms <A_MARGIN_MS>
-          [default: 2000]
+          [default: 20]
 
       --b-label <B_LABEL>
 
@@ -461,7 +461,7 @@ Options:
 
 
       --b-margin-ms <B_MARGIN_MS>
-          [default: 2000]
+          [default: 20]
 
       --ponder
           Let engines think on the opponent's clock through the UCI ponder protocol. Both engines then search at once, so each needs its own cores
@@ -658,7 +658,7 @@ Options:
 
 
       --margin-ms <MARGIN_MS>
-          [default: 2000]
+          [default: 20]
 
       --ponder
           Let both perturbation arms think on the opponent's clock. Both then search at once, so each needs its own cores
@@ -1089,7 +1089,7 @@ Options:
 
 
       --a-margin-ms <A_MARGIN_MS>
-          [default: 2000]
+          [default: 20]
 
       --b-label <B_LABEL>
 
@@ -1128,7 +1128,7 @@ Options:
 
 
       --b-margin-ms <B_MARGIN_MS>
-          [default: 2000]
+          [default: 20]
 
       --ponder
           Let engines think on the opponent's clock through the UCI ponder protocol. Both engines then search at once, so each needs its own cores
@@ -2059,7 +2059,7 @@ Options:
 
 
       --margin-ms <MARGIN_MS>
-          [default: 2000]
+          [default: 20]
 
       --ponder
           Let engines think on the opponent's clock through the UCI ponder protocol. Both engines then search at once, so each needs its own cores

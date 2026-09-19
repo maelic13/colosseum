@@ -40,7 +40,9 @@ Each side has an independent time control. Select at most one mode per side:
 
 With no selection, that side uses `3000 ms + 30 ms` per move. The per-side
 `--a-margin-ms` and `--b-margin-ms` values are forfeit tolerances only; they are
-not sent to the engines. This permits odds matches, including one engine at a
+not sent to the engines. The default is 20 ms: a move forfeits when it arrives
+more than 20 ms after its side's clock ran out. Raise it for an engine known to
+stall for longer. This permits odds matches, including one engine at a
 different clock or search limit.
 
 `--ponder` enables the ordinary UCI pondering protocol for both engines and

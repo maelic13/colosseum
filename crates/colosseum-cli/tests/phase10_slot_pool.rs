@@ -153,6 +153,12 @@ fn a_match_never_puts_two_games_on_one_slot() {
             "2",
             "--seed",
             "3",
+            // Uneven stubs overrun their movetime on purpose; slots, not
+            // clocks, are under test here.
+            "--a-margin-ms",
+            "2000",
+            "--b-margin-ms",
+            "2000",
             "--dir",
         ])
         .arg(&directory));
@@ -367,6 +373,8 @@ fn a_tournament_never_puts_two_games_on_one_slot() {
             "4",
             "--seed",
             "5",
+            "--margin-ms",
+            "2000",
             "--dir",
         ])
         .arg(&directory);

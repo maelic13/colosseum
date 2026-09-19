@@ -71,6 +71,12 @@ fn stub_match(run: &Path, games: u32, sleep_ms: u32, moves: u32, progress: &[&st
             "999",
             "--max-time-losses",
             "999",
+            // The stub sleeps past its movetime on purpose: these games must
+            // run their moves, not forfeit on the default 20 ms margin.
+            "--a-margin-ms",
+            "2000",
+            "--b-margin-ms",
+            "2000",
         ])
         .args(progress)
         .arg("--dir")

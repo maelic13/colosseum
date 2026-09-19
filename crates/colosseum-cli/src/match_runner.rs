@@ -33,7 +33,11 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const DEFAULT_BASE_MS: u64 = 3_000;
 pub const DEFAULT_INCREMENT_MS: u64 = 30;
-pub const DEFAULT_MARGIN_MS: u64 = 2_000;
+/// How far past its clock a move may arrive before it forfeits: enough for
+/// the harness's own delivery (about a millisecond measured) and the rare
+/// scheduling delay, as fastchess and fishtest set it. An engine known to
+/// stall for longer is given more with `--margin-ms`.
+pub const DEFAULT_MARGIN_MS: u64 = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfiguredTimeControl {
