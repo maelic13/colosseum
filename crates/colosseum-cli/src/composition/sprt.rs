@@ -766,15 +766,13 @@ pub(crate) fn sprt_progress_block(
     // Otherwise the estimate is the pairs the LLR would need at its current
     // drift, and never more than the pairs the cap still allows.
     let to_cap = u64::from(design.max_pairs).saturating_sub(done);
-    let remaining = if terminal {
-        0
-    } else {
-        statistics
+    // An LLR past its bound has decided the test even before the driver has
+    // stopped it; without this its estimate fell back to the whole cap.
+    let decided = terminal
+        || statistics
             .as_ref()
-            .ok()
-            .and_then(pairs_to_bound)
-            .map_or(to_cap, |pairs| pairs.min(to_cap))
-    };
+            .is_ok_and(|result| result.decision != SprtDecision::Continue);
+    let remaining = remaining_pairs(statistics.as_ref().ok(), to_cap, decided);
     block.field(
         "time remaining",
         match progress::time_for_units(
@@ -783,7 +781,7 @@ pub(crate) fn sprt_progress_block(
             remaining,
         ) {
             // The estimate assumes the LLR keeps moving as it has so far.
-            Some(left) if terminal => progress::format_duration(left.as_secs_f64()),
+            Some(left) if decided => progress::format_duration(left.as_secs_f64()),
             Some(left) => format!(
                 "{} if the trend holds",
                 progress::format_duration(left.as_secs_f64())
@@ -800,6 +798,17 @@ pub(crate) fn sprt_progress_block(
 /// pair. It is arithmetic on the existing statistic and not a second estimator:
 /// a real sequential test's path is not a straight line, and the figure is
 /// labelled as the current drift for that reason.
+/// Pairs an SPRT still has to play: none once decided, otherwise the pairs its
+/// LLR needs at its current drift, never more than the cap still allows.
+fn remaining_pairs(result: Option<&PentanomialSprtResult>, to_cap: u64, decided: bool) -> u64 {
+    if decided {
+        return 0;
+    }
+    result
+        .and_then(pairs_to_bound)
+        .map_or(to_cap, |pairs| pairs.min(to_cap))
+}
+
 fn pairs_to_bound(result: &PentanomialSprtResult) -> Option<u64> {
     if result.pairs == 0 || !result.llr.is_finite() {
         return None;
@@ -1031,4 +1040,29 @@ pub(crate) fn print_sprt(
         "Total Time: {}",
         progress::format_duration(elapsed.as_secs_f64())
     );
+}
+
+#[cfg(test)]
+mod remaining_tests {
+    use super::*;
+
+    #[test]
+    fn a_test_whose_llr_has_crossed_its_bound_has_nothing_left_to_run() {
+        // 241 pairs of a clear gain, as the qualification verdict had when
+        // its last block still estimated the whole cap.
+        let mut vector = PentanomialVector::default();
+        for _ in 0..120 {
+            vector.record_pair(PairGameResult::Win, PairGameResult::Draw);
+            vector.record_pair(PairGameResult::Draw, PairGameResult::Draw);
+        }
+        vector.record_pair(PairGameResult::Win, PairGameResult::Win);
+        let result = pentanomial_sprt(&vector, EloModel::Normalized, 0.0, 10.0, 0.05, 0.05)
+            .expect("statistics for a non-empty sample");
+        assert_eq!(result.decision, SprtDecision::AcceptH1);
+        // Past the bound the drift estimate has no pairs left to give, which
+        // the estimate used to read as "unknown" and replace with the cap.
+        assert_eq!(pairs_to_bound(&result), None);
+        assert_eq!(remaining_pairs(Some(&result), 7_759, false), 7_759);
+        assert_eq!(remaining_pairs(Some(&result), 7_759, true), 0);
+    }
 }
