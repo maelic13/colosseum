@@ -15,8 +15,8 @@ use thiserror::Error;
 use crate::cancellation::Cancellation;
 use crate::journal::GameRecord;
 use crate::match_runner::{
-    ConfiguredTimeControl, FaultPolicy, FixedMatchRequest, MatchExecutionPlan, MatchOpenings,
-    MatchProgress, OpeningAssignment, run_fixed_match,
+    ConfiguredTimeControl, EngineProcesses, FaultPolicy, FixedMatchRequest, MatchExecutionPlan,
+    MatchOpenings, MatchProgress, OpeningAssignment, run_fixed_match,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -284,6 +284,8 @@ pub async fn run_tournament(
                     engine_b_time_control: time_control,
                     adjudication,
                     ponder: request.ponder,
+                    // A tournament's slot changes engines from game to game.
+                    engine_processes: EngineProcesses::PerGame,
                     fault_policy: FaultPolicy {
                         max_engine_faults: u32::MAX,
                         max_time_losses: u32::MAX,

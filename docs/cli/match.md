@@ -168,6 +168,20 @@ with optional `--headroom-cores N` to allocate whole physical cores through the
 detected topology, or provide an explicit logical CPU pool such as
 `--placement 0-7`.
 
+Each slot keeps its two engine processes from game to game by default
+(`--engine-processes per-slot`). Before a game a kept engine is sent the
+options whose values changed, `isready`, `ucinewgame` and `isready`, the setup
+a fresh engine receives less its handshake. An engine that faulted in its
+game, does not answer `isready` after it, or whose executable, arguments,
+directory, environment, CPUs or option names change, is replaced by a fresh
+process; every kept engine is quit when the run ends. The work an engine does
+once per process, such as tables it builds on first use, is then paid once per
+run rather than inside some game's search, as it is under a runner that keeps
+engines for a whole tournament. `--engine-processes per-game` starts two fresh
+processes for every game and ends them with it, for complete isolation between
+games. A tournament always starts fresh processes, because its slots change
+engines from game to game.
+
 Both engines of a game share one core set by default, `--cores-per-game N`
 (default 1), because without pondering only one of them searches at a time and
 the other is blocked reading a pipe. A 16-core host therefore runs 15

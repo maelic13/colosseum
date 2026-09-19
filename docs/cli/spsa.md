@@ -173,7 +173,12 @@ controls; concurrency and CPU placement; and an optional EPD/PGN `--book` with
 order, start and PGN-ply controls. Without a book every game starts from
 `startpos` and output records the lack of opening diversity. A supplied book is
 parsed once when a process session starts and its in-memory openings are reused
-across the complete tune. Engine processes themselves retain per-game isolation.
+across the complete tune. Each slot keeps its two engine processes from game
+to game (`--engine-processes per-slot`, the default): a kept engine is sent
+only the options whose values changed, so a perturbed knob reaches it every
+iteration and an unchanged `Hash` is never resent. An engine that faults, or
+does not answer `isready` after its game, is replaced by a fresh process.
+`--engine-processes per-game` starts two fresh processes for every game.
 The single-engine `--cores` control is rejected because it cannot express two
 disjoint arm allocations; use `--placement` with `--cores-per-engine` instead.
 If Hash itself is tuned, trusted memory-budget checks use its declared upper

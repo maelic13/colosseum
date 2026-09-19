@@ -18,9 +18,9 @@ use colosseum_core::{
 use colosseum_engine::{
     ClockAccountingReport, CoreClass, CpuPlacementPolicy, EngineCpuPlacement, EngineFaultKind,
     EngineGameSpec, GameFault, GamePairIdentity, GameSide, GameSlotCpuAllocation, GameSpec,
-    LiveGameState, OpeningList, ResolvedOpening, SlotAllocation, allocate_game_slots,
+    KeptEngine, LiveGameState, OpeningList, ResolvedOpening, SlotAllocation, allocate_game_slots,
     detect_allowed_cpu_set, detect_cpu_characteristics, detect_cpu_topology, load_openings_named,
-    plan_cpu_placement, run_game,
+    plan_cpu_placement, run_game, run_game_keeping,
 };
 use colosseum_uci::SpawnOptions;
 use serde::{Deserialize, Serialize};
@@ -445,6 +445,74 @@ pub struct MatchOpenings {
     report: OpeningPolicyReport,
 }
 
+/// Whether a slot's engines live for one game or for the whole run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, clap::ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum EngineProcesses {
+    /// Each slot keeps its two engine processes from game to game, restarting
+    /// one after a fault or when its launch or option names change, as a
+    /// runner that keeps engines for a whole tournament does. An engine's
+    /// one-time work is paid once per run, not inside a game's search.
+    #[default]
+    PerSlot,
+    /// Two fresh processes per game, ended with it.
+    PerGame,
+}
+
+/// The engines each slot keeps between its games, one per side: index 0 is
+/// engine A, 1 is engine B, whichever colour they play. A slot has one live
+/// game at a time, so a slot's engines are never shared between two games.
+pub struct SlotEngines {
+    slots: Vec<tokio::sync::Mutex<[Option<KeptEngine>; 2]>>,
+}
+
+impl std::fmt::Debug for SlotEngines {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SlotEngines")
+            .field("slots", &self.slots.len())
+            .finish()
+    }
+}
+
+impl SlotEngines {
+    /// A store for `mode`: `None` when every game starts its own engines.
+    #[must_use]
+    pub fn for_mode(mode: EngineProcesses, slots: usize) -> Option<Arc<Self>> {
+        (mode == EngineProcesses::PerSlot).then(|| {
+            Arc::new(Self {
+                slots: (0..slots)
+                    .map(|_| tokio::sync::Mutex::new([None, None]))
+                    .collect(),
+            })
+        })
+    }
+
+    async fn take(&self, slot: usize) -> [Option<KeptEngine>; 2] {
+        match self.slots.get(slot) {
+            Some(engines) => std::mem::take(&mut *engines.lock().await),
+            None => [None, None],
+        }
+    }
+
+    async fn put(&self, slot: usize, engines: [Option<KeptEngine>; 2]) {
+        if let Some(stored) = self.slots.get(slot) {
+            *stored.lock().await = engines;
+        }
+    }
+
+    /// Quit every kept engine. A run calls this when it ends; engines it
+    /// never reaches are killed with their handles.
+    pub async fn shutdown(&self) {
+        for slot in &self.slots {
+            let engines = std::mem::take(&mut *slot.lock().await);
+            for engine in engines.into_iter().flatten() {
+                engine.quit().await;
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PairGameSettings {
     pub engine_a: EngineLaunchSpec,
@@ -458,6 +526,9 @@ pub struct PairGameSettings {
     /// result instead of launching engines, so a tune of thousands of
     /// iterations can exercise everything around the games.
     pub synthetic_games: bool,
+    /// The engines kept per slot, when a slot keeps its engines between
+    /// games.
+    pub engines: Option<Arc<SlotEngines>>,
 }
 
 impl MatchOpenings {
@@ -639,6 +710,7 @@ pub struct FixedMatchRequest {
     pub engine_b_time_control: ConfiguredTimeControl,
     pub adjudication: AdjudicationConfig,
     pub ponder: bool,
+    pub engine_processes: EngineProcesses,
     pub fault_policy: FaultPolicy,
     pub execution: MatchExecutionPlan,
     pub master_seed: u64,
@@ -807,6 +879,7 @@ pub async fn play_pair_game(
     play_game(GameRequest {
         number,
         slot: slot.slot_index,
+        engines: settings.engines.clone(),
         identity_override: None,
         engine_a: engine_spec(engine_a, EngineId::from_u128(1)),
         engine_b: engine_spec(engine_b, EngineId::from_u128(2)),
@@ -1020,6 +1093,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         engine_b_time_control,
         adjudication,
         ponder,
+        engine_processes,
         fault_policy,
         execution,
         master_seed,
@@ -1034,6 +1108,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
     if games == 0 {
         return Err(MatchError::ZeroGames);
     }
+    let kept_engines = SlotEngines::for_mode(engine_processes, execution.slots.len());
     let engine_a = engine_spec(engine_a, EngineId::from_u128(1));
     let engine_b = engine_spec(engine_b, EngineId::from_u128(2));
     let mut report = FixedMatchReport {
@@ -1098,6 +1173,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
             let game = play_game(GameRequest {
                 number,
                 slot: slot.slot_index,
+                engines: kept_engines.clone(),
                 identity_override: identity_override.clone(),
                 engine_a,
                 engine_b,
@@ -1136,6 +1212,9 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         report.games.push(game);
         cancellation.record_committed_unit();
     }
+    if let Some(engines) = &kept_engines {
+        engines.shutdown().await;
+    }
     report.games.sort_by_key(|game| game.number);
     for game in report.games.clone() {
         let white_side = game.white;
@@ -1167,6 +1246,8 @@ struct GameRequest {
     number: u32,
     /// The slot index recorded with the game.
     slot: usize,
+    /// The slot's kept engines, when it keeps them between games.
+    engines: Option<Arc<SlotEngines>>,
     identity_override: Option<GamePairIdentity>,
     engine_a: EngineGameSpec,
     engine_b: EngineGameSpec,
@@ -1182,6 +1263,7 @@ async fn play_game(request: GameRequest) -> MatchGame {
     let GameRequest {
         number,
         slot,
+        engines,
         identity_override,
         engine_a,
         engine_b,
@@ -1256,8 +1338,23 @@ async fn play_game(request: GameRequest) -> MatchGame {
         white_time_control.control,
     );
     let started_unix_us = unix_us();
-    // `run_game` returns once both engine processes have exited.
-    let game = run_game(spec, live).await;
+    // `run_game` returns once both engine processes have exited; with kept
+    // engines, once both are ready for the slot's next game or have exited.
+    let game = match &engines {
+        Some(engines) => {
+            let [a, b] = engines.take(slot).await;
+            let kept = if a_is_white { [a, b] } else { [b, a] };
+            let (game, [white, black]) = run_game_keeping(spec, live, kept).await;
+            let sides = if a_is_white {
+                [white, black]
+            } else {
+                [black, white]
+            };
+            engines.put(slot, sides).await;
+            game
+        }
+        None => run_game(spec, live).await,
+    };
     let ended_unix_us = unix_us();
     MatchGame {
         number,

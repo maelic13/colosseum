@@ -210,6 +210,15 @@ Options:
       --ponder
           Let engines think on the opponent's clock through the UCI ponder protocol. Both engines then search at once, so each needs its own cores
 
+      --engine-processes <ENGINE_PROCESSES>
+          Whether a slot keeps its two engine processes from game to game (`per-slot`, restarting one after a fault) or starts fresh ones for every game (`per-game`)
+
+          Possible values:
+          - per-slot: Each slot keeps its two engine processes from game to game, restarting one after a fault or when its launch or option names change, as a runner that keeps engines for a whole tournament does. An engine's one-time work is paid once per run, not inside a game's search
+          - per-game: Two fresh processes per game, ended with it
+
+          [default: per-slot]
+
       --draw-adjudication
           Adjudicate a draw once both engines agree; off unless requested
 
@@ -297,7 +306,7 @@ Options:
           Archive an existing --dir and start a fresh run there
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
 ## `colosseum-cli sprt`
@@ -457,6 +466,15 @@ Options:
       --ponder
           Let engines think on the opponent's clock through the UCI ponder protocol. Both engines then search at once, so each needs its own cores
 
+      --engine-processes <ENGINE_PROCESSES>
+          Whether a slot keeps its two engine processes from game to game (`per-slot`, restarting one after a fault) or starts fresh ones for every game (`per-game`)
+
+          Possible values:
+          - per-slot: Each slot keeps its two engine processes from game to game, restarting one after a fault or when its launch or option names change, as a runner that keeps engines for a whole tournament does. An engine's one-time work is paid once per run, not inside a game's search
+          - per-game: Two fresh processes per game, ended with it
+
+          [default: per-slot]
+
       --draw-adjudication
           Adjudicate a draw once both engines agree; off unless requested
 
@@ -544,7 +562,7 @@ Options:
           Archive an existing --dir and start a fresh run there
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
 ## `colosseum-cli spsa`
@@ -645,6 +663,15 @@ Options:
       --ponder
           Let both perturbation arms think on the opponent's clock. Both then search at once, so each needs its own cores
 
+      --engine-processes <ENGINE_PROCESSES>
+          Whether a slot keeps its two engine processes from game to game (`per-slot`, restarting one after a fault or an option set that changes by name) or starts fresh ones for every game (`per-game`)
+
+          Possible values:
+          - per-slot: Each slot keeps its two engine processes from game to game, restarting one after a fault or when its launch or option names change, as a runner that keeps engines for a whole tournament does. An engine's one-time work is paid once per run, not inside a game's search
+          - per-game: Two fresh processes per game, ended with it
+
+          [default: per-slot]
+
       --draw-adjudication
           Adjudicate a draw once both engines agree; off unless requested
 
@@ -736,7 +763,7 @@ Options:
           [default: 5]
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
 ## `colosseum-cli spsa plan`
@@ -1106,6 +1133,15 @@ Options:
       --ponder
           Let engines think on the opponent's clock through the UCI ponder protocol. Both engines then search at once, so each needs its own cores
 
+      --engine-processes <ENGINE_PROCESSES>
+          Whether a slot keeps its two engine processes from game to game (`per-slot`, restarting one after a fault) or starts fresh ones for every game (`per-game`)
+
+          Possible values:
+          - per-slot: Each slot keeps its two engine processes from game to game, restarting one after a fault or when its launch or option names change, as a runner that keeps engines for a whole tournament does. An engine's one-time work is paid once per run, not inside a game's search
+          - per-game: Two fresh processes per game, ended with it
+
+          [default: per-slot]
+
       --draw-adjudication
           Adjudicate a draw once both engines agree; off unless requested
 
@@ -1193,7 +1229,7 @@ Options:
           Archive an existing --dir and start a fresh run there
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
 ## `colosseum-cli engine`

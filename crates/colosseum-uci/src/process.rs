@@ -27,7 +27,7 @@ use crate::score::Score;
 use crate::timing::SearchTiming;
 
 /// How to launch an engine.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpawnOptions {
     pub path: PathBuf,
     pub args: Vec<String>,

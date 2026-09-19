@@ -48,6 +48,10 @@ fn each_injected_delay_lands_in_its_own_game_phase() {
             "7",
             "--placement",
             "off",
+            // Teardown here is the fresh processes' exit, which kept engines
+            // never reach between games.
+            "--engine-processes",
+            "per-game",
             "--json",
             "--dir",
         ])

@@ -66,12 +66,15 @@ aborts).
 - **The Arena tab is live-only**: no per-game browsing/viewer in-app; users
   export PGN for analysis elsewhere. One tournament is always selected and
   auto-loaded; there is no "close tournament".
-- **Engines are spawned per game, deliberately — do not add a process pool.**
-  Measured on the real library (spawn+handshake+ucinewgame): modern engines
-  17–350 ms, worst case Rybka 3 ~840 ms, vs ~34 s average game time — a 1–3%
-  overhead. Reuse would break crash isolation and per-game forensics, keep
-  idle Hash allocations alive, and trust `ucinewgame` state resets in exactly
-  the old engines known to leak state (learning files, etc.).
+- **The GUI spawns engines per game, deliberately.** Measured on the real
+  library (spawn+handshake+ucinewgame): modern engines 17–350 ms, worst case
+  Rybka 3 ~840 ms, vs ~34 s average game time — a 1–3% overhead; reuse would
+  keep idle Hash allocations alive and trust `ucinewgame` in exactly the old
+  engines known to leak state. **The CLI keeps each slot's engines between
+  games by default** (`--engine-processes per-slot`, PLAN §Phase 10(ae)),
+  replacing one after any fault: fresh processes put an engine's one-time
+  work inside a game's search (Rarog's KPK bitbase forfeited games that way),
+  and fastchess keeps its engines too. Tournaments keep fresh processes.
 - **Store writes are batched**: schedule inserts are one transaction
   (`insert_pending_games`) — per-row inserts froze the UI for minutes.
 - GUI: all visual rules live in `docs/design/GUIDELINES.md` (binding). The

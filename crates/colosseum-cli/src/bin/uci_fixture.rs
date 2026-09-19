@@ -15,6 +15,8 @@ struct FixtureArgs {
     pid_file: Option<std::path::PathBuf>,
     /// Wait this long before answering `uci`: time spent starting up.
     uciok_after_ms: u64,
+    /// Append every command received, with this process's identifier, here.
+    log_commands: Option<std::path::PathBuf>,
     /// Wait this long after `quit` before exiting: time spent shutting down.
     exit_after_quit_ms: u64,
     /// A search in timed phases: wait, first `info`, wait, last `info`
@@ -55,6 +57,8 @@ fn arguments() -> FixtureArgs {
             parsed.append_pid_file = true;
         } else if let Some(value) = argument.strip_prefix("--pid-file=") {
             parsed.pid_file = Some(value.into());
+        } else if let Some(value) = argument.strip_prefix("--log-commands=") {
+            parsed.log_commands = Some(value.into());
         } else if let Some(value) = argument.strip_prefix("--uciok-after-ms=") {
             parsed.uciok_after_ms = value.parse().expect("--uciok-after-ms needs an integer");
         } else if let Some(value) = argument.strip_prefix("--exit-after-quit-ms=") {
@@ -104,9 +108,21 @@ fn main() -> std::io::Result<()> {
     let mut stdout = std::io::stdout().lock();
     let mut searching = false;
     let mut position = String::from("position startpos");
+    let mut command_log = match &arguments.log_commands {
+        Some(path) => Some(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)?,
+        ),
+        None => None,
+    };
     for line in stdin.lock().lines() {
         let line = line?;
         let line = line.trim();
+        if let Some(log) = command_log.as_mut() {
+            writeln!(log, "{} {line}", std::process::id())?;
+        }
         match line {
             "uci" => {
                 std::thread::sleep(Duration::from_millis(arguments.uciok_after_ms));

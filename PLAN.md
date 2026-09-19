@@ -3346,6 +3346,43 @@ games" procedure at 10.10, once, on the final state.
   meant a run with several slots never reached it. `--anchor` together with
   `--fixed` on one participant is refused at resolution, before a run
   directory exists, because the two say different things about one rating.
+- **(ae) Persistent engine processes per slot**, by maintainer decision
+  2026-09-19 after 10.9m: fastchess keeps its engines for a whole tournament,
+  so an engine's one-time work (Rarog's KPK bitbase, 33–37 ms on first use) is
+  paid once, where Colosseum's fresh processes paid it inside a game's search
+  in most games; and a fresh process costs its slot about 1% of its time
+  (start-up 61 ms of a 9 s game at 3+0.03). Crash isolation is kept by
+  replacing an engine after any fault.
+
+  **Implementation evidence (Phase 10.9u):** `run_game_keeping` in the
+  runner takes a slot's kept engines (white, black) and returns the ones fit
+  to keep: an engine that faulted in the game, or does not answer `isready`
+  within 2 s after it (a running ponder stopped first), is quit, and nothing
+  is kept after an infrastructure failure. A kept engine fits the next game
+  when its executable, arguments, directory, environment, CPUs and option
+  names are unchanged; it then receives only the options whose values
+  changed (buttons again), `isready`, `ucinewgame` and `isready` — a fresh
+  engine's setup less its handshake — so an SPSA arm gets its perturbed
+  knobs every iteration and an unchanged `Hash` is never resent to
+  reallocate; one that does not fit is quit and a fresh process started. The
+  CLI's `SlotEngines` holds each slot's engines by side (A, B), taken and
+  put back by the game on the slot, which the slot pool guarantees is the
+  only one; `run_fixed_match`, `sprt` and `spsa` quit every kept engine when
+  the run ends, and a killed harness takes them down through their
+  kill-on-close jobs. `--engine-processes per-slot` is the default for
+  `match`, `calibrate`, `sprt` and `spsa` and is recorded in the resolved
+  configuration; `per-game` restores two fresh processes per game.
+  Tournaments always use fresh processes. Tests, reading the fixture
+  engine's own command log: six games at one slot ran one process per side,
+  announced six new games and sent `Hash` once (six processes and six with
+  `per-game`, and with the store disabled the test fails with six); a side
+  that crashes in every game is replaced four times in four games while its
+  opponent plays all four in one process; a kept engine is reaped when the
+  harness is killed. The fresh-process kill test and the teardown phase test
+  pass `per-game`, which is what they test. Real smoke at 15 slots on Rarog:
+  a 60-game match, start-up median 8.3 ms (220–258 ms for a slot's first
+  game), teardown 0.1 ms, no fault, no Rarog process left after the run; a
+  3-iteration, 82-knob tune the same.
 - **(j) Release acceptance repeat.** Regenerate the command reference, update
   `CHANGELOG-CLI.md` under 0.1.0, run the Phase 4B oracle replay and the
   Phase 8.1 parity matrix on the corrected source, repeat the short third-party

@@ -158,6 +158,12 @@ pub(crate) struct SpsaConditions {
     #[arg(long, requires = "cores_per_engine")]
     pub(crate) ponder: bool,
 
+    /// Whether a slot keeps its two engine processes from game to game
+    /// (`per-slot`, restarting one after a fault or an option set that
+    /// changes by name) or starts fresh ones for every game (`per-game`).
+    #[arg(long, value_enum, default_value = "per-slot")]
+    pub(crate) engine_processes: match_runner::EngineProcesses,
+
     /// Adjudicate a draw once both engines agree; off unless requested.
     #[arg(long)]
     pub(crate) draw_adjudication: bool,
@@ -880,6 +886,7 @@ pub(crate) async fn run_spsa_command(
         "engine_time_control": engine_time_control,
         "adjudication": adjudication,
         "ponder": conditions.ponder,
+        "engine_processes": conditions.engine_processes,
         "execution": execution,
         "master_seed": master_seed,
         "master_seed_generated": master_seed_generated,
@@ -1089,6 +1096,7 @@ pub(crate) async fn run_spsa_command(
         "engine_time_control": engine_time_control,
         "adjudication": adjudication,
         "ponder": conditions.ponder,
+        "engine_processes": conditions.engine_processes,
         "execution": execution,
         "master_seed": master_seed,
         "master_seed_generated": master_seed_generated,
@@ -1125,6 +1133,8 @@ pub(crate) async fn run_spsa_command(
     let knobs = verified_schedule.artifact().knobs.clone();
     let initial_centers = bound_tune.initial_centers();
     let resumed_iterations = observer.committed_iterations();
+    let kept_engines =
+        match_runner::SlotEngines::for_mode(conditions.engine_processes, execution.slots.len());
     let driver_request = spsa_driver::SpsaDriverRequest {
         schedule: verified_schedule,
         settings,
@@ -1139,6 +1149,7 @@ pub(crate) async fn run_spsa_command(
             ponder: conditions.ponder,
             openings: openings.clone(),
             synthetic_games: conditions.synthetic_games,
+            engines: kept_engines.clone(),
         },
         execution: execution.clone(),
         fault_policy,
@@ -1179,6 +1190,9 @@ pub(crate) async fn run_spsa_command(
             }
         }
     };
+    if let Some(engines) = &kept_engines {
+        engines.shutdown().await;
+    }
     let final_block = spsa_progress_block(&observer, &schedule, settings, &centres, fault_policy);
     if schedule.needs_final(final_block.done) {
         schedule.mark(final_block.done);

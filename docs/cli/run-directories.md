@@ -62,9 +62,10 @@ first search), `play_ns` (first search to the end of the last), `charged_ns`
 `teardown_ns` (until both engines had exited); `stats` reports their
 distribution. `slot` names
 the CPU slot the game ran on (`index`, counting from zero) and when it held
-it, in microseconds since the Unix epoch: `started_unix_us` before its first
-engine was spawned, `ended_unix_us` after both had exited. Two games' spans on
-one slot never overlap. It never holds moves.
+it, in microseconds since the Unix epoch: `started_unix_us` before its
+engines were started or refreshed, `ended_unix_us` after both had exited or,
+when the slot keeps its engines, were ready for its next game. Two games'
+spans on one slot never overlap. It never holds moves.
 Nothing is ever rewritten: a game is committed by appending its line.
 
 **`games.pgn`** is appended one game at a time and never rewritten. Its tags

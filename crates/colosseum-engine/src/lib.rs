@@ -69,7 +69,7 @@ pub use round_trip::RoundTripMaxima;
 pub use runner::{
     CLOCK_MODEL_ID, CLOCK_MODEL_VERSION, ChargedElapsedSummary, ClockAccountingReport,
     EngineFaultKind, EngineGameSpec, GameFault, GamePhases, GameReport, GameSide, GameSpec,
-    run_game,
+    KeptEngine, run_game, run_game_keeping,
 };
 #[cfg(feature = "tournament")]
 pub use scheduler::{

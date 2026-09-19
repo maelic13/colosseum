@@ -977,6 +977,12 @@ model as well.
   recovery test in both modes; becomes the tuning default only if it
   recovers no worse; `spsa` only, the other commands have no tail; may
   follow the release — PLAN §Phase 10(ad)
+- ☑ **10.9u — DONE** — **Model: Sol High.** Persistent engine processes per
+  slot, `--engine-processes per-slot` (default) or `per-game`, for `match`,
+  `calibrate`, `sprt` and `spsa`; a kept engine is refreshed with its changed
+  options, `isready`, `ucinewgame`, `isready`, replaced after a fault, a failed
+  post-game `isready` or a change of launch or option names, and quit at the
+  end of the run; tournaments keep fresh processes — PLAN §Phase 10(ae)
 - ☐ **10.9r** — **Model: Sol High.** Qualification on a real engine, part of
   the release and recorded in `docs/architecture/phase-10-qualification.md`:
   maintainer-run on the release candidate, one command at a time, each

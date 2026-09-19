@@ -63,6 +63,12 @@ pub(crate) struct MatchConditions {
     #[arg(long, requires = "cores_per_engine")]
     pub(crate) ponder: bool,
 
+    /// Whether a slot keeps its two engine processes from game to game
+    /// (`per-slot`, restarting one after a fault) or starts fresh ones for
+    /// every game (`per-game`).
+    #[arg(long, value_enum, default_value = "per-slot")]
+    pub(crate) engine_processes: match_runner::EngineProcesses,
+
     /// Adjudicate a draw once both engines agree; off unless requested.
     #[arg(long)]
     pub(crate) draw_adjudication: bool,

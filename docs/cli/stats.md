@@ -143,7 +143,8 @@ spawned, handshaken, configured and readied. `play` runs from the first search
 to the end of the last, and is `charged` (both clocks) plus `uncharged-play`,
 which divides into the harness's own work between searches, the `position`
 written before each `go`, and each `bestmove`'s arrival to its search
-returning. `teardown` runs to both engine processes having exited, and
+returning. `teardown` runs to both engine processes having exited, or to
+both being ready for the slot's next game when it keeps its engines, and
 `outside-runner` is what the CPU slot's span holds beyond those three. None of
 this is charged to an engine; it is the time a run spends on neither clock.
 

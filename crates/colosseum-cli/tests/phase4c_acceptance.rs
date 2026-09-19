@@ -43,6 +43,9 @@ fn calibration(run: &Path, tolerance_nelo: f64) -> Command {
             "2",
             "--concurrency",
             "1",
+            // The kill below waits for the next game's engine processes.
+            "--engine-processes",
+            "per-game",
             "--placement",
             "off",
             "--seed",

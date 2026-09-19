@@ -533,9 +533,148 @@ async fn prepare(spec: &EngineGameSpec, handshake_timeout: Duration) -> Prepared
     }
 }
 
+/// How long an engine kept for the next game has to answer `isready` once its
+/// game is over. An engine that cannot is not kept.
+const KEEP_READY_DEADLINE: Duration = Duration::from_secs(2);
+
+/// An engine process kept for the next game on its slot, with what it was
+/// launched and configured with.
+///
+/// Keeping it saves the operating system's cost of starting a process every
+/// game, and it means an engine's one-time work (tables built on first use,
+/// memory touched once) is paid once per run rather than inside some game's
+/// search, as a runner that keeps its engines alive for a whole tournament
+/// behaves. It is kept only after a game in which it did not fault and after
+/// which it answered `isready`.
+pub struct KeptEngine {
+    process: EngineProcess,
+    spawn: SpawnOptions,
+    cpus: CpuAllocation,
+    options: Vec<(String, Option<String>)>,
+}
+
+impl KeptEngine {
+    /// End the process, gracefully if it answers.
+    pub async fn quit(self) {
+        let _ = self.process.quit(Duration::from_millis(500)).await;
+    }
+
+    /// Whether this process can play `spec`'s side: the same executable,
+    /// arguments, directory, environment and CPUs, and the same options by
+    /// name. Values may differ; only the changed ones are sent.
+    fn fits(&self, spec: &EngineGameSpec) -> bool {
+        self.spawn == spec.spawn
+            && self.cpus == spec.allocated_cpus
+            && self.options.len() == spec.options.len()
+            && self
+                .options
+                .iter()
+                .zip(&spec.options)
+                .all(|(kept, wanted)| kept.0 == wanted.0)
+    }
+}
+
+/// Ready an engine for a game: the kept one when it fits, refreshed, or a
+/// fresh process. A kept engine that does not fit is quit first.
+async fn prepare_or_reuse(
+    spec: &EngineGameSpec,
+    kept: Option<KeptEngine>,
+    handshake_timeout: Duration,
+) -> Prepared {
+    match kept {
+        Some(kept) if kept.fits(spec) => {
+            let KeptEngine {
+                mut process,
+                options,
+                ..
+            } = kept;
+            match refresh_engine(&mut process, &options, spec, handshake_timeout).await {
+                Ok(()) => Prepared::Ready(process),
+                Err(err) => Prepared::Failed(err, Box::new(process)),
+            }
+        }
+        Some(kept) => {
+            kept.quit().await;
+            prepare(spec, handshake_timeout).await
+        }
+        None => prepare(spec, handshake_timeout).await,
+    }
+}
+
+/// The setup of a fresh engine less its handshake: the options that changed
+/// (a buttons is pressed again, as a fresh engine's would be; an unchanged
+/// `Hash` is not resent, which would reallocate the table), then ready, new
+/// game, ready.
+async fn refresh_engine(
+    engine: &mut EngineProcess,
+    previous: &[(String, Option<String>)],
+    spec: &EngineGameSpec,
+    handshake_timeout: Duration,
+) -> Result<(), UciError> {
+    for ((name, value), (_, before)) in spec.options.iter().zip(previous) {
+        if value.is_none() || value != before {
+            engine.set_option(name, value.as_deref()).await?;
+        }
+    }
+    engine.is_ready(handshake_timeout).await?;
+    engine.new_game().await?;
+    engine.is_ready(handshake_timeout).await
+}
+
+/// After a game: quit the engine, or keep it when asked to and it is fit to
+/// play again. A ponder still running is stopped first.
+async fn finish_engine(
+    mut engine: EngineProcess,
+    spec: &EngineGameSpec,
+    keep: bool,
+    pondering: bool,
+) -> Option<KeptEngine> {
+    if !keep {
+        let _ = engine.quit(Duration::from_millis(500)).await;
+        return None;
+    }
+    let settled = if pondering {
+        engine.stop_ponder(PONDER_STOP_DEADLINE).await.is_ok()
+    } else {
+        true
+    };
+    if settled && engine.is_ready(KEEP_READY_DEADLINE).await.is_ok() {
+        return Some(KeptEngine {
+            process: engine,
+            spawn: spec.spawn.clone(),
+            cpus: spec.allocated_cpus.clone(),
+            options: spec.options.clone(),
+        });
+    }
+    let _ = engine.quit(Duration::from_millis(500)).await;
+    None
+}
+
 /// Play one complete game and return its report. Never panics on engine misbehavior.
-/// `live` is updated throughout for the GUI's live view.
+/// `live` is updated throughout for the GUI's live view. The game starts its
+/// own engine processes and ends them.
 pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
+    play(spec, live, [None, None], false).await.0
+}
+
+/// Play one game with the engines kept from the slot's previous game,
+/// `[white, black]`, and return the engines fit to keep for its next one.
+/// An engine that faulted, or does not answer after the game, is not
+/// returned; a missing or unfitting one is started fresh.
+pub async fn run_game_keeping(
+    spec: GameSpec,
+    live: LiveGameHandle,
+    kept: [Option<KeptEngine>; 2],
+) -> (GameReport, [Option<KeptEngine>; 2]) {
+    play(spec, live, kept, true).await
+}
+
+async fn play(
+    spec: GameSpec,
+    live: LiveGameHandle,
+    kept: [Option<KeptEngine>; 2],
+    keep: bool,
+) -> (GameReport, [Option<KeptEngine>; 2]) {
     let game_start = std::time::Instant::now();
     let monotonic_resolution_ns = monotonic_resolution_ns();
 
@@ -543,9 +682,10 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
     // engine's slow start no longer delays the other's, and neither side's
     // setup waits in line. Each side keeps its own outcome, so a failure's
     // forensics still belong to the side that failed.
+    let [kept_white, kept_black] = kept;
     let (white, black) = tokio::join!(
-        prepare(&spec.white, spec.handshake_timeout),
-        prepare(&spec.black, spec.handshake_timeout)
+        prepare_or_reuse(&spec.white, kept_white, spec.handshake_timeout),
+        prepare_or_reuse(&spec.black, kept_black, spec.handshake_timeout)
     );
 
     let (mut white, mut black) = match (white, black) {
@@ -557,7 +697,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
             if let Ok(mut lg) = live.lock() {
                 lg.finished = Some((report.result, report.termination));
             }
-            return report;
+            return (report, [None, None]);
         }
     };
 
@@ -972,9 +1112,30 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         lg.black_pondering = false;
     }
 
-    // Shut engines down gracefully (kill_on_drop covers anything left).
-    let _ = white.quit(Duration::from_millis(500)).await;
-    let _ = black.quit(Duration::from_millis(500)).await;
+    // Shut engines down gracefully (kill_on_drop covers anything left), or
+    // keep the ones fit to play the slot's next game. An engine that faulted
+    // is never kept, and nothing is kept after an infrastructure failure.
+    let faulted = match &outcome.fault {
+        Some(GameFault::Engine { side, .. }) => Some(*side),
+        Some(GameFault::Infrastructure { .. }) => None,
+        None => None,
+    };
+    let infrastructure = matches!(outcome.fault, Some(GameFault::Infrastructure { .. }));
+    let keep_side = |side: GameSide| keep && !infrastructure && faulted != Some(side);
+    let (white_kept, black_kept) = tokio::join!(
+        finish_engine(
+            white,
+            &spec.white,
+            keep_side(GameSide::White),
+            ponder_pred[0].is_some()
+        ),
+        finish_engine(
+            black,
+            &spec.black,
+            keep_side(GameSide::Black),
+            ponder_pred[1].is_some()
+        )
+    );
     let exited = std::time::Instant::now();
 
     let stats = GameStats {
@@ -996,7 +1157,7 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         forfeited_search,
     );
 
-    GameReport {
+    let report = GameReport {
         game_id: spec.game_id,
         white: spec.white.id,
         black: spec.black.id,
@@ -1017,7 +1178,8 @@ pub async fn run_game(spec: GameSpec, live: LiveGameHandle) -> GameReport {
         ),
         fault: outcome.fault,
         error: outcome.error,
-    }
+    };
+    (report, [white_kept, black_kept])
 }
 
 /// Parse an engine's `bestmove` against the current position, tolerating two

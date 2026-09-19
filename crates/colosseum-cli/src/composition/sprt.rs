@@ -423,6 +423,7 @@ pub(crate) async fn run_sprt(
             "engine_b_time_control": engine_b_time_control,
             "adjudication": adjudication,
             "ponder": command.ponder,
+        "engine_processes": command.engine_processes,
             "fault_policy": fault_policy,
             "execution": execution,
             "master_seed": master_seed,
@@ -525,6 +526,7 @@ pub(crate) async fn run_sprt(
         "engine_b_time_control": engine_b_time_control,
         "adjudication": adjudication,
         "ponder": command.ponder,
+        "engine_processes": command.engine_processes,
         "fault_policy": fault_policy,
         "execution": execution,
         "master_seed": master_seed,
@@ -540,6 +542,8 @@ pub(crate) async fn run_sprt(
     let openings_report = openings.report().clone();
     let resumed_pairs = official_pairs.len() as u64;
     let players = Players::new(&engine_a, &engine_b);
+    let kept_engines =
+        match_runner::SlotEngines::for_mode(command.engine_processes, execution.slots.len());
     let request = sprt_runner::PairScheduleRequest {
         settings: match_runner::PairGameSettings {
             engine_a,
@@ -550,6 +554,7 @@ pub(crate) async fn run_sprt(
             ponder: command.ponder,
             openings,
             synthetic_games: false,
+            engines: kept_engines.clone(),
         },
         execution: execution.clone(),
         design,
@@ -575,6 +580,9 @@ pub(crate) async fn run_sprt(
             }
         }
     };
+    if let Some(engines) = &kept_engines {
+        engines.shutdown().await;
+    }
     let final_block =
         sprt_progress_block(&observer, &progress, design, &players, true, fault_policy);
     if progress.needs_final(final_block.done) {
