@@ -20,7 +20,9 @@ fn base_match(run: &Path, games: u32) -> Command {
         .arg(fixture())
         .arg("--dir")
         .arg(run)
-        .args(["--seed", "424242", "--max-engine-faults", "100", "--json"]);
+        .args(["--seed", "424242", "--max-engine-faults", "1000", "--json"])
+        // The kill test waits for the next game's engine processes.
+        .args(["--engine-processes", "per-game"]);
     command
 }
 
@@ -97,7 +99,11 @@ fn killed_match_resumes_missing_games_in_deterministic_schedule_order() {
     let run = root.path().join("resumable");
     let a_pid_file = root.path().join("a.pid");
     let b_pid_file = root.path().join("b.pid");
-    let mut first = base_match(&run, 20);
+    // Long enough that the checkpoint due every 50 games lands mid-run: with
+    // 20 short games the first checkpoint came as the match finished, and the
+    // kill sometimes arrived after it had.
+    const GAMES: u32 = 120;
+    let mut first = base_match(&run, GAMES);
     first
         .arg("--a-engine-arg=--sleep-ms=100")
         .arg(format!(
@@ -123,7 +129,7 @@ fn killed_match_resumes_missing_games_in_deterministic_schedule_order() {
     child.wait().unwrap();
     assert_processes_reaped([active.0, active.1]);
 
-    let mut resumed = base_match(&run, 20);
+    let mut resumed = base_match(&run, GAMES);
     resumed
         .arg("--a-engine-arg=--sleep-ms=100")
         .arg(format!(
@@ -140,9 +146,12 @@ fn killed_match_resumes_missing_games_in_deterministic_schedule_order() {
         .iter()
         .map(|game| game["number"].as_u64().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(numbers, (1..=20).collect::<Vec<_>>());
-    assert_eq!(numbers.iter().copied().collect::<BTreeSet<_>>().len(), 20);
-    assert_eq!(value["report"]["games_attempted"], 20);
+    assert_eq!(numbers, (1..=GAMES).map(u64::from).collect::<Vec<_>>());
+    assert_eq!(
+        numbers.iter().copied().collect::<BTreeSet<_>>().len(),
+        GAMES as usize
+    );
+    assert_eq!(value["report"]["games_attempted"], GAMES);
     assert_eq!(value["report"]["status"], "completed");
     assert!(run.join("checkpoint.previous.json").is_file());
     assert!(
@@ -150,7 +159,7 @@ fn killed_match_resumes_missing_games_in_deterministic_schedule_order() {
             .unwrap()
             .matches("[Event \"Colosseum CLI fixed match\"]")
             .count()
-            == 20
+            == GAMES as usize
     );
 }
 
