@@ -223,3 +223,64 @@ by held time per search, the late-mode metric and the forfeit count.
 Target, unchanged: 0 time losses in 10,000 games at 14 slots, or a
 documented operating-system floor that fastchess shares. The fix is its own
 step.
+
+## Findings, 2026-09-18/19
+
+Three runs of 2,000 games at 3+0.03, 14 slots, 20 ms margin, on the
+reference host, each with the held-time reading and the last with kernel
+time and page faults per search (`tools/results` in Rarog):
+
+| run | time losses | searches held > 25 ms | longest hold | lowest slack to the deadline |
+|---|---|---|---|---|
+| Rarog b22core–b22base, `--placement auto` | 1 | 4 of 254,005 | 32.7 ms | 18 ms |
+| Stockfish 18 against itself, `--placement auto` | 0 | 13 of 301,432 | 50.4 ms | 161 ms |
+| Rarog, one logical CPU per game (`2,4,…,28`) | 2 | not the carrier | — | — |
+
+**The engine did the overrunning work.** The forfeiting search of the first
+run was held 0.2 ms: Rarog's process was on its CPU for the whole 76.6 ms,
+42 ms past its own hard cap. The two of the third run were held 0.2 ms and
+26.5 ms, spent no measurable kernel time, and each took 129–130 page faults
+where the searches around them took none.
+
+**The carrier is Rarog's KPK bitbase, built on first use.** It is a
+`2 × 64 × 64 × 64`-byte table (`src/kpk.rs`, 512 KiB, 128 pages), generated
+by retrograde analysis inside the evaluation the first time a search reaches
+a king-and-pawn-against-king position, where the engine's clock check cannot
+interrupt it. Measured on the real binary: the first KPK-reaching search in
+a fresh process takes 33–37 ms, the same search in the same process again
+0.3–1.4 ms. 72.6% of game-sides in the third run show exactly one search
+with about 130 page faults, the build; by chance the forfeiting search would
+be that search about once in 80, and both were. Replaying the second forfeit
+from its transcript (`go wtime 49 btime 855`) reproduces an overrun only in a
+fresh process: 37.7 ms median against a 29 ms cap, 25.4 ms with the bitbase
+built beforehand. Every Rarog forfeit on record came late in a game (plies
+77–180) with the bitbase not yet built in that process.
+
+**Why fastchess shows none.** fastchess keeps each engine process for the
+whole tournament (see Process lifetime above), so the bitbase is built once
+per process, in its first game that reaches it. Colosseum starts fresh
+processes every game, so the build lands inside a search in most games, and
+forfeits when it lands in a scramble search near the cap. The harness
+measures correctly; it exposes an engine that does lazy work on its own
+clock, as any runner that starts engines per game would.
+
+**Stockfish is not immune to stalls, it keeps a reserve.** It was held off
+its CPU more often and longer than Rarog, but never came closer than 161 ms
+to its deadline, where Rarog routinely comes within 20–30 ms.
+
+**One logical CPU per game** made no difference to the carrier (both of its
+forfeits were bitbase builds) and is not adopted on this evidence.
+
+**The CPU-graph gaps** seen during the third run are the game changeover: a
+search runs for 98.9% of each slot's wall time; start-up takes 0.68% (61 ms a
+game), teardown 0.13%, uncharged play 0.29%, the hand-over between games
+0.001%.
+
+**Outcome for the harness:** no harness change is required for correctness.
+The fix belongs to the engine: build lazily initialised tables before the
+first search, as Stockfish initialises its bitbases at start-up. The target
+(0 time losses in 10,000 games) is then to be confirmed on an engine build
+that does so. CPU Sets, persistent processes, `isready` before `go` and the
+creation flags stay untested and are not needed to explain any forfeit on
+record; persistent processes remain a throughput option worth about 1% of
+slot time.

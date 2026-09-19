@@ -2662,7 +2662,18 @@ games" procedure at 10.10, once, on the final state.
   forfeit count as the two readings; (4) only then the fix, as its own
   step. Success criterion: 0 time losses in 10,000 games at 14 slots on the
   reference host, or a documented operating-system floor that fastchess
-  shares. This does not block use: a symmetric forfeit per thousand games
+  shares. **Found 2026-09-19** (`docs/architecture/fastchess-mechanics.md`,
+  Findings): the residual forfeits are not the harness's. Per-search held
+  time, kernel time and page faults (10.9m instrument) show the forfeiting
+  searches on their CPU the whole time, each taking the ~130 page faults of
+  Rarog's 512 KiB KPK bitbase, which Rarog builds inside the evaluation on
+  first use (33–37 ms, uninterruptible by its clock check). fastchess keeps
+  processes for the whole run and pays it once; Colosseum's fresh processes
+  pay it in most games, and it forfeits when it lands in a scramble. A
+  Stockfish 18 null run under the same conditions: no losses, stalls up to
+  50 ms, but never closer than 161 ms to a deadline. No harness change is
+  needed; the target is to be confirmed on an engine build that initialises
+  the table before searching. This does not block use: a symmetric forfeit per thousand games
   moves an estimate by a small fraction of its error bar, and (v) keeps a
   sequential test alive through one.
 - **(x) An SPSA iteration must fill the machine.** Measured on a real 60-
