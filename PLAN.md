@@ -3390,6 +3390,16 @@ games" procedure at 10.10, once, on the final state.
   archive smoke. The maintainer then merges `cli` to `main` and tags
   `cli-v0.1.0`.
 
+**Decisions 2026-09-19 (maintainer):** (w) closed as rejected: its study
+traced the forfeits to Rarog's lazily built KPK bitbase, fixed in Rarog, and
+the 10,000-game target is not pursued; (ae) carries its one harness change.
+(r) and (ad) follow the release. (ab)'s symmetry run is its own step, 10.9v,
+run overnight when the machine is free and not blocking `cli-v0.1.0`; the
+earlier −1.1 ± 3.9 nElo predates the slot pool and kept engines, so it does
+not qualify the code being released. The rest of (ab) runs on the candidate
+with kept engines, the default, because the scale and verdict figures on
+record were measured with fresh processes per game.
+
 **Exit criterion:** every item above demonstrated by its tests and fixtures;
 oracle replay and parity matrix agree on shared fields; the candidate's four
 archives pass smoke; documentation, changelog and generated reference are

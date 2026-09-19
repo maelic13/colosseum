@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9m** the fastchess study, **10.9t** overlapped SPSA (study first, may follow the release), **10.9r** qualification on a real engine (maintainer-run), then **10.10 — EXIT**; 10.9p deferred, 10.9h recommended for deferral |
+| Next step | **10.9r** qualification on a real engine (maintainer-run: scale, verdict, ratings, tuning), then **10.10 — EXIT**; 10.9v symmetry when the machine is free; 10.9p, 10.9h and 10.9t deferred behind the release |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -948,7 +948,7 @@ model as well.
   conditions); adopt only if the sibling-mode tune gates no worse; never a
   gate condition; **DEFERRED behind the release** by maintainer decision
   2026-09-18, with a no-code ten-minute pre-check recorded — PLAN §Phase 10(z)
-- ◐ **10.9m — IN PROGRESS** — **Model: Sol High.** Residual time losses, research before any
+- ☑ **10.9m — REJECTED** — **Model: Sol High.** Residual time losses, research before any
   fix: fastchess source study in `docs/architecture/fastchess-mechanics.md`
   (process lifetime, creation flags and priority, affinity, pipes and
   readers, where its clock starts and stops, `timemargin`, between-game
@@ -960,7 +960,10 @@ model as well.
   trajectory), read by the late-mode metric and the forfeit count; the fix
   is its own later step; target 0 time losses in 10,000 games or a documented
   floor fastchess shares; does not block use — PLAN §Phase 10(w)
-- ☐ **10.9h** — **Model: Sol High.** Placement per platform research note:
+  - Closed by maintainer decision 2026-09-19: the study found the forfeits
+    were Rarog's lazily built KPK bitbase (fixed in Rarog), not the harness;
+    the 10,000-game target is not pursued; persistent processes became 10.9u
+- ☑ **10.9h — DEFERRED → after `cli-v0.1.0`** — **Model: Sol High.** Placement per platform research note:
   Linux isolated-core and IRQ-affinity detection and preference, macOS
   advisory contract, WSL excluded as evidence; implementation follows as
   its own step if the note calls for it — PLAN §Phase 10(r)
@@ -970,7 +973,7 @@ model as well.
   per slot as the candidate (fresh processes stay selectable); target under
   0.3 s uncharged per game at 15 slots (measured 1.22 s, 9% of throughput)
   with `h=` and the fault rate unchanged — PLAN §Phase 10(ac)
-- ☐ **10.9t** — **Model: Sol High.** Overlapped SPSA iterations, `--overlap 1`,
+- ☑ **10.9t — DEFERRED → after `cli-v0.1.0`** — **Model: Sol High.** Overlapped SPSA iterations, `--overlap 1`,
   default off: next iteration's games start on freed slots around the newest
   committed centre, updates in order, staleness bounded at one and recorded;
   zero-game study on noisy synthetic objectives over many seeds, then the
@@ -986,13 +989,17 @@ model as well.
 - ☐ **10.9r** — **Model: Sol High.** Qualification on a real engine, part of
   the release and recorded in `docs/architecture/phase-10-qualification.md`:
   maintainer-run on the release candidate, one command at a time, each
-  result analysed from its run directory: symmetry (identical-binary
-  `calibrate`, 30,000 games, interval inside ±5 nElo), scale (fixed 2,000
-  games against a second runner's figure), verdict (SPRT replay), ratings
-  (fixed-field gauntlet), tuning (the SPSA recovery test from a detuned
-  start with `sprt --apply` accepting H1), faults (zero time losses or the
-  10.9m floor); an adopting project trusts the released binary and repeats
-  none of it — PLAN §Phase 10(ab)
+  result analysed from its run directory: scale (fixed 2,000 games against a
+  second runner's figure), verdict (SPRT replay), ratings (fixed-field
+  gauntlet), tuning (the SPSA recovery test from a detuned start with `sprt
+  --apply` accepting H1), faults (zero time losses in these runs); symmetry
+  is 10.9v; an adopting project trusts the released binary and repeats none
+  of it — PLAN §Phase 10(ab)
+- ☐ **10.9v** — **Model: Sol High.** Symmetry qualification: an
+  identical-binary `calibrate` of 30,000 games on the released binary, whole
+  95% nElo interval inside ±5, zero time losses; overnight, when the
+  maintainer has the machine free; does not block `cli-v0.1.0` by maintainer
+  decision 2026-09-19 — PLAN §Phase 10(ab)
 - ☐ **10.10 — EXIT** — **Model: Sol High.** Release acceptance repeat:
   regenerate the command reference, update `CHANGELOG-CLI.md` under 0.1.0,
   Phase 4B oracle replay and Phase 8.1 parity matrix on the corrected source,
