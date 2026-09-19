@@ -449,7 +449,7 @@ pub(crate) fn match_progress_block(
     // A fixed match plays colour-reversed pairs on one opening, exactly as a
     // sequential test does, so it has the same paired estimates and reports
     // them the same way.
-    sample.add_fields(&mut block, policy, players);
+    sample.add_fields(&mut block, policy);
     if let Some(rate) =
         progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
     {
@@ -647,13 +647,9 @@ pub(crate) fn print_fixed_match(report: &match_runner::FixedMatchReport) {
         Err(error) => println!("Elo and nElo unavailable: {error}"),
     }
     println!("Ptnml: {:?}", sample.vector.counts());
-    let players = Players {
-        a: report.engine_a.name.clone(),
-        b: report.engine_b.name.clone(),
-    };
     println!(
         "faults: {}; infrastructure {}; {}",
-        fault_counts_text(report.faults, &players),
+        fault_counts_text(report.faults),
         report.faults.infrastructure,
         fault_allowance_text(
             report.fault_policy,

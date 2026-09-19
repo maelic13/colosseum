@@ -500,7 +500,7 @@ pub(crate) fn calibration_progress_block(
         schedule.elapsed(),
     );
     block.field("players", players.to_string());
-    sample.add_fields(&mut block, policy, players);
+    sample.add_fields(&mut block, policy);
     if let Some(rate) =
         progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
     {
@@ -598,13 +598,9 @@ pub(crate) fn print_calibration(report: &CalibrationReport, run_directory: &Path
         println!("interval unavailable: {reason}");
     }
     let faults = report.fixed_match.faults;
-    let players = Players {
-        a: report.fixed_match.engine_a.name.clone(),
-        b: report.fixed_match.engine_b.name.clone(),
-    };
     println!(
         "faults: {}; {}",
-        fault_counts_text(faults, &players),
+        fault_counts_text(faults),
         fault_allowance_text(
             report.fixed_match.fault_policy,
             faults,

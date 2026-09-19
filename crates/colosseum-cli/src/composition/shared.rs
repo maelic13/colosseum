@@ -223,12 +223,11 @@ impl std::fmt::Display for Players {
     }
 }
 
-/// Faults per side, each count named for its engine: a bare `0/2` reads as
-/// "none of two" rather than "none for A, two for B".
-pub(crate) fn fault_counts_text(faults: MatchFaultCounts, players: &Players) -> String {
-    let (a, b) = (&players.a, &players.b);
+/// Faults per side, engine A's first, as `time: 0-2; other: 0-0`: a `0/2`
+/// read as "none of two" rather than "none for A, two for B".
+pub(crate) fn fault_counts_text(faults: MatchFaultCounts) -> String {
     format!(
-        "time: {a} {}, {b} {}; other: {a} {}, {b} {}",
+        "time: {}-{}; other: {}-{}",
         faults.time_losses_a,
         faults.time_losses_b,
         faults.engine_a.saturating_sub(faults.time_losses_a),
@@ -759,12 +758,7 @@ impl PairedProgress {
 
     /// The lines both commands share, in the order an operator reads them:
     /// the size of the sample, what it is worth, then how it was reached.
-    pub(crate) fn add_fields(
-        &self,
-        block: &mut ProgressBlock,
-        policy: FaultPolicy,
-        players: &Players,
-    ) {
+    pub(crate) fn add_fields(&self, block: &mut ProgressBlock, policy: FaultPolicy) {
         // A run that counts games has the game count in its headline already;
         // what it does not say is how many of them are complete pairs, which
         // is what every figure below is computed over.
@@ -815,7 +809,7 @@ impl PairedProgress {
                 "faults",
                 format!(
                     "{}; {}",
-                    fault_counts_text(self.faults, players),
+                    fault_counts_text(self.faults),
                     fault_allowance_text(policy, self.faults, u64::from(self.scored_games))
                 ),
             );
@@ -890,7 +884,7 @@ mod fault_text_tests {
     use super::*;
 
     #[test]
-    fn each_fault_count_is_named_for_its_engine() {
+    fn each_sides_fault_count_is_separated_by_a_hyphen() {
         let faults = MatchFaultCounts {
             engine_a: 1,
             engine_b: 3,
@@ -898,14 +892,11 @@ mod fault_text_tests {
             time_losses_b: 2,
             infrastructure: 0,
         };
+        assert_eq!(fault_counts_text(faults), "time: 0-2; other: 1-1");
         let players = Players {
             a: "b22core".into(),
             b: "b22base".into(),
         };
-        assert_eq!(
-            fault_counts_text(faults, &players),
-            "time: b22core 0, b22base 2; other: b22core 1, b22base 1"
-        );
         assert_eq!(players.to_string(), "b22core vs. b22base");
     }
 }

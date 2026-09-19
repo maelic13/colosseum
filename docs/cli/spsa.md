@@ -215,7 +215,7 @@ more at termination:
 progress [spsa]: 400/2000 iterations (20%), 41m12s elapsed
   games           12800
   rate            6s/iteration, 18640 games/hour
-  faults          time: plus 1, minus 0; other: plus 0, minus 0; 1 of 64 allowed
+  faults          time: 1-0; other: 0-0; 1 of 64 allowed
   time remaining  2h44m
 ```
 
@@ -246,7 +246,7 @@ Hash          16    204  203.6412    +188  1..1024
 Threads        4      3    3.4410      -1    1..16
 --------------------------------------------------
   tuned      the values the tune ended on, rounded to whole numbers
-  faults     time: plus 0, minus 0; other: plus 0, minus 0; 0 of 320 allowed
+  faults     time: 0-0; other: 0-0; 0 of 320 allowed
   at a rail  none
   files      /home/you/engine/colosseum-runs/spsa-...
              tuned-options.txt   setoption lines, ready to paste
@@ -270,7 +270,7 @@ result; `spsa status` shows where every parameter stands at any time:
 --------------------------------------------------
 SPSA stopped after iteration 24 of 60. Nothing is lost; run the same command again to resume.
   games    768 played
-  faults   time: plus 0, minus 0; other: plus 0, minus 0; 0 of 3 allowed
+  faults   time: 0-0; other: 0-0; 0 of 3 allowed
   files    /home/you/engine/colosseum-runs/spsa-...
 ```
 

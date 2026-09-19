@@ -74,7 +74,7 @@ progress [sprt]: 105/200 pairs (52%), 8m41s elapsed
   nElo            +248.0 +/- 47.0
   W/D/L           158/0/52
   Ptnml           [0, 0, 52, 0, 53]
-  faults          time: candidate 0, baseline 0; other: candidate 0, baseline 0; 0 of 3 allowed
+  faults          time: 0-0; other: 0-0; 0 of 3 allowed
   LLR             +2.96 in [-2.94, 2.94] (accept H1)
   rate            724 pairs/hour
   time remaining  0s
@@ -86,7 +86,8 @@ the pentanomial vector; `time remaining` extrapolates the rate observed so far
 and is `0s` once the run has stopped. A sequential test caps that estimate at
 the pairs its `--max-pairs` still allows, and takes the nearer of that and the
 pairs its LLR would need at the drift it has. The `faults` line counts
-engine faults with losses on time among them, their rate over the games
+engine faults with losses on time among them, each as engine A's count and
+engine B's (the plus and minus arms for a tune), `time: 0-2`, their rate over the games
 played, and the allowance: 1% of the scheduled games and at least 5 for
 `match`, `calibrate` and `tournament`; for `sprt` and `spsa`, which cannot know
 their length, 0.5% of the games played so far and at least 3, rising as they

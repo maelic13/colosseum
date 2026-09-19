@@ -110,7 +110,7 @@ count, its rate over the games played and the allowance at that point are on
 the `faults` line of every progress block and of the final report:
 
 ```text
-faults: time: candidate 0, baseline 2; other: candidate 0, baseline 0; 2 of 4 allowed
+faults: time: 0-2; other: 0-0; 2 of 4 allowed
 ```
 
 `--max-engine-faults N` and `--max-time-losses N` set fixed limits instead, and

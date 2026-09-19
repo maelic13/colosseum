@@ -1478,14 +1478,6 @@ impl SpsaCentreTracker {
     }
 }
 
-/// A tune's two sides: engine A plays the plus arm, engine B the minus arm.
-fn spsa_arms() -> Players {
-    Players {
-        a: "plus".to_owned(),
-        b: "minus".to_owned(),
-    }
-}
-
 /// What one committed iteration says about the search: the mini-match it
 /// played, the gain and perturbation scale it used, and what moved.
 ///
@@ -1564,7 +1556,7 @@ pub(crate) fn spsa_progress_block(
         "faults",
         format!(
             "{}; {}",
-            fault_counts_text(faults, &spsa_arms()),
+            fault_counts_text(faults),
             fault_allowance_text(
                 fault_policy,
                 faults,
@@ -2048,7 +2040,7 @@ pub(crate) fn print_spsa(report: &SpsaReport, run_directory: &Path) {
         * u64::from(settings.games_per_iteration);
     let fault_line = format!(
         "{}; {}",
-        fault_counts_text(faults, &spsa_arms()),
+        fault_counts_text(faults),
         fault_allowance_text(report.fault_policy, faults, games_played)
     );
     // An absolute path: the reader may be in any directory when they come back.
