@@ -151,8 +151,7 @@ fn fixed_field_command(run: &Path, fixed: &[&str]) -> Command {
             "7",
             "--dir",
         ])
-        .arg(run)
-        .arg("--json");
+        .arg(run);
     command
 }
 
@@ -161,6 +160,7 @@ fn a_fixed_field_pins_its_members_and_estimates_only_the_newcomer() {
     let root = tempfile::tempdir().unwrap();
     let run = root.path().join("fixed");
     let output = fixed_field_command(&run, &["1:2400", "2:2200.5"])
+        .arg("--json")
         .output()
         .unwrap();
     assert!(
@@ -215,6 +215,17 @@ fn a_fixed_field_pins_its_members_and_estimates_only_the_newcomer() {
     let record: serde_json::Value =
         serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
     assert_eq!(record["workflow"]["fixed_ratings"][0]["rating"], 2400.0);
+
+    // The text report marks a pinned rating and gives it no error, rather
+    // than calling a measurement it never made unavailable.
+    let text = fixed_field_command(&root.path().join("text"), &["1:2400", "2:2200.5"])
+        .output()
+        .unwrap();
+    assert!(text.status.success());
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(text.contains("2400.0 [fixed];"), "{text}");
+    assert!(text.contains("2200.5 [fixed];"), "{text}");
+    assert!(!text.contains("unavailable"), "{text}");
 }
 
 #[test]

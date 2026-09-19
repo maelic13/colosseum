@@ -857,12 +857,16 @@ pub(crate) fn print_tournament(report: &tournament_driver::TournamentReport) {
         report.results.games_attempted
     );
     for row in &report.results.standings {
-        let error = row
-            .error_95
-            .map_or_else(|| "unavailable".into(), |value| format!("±{value:.1}"));
-        let fixed = if row.fixed { " [fixed]" } else { "" };
+        // A pinned rating is an input, not a measurement: it has no error to
+        // report, so it is marked rather than called unavailable.
+        let error = if row.fixed {
+            "[fixed]".to_owned()
+        } else {
+            row.error_95
+                .map_or_else(|| "unavailable".into(), |value| format!("±{value:.1}"))
+        };
         println!(
-            "{}. {}: {:.1} {error}{fixed}; {:.1}/{} ({}-{}-{})",
+            "{}. {}: {:.1} {error}; {:.1}/{} ({}-{}-{})",
             row.rank, row.name, row.rating, row.points, row.games, row.wins, row.draws, row.losses
         );
     }
