@@ -501,10 +501,14 @@ pub(crate) fn calibration_progress_block(
     );
     block.field("players", players.to_string());
     sample.add_fields(&mut block, policy);
-    if let Some(rate) =
-        progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
-    {
-        block.field("rate", format!("{rate:.0} pairs/hour"));
+    // Pairs are this command's unit of work, but throughput is reported in
+    // games, as every other command reports it, so two runs can be compared
+    // directly. A committed pair is exactly two games.
+    if let Some(rate) = progress::rate_per_hour(
+        schedule.units_since_start(done).saturating_mul(2),
+        schedule.elapsed_hours(),
+    ) {
+        block.field("rate", format!("{rate:.0} games/hour"));
     }
     block.field(
         "time remaining",

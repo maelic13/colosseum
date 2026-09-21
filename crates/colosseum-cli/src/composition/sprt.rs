@@ -757,10 +757,14 @@ pub(crate) fn sprt_progress_block(
             block.field("LLR", format!("unavailable: {error}"));
         }
     }
-    if let Some(rate) =
-        progress::rate_per_hour(progress.units_since_start(done), progress.elapsed_hours())
-    {
-        block.field("rate", format!("{rate:.0} pairs/hour"));
+    // Pairs are this command's unit of work, but throughput is reported in
+    // games, as every other command reports it, so two runs can be compared
+    // directly. A committed pair is exactly two games.
+    if let Some(rate) = progress::rate_per_hour(
+        progress.units_since_start(done).saturating_mul(2),
+        progress.elapsed_hours(),
+    ) {
+        block.field("rate", format!("{rate:.0} games/hour"));
     }
     // A test that has stopped has nothing left to run, whatever the cap says.
     // Otherwise the estimate is the pairs the LLR would need at its current

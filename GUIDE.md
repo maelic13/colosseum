@@ -851,7 +851,7 @@ model as well.
   1) with a `--progress-min-secs` floor (default 5) and at termination,
   never per commit; `--progress-interval-secs` removed: `sprt` and
   `calibrate` show games, pairs, W/D/L, pentanomial, Elo and nElo with 95%
-  intervals, LLR against bounds, faults, pairs per hour and expected
+  intervals, LLR against bounds, faults, games per hour and expected
   remaining games; `match` shows score, Elo with interval and rate; `spsa`
   shows iteration and percentage, elapsed and ETA, last mini-match score,
   current gain and perturbation scale, and the three centres that moved

@@ -2417,7 +2417,8 @@ games" procedure at 10.10, once, on the final state.
   carries what a decision needs: for `sprt` and `calibrate`, games and
   pairs done, W/D/L and the pentanomial vector, the point estimate with its
   95% interval in the run's Elo model (both models for SPRT), LLR against
-  its bounds, fault and time-loss counts, pairs per hour and, for SPRT, the
+  its bounds, fault and time-loss counts, games per hour (the unit every
+  command reports, a pair being two games) and, for SPRT, the
   expected remaining games at the current drift; for `match`, score, Elo
   with interval and rate; for `spsa`, iteration and percentage, elapsed and
   a linear ETA, the last mini-match pair score, the current gain and

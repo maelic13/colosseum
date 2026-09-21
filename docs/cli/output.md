@@ -76,7 +76,7 @@ progress [sprt]: 105/200 pairs (52%), 8m41s elapsed
   Ptnml           [0, 0, 52, 0, 53]
   faults          time: 0-0; other: 0-0; 0 of 3 allowed
   LLR             +2.96 in [-2.94, 2.94] (accept H1)
-  rate            724 pairs/hour
+  rate            1448 games/hour
   time remaining  0s
 --------------------------------------------------
 ```

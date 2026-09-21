@@ -342,6 +342,10 @@ fn an_sprt_block_carries_the_sample_both_models_and_the_llr() {
     ] {
         assert!(last.contains(field), "{field} missing from:\n{last}");
     }
+    // Throughput is in games, as every command reports it, although this
+    // command's unit of work is the pair.
+    assert!(last.contains("games/hour"), "{last}");
+    assert!(!last.contains("pairs/hour"), "{last}");
     // The pentanomial is the vector the run committed, and the LLR is stated
     // against its exact Wald bounds.
     assert!(last.contains("[0, 0, 10, 0, 10]"), "{last}");
@@ -598,6 +602,8 @@ fn a_calibration_block_reports_its_paired_sample() {
         assert!(last.contains(field), "{field} missing from:\n{last}");
     }
     assert!(last.contains("[0, 0, 4, 0, 0]"), "{last}");
+    // Throughput in games, as `match`, `spsa` and `tournament` report it.
+    assert!(!last.contains("pairs/hour"), "{last}");
     // A degenerate sample has no estimate in either model, and the block says
     // so for both rather than dropping a line a reader looks for.
     assert_eq!(last.matches("unavailable:").count(), 2, "{last}");

@@ -67,7 +67,8 @@ Progress is written to stderr every `--progress-every N` official pairs
 decision: the two engines, games and pairs committed, logistic and normalized
 Elo each with the half-width of its 95% interval, W/D/L, the pentanomial
 vector, engine faults and time losses, the LLR against its exact Wald bounds,
-pairs per hour, and the time still expected. That last figure extrapolates the
+games per hour — the unit every command reports throughput in, so two runs
+compare directly — and the time still expected. That last figure extrapolates the
 LLR the test already computed at its average drift per pair, never exceeds the
 pairs `--max-pairs` still allows, and is `0s` once the test has stopped; a
 sequential path is not a straight line, so read it as a projection.
