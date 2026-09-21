@@ -1036,11 +1036,14 @@ model as well.
   short third-party usability flows, fresh four-platform CI candidate and
   exact archive smoke; then the maintainer merges `cli` to `main` and tags
   `cli-v0.1.0` — PLAN §Phase 10(j)
-  - The recorded parity command no longer runs: adjudication is off unless
-    asked for, so it needs `--draw-adjudication` beside its draw parameters.
-    Use `repeat_command` from
+  - Run the parity commands exactly as recorded in
     [`docs/fixtures/phase8/parity.json`](docs/fixtures/phase8/parity.json);
-    dropping the draw parameters instead would compare different conditions
+    10.9w repaired the Colosseum one to carry `--draw-adjudication` and proved
+    it by running it. Never drop the draw parameters to make a command parse —
+    that would compare different conditions. The recorded artifact hashes
+    belong to one Rarog 2.3.1 build (SHA-256 `2a95390d…`); the copy in
+    `D:\chess\engines\rarog` hashes `033f6633…`, so locate that exact build
+    first or re-record the whole matrix on the build actually used
   - `CHANGELOG-CLI.md` under 0.1.0 is written but dated `unreleased`; set the
     date when the tag is cut
 

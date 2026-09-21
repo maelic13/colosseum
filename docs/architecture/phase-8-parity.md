@@ -29,25 +29,29 @@ not part of runner semantics.
 
 <cutechess-cli> -engine cmd=<rarog> name=A -engine cmd=<rarog> name=B -each proto=uci tc=inf depth=1 -rounds 4 -games 2 -repeat -concurrency 1 -draw movenumber=5 movecount=2 score=10000 -ratinginterval 8
 
-<colosseum-cli> sprt <rarog> <rarog> --max-pairs 4 --preset gainer --a-depth 1 --b-depth 1 --draw-move 5 --draw-moves 2 --draw-score-cp 10000 --dir <run-dir> --json --seed 123 --placement off
+<colosseum-cli> sprt <rarog> <rarog> --max-pairs 4 --preset gainer --a-depth 1 --b-depth 1 --draw-adjudication --draw-move 5 --draw-moves 2 --draw-score-cp 10000 --dir <run-dir> --json --seed 123 --placement off
 ```
 
 ### Repeating this comparison
 
-The commands above are what ran on 2026-08-03 and stay as recorded. The
-Colosseum one no longer runs: adjudication is now off unless asked for, so its
-draw parameters require `--draw-adjudication`. Repeat the comparison with:
+Run the commands exactly as written; they are the commands that run. The
+Colosseum one carries `--draw-adjudication` because adjudication is off unless
+asked for. The 2026-08-03 run used the same arguments without that flag, which
+then enabled adjudication implicitly; the record was repaired on 2026-09-21 and
+the repaired command proved by running it: colosseum-cli 0.1.0 built from `cli`
+at `6fd0150` against `rarog-v2.3.1-windows-pext-pgo.exe` (SHA-256
+`033f66334385e30ad358293a411e72508fa5edf04d6fc57310bc545b39046898`) on both
+arms returned exit 4, `INCONCLUSIVE`, eight games, 0/8/0, four complete pairs,
+pentanomial `[0, 0, 4, 0, 0]` and zero faults — every shared field equal to the
+recorded observation. That proof run used a different build of Rarog 2.3.1 from
+the recorded one, so it demonstrates the command, not the recorded artifact
+hashes.
 
-```text
-<colosseum-cli> sprt <rarog> <rarog> --max-pairs 4 --preset gainer --a-depth 1 --b-depth 1 --draw-adjudication --draw-move 5 --draw-moves 2 --draw-score-cp 10000 --dir <run-dir> --json --seed 123 --placement off
-```
-
-Add the flag; do not drop the draw parameters to make the command parse. The
-aggressive early draw rule is what makes all eight games draw and gives the
-three runners an identical outcome to compare. Without it the games play out,
-and the comparison is against different conditions — which reads as a parity
-divergence that is not one. The FastChess and Cute Chess commands are
-unaffected.
+Do not drop the draw parameters to make the command parse. The deliberately
+early draw rule is what makes all eight games draw and gives the three runners
+one outcome to compare. Without it the games play out, and the comparison is
+against different conditions — which reads as a parity divergence that is not
+one. The FastChess and Cute Chess commands are unaffected.
 
 ## Result and boundary
 

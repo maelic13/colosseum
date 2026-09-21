@@ -34,6 +34,7 @@ struct VersionSource {
 #[derive(Debug, Deserialize)]
 struct Observation {
     runner: String,
+    command: String,
     artifact_sha256: String,
     games: u32,
     wins: u32,
@@ -119,11 +120,44 @@ fn frozen_external_outputs_prove_shared_game_outcomes() {
     }
 }
 
+/// The recorded command is the command that runs. Phase 10(b) made
+/// adjudication opt-in and left the fixture's Colosseum command unrunnable
+/// until 10.9w repaired it; this keeps the record executable against the
+/// command surface it is recorded against.
+#[test]
+fn the_recorded_colosseum_parity_command_still_parses() {
+    let fixture: ParityFixture =
+        serde_json::from_str(include_str!("../../../docs/fixtures/phase8/parity.json")).unwrap();
+    let recorded = &fixture
+        .observations
+        .iter()
+        .find(|observation| observation.runner == "colosseum-cli")
+        .unwrap()
+        .command;
+
+    // The draw parameters are only comparable against the external runners
+    // while adjudication is actually enabled; dropping them to make the
+    // command parse would compare different conditions.
+    assert!(recorded.contains("--draw-move 5"));
+    assert!(recorded.contains("--draw-moves 2"));
+    assert!(recorded.contains("--draw-score-cp 10000"));
+
+    let argv = recorded.split_whitespace().map(|argument| match argument {
+        "<colosseum-cli>" => "colosseum-cli",
+        "<rarog>" => "engine",
+        "<run-dir>" => "run-dir",
+        other => other,
+    });
+    colosseum_cli::command_spec()
+        .try_get_matches_from(argv)
+        .expect("the recorded parity command must parse against the shipped command surface");
+}
+
 #[test]
 fn release_candidate_matches_the_external_oracles_on_shared_fields() {
     let fixture: ParityFixture =
         serde_json::from_str(include_str!("../../../docs/fixtures/phase8/parity.json")).unwrap();
-    assert_eq!(fixture.schema_version, 1);
+    assert_eq!(fixture.schema_version, 2);
     assert_eq!(
         fixture.oracle_matrix,
         "tests/fixtures/statistics/oracle-matrix.md"
