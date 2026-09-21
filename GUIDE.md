@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | **Phases 0–9 are complete, and 10.1–10.9f with them.** Candidate `823b398` passed four-platform archive smoke and exact-artifact Rarog/Basilisk gates on Windows and WSL Linux; every first-release correction has landed since |
-| What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
+| What exists | **Phases 0–9 are complete, and 10.1–10.9v with them** (10.9p open and deferred behind the release; 10.9m rejected; 10.9h and 10.9t deferred). Candidate `823b398` passed four-platform archive smoke and exact-artifact Rarog/Basilisk gates on Windows and WSL Linux; every first-release correction has landed since |
+| What is missing | **10.9w–10.9z**, release preparation added 2026-09-21 (audit corrections, versions and tag contract, the xtask build, user documentation); then **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.10 — EXIT**, release acceptance, now that 10.9r has passed on a real engine (scale, verdict, ratings, tuning) and 10.9v symmetry with it; 10.9p, 10.9h and 10.9t deferred behind the release |
-| Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
+| Next step | **10.9w**, corrections from Rarog's adoption audit, then 10.9x–10.9z and **10.10 — EXIT**, release acceptance, now that 10.9r has passed on a real engine (scale, verdict, ratings, tuning) and 10.9v symmetry with it; 10.9p, 10.9h and 10.9t deferred behind the release |
+| Recommended model | **Sol High** for 10.9w (and 10.9x, 10.9y, 10.10; Terra High for 10.9z) (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
 
@@ -1004,6 +1004,32 @@ model as well.
   **−0.0 ± 3.9 nElo**, −0.0 ± 2.0 Elo, W-D-L 7727-14545-7728, status `pass`,
   no fault of any kind, 5,800 games per hour, stopped and resumed once from
   its own directory — PLAN §Phase 10(ab)
+- ☐ **10.9w** — **Model: Sol High.** Corrections from the adoption audit:
+  the recorded parity command repaired and run; a test that pins what an
+  installed GUI 1.0.2's updater does with a `gui-v` tag (it sees nothing),
+  with the decision 10.9x needs written down; the GUI changes `cli` carries
+  since 1.0.2 listed, user-visible ones marked; the optional fresh-process
+  run on a post-fix engine offered as a command; a sweep of every `☐`, `◐`,
+  `TODO`, `FIXME` and "owed" so each is done, deferred with its reason or
+  listed for the maintainer; stale tracker text corrected — PLAN §Phase 10(af)
+- ☐ **10.9x** — **Model: Sol High.** Versions and the tag contract: the CLI's
+  first version is 0.1.0, with the conditions for 1.0.0 recorded; the GUI
+  version for the merged source; the GUI tag scheme that 1.0.2 can still see
+  (preferred: a bridge release under a legacy `v` tag, `gui-v` after it);
+  "latest" stays the stable GUI release; `colosseum-release`, both workflows
+  and the manifests accept exactly that and refuse the rest — PLAN §Phase 10(ag)
+- ☐ **10.9y** — **Model: Sol High.** One build entry point: a `cargo xtask`
+  with `build gui|cli`, `package gui|cli` and `release-check <tag>` replaces
+  the three per-platform build scripts; both release workflows call it; the
+  products stay separate artifacts; local archives equal the candidate's file
+  lists and pass their archive smoke — PLAN §Phase 10(ah)
+- ☐ **10.9z** — **Model: Terra High.** User-facing documentation for the
+  release: `README.md` as the front door to both products (purpose, download
+  per platform with checksums, the GUI from the latest release and the CLI
+  from the newest `cli-v` release, first tournament, first `match`, `sprt` and
+  `spsa` with a run file); `README-CLI.md`, both changelogs, `docs/cli/` and
+  `docs/DEVELOPMENT.md` in agreement; links checked, post-tag links listed
+  for the maintainer — PLAN §Phase 10(ai)
 - ☐ **10.10 — EXIT** — **Model: Sol High.** Release acceptance repeat:
   regenerate the command reference, update `CHANGELOG-CLI.md` under 0.1.0,
   Phase 4B oracle replay and Phase 8.1 parity matrix on the corrected source,
@@ -1085,8 +1111,8 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 10 is open.** Work the steps in order, one commit per step, starting
-with 10.1. Steps 10.2 through 10.8 change game-playing behaviour or its
+**Phase 10 is open; the next step is 10.9w.** Work the steps in order, one commit per step.
+10.9w–10.9z were added on 2026-09-21 and precede 10.10. Steps 10.2 through 10.8 change game-playing behaviour or its
 record; do not repeat the recurring "after changing anything that runs
 games" procedure per step, run it once at 10.10 on the final state. The
 merge of `cli` to `main`, the `cli-v0.1.0` tag and publication remain

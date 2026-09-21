@@ -1696,7 +1696,7 @@ Every identifier is covered below; ranges are inclusive.
 | 7 | 7.1 | 7.2–7.3 |
 | 8 | — | 8.1–8.3 |
 | 9 | 9.2–9.3, 9.6 | 9.0–9.1, 9.4–9.5, 9.7 |
-| 10 | 10.1, 10.4, 10.7–10.9 | 10.2–10.3, 10.5–10.6, 10.9a–10.9c, 10.10 |
+| 10 | 10.1, 10.4, 10.7–10.9, 10.9z | 10.2–10.3, 10.5–10.6, 10.9a–10.9c, 10.9w–10.9y, 10.10 |
 | 11 | 11.4 | 11.1–11.3 |
 
 ### Phase 0 — Current-state analysis and target architecture
@@ -3399,6 +3399,81 @@ games" procedure at 10.10, once, on the final state.
   a 60-game match, start-up median 8.3 ms (220–258 ms for a slot's first
   game), teardown 0.1 ms, no fault, no Rarog process left after the run; a
   3-iteration, 82-knob tune the same.
+- **(af) Corrections from the adoption audit** (GUIDE 10.9w, Sol High), by
+  maintainer decision 2026-09-21 after Rarog audited the harness it is about
+  to adopt (Rarog `analysis/b2_audit_2026-09-21.md`). The audit recounted the
+  symmetry and scale runs from their PGNs to the recorded figures and found
+  no defect in the harness; what it found is release preparation:
+  - The recorded Phase 8.1 parity command no longer runs, because
+    adjudication is off unless asked for. Repair the record so the command
+    that is written is the command that runs (`repeat_command` in
+    `docs/fixtures/phase8/parity.json` carries `--draw-adjudication`), and
+    prove it by running it.
+  - **An installed GUI 1.0.2 cannot see a `gui-v` release.** Its updater reads
+    `releases/latest` and parses the tag with `trim_start_matches('v')`, so
+    `gui-v1.1.0` yields no version and no notice, for ever. The updater on
+    `cli` reads the release list and accepts both `gui-v` and legacy `v`
+    tags. This item verifies the finding with a test against the 1.0.2
+    parser's behaviour and records the decision (ag) needs; it changes no tag
+    contract itself.
+  - The `cli` branch carries GUI source changes since 1.0.2 (the pinned
+    field, the resignation policy, the application boundary, the updater):
+    12 files, about 600 lines. Merging `cli` to `main` therefore changes the
+    GUI that `main` builds. List them, and say which are user-visible, so
+    (ag) can version the GUI.
+  - Qualification §4's per-coordinate criterion is recorded as missed. Keep
+    it so; add nothing that softens it.
+  - Every binary in the qualification runs predates Rarog's start-up fix, so
+    no run exercises fresh processes per game on a fixed engine. One optional
+    maintainer-run `match --engine-processes per-game` of 2,000 games on a
+    post-fix Rarog pair is offered as a command, not required, and does not
+    block the release.
+  - Sweep for anything else unfinished: every `☐`, `◐`, `TODO`, `FIXME` and
+    "owed" in GUIDE, PLAN, `docs/` and the CLI crates is either done, deferred
+    with its reason, or listed for the maintainer. Tracker text that has gone
+    stale is corrected.
+- **(ag) Versions and the tag contract** (GUIDE 10.9x, Sol High). Decide and
+  record, then make `colosseum-release`, both workflows and the manifests
+  agree:
+  - **The CLI's first version is 0.1.0.** Its command surface, run-file
+    schema, run-directory format and JSON reports have changed within
+    Phase 10 (pre-10.9g directories are refused) and will change again when
+    Phase 11 puts the GUI on the harness and when (z), (r) and (ad) land.
+    1.0.0 is a promise that scripts and run directories keep working; it is
+    made when those formats have survived a release unchanged. Adopters pin
+    an archive by SHA-256 meanwhile.
+  - **The GUI version for the merged source**, from (af)'s list: a minor
+    release if anything user-visible was added, otherwise a patch.
+  - **The GUI tag scheme**, from (af)'s finding. Preferred: the next GUI
+    release is a bridge tagged in the legacy `v<semver>` form so that 1.0.2
+    sees it, it ships the new updater, and `gui-v` begins with the release
+    after it. `colosseum-release` and `release-gui.yml` accept exactly what
+    is decided and refuse the rest.
+  - GitHub's repository-wide "latest" belongs to the stable GUI release; a
+    CLI release never claims it (`make_latest: false`, already so). README
+    links reach the newest CLI through the `cli-v` release list.
+- **(ah) One build entry point** (GUIDE 10.9y, Sol High). A `cargo xtask`
+  crate, as Rarog uses, replaces `build_windows.ps1`, `build_linux.sh` and
+  `build_macos.sh`: `build gui|cli`, `package gui|cli` producing the archives
+  and their `SHA256SUMS` exactly as the release workflows stage them, and
+  `release-check <tag>` wrapping `colosseum-release` and the documentation
+  drift gate. The two workflows call the same commands, so a local package
+  and a published one come from one recipe. The products stay separate: no
+  command builds or packages both into one artifact, and the CLI archive
+  never contains the GUI. Exit: on Windows, `cargo xtask package cli` and
+  `package gui` produce archives whose contents equal the candidate's file
+  lists, and each passes its `Smoke-*Archive.ps1`.
+- **(ai) User-facing documentation for the release** (GUIDE 10.9z, Terra
+  High). `README.md` is the front door for both products: what each is for,
+  how to download it (the GUI from the latest release, the CLI from the
+  newest `cli-v` release, per platform, with checksum verification), how to
+  start, a first tournament in the GUI, and a first `match`, `sprt` and `spsa`
+  in the CLI with a run file, then links to `docs/cli/`. `README-CLI.md`, both
+  changelogs, `docs/cli/` and `docs/DEVELOPMENT.md` (the xtask, the tag
+  contract) agree with it. No phase numbers or internal method in user
+  documents. Every link is checked, including the release links that exist
+  only after the tags, which are listed for the maintainer to open after
+  publication.
 - **(j) Release acceptance repeat.** Regenerate the command reference, update
   `CHANGELOG-CLI.md` under 0.1.0, run the Phase 4B oracle replay and the
   Phase 8.1 parity matrix on the corrected source, repeat the short third-party
