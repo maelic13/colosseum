@@ -2912,7 +2912,9 @@ games" procedure at 10.10, once, on the final state.
   qualification document): scale +54.3 ± 10.6; verdict H1 at 241 pairs;
   ratings 3201.9 ± 14.0 against the desktop's 3191; tuning recovered a
   −56.2 ± 10.2 Elo detune to +9.6 ± 10.0 against the defaults, its gate
-  accepting H1 at 252 pairs. Zero faults of any kind in every run. The
+  accepting H1 at 252 pairs; symmetry (GUIDE 10.9v, 2026-09-21) −0.0 ± 3.9
+  nElo over 30,000 identical-binary games, status `pass`. Zero faults of any
+  kind in every run. The
   recovery test's per-coordinate rule is now known to be the wrong
   instrument: two of the four coordinates ended inside the schedule's own
   noise (±4 perturbation steps over 1,500 iterations at `r_end` 0.03) while

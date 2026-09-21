@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.10 — EXIT**, release acceptance, now that 10.9r has passed on a real engine (scale, verdict, ratings, tuning); 10.9v symmetry when the machine is free; 10.9p, 10.9h and 10.9t deferred behind the release |
+| Next step | **10.10 — EXIT**, release acceptance, now that 10.9r has passed on a real engine (scale, verdict, ratings, tuning) and 10.9v symmetry with it; 10.9p, 10.9h and 10.9t deferred behind the release |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -998,11 +998,12 @@ model as well.
   inside the schedule's noise. Zero time losses in every run; symmetry is
   10.9v; an adopting project trusts the released binary and repeats none of
   it — PLAN §Phase 10(ab)
-- ☐ **10.9v** — **Model: Sol High.** Symmetry qualification: an
-  identical-binary `calibrate` of 30,000 games on the released binary, whole
-  95% nElo interval inside ±5, zero time losses; overnight, when the
-  maintainer has the machine free; does not block `cli-v0.1.0` by maintainer
-  decision 2026-09-19 — PLAN §Phase 10(ab)
+- ☑ **10.9v — DONE** — **Model: Sol High.** Symmetry qualification: an
+  identical-binary `calibrate` of 30,000 games, whole 95% nElo interval
+  inside ±5, zero time losses. Run 2026-09-21 on `rarog-b24a-core-pext-pgo`:
+  **−0.0 ± 3.9 nElo**, −0.0 ± 2.0 Elo, W-D-L 7727-14545-7728, status `pass`,
+  no fault of any kind, 5,800 games per hour, stopped and resumed once from
+  its own directory — PLAN §Phase 10(ab)
 - ☐ **10.10 — EXIT** — **Model: Sol High.** Release acceptance repeat:
   regenerate the command reference, update `CHANGELOG-CLI.md` under 0.1.0,
   Phase 4B oracle replay and Phase 8.1 parity matrix on the corrected source,

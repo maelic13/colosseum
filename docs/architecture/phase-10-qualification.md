@@ -219,3 +219,38 @@ also why the defaults are not the only optimum — Rarog's 82-parameter tune of
 this arm gained about 119 Elo over them. A per-coordinate criterion is
 therefore the wrong instrument at this budget, and a repeat of this test
 should gate on strength and keep coordinate movement as evidence.
+
+## 5. Symmetry — passed (10.9v)
+
+One binary against a copy of itself, which measures the harness rather than
+the engine: any colour, pairing, placement or clock asymmetry shows here as a
+difference where none exists.
+
+```text
+colosseum-cli calibrate rarog-b24a-core-pext-pgo.exe rarog-b24a-core-pext-pgo.exe \
+  --games 30000 --a-base-ms 3000 --a-increment-ms 30 \
+  --b-base-ms 3000 --b-increment-ms 30 \
+  --a-option Hash=64 --a-option Threads=1 --b-option Hash=64 --b-option Threads=1 \
+  --a-margin-ms 20 --b-margin-ms 20 --book UHO_Lichess_4852_v1.epd \
+  --book-order random --seed 48 --placement auto --concurrency 14 \
+  --dir colosseum-qual-symmetry
+```
+
+Both sides are `rarog-b24a-core-pext-pgo.exe` (sha256 `9206A59884D0…`), which
+the command requires to be byte-identical.
+
+| | Result | Tolerance |
+|---|---|---|
+| nElo | **−0.0 ± 3.9** | whole 95% interval inside ±5 |
+| Elo | −0.0 ± 2.0 | |
+| W-D-L | 7727-14545-7728 | |
+| Ptnml | [291, 2627, 9162, 2632, 288] | |
+| Time losses | **0** | |
+
+Status `pass`: 30,000 games, 15,000 complete pairs, no unpaired game and no
+fault of any kind, 5,800 games per hour across 14 slots. Start-up is 8.1 ms
+per game at the median with engines kept per slot. The run was stopped after
+613 pairs and resumed from its directory the same day, which the journal
+records; both sessions used the same CLI binary (`9f94aa9`,
+`da248afc4a3d…`). The rate the progress block printed in pairs per hour is
+reported in games per hour from `c63b71c`, after this run.
