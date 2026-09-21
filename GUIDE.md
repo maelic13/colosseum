@@ -1005,18 +1005,18 @@ model as well.
   no fault of any kind, 5,800 games per hour, stopped and resumed once from
   its own directory — PLAN §Phase 10(ab)
 - ☐ **10.9w** — **Model: Sol High.** Corrections from the adoption audit:
-  the recorded parity command repaired and run; a test that pins what an
-  installed GUI 1.0.2's updater does with a `gui-v` tag (it sees nothing),
-  with the decision 10.9x needs written down; the GUI changes `cli` carries
-  since 1.0.2 listed, user-visible ones marked; the optional fresh-process
+  the recorded parity command repaired and run; the GUI changes `cli` carries
+  since 1.0.2 listed, user-visible ones marked, because the GUI is released
+  too (1.0.2's updater not seeing a `gui-v` tag is accepted, maintainer
+  decision 2026-09-21: no user base, hidden updater); the optional fresh-process
   run on a post-fix engine offered as a command; a sweep of every `☐`, `◐`,
   `TODO`, `FIXME` and "owed" so each is done, deferred with its reason or
   listed for the maintainer; stale tracker text corrected — PLAN §Phase 10(af)
 - ☐ **10.9x** — **Model: Sol High.** Versions and the tag contract: the CLI's
   first version is 0.1.0, with the conditions for 1.0.0 recorded; the GUI
-  version for the merged source; the GUI tag scheme that 1.0.2 can still see
-  (preferred: a bridge release under a legacy `v` tag, `gui-v` after it);
-  "latest" stays the stable GUI release; `colosseum-release`, both workflows
+  is released alongside it with its own new version for the merged source
+  (minor if anything user-visible was added), tagged `gui-v<semver>` as
+  designed; "latest" stays the stable GUI release; `colosseum-release`, both workflows
   and the manifests accept exactly that and refuse the rest — PLAN §Phase 10(ag)
 - ☐ **10.9y** — **Model: Sol High.** One build entry point: a `cargo xtask`
   with `build gui|cli`, `package gui|cli` and `release-check <tag>` replaces

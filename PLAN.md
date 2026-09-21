@@ -3409,13 +3409,14 @@ games" procedure at 10.10, once, on the final state.
     that is written is the command that runs (`repeat_command` in
     `docs/fixtures/phase8/parity.json` carries `--draw-adjudication`), and
     prove it by running it.
-  - **An installed GUI 1.0.2 cannot see a `gui-v` release.** Its updater reads
+  - An installed GUI 1.0.2 cannot see a `gui-v` release: its updater reads
     `releases/latest` and parses the tag with `trim_start_matches('v')`, so
-    `gui-v1.1.0` yields no version and no notice, for ever. The updater on
-    `cli` reads the release list and accepts both `gui-v` and legacy `v`
-    tags. This item verifies the finding with a test against the 1.0.2
-    parser's behaviour and records the decision (ag) needs; it changes no tag
-    contract itself.
+    `gui-v1.1.0` yields no version and no notice. **Accepted by maintainer
+    decision 2026-09-21:** the application has no user base to strand and
+    the updater is hidden, so no bridge release, no legacy tag and no test
+    for the old parser. One sentence in the GUI changelog tells a 1.0.2 user
+    to download the new version by hand. The updater on `cli` reads the
+    release list and accepts both forms; nothing here changes it.
   - The `cli` branch carries GUI source changes since 1.0.2 (the pinned
     field, the resignation policy, the application boundary, the updater):
     12 files, about 600 lines. Merging `cli` to `main` therefore changes the
@@ -3442,13 +3443,14 @@ games" procedure at 10.10, once, on the final state.
     1.0.0 is a promise that scripts and run directories keep working; it is
     made when those formats have survived a release unchanged. Adopters pin
     an archive by SHA-256 meanwhile.
-  - **The GUI version for the merged source**, from (af)'s list: a minor
-    release if anything user-visible was added, otherwise a patch.
-  - **The GUI tag scheme**, from (af)'s finding. Preferred: the next GUI
-    release is a bridge tagged in the legacy `v<semver>` form so that 1.0.2
-    sees it, it ships the new updater, and `gui-v` begins with the release
-    after it. `colosseum-release` and `release-gui.yml` accept exactly what
-    is decided and refuse the rest.
+  - **The GUI is released with the CLI, and gets its own version for the
+    merged source**, from (af)'s list: a minor release if anything
+    user-visible was added, otherwise a patch. The manifest, `CHANGELOG-GUI.md`
+    and the updater's own version agree, and `colosseum-release` validates
+    the tag.
+  - **The GUI tag scheme is `gui-v<semver>`, as designed**; the legacy
+    `v<semver>` form ends with 1.0.2 (maintainer decision 2026-09-21, see
+    (af)). `colosseum-release` and `release-gui.yml` accept exactly that.
   - GitHub's repository-wide "latest" belongs to the stable GUI release; a
     CLI release never claims it (`make_latest: false`, already so). README
     links reach the newest CLI through the `cli-v` release list.
