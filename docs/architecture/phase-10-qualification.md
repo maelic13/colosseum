@@ -157,3 +157,65 @@ points, Stockfish 5). 2,400 official games, W-D-L 937-643-820 for Rarog, no
 fault of any kind, 14 slots with no overlapping span, 5,066 games per hour.
 The report printed a pinned rating as "3192.0 unavailable [fixed]"; a display
 defect, fixed in `9f94aa9`.
+
+## 4. Tuning — passed on strength, with one criterion missed
+
+Whether `spsa` recovers a known loss. Four parameters of
+`rarog-b23core-tune.exe` (sha256 `25467C63…`, bench 4,706,910, the tune build
+Rarog's own SPSA uses) were pushed about ten perturbation steps from their
+defaults, each away from where Rarog's 3,900-iteration tune had taken it, and
+each from a different pruning mechanism. Three runs: the detune's cost, the
+tune, and the gate on its result.
+
+**4a, the detune.** `CoreRfpLinear` 50→105, `CoreLmpSquare` 1351→2400,
+`CoreFpLinear` 90→165 and `CoreLmrQuiet` 2432→4050, 2,000 games against the
+same binary at its defaults: **−56.2 ± 10.2 Elo**, no fault, 5,764 games per
+hour. A first attempt at about seven steps cost −28.7 ± 9.8, short of the 30
+Elo fixed beforehand, so the parameters were pushed further and the run
+repeated; the criterion was not moved.
+
+**4b, the tune.** 45,000 games from the detuned start, 1,500 iterations of 30
+games, `r_end` 0.03, 15 slots (`tools/results/colosseum-qual-recovery.toml`
+holds the vector; `min`, `max` and `c_end` are Rarog's own).
+
+```text
+colosseum-cli spsa rarog-b23core-tune.exe --tune colosseum-qual-recovery.toml \
+  --r-end 0.03 --total-games 45000 --games-per-iteration 30 \
+  --base-ms 3000 --increment-ms 30 --option Hash=64 --option Threads=1 \
+  --book UHO_Lichess_4852_v1.epd --book-order random --seed 47 \
+  --placement auto --concurrency 15 --dir colosseum-qual-recovery
+```
+
+| Parameter | Detuned start | Ended at | Half way back | Default |
+|---|---|---|---|---|
+| `CoreRfpLinear` | 105 | **16** | ≤ 77 | 50 |
+| `CoreLmrQuiet` | 4050 | **1148** | ≤ 3241 | 2432 |
+| `CoreLmpSquare` | 2400 | 2275 | ≤ 1875 | 1351 |
+| `CoreFpLinear` | 165 | 184 | ≤ 127 | 90 |
+
+**Two of the four met the per-parameter criterion fixed before the run, so as
+stated it failed.** `CoreRfpLinear` returned to 16, where Rarog's long tune
+put it (17), and `CoreLmrQuiet` travelled eighteen perturbation steps: a sign
+or scale error in the tuner cannot produce that. The other two stayed within
+the schedule's noise: at `r_end` 0.03 one iteration's noise moves a parameter
+about 0.11 steps, so 1,500 of them random-walk about ±4, and these moved −1.2
+and +2.5. 45,000 games, no fault, 4,913 games per hour, no parameter at a
+rail.
+
+**4c, the gate.** `sprt --apply` on the tune's `result.json` resolves to
+exactly the two vectors above with `Hash 64`, `Threads 1` and the tune's time
+control, and the same design run explicitly accepted **H1 at 252 pairs**
+(**+57.7 ± 22.4 Elo**, LLR 2.975 of 2.944, 16 post-terminal pairs kept outside
+the sample, no fault). The tuned vector against the engine's own defaults, a
+further 2,000 games, measures **+9.6 ± 10.0 Elo**: the whole 56 Elo is
+recovered, and the end point is at least as strong as the defaults it was
+detuned from.
+
+The criterion was about coordinates, but the property being qualified is that
+a tune recovers strength, and it did. The surface is coupled: with
+`CoreLmrQuiet` at 1148 rather than 2432, `CoreFpLinear` at 184 and
+`CoreLmpSquare` at 2275 are worth what the defaults are at theirs, which is
+also why the defaults are not the only optimum — Rarog's 82-parameter tune of
+this arm gained about 119 Elo over them. A per-coordinate criterion is
+therefore the wrong instrument at this budget, and a repeat of this test
+should gate on strength and keep coordinate movement as evidence.

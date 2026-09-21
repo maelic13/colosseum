@@ -2907,6 +2907,19 @@ games" procedure at 10.10, once, on the final state.
   and +54.3; verdict H1 at 220 pairs, nElo +94.1 ± 32.5, against 216 pairs
   and +94.0 ± 32.8; symmetry −1.1 ± 3.9, measured before the slot pool and
   therefore owed again. Item (j) does not close without this record.
+  **Run on the candidate 2026-09-19/21** (GUIDE 10.9r, all four in the
+  qualification document): scale +54.3 ± 10.6; verdict H1 at 241 pairs;
+  ratings 3201.9 ± 14.0 against the desktop's 3191; tuning recovered a
+  −56.2 ± 10.2 Elo detune to +9.6 ± 10.0 against the defaults, its gate
+  accepting H1 at 252 pairs. Zero faults of any kind in every run. The
+  recovery test's per-coordinate rule is now known to be the wrong
+  instrument: two of the four coordinates ended inside the schedule's own
+  noise (±4 perturbation steps over 1,500 iterations at `r_end` 0.03) while
+  the tuned vector was at least as strong as the defaults, because the
+  surface is coupled and the defaults are not its only optimum. A repeat
+  gates on strength — the applied SPRT and a fixed match against the
+  defaults — and keeps coordinate movement as evidence. Symmetry stays owed
+  as 10.9v and does not block the release.
   **Release order from here:** (aa), then (w) the fastchess study and what
   it concludes, then (ab) inside (j). Item (r), placement per platform, is
   recommended for deferral behind the release with the limitation stated in

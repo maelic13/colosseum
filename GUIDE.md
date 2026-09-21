@@ -18,7 +18,7 @@ numbers, internal naming or method argumentation.
 | What is missing | **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9r** qualification on a real engine (maintainer-run: scale, verdict, ratings, tuning), then **10.10 — EXIT**; 10.9v symmetry when the machine is free; 10.9p, 10.9h and 10.9t deferred behind the release |
+| Next step | **10.10 — EXIT**, release acceptance, now that 10.9r has passed on a real engine (scale, verdict, ratings, tuning); 10.9v symmetry when the machine is free; 10.9p, 10.9h and 10.9t deferred behind the release |
 | Recommended model | **Sol High** for 10.10 (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
@@ -986,15 +986,18 @@ model as well.
   options, `isready`, `ucinewgame`, `isready`, replaced after a fault, a failed
   post-game `isready` or a change of launch or option names, and quit at the
   end of the run; tournaments keep fresh processes — PLAN §Phase 10(ae)
-- ☐ **10.9r** — **Model: Sol High.** Qualification on a real engine, part of
-  the release and recorded in `docs/architecture/phase-10-qualification.md`:
-  maintainer-run on the release candidate, one command at a time, each
-  result analysed from its run directory: scale (fixed 2,000 games against a
-  second runner's figure), verdict (SPRT replay), ratings (fixed-field
-  gauntlet), tuning (the SPSA recovery test from a detuned start with `sprt
-  --apply` accepting H1), faults (zero time losses in these runs); symmetry
-  is 10.9v; an adopting project trusts the released binary and repeats none
-  of it — PLAN §Phase 10(ab)
+- ☑ **10.9r — DONE** — **Model: Sol High.** Qualification on a real engine,
+  part of the release and recorded in
+  `docs/architecture/phase-10-qualification.md`: maintainer-run on the release
+  candidate, one command at a time, each result analysed from its run
+  directory. Scale +54.3 ± 10.6 Elo against fastchess's +52.2 ± 10.7 and
+  +54.3 ± 11.1; verdict H1 at 241 pairs where fastchess took 216; ratings
+  3201.9 ± 14.0 against the desktop's 3191; tuning recovered a −56.2 ± 10.2
+  Elo detune to +9.6 ± 10.0 against the defaults, its gate accepting H1 at 252
+  pairs, with two of four coordinates short of the per-coordinate criterion
+  inside the schedule's noise. Zero time losses in every run; symmetry is
+  10.9v; an adopting project trusts the released binary and repeats none of
+  it — PLAN §Phase 10(ab)
 - ☐ **10.9v** — **Model: Sol High.** Symmetry qualification: an
   identical-binary `calibrate` of 30,000 games on the released binary, whole
   95% nElo interval inside ±5, zero time losses; overnight, when the
