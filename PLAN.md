@@ -2548,7 +2548,8 @@ games" procedure at 10.10, once, on the final state.
   16-core host at 14 slots, a 2,000-game 3+0.03 match names the phase
   that carries every overhead above 20 ms; the fix for that phase is its
   own step and is not guessed here. Corrections owed from review of the
-  instrument, to land with that fix step: a `ponderhit` search charges from
+  instrument, to land with that fix step — which they did, with (u); see its
+  implementation evidence: a `ponderhit` search charges from
   the `ponderhit` write while the engine reports time since `go ponder`,
   so `h=` is wrongly negative under `--ponder`; the forfeited move's own
   overhead is recorded in the journal maxima but not in `games.pgn`, so
@@ -2921,13 +2922,14 @@ games" procedure at 10.10, once, on the final state.
   the tuned vector was at least as strong as the defaults, because the
   surface is coupled and the defaults are not its only optimum. A repeat
   gates on strength — the applied SPRT and a fixed match against the
-  defaults — and keeps coordinate movement as evidence. Symmetry stays owed
-  as 10.9v and does not block the release.
-  **Release order from here:** (aa), then (w) the fastchess study and what
-  it concludes, then (ab) inside (j). Item (r), placement per platform, is
-  recommended for deferral behind the release with the limitation stated in
-  the release notes, since the reference platform is Windows; the
-  maintainer decides.
+  defaults — and keeps coordinate movement as evidence. Symmetry ran as
+  10.9v on 2026-09-21 and is recorded above; (ab) is complete.
+  **Release order from here** (corrected 10.9w): (aa) landed as 10.9q and
+  (w) closed as rejected on 2026-09-19, so what remains before (j) is
+  (af) to (ai), GUIDE 10.9w–10.9z. Item (r), placement per platform, was
+  deferred behind the release by the maintainer (GUIDE 10.9h), with the
+  limitation to be stated in the release notes, since the reference
+  platform is Windows.
 - **(ac) Harness time that belongs to neither clock.** The same tune missed
   its predicted 4,860 games per hour by 7%, and not through the engines:
   moves per game (122) and charged time per game (8.6 s) were identical to
@@ -3068,7 +3070,16 @@ games" procedure at 10.10, once, on the final state.
   human form is that document; a live run prints none, so its standard
   error stays progress only. Owed and maintainer-run: a tune at 14 slots and
   42 games per iteration, or 15 and 30, above 85% occupancy and 5,000 games
-  per hour.
+  per hour. **Run, and short of both thresholds (recorded 10.9w):** the
+  2026-09-18 60-iteration tune at 15 slots and 30 games per iteration
+  measured 83% occupancy against 81% modelled and 4,517 games per hour, and
+  10.9r's 1,500-iteration recovery tune at the same shape measured 4,913
+  games per hour. Both are well above the 2,745 games per hour before this
+  item and above weather-factory's 3,720 on the same surface, and neither
+  reaches 85% and 5,000. Whether to chase the remaining margin — (z), two
+  games per physical core, and (ad), overlapped iterations, are the two
+  candidates, both deferred behind the release — is a maintainer decision;
+  nothing in the release depends on it.
 
   **Implementation evidence (Phase 10.9l):** `FaultPolicy` gained an
   optional `rate` (`FaultRate`: per mille, and which of the engine-fault and
@@ -3428,7 +3439,29 @@ games" procedure at 10.10, once, on the final state.
     no run exercises fresh processes per game on a fixed engine. One optional
     maintainer-run `match --engine-processes per-game` of 2,000 games on a
     post-fix Rarog pair is offered as a command, not required, and does not
-    block the release.
+    block the release. It is the qualification's scale command with the
+    post-fix pair and fresh processes per game:
+
+    ```text
+    colosseum-cli match ^
+      D:\code\rarog\tools\test_engines\rarog-startupfix-core-pext-pgo.exe ^
+      D:\code\rarog\tools\test_engines\rarog-startupfix-base-pext-pgo.exe ^
+      --a-label startupfix-core --b-label startupfix-base --games 2000 ^
+      --engine-processes per-game ^
+      --a-base-ms 3000 --a-increment-ms 30 --b-base-ms 3000 --b-increment-ms 30 ^
+      --a-option Hash=64 --a-option Threads=1 ^
+      --b-option Hash=64 --b-option Threads=1 ^
+      --a-margin-ms 20 --b-margin-ms 20 --book UHO_Lichess_4852_v1.epd ^
+      --book-order random --seed 48 --placement auto --concurrency 14 ^
+      --dir colosseum-freshproc-postfix
+    ```
+
+    What it would answer: whether fresh processes per game still cost a
+    forfeit on an engine that no longer does its one-time work inside a
+    search. Read from the run directory: time losses (expect 0), `stats`
+    start-up and teardown per game against the scale run's 7.3 ms and 0.1 ms
+    with kept engines, and the overhead distribution. Nothing in the release
+    depends on the answer; `per-slot` stays the default either way.
   - Sweep for anything else unfinished: every `☐`, `◐`, `TODO`, `FIXME` and
     "owed" in GUIDE, PLAN, `docs/` and the CLI crates is either done, deferred
     with its reason, or listed for the maintainer. Tracker text that has gone

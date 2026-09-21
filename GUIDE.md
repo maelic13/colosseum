@@ -14,12 +14,12 @@ numbers, internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | **Phases 0–9 are complete, and 10.1–10.9v with them** (10.9p open and deferred behind the release; 10.9m rejected; 10.9h and 10.9t deferred). Candidate `823b398` passed four-platform archive smoke and exact-artifact Rarog/Basilisk gates on Windows and WSL Linux; every first-release correction has landed since |
-| What is missing | **10.9w–10.9z**, release preparation added 2026-09-21 (audit corrections, versions and tag contract, the xtask build, user documentation); then **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release |
+| What exists | **Phases 0–9 are complete, and 10.1–10.9w with them** (10.9m rejected; 10.9h, 10.9p and 10.9t deferred behind the release). Candidate `823b398` passed four-platform archive smoke and exact-artifact Rarog/Basilisk gates on Windows and WSL Linux; every first-release correction has landed since |
+| What is missing | **10.9x–10.9z**, release preparation (versions and tag contract, the xtask build, user documentation); then **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release. One decision is open for the maintainer, from 10.9w: the GUI records a game whose engine could not be spawned as an unscorable draw, where 1.0.2 gave the failing engine a loss |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9w**, corrections from Rarog's adoption audit, then 10.9x–10.9z and **10.10 — EXIT**, release acceptance, now that 10.9r has passed on a real engine (scale, verdict, ratings, tuning) and 10.9v symmetry with it; 10.9p, 10.9h and 10.9t deferred behind the release |
-| Recommended model | **Sol High** for 10.9w (and 10.9x, 10.9y, 10.10; Terra High for 10.9z) (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
+| Next step | **10.9x**, versions and the tag contract — the CLI at 0.1.0 and the GUI at its own new version, which 10.9w's change list feeds; then 10.9y, 10.9z and **10.10 — EXIT**, release acceptance; 10.9h, 10.9p and 10.9t deferred behind the release |
+| Recommended model | **Sol High** for 10.9x (and 10.9y, 10.10; Terra High for 10.9z) (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
 
 ## Forward tracker
 
@@ -874,7 +874,8 @@ model as well.
   100 ms remaining shows no move charged above the engine's reported time
   plus 20 ms; (2) fixed-movetime outlier probe — 100 ms, 14 slots, 50,000
   moves, at or below fastchess's outlier rate. Both are recorded in PLAN
-  §Phase 10(q) when run
+  §Phase 10(q) when run. **Still owed after the 10.9w sweep** — the only
+  maintainer run Phase 10 still owes; neither probe blocks the release
 - ☑ **10.9i — DONE** — **Model: Terra High.** Writer hardening: bounded writer
   queue with off-runtime back-pressure; terminal run record written directly
   when the writer has failed; pre-10.9g directories refused with the
@@ -888,9 +889,12 @@ model as well.
   in `games.pgn`, full breakdown of the last five moves in a forfeit
   forensic, overhead distribution and over-margin count in `stats`; the
   maintainer's 2,000-game 3+0.03 run then names the guilty phase — PLAN
-  §Phase 10(t). **Owed, maintainer-run on the 16-core host:** the
-  2,000-game 3+0.03 match at 14 slots, read with `stats` and the forfeit
-  forensics, naming the phase that carries every overhead above 20 ms
+  §Phase 10(t). **Owed run discharged (recorded 10.9w):** the instrument
+  named the phase at 10.9k — all harness phases under 1.3 ms, every
+  forfeiting `bestmove` 42–64 ms after the engine's own hard cap, a second
+  mode and not noise (PLAN §Phase 10(u)); 10.9r's 2,000-game 3+0.03 scale
+  run at 14 slots then read the overhead distribution with no forfeit to
+  take a forensic from
   - Landed with 10.9k: `h=` under `--ponder`, the forfeited move's
     overhead in `games.pgn` and the `stats` over-margin count, the late
     wait on a per-read fault, ms/ns rounding, and the SPSA unscorable
@@ -903,10 +907,10 @@ model as well.
   openings and commit order unchanged; slot recorded in journal and PGN;
   invariant and uneven-length stub test that fails on the modulo rule; the
   10.9j owed corrections land here too; maintainer's 2,000-game run shows
-  zero time losses — PLAN §Phase 10(u). **Owed, maintainer-run on the
-  16-core host:** the 2,000-game 3+0.03 match at 14 slots showing zero time
-  losses, and every game core continuously busy as read from the journal's
-  slot spans
+  zero time losses — PLAN §Phase 10(u). **Owed run discharged (recorded
+  10.9w):** 10.9r's scale run is that run — 2,000 games at 3+0.03 on 14
+  slots, zero time losses, no fault of any kind, no overlapping slot span,
+  5,579 games per hour (`docs/architecture/phase-10-qualification.md` §1)
 - ☑ **10.9l — DONE** — **Model: Sol High.** A rare forfeit must not void a sequential
   test: `sprt` and `spsa` score an engine-attributable forfeit as a loss, keep
   the pair in the official sample in order, and invalidate only above a
@@ -920,9 +924,13 @@ model as well.
   shape, idle slots and expected occupancy and warn when games per iteration
   is not a multiple of the slot count; occupancy test that fails on pair-held
   slots; `sprt` keeps the pair as its unit; asynchronous SPSA recorded as
-  post-release research — PLAN §Phase 10(x). **Owed, maintainer-run on the
-  reference host:** a tune at 14 slots and 42 games per iteration, or 15 and
-  30, above 85% occupancy and 5,000 games per hour
+  post-release research — PLAN §Phase 10(x). **Owed run done, thresholds
+  missed (recorded 10.9w):** the tune ran at 15 slots and 30 games per
+  iteration and measured 83% occupancy and 4,517 games per hour
+  (10.9r's recovery tune at the same shape, 4,913), against the 85% and
+  5,000 fixed beforehand — up from 2,745 before this item and above
+  weather-factory's 3,720, but short. Chasing the margin is 10.9p or 10.9t,
+  both deferred behind the release; nothing in the release depends on it
 - ☑ **10.9o — DONE** — **Model: Sol High.** SPSA at the scale of a real tune:
   `result.json` carries per-iteration summaries and refers to the journal;
   driver memory bounded by the iteration in flight; 5,000-iteration stub tune
@@ -939,14 +947,14 @@ model as well.
   `result.json` file; run-file `iterations` yields to `--total-games`; the
   maintainer's 15-slot, 30-game throughput figures recorded — PLAN §Phase
   10(aa)
-- ☐ **10.9p** — **Model: Sol High.** Two games per physical core, experiment for
+- ☑ **10.9p — DEFERRED → after `cli-v0.1.0`** — **Model: Sol High.** Two games per physical core, experiment for
   tuning only: explicit `--games-per-core 2` for `spsa` and `match`, refused
   elsewhere; one logical CPU per game, a core's two games on its two siblings;
   recorded in run record, PGN and dry run; maintainer-run evidence of
   throughput and per-engine speed, forfeits and late moves over 2,000 games,
   and transfer (the same short tune in both modes, each gated under ordinary
   conditions); adopt only if the sibling-mode tune gates no worse; never a
-  gate condition; **DEFERRED behind the release** by maintainer decision
+  gate condition; deferred behind the release by maintainer decision
   2026-09-18, with a no-code ten-minute pre-check recorded — PLAN §Phase 10(z)
 - ☑ **10.9m — REJECTED** — **Model: Sol High.** Residual time losses, research before any
   fix: fastchess source study in `docs/architecture/fastchess-mechanics.md`
@@ -1004,7 +1012,7 @@ model as well.
   **−0.0 ± 3.9 nElo**, −0.0 ± 2.0 Elo, W-D-L 7727-14545-7728, status `pass`,
   no fault of any kind, 5,800 games per hour, stopped and resumed once from
   its own directory — PLAN §Phase 10(ab)
-- ☐ **10.9w** — **Model: Sol High.** Corrections from the adoption audit:
+- ☑ **10.9w — DONE** — **Model: Sol High.** Corrections from the adoption audit:
   the recorded parity command repaired and run; the GUI changes `cli` carries
   since 1.0.2 listed, user-visible ones marked, because the GUI is released
   too (1.0.2's updater not seeing a `gui-v` tag is accepted, maintainer
@@ -1012,12 +1020,32 @@ model as well.
   run on a post-fix engine offered as a command; a sweep of every `☐`, `◐`,
   `TODO`, `FIXME` and "owed" so each is done, deferred with its reason or
   listed for the maintainer; stale tracker text corrected — PLAN §Phase 10(af)
+  - The parity record now carries `--draw-adjudication` and a test parses it
+    against the shipped command surface; proved by running it, every shared
+    field equal to the recorded observation
+  - GUI: 12 files over six commits, three of them user-visible (`--version`,
+    the `gui-v` update check, the `Fixed` CSV column), plus the annotated PGN
+    the shared crates now write. It builds, its tests pass, and it played a
+    real two-game tournament at 100 ms per move
+  - **Open for the maintainer, found by this step:** a game whose engine
+    cannot be spawned is an unscorable draw the GUI scheduler still records
+    into standings and ratings, where 1.0.2 gave the failing engine a loss.
+    The choice between those two and the CLI's exclusion is a policy
+    decision, and Phase 11.2 is where fault classification reaches the
+    desktop, so it is not decided here — PLAN §Phase 10(af)
+  - No `TODO` or `FIXME` exists anywhere in the crates or docs; every other
+    `☐`/`◐` is a future numbered step. Owed runs: 10.9j and 10.9k discharged,
+    10.9n run and short of its thresholds, 10.9g's two probes still owed and
+    not blocking
 - ☐ **10.9x** — **Model: Sol High.** Versions and the tag contract: the CLI's
   first version is 0.1.0, with the conditions for 1.0.0 recorded; the GUI
   is released alongside it with its own new version for the merged source
   (minor if anything user-visible was added), tagged `gui-v<semver>` as
   designed; "latest" stays the stable GUI release; `colosseum-release`, both workflows
   and the manifests accept exactly that and refuse the rest — PLAN §Phase 10(ag)
+  - The GUI's version follows from 10.9w's change list in PLAN §Phase 10(af):
+    it records three user-visible additions in the GUI crate and the
+    annotated PGN the shared crates now write, which is the "minor" case
 - ☐ **10.9y** — **Model: Sol High.** One build entry point: a `cargo xtask`
   with `build gui|cli`, `package gui|cli` and `release-check <tag>` replaces
   the three per-platform build scripts; both release workflows call it; the
@@ -1114,7 +1142,7 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 10 is open; the next step is 10.9w.** Work the steps in order, one commit per step.
+**Phase 10 is open; the next step is 10.9x.** Work the steps in order, one commit per step.
 10.9w–10.9z were added on 2026-09-21 and precede 10.10. Steps 10.2 through 10.8 change game-playing behaviour or its
 record; do not repeat the recurring "after changing anything that runs
 games" procedure per step, run it once at 10.10 on the final state. The
