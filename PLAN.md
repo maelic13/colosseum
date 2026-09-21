@@ -3433,6 +3433,79 @@ games" procedure at 10.10, once, on the final state.
     "owed" in GUIDE, PLAN, `docs/` and the CLI crates is either done, deferred
     with its reason, or listed for the maintainer. Tracker text that has gone
     stale is corrected.
+
+  **Implementation evidence (Phase 10.9w) — the parity command.** The record
+  in `docs/fixtures/phase8/parity.json` now carries `--draw-adjudication`
+  beside its draw parameters and is the command that runs; `command_note`
+  says why the 2026-08-03 form differs and forbids dropping the draw
+  parameters, and a test parses the recorded command against the shipped
+  clap surface, so the two cannot drift apart again. Proved by running it on
+  2026-09-21: colosseum-cli 0.1.0 built from `cli` at `6fd0150`,
+  `rarog-v2.3.1-windows-pext-pgo.exe` (sha256 `033f6633…`) on both arms,
+  exit 4, `inconclusive`, 8 games, 0/8/0, 4 complete pairs, pentanomial
+  `[0, 0, 4, 0, 0]`, 0 faults — every shared field equal to the recorded
+  observation. The pre-correction form exits 2. Noted for (j): that proof
+  used a different build of Rarog 2.3.1 from the one the recorded artifact
+  hashes belong to (`2a95390d…`), which is not in `D:\chess\engines\rarog`.
+
+  **Implementation evidence (Phase 10.9w) — the GUI source since 1.0.2.**
+  `git diff main..cli -- crates/colosseum-gui`: 12 files, 600 insertions, 38
+  deletions, from six commits. What a user of the GUI can see is marked
+  **user-visible**; the rest is internal.
+
+  | Change | Kind | Commit |
+  |---|---|---|
+  | `colosseum --version` prints the product version and exits | **user-visible** | `9c3a03f` |
+  | Update check reads the whole release list, takes the newest stable `gui-v` tag and accepts the legacy `v` form only up to 1.0.2; the fallback link is the releases page, not `/releases/latest` | **user-visible** | `f3a5bbf` |
+  | Standings CSV export carries the `Fixed` column, `no` on every GUI row (the GUI has no fixed field) | **user-visible** | `01254ed` |
+  | GUI package pinned to its own `1.0.2` instead of the workspace version, and `publish = false` | internal (release mechanics) | `9c3a03f` |
+  | `AppDirs`, `AppConfig` and `EngineLibrary` moved from `colosseum-engine` into the GUI crate with their own `ConfigError`; paths, file names and formats unchanged | internal | `d2fdf4c` |
+  | Product identity (`DISPLAY_NAME`, `APP_DIR_NAME`, `QUALIFIER`, `ORGANIZATION`) moved from `colosseum-core::branding` into the GUI's `product.rs`, same values | internal | `d2fdf4c` |
+  | `runtime_adapter.rs`: library entry to `RuntimeParticipant`/`EngineLaunchSpec`, with tests that the launch spec leaks no library metadata; computed in `Backend::start_tournament` behind a `debug_assert` and not yet consumed — the seam Phase 11 consumes | internal | `d2fdf4c` |
+  | Engine and tournament identifiers created by the caller (`EngineId::from_uuid(Uuid::new_v4())`) instead of the domain | internal | `d2fdf4c` |
+  | The tournament form passes `two_sided: true` for resignation, which is the serde default and 1.0.2's behaviour | internal (behaviour-preserving) | `89d24a0` |
+  | Live and export rows pass `fixed: false` | internal (the CSV column above is its visible half) | `01254ed` |
+  | Build script gates `winresource` on the Windows *host* and the Windows *target* together, so the GUI builds on Unix hosts | internal | `4ab58ef` |
+  | `colosseum-application`, `directories`, `thiserror`, `toml` and `uuid` added to the GUI's dependencies | internal | `d2fdf4c`, `9c3a03f` |
+
+  **Implementation evidence (Phase 10.9w) — GUI behaviour arriving through
+  the shared crates.** The GUI crate is only half the picture: `cli` also
+  changes `colosseum-core` and `colosseum-engine`, which the GUI's scheduler,
+  runner and store use. Two effects reach a GUI user and belong in the
+  version decision and the changelog:
+  - **user-visible.** Every PGN the GUI writes now carries per-move search
+    comments (`{s= d= t= h= n=}`, `{book}` on pre-played moves) and the
+    `OpeningPlyCount`, `WhiteTimeMarginMs` and `BlackTimeMarginMs` tags.
+    Confirmed on the real run below.
+  - **regression against 1.0.2, not fixed here.** A game whose engine cannot
+    be spawned is classified as an infrastructure fault and reported as an
+    unscorable draw (`Termination::Aborted`, `scorable: false`). The CLI
+    honours `scorable` and excludes such a game; the GUI's scheduler does
+    not read it, so it records the draw into standings and into the ML
+    rating. In 1.0.2 the engine that failed to start lost both its games and
+    the working engine won them. Reproduced by the existing GUI smoke test
+    `failed_engine_loses_with_error`, which passes at `main` and fails on
+    `cli` (`wins` 0, expected 2). The fix is a policy choice between 1.0.2's
+    loss and the CLI's exclusion, and PLAN §Phase 11(b) is where fault
+    classification reaches desktop tournaments, so it is left for the
+    maintainer rather than decided here.
+
+  **Implementation evidence (Phase 10.9w) — the GUI is buildable and runs
+  games.** `cargo build --release -p colosseum-gui` succeeds and the binary
+  reports `colosseum 1.0.2`; the workspace suite is green (589 tests). The
+  app itself, run 2026-09-21 from a `--portable` copy so that no real user
+  data was touched, played a short tournament: Basilisk 1.10.0 against Rarog
+  2.4.0 from `D:\chess\engines`, round robin, two games at 100 ms per move.
+  It finished in 37 s, 1.5–0.5 to Basilisk, terminations one `Checkmate` and
+  one `50-move rule`, no forfeit and no engine error. The live view drew the
+  board, move list, ECO opening, evaluation graph and both engines' depth,
+  nodes and nps; standings, head-to-head, terminations and the tournament
+  information panel all filled; the tournament was then deleted through the
+  app. The GUI scheduler's real-engine smoke suite passes 6 of 7 against
+  Rarog 2.4.0 (full round robin, openings, resume across restart,
+  stop-drain-resume, force-stop); the seventh is the regression above. A
+  headless four-game run through the same scheduler, runner and store
+  confirmed the stored PGN carries the annotations above.
 - **(ag) Versions and the tag contract** (GUIDE 10.9x, Sol High). Decide and
   record, then make `colosseum-release`, both workflows and the manifests
   agree:
