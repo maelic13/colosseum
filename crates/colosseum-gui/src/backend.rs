@@ -363,12 +363,18 @@ impl Backend {
         Ok(())
     }
 
-    /// Concatenate the PGN of every finished game in a tournament, in play
+    /// Concatenate the PGN of every played game in a tournament, in play
     /// order, separated by blank lines. Empty if no games have finished yet.
+    /// A game the runner could not play (stored with an `Aborted`
+    /// termination) is left out, as the on-disk PGN file leaves it out: its
+    /// moveless placeholder draw is not a game.
     pub fn collect_pgn(&self, id: TournamentId) -> anyhow::Result<String> {
         let games = self.store.list_games(id)?;
         let mut out = String::new();
         for g in games {
+            if g.termination == Some(colosseum_core::Termination::Aborted) {
+                continue;
+            }
             if let Some(pgn) = g.pgn.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
                 if !out.is_empty() {
                     out.push_str("\n\n");
