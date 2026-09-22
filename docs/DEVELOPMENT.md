@@ -113,6 +113,26 @@ Those commands are the required hermetic suite: they use only inputs owned by
 the repository. They do not discover an installed engine, read an engine-path
 environment variable, or establish a platform or release claim.
 
+How the suite is laid out:
+
+- Logic that needs no process — statistics, schedules, parsers, report and
+  progress formatting, resume arithmetic — is unit-tested beside its code in
+  `src/`. Where a rule depends on time or the host, the code takes the instant
+  or the CPU topology as an input so the test can supply a synthetic one.
+- Each crate's integration tests drive only what needs a real process. The
+  CLI's are one binary, `crates/colosseum-cli/tests/cli/`, with a module per
+  behaviour; they run the `colosseum-cli` binary against the repository's
+  fixture engines (`colosseum-uci-fixture` and the hidden `__uci-stub` mode)
+  for a handful of games, and stop runs with the hidden
+  `--__stop-after-units` hook rather than a timed kill.
+- No test asserts a wall-clock upper bound, a throughput or a memory figure,
+  or depends on which CPUs the host has; measured time is checked only from
+  below.
+
+The phase acceptance manifests under `docs/fixtures/` record the evidence as
+it stood when each phase closed. Test files and names they cite predate the
+suite's reorganisation by behaviour and are historical.
+
 Real-engine interoperability coverage is a separate, explicit local smoke
 tier. It receives a local UCI executable through `COLOSSEUM_SMOKE_ENGINE`,
 copies that executable to a temporary directory, and fails if the variable is
@@ -202,7 +222,7 @@ artifact. The optimized leg uses `ci-release`, which inherits the shipped
 release profile — same `opt-level`, assertions and overflow checks off — but
 drops the distribution-only whole-program LTO and single codegen unit, and
 keeps symbols so a CI failure still has a backtrace. Those settings change no
-behaviour the suite can observe and cost minutes across forty test binaries.
+behaviour the suite can observe and cost minutes across the test binaries.
 Run it locally the same way:
 
 ```bash
