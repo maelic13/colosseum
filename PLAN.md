@@ -1953,8 +1953,16 @@ change if one were revisited.
   Measure private commit instead (`PROCESS_MEMORY_COUNTERS_EX.PrivateUsage`
   on Windows, `VmData` from `/proc/<pid>/status` on Linux), which trimming
   does not touch, keep the same limits, and record the change in the test's
-  doc comment. Accepting the flake is rejected: 10.10 runs the full suite as
-  release evidence and a rerun would be evidence of nothing.
+  doc comment. A second instance, found during 10.9w.1:
+  `status_before_the_first_block_says_when_it_is_due` in
+  `crates/colosseum-cli/tests/phase10_progress.rs` waits for
+  `run-record.json`, sleeps 200 ms and expects `status` to answer before 20
+  games commit — a timing race under full-suite load. Replace the sleep with
+  a bounded wait on the condition the test actually needs (the run record
+  present and the first block not yet due), or run the stub at a game count
+  no loaded machine can commit in time. Accepting either flake is rejected:
+  10.10 runs the full suite as release evidence and a rerun would be
+  evidence of nothing.
 
 **Deferred behind the release, with the condition that reopens each:**
 

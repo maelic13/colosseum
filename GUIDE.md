@@ -133,8 +133,10 @@ When reporting the next step, always report its model as well.
   maintainer. The 2026-09-22 pass drafted README and the changelog section;
   this step reconciles them — PLAN §Phase 10(ai)
 - ☐ **10.10 — EXIT** — **Model: Sol High.** Release acceptance repeat: the
-  flaky working-set test moved to private commit first (PLAN §Phase
-  10(af.2)); command reference regenerated; both changelogs dated; Phase 4B
+  two flaky tests made robust first — the working-set comparison moved to
+  private commit, and the progress-status timing race in
+  `phase10_progress.rs` replaced by a bounded wait (PLAN §Phase 10(af.2));
+  command reference regenerated; both changelogs dated; Phase 4B
   oracle replay and Phase 8.1 parity matrix on the corrected source, run
   exactly as recorded (locate the Rarog 2.3.1 build the hashes belong to,
   SHA-256 `2a95390d…`, or re-record); short third-party usability flows; CLI
