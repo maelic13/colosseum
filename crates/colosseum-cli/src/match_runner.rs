@@ -1280,21 +1280,39 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         }
         record_fault(&mut report.faults, white_side, game.fault.as_ref());
     }
-    if report
-        .games
+    report.status = match_status(
+        &report.games,
+        report.faults,
+        fault_policy,
+        cancellation.stopping(),
+        games,
+    );
+    Ok(report)
+}
+
+/// How a match that played `played` of `requested` games ended.
+fn match_status(
+    played: &[MatchGame],
+    faults: MatchFaultCounts,
+    fault_policy: FaultPolicy,
+    stopping: bool,
+    requested: u32,
+) -> MatchStatus {
+    if played
         .iter()
         .any(|game| matches!(game.fault, Some(GameFault::Infrastructure { .. })))
     {
-        report.status = MatchStatus::InfrastructureError;
-    } else if fault_policy.exceeded(report.faults, report.games.len() as u64) {
-        report.status = MatchStatus::Invalid;
-    } else if cancellation.stopping() && report.games.len() < games as usize {
+        MatchStatus::InfrastructureError
+    } else if fault_policy.exceeded(faults, played.len() as u64) {
+        MatchStatus::Invalid
+    } else if stopping && played.len() < requested as usize {
         // A stop is only a stop when work was actually left undone. An
         // interrupt that arrives while the last game is being joined still
         // produced every requested game, and that is a completed match.
-        report.status = MatchStatus::Cancelled;
+        MatchStatus::Cancelled
+    } else {
+        MatchStatus::Completed
     }
-    Ok(report)
 }
 
 struct GameRequest {
@@ -1888,5 +1906,81 @@ mod tests {
             &settings.openings.entries,
             &launched.openings.entries
         ));
+    }
+
+    fn played(number: u32, fault: Option<GameFault>) -> MatchGame {
+        MatchGame {
+            number,
+            white: MatchSide::A,
+            result: GameResult::Draw,
+            scorable: true,
+            termination: Termination::MaxMoves,
+            clock_accounting: ClockAccountingReport {
+                model: "test".into(),
+                version: 1,
+                white_margin_ms: 0,
+                black_margin_ms: 0,
+                monotonic_resolution_ns: 1,
+                white_charged_elapsed: None,
+                black_charged_elapsed: None,
+                white_round_trip: None,
+                black_round_trip: None,
+                phases: None,
+            },
+            opening: OpeningAssignment {
+                book_index: None,
+                label: "startpos".into(),
+            },
+            fault,
+            error: None,
+            pgn: String::new(),
+            slot: None,
+        }
+    }
+
+    #[test]
+    fn a_stop_that_left_no_game_undone_is_a_completed_match() {
+        let policy = FaultPolicy::sequential(None, None);
+        let none = MatchFaultCounts::default();
+        let games = [played(1, None), played(2, None)];
+        // The interrupt arrived while the last game was being joined.
+        assert_eq!(
+            match_status(&games, none, policy, true, 2),
+            MatchStatus::Completed
+        );
+        assert_eq!(
+            match_status(&games[..1], none, policy, true, 2),
+            MatchStatus::Cancelled
+        );
+        assert_eq!(
+            match_status(&games[..1], none, policy, false, 2),
+            MatchStatus::Completed
+        );
+
+        // A fault outranks the stop: an infrastructure failure first, then
+        // an exceeded allowance.
+        let failed = [
+            played(1, None),
+            played(
+                2,
+                Some(GameFault::Infrastructure {
+                    operation: "artifact".into(),
+                    message: "disk full".into(),
+                }),
+            ),
+        ];
+        assert_eq!(
+            match_status(&failed, none, policy, true, 4),
+            MatchStatus::InfrastructureError
+        );
+        let strict = FaultPolicy::sequential(Some(0), None);
+        let faulted = MatchFaultCounts {
+            engine_a: 1,
+            ..MatchFaultCounts::default()
+        };
+        assert_eq!(
+            match_status(&games, faulted, strict, true, 4),
+            MatchStatus::Invalid
+        );
     }
 }
