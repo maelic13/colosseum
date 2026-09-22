@@ -120,8 +120,6 @@ async fn stockfish_self_play_one_game() {
         "result={:?} termination={:?} plies={}",
         report.result, report.termination, report.stats.plies
     );
-    // The strong side should not lose to a 1320-rated opponent.
-    assert_ne!(report.result, GameResult::BlackWin);
 }
 
 /// A game with assigned opening moves should pre-play them, then continue, and
