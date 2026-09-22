@@ -13,7 +13,7 @@ use colosseum_engine::summarize;
 /// The committed specimen of the writer form. Freezing it means a change to
 /// the comment shape has to be a deliberate edit here, not a silent drift that
 /// breaks every reader a user already wrote.
-const ANNOTATED: &str = include_str!("../../../tests/fixtures/annotated-games.pgn");
+const ANNOTATED: &str = include_str!("../../../../tests/fixtures/annotated-games.pgn");
 
 fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_colosseum-cli"))

@@ -1,11 +1,10 @@
-//! Regression tests for the Phase 10 review defects that need a real run.
+//! A stop request that lands on a boundary must not cost the run its outcome.
 //!
-//! Most were about an interrupt arriving at an awkward moment. The common
-//! shape of the bug was treating "a stop was asked for" as "the run did not
-//! finish", which turns a completed match or a cap-reached SPRT into a
-//! cancellation and loses the verdict it had already earned. The SPRT cases
-//! are `sprt_runner`'s unit tests, and a cancelled suite's exit code is
-//! asserted with its clean stop in `phase10_graceful_stop`.
+//! The shape of the defect these guard against is treating "a stop was asked
+//! for" as "the run did not finish", which turns a completed match into a
+//! cancellation, or lets a repeated staged stop play one more unit each time.
+//! When a stop cancels an SPRT is `sprt_runner`'s unit tests, and which status
+//! a fixed match reports is `match_runner`'s.
 
 use std::path::Path;
 use std::process::Command;
@@ -160,48 +159,5 @@ fn stop_after_iteration_is_cumulative_across_resumes() {
     assert_eq!(
         again["report"]["driver"]["final_centers"],
         first["report"]["driver"]["final_centers"]
-    );
-}
-
-/// `--anchor` pins a participant at its own rating and `--fixed` at a supplied
-/// one. Naming the same participant through both is a contradiction, refused
-/// before a run directory exists.
-#[test]
-fn anchor_and_fixed_on_one_participant_are_refused_before_any_run_directory() {
-    let root = tempfile::tempdir().unwrap();
-    let run = root.path().join("never-created");
-
-    for extra in [vec!["--dry-run"], vec![]] {
-        let output = cli()
-            .args(["tournament", "run", "--engine", "a", "--engine", "b"])
-            .args(["--engine", "c", "--anchor", "2", "--fixed", "2:2400"])
-            .args(&extra)
-            .args(["--json", "--dir"])
-            .arg(&run)
-            .output()
-            .unwrap();
-        assert_eq!(output.status.code(), Some(2), "{extra:?} was accepted");
-        let stderr = String::from_utf8(output.stderr).unwrap();
-        assert!(
-            stderr.contains("--anchor") && stderr.contains("--fixed"),
-            "{extra:?} refusal must name both flags: {stderr}"
-        );
-        assert!(
-            !run.exists(),
-            "{extra:?} created a run directory for a configuration it refused"
-        );
-    }
-
-    // Pinning different participants through the two flags stays valid.
-    let output = cli()
-        .args(["tournament", "run", "--engine", "a", "--engine", "b"])
-        .args(["--engine", "c", "--anchor", "1", "--fixed", "2:2400"])
-        .args(["--dry-run", "--json"])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
     );
 }
