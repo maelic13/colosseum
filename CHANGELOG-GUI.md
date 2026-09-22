@@ -50,6 +50,15 @@ by hand once; from then on the update check works again.
   the new one
 
 ### Fixed
+- **The time control in every exported PGN.** An increment below a tenth of a
+  second was rounded away, so a 3+0.03 tournament wrote
+  `[TimeControl "3+0.0"]` into every game it exported — and into the incident
+  headers. The label is now built from the exact milliseconds
+- **Engine crashes name their exit status.** When an engine's output ended
+  because the process died, the incident report said only "engine terminated
+  unexpectedly". It now carries the exit status where the engine can be
+  reaped in time, which is what distinguishes an engine that failed from one
+  that was stopped
 - The application builds on Linux and macOS hosts again (the Windows icon
   resource is only compiled when both host and target are Windows)
 

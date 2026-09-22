@@ -214,7 +214,10 @@ mod tests {
         let only_beta = serde_json::json!([
             {"tag_name":"gui-v1.2.0","html_url":"beta","prerelease":true}
         ]);
-        assert_eq!(select_latest_gui_release(only_beta.as_array().unwrap()), None);
+        assert_eq!(
+            select_latest_gui_release(only_beta.as_array().unwrap()),
+            None
+        );
 
         // A release object that omits the flags is still a release.
         let bare = serde_json::json!([{"tag_name":"gui-v1.1.0","html_url":"stable"}]);

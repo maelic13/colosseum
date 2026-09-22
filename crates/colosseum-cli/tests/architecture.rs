@@ -154,7 +154,10 @@ fn independent_release_lanes_are_complete_and_least_privileged() {
     assert!(!gui.contains("xtask package cli"));
 
     for (workflow, name) in [(&gui, "gui"), (&cli, "cli")] {
-        assert!(workflow.contains("permissions:\n  contents: read"), "{name}");
+        assert!(
+            workflow.contains("permissions:\n  contents: read"),
+            "{name}"
+        );
         assert_eq!(workflow.matches("contents: write").count(), 1, "{name}");
         // A candidate proves the whole lane without a tag or a release.
         assert!(workflow.contains("workflow_dispatch:"), "{name}");
@@ -163,7 +166,9 @@ fn independent_release_lanes_are_complete_and_least_privileged() {
         // a release carries what its matrix produced and nothing else.
         assert!(workflow.contains("expected=("), "{name}");
         assert!(
-            workflow.contains(r#"for file in "${expected[@]}"; do test -f "release-artifacts/$file"; done"#),
+            workflow.contains(
+                r#"for file in "${expected[@]}"; do test -f "release-artifacts/$file"; done"#
+            ),
             "{name}"
         );
         assert!(
@@ -171,7 +176,10 @@ fn independent_release_lanes_are_complete_and_least_privileged() {
             "{name}"
         );
         // Checksums are generated and re-checked, never published as an asset.
-        assert!(!workflow.contains("release-artifacts/SHA256SUMS\n"), "{name}");
+        assert!(
+            !workflow.contains("release-artifacts/SHA256SUMS\n"),
+            "{name}"
+        );
     }
 }
 

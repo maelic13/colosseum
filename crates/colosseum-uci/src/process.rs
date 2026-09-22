@@ -77,6 +77,9 @@ pub struct SearchOutput {
     pub elapsed: Duration,
 }
 
+/// How long EOF on stdout waits for the child to be reaped before the error
+/// gives up on naming its exit status.
+const TERMINATION_REAP_GRACE: Duration = Duration::from_millis(100);
 /// How many recent protocol lines are kept for incident forensics.
 const TRANSCRIPT_CAP: usize = 120;
 /// How many recent stderr lines are kept (crash/assert messages).
@@ -693,7 +696,8 @@ impl EngineProcess {
     }
 
     /// Read the next line, enforcing an absolute deadline. Maps a timeout to
-    /// `timeout_err`, EOF to [`UciError::Terminated`].
+    /// `timeout_err`, and EOF to [`UciError::TerminatedWithStatus`] where the
+    /// child can be reaped in time, [`UciError::Terminated`] otherwise.
     ///
     /// The deadline is judged by when a line arrived, not by when it is
     /// looked at: a `bestmove` the engine sent in time is in time even if the
@@ -706,7 +710,9 @@ impl EngineProcess {
     ) -> Result<ArrivedLine, UciError> {
         let event = match self.lines.try_recv() {
             Ok(event) => event,
-            Err(mpsc::error::TryRecvError::Disconnected) => return Err(UciError::Terminated),
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                return Err(self.terminated_error().await);
+            }
             Err(mpsc::error::TryRecvError::Empty) => {
                 // On the `None` path we diverge by returning, so `timeout_err`
                 // is only ever moved once and needs no `Clone`.
@@ -715,7 +721,7 @@ impl EngineProcess {
                 };
                 match timeout(remaining, self.lines.recv()).await {
                     Err(_elapsed) => return Err(timeout_err),
-                    Ok(None) => return Err(UciError::Terminated),
+                    Ok(None) => return Err(self.terminated_error().await),
                     Ok(Some(event)) => event,
                 }
             }
@@ -739,8 +745,22 @@ impl EngineProcess {
                 self.record("<", &format!("[{bytes}-byte line discarded]"));
                 Err(overlong_error())
             }
-            PipeEvent::Eof => Err(UciError::Terminated),
+            PipeEvent::Eof => Err(self.terminated_error().await),
             PipeEvent::Failed(error) => Err(error),
+        }
+    }
+
+    /// EOF on an engine's stdout normally means the process has just exited.
+    /// Give the runtime a brief chance to reap it, so an incident report keeps
+    /// the exit status instead of reducing every crash to an unexplained
+    /// closed pipe. A child that has not exited within the grace period is
+    /// reported as a bare termination rather than waited on further: this sits
+    /// in the middle of a game, and a stuck engine must not stall the harness.
+    async fn terminated_error(&mut self) -> UciError {
+        match timeout(TERMINATION_REAP_GRACE, self.child.wait()).await {
+            Ok(Ok(status)) => UciError::TerminatedWithStatus(status.to_string()),
+            Ok(Err(error)) => UciError::Io(error),
+            Err(_elapsed) => UciError::Terminated,
         }
     }
 }
@@ -1181,5 +1201,47 @@ mod clock_tests {
             charged_elapsed(start, read_finished),
             Duration::from_millis(42)
         );
+    }
+}
+
+#[cfg(test)]
+mod termination_tests {
+    use super::*;
+
+    /// An engine that dies mid-protocol must carry its exit status out with
+    /// it. That status is the forensic difference between an engine that
+    /// failed and a pipe that closed for some other reason, and without it
+    /// every incident report reads the same.
+    #[tokio::test]
+    async fn eof_reports_the_child_exit_status() {
+        #[cfg(windows)]
+        let options = SpawnOptions {
+            path: std::path::PathBuf::from("cmd.exe"),
+            args: vec![
+                "/D".into(),
+                "/S".into(),
+                "/C".into(),
+                "set /p line= & exit /b 7".into(),
+            ],
+            ..SpawnOptions::default()
+        };
+        #[cfg(not(windows))]
+        let options = SpawnOptions {
+            path: std::path::PathBuf::from("sh"),
+            args: vec!["-c".into(), "read line; exit 7".into()],
+            ..SpawnOptions::default()
+        };
+
+        let mut engine = EngineProcess::spawn(options).await.expect("spawn fixture");
+        let error = engine
+            .handshake(Duration::from_secs(5))
+            .await
+            .expect_err("the fixture exits during the handshake");
+        match error {
+            UciError::TerminatedWithStatus(status) => {
+                assert!(status.contains('7'), "exit status not reported: {status}");
+            }
+            other => panic!("expected the exit status, got: {other}"),
+        }
     }
 }

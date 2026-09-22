@@ -1471,7 +1471,9 @@ impl Outcome {
 fn fault_kind_for_uci(error: &UciError) -> EngineFaultKind {
     match error {
         UciError::MoveTimeout | UciError::HandshakeTimeout => EngineFaultKind::Timeout,
-        UciError::Terminated | UciError::Io(_) => EngineFaultKind::Disconnect,
+        UciError::Terminated | UciError::TerminatedWithStatus(_) | UciError::Io(_) => {
+            EngineFaultKind::Disconnect
+        }
         UciError::Protocol(_) => EngineFaultKind::Protocol,
         UciError::ShutdownTimeout => EngineFaultKind::Crash,
     }

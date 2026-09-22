@@ -280,23 +280,33 @@ async fn failed_engine_is_not_scored() {
     assert_eq!(snap.games_finished, 2);
     for id in [good_id, bogus_id] {
         let standing = snap.standings.standing(id);
-        assert_eq!(standing.games(), 0, "engine {id} was given games it never played");
+        assert_eq!(
+            standing.games(),
+            0,
+            "engine {id} was given games it never played"
+        );
         assert_eq!((standing.wins, standing.draws, standing.losses), (0, 0, 0));
         assert_eq!(standing.points(), 0.0);
     }
     // Ratings move only on games actually played, so the writeback after every
     // finished game cannot shift the library on a tournament like this one.
     for id in [good_id, bogus_id] {
-        let elo = snap.elo.get(&id).expect("every participant carries a rating");
+        let elo = snap
+            .elo
+            .get(&id)
+            .expect("every participant carries a rating");
         assert_eq!(elo.delta, 0.0, "engine {id} changed rating without a game");
     }
     assert_eq!(
-        snap.termination_counts.get(&colosseum_core::Termination::Aborted),
+        snap.termination_counts
+            .get(&colosseum_core::Termination::Aborted),
         Some(&2),
         "both games must be recorded as aborted"
     );
     assert!(
-        snap.recent_errors.iter().all(|error| error.contains("not scored")),
+        snap.recent_errors
+            .iter()
+            .all(|error| error.contains("not scored")),
         "the error text must say the game was not scored: {:?}",
         snap.recent_errors
     );

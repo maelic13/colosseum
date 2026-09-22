@@ -1270,14 +1270,19 @@ fn versioned_name(engine: &EngineConfig) -> String {
 
 fn time_control_label(config: &TournamentConfig) -> String {
     use colosseum_core::TimeControl;
-    // Render seconds compactly: whole numbers without a trailing ".0".
+    // Render milliseconds as exact compact seconds. Formatting a float at one
+    // decimal turned a 30 ms increment into `0.0`, so every PGN a 3+0.03
+    // tournament wrote carried `[TimeControl "3+0.0"]`.
     fn secs(ms: u64) -> String {
-        let s = ms as f64 / 1000.0;
-        if (s.fract()).abs() < f64::EPSILON {
-            format!("{s:.0}")
-        } else {
-            format!("{s:.1}")
+        let whole = ms / 1000;
+        let remainder = ms % 1000;
+        if remainder == 0 {
+            return whole.to_string();
         }
+        format!(
+            "{whole}.{}",
+            format!("{remainder:03}").trim_end_matches('0')
+        )
     }
     match config.time_control {
         TimeControl::PerMove { ms } => format!("movetime/{ms}ms"),
@@ -1533,6 +1538,50 @@ mod tests {
     /// stored-results replay must exclude it exactly as the live path does —
     /// otherwise reopening a tournament would show points the live table never
     /// showed.
+    /// Every PGN the GUI writes carries this label. A 30 ms increment must
+    /// not round to `0.0`: a reader cannot tell a 3+0.03 game from a 3+0 one.
+    #[test]
+    fn a_time_control_label_keeps_increments_below_a_tenth_of_a_second() {
+        let label = |control| {
+            time_control_label(&TournamentConfig {
+                time_control: control,
+                ..TournamentConfig::default()
+            })
+        };
+        use colosseum_core::TimeControl;
+        assert_eq!(
+            label(TimeControl::Increment {
+                base_ms: 3_000,
+                inc_ms: 30
+            }),
+            "3+0.03"
+        );
+        assert_eq!(
+            label(TimeControl::Increment {
+                base_ms: 1_500,
+                inc_ms: 250
+            }),
+            "1.5+0.25"
+        );
+        // A whole number of seconds still renders without a decimal point.
+        assert_eq!(
+            label(TimeControl::Increment {
+                base_ms: 60_000,
+                inc_ms: 1_000
+            }),
+            "60+1"
+        );
+        assert_eq!(label(TimeControl::SuddenDeath { base_ms: 10_500 }), "10.5s");
+        // One millisecond is the smallest step the control can express.
+        assert_eq!(
+            label(TimeControl::Increment {
+                base_ms: 1,
+                inc_ms: 1
+            }),
+            "0.001+0.001"
+        );
+    }
+
     #[test]
     fn stored_results_exclude_a_game_that_was_never_played() {
         use crate::store::Store;
@@ -1563,7 +1612,17 @@ mod tests {
         let finish = |game, result, termination| {
             store
                 .finish_game(
-                    game, result, termination, None, None, None, None, None, None, 20, "pgn",
+                    game,
+                    result,
+                    termination,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    20,
+                    "pgn",
                 )
                 .unwrap();
         };
@@ -1574,7 +1633,10 @@ mod tests {
         let results = load_tournament_results(&store, &row).unwrap();
 
         assert_eq!(results.games_total, 2);
-        assert_eq!(results.games_finished, 1, "the aborted game is not a result");
+        assert_eq!(
+            results.games_finished, 1,
+            "the aborted game is not a result"
+        );
         assert_eq!(results.decisive, 1);
         assert_eq!(results.draws, 0, "the placeholder draw must not be counted");
         assert_eq!(results.standings.standing(white.id).wins, 1);
@@ -1595,24 +1657,25 @@ mod tests {
         let mut stored = test_engine();
         stored.path = missing.clone();
         stored.args = vec!["--old".into()];
-        stored.options.insert(
-            "Hash".into(),
-            colosseum_core::UciOptionValue::Spin(64),
-        );
+        stored
+            .options
+            .insert("Hash".into(), colosseum_core::UciOptionValue::Spin(64));
 
         let mut library_entry = stored.clone();
         library_entry.path = present.clone();
         library_entry.args = vec!["--new".into()];
         library_entry.working_dir = Some(PathBuf::from("new-dir"));
         library_entry.env.insert("NNUE".into(), "net.nnue".into());
-        library_entry.options.insert(
-            "Hash".into(),
-            colosseum_core::UciOptionValue::Spin(4096),
-        );
+        library_entry
+            .options
+            .insert("Hash".into(), colosseum_core::UciOptionValue::Spin(4096));
 
         // The one case the repair exists for.
         let mut repaired = stored.clone();
-        assert!(repair_missing_executable(&mut repaired, &[library_entry.clone()]));
+        assert!(repair_missing_executable(
+            &mut repaired,
+            &[library_entry.clone()]
+        ));
         assert_eq!(repaired.path, present);
         assert_eq!(repaired.args, ["--new"]);
         assert_eq!(repaired.working_dir, Some(PathBuf::from("new-dir")));
@@ -1626,7 +1689,10 @@ mod tests {
         // An executable that is there is never second-guessed.
         let mut working = stored.clone();
         working.path = present.clone();
-        assert!(!repair_missing_executable(&mut working, &[library_entry.clone()]));
+        assert!(!repair_missing_executable(
+            &mut working,
+            &[library_entry.clone()]
+        ));
         assert_eq!(working.args, ["--old"]);
 
         // A different engine's entry is not a substitute.

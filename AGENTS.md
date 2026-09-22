@@ -75,13 +75,19 @@ subject.
 
 ## Verification baseline
 
-Unless a step specifies more, use:
+Unless a step specifies more, use what CI enforces, in this order:
 
 ```text
+cargo fmt --all --check
 cargo check --workspace --tests
-cargo clippy --workspace
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 ```
+
+`cargo fmt --all --check` is not optional and is not cosmetic: `ci.yml` fails
+the pull request on it, and a formatting failure is indistinguishable from a
+real one in a release gate. The same applies to `--all-targets -- -D
+warnings`, which lints the test code the shorter form skips.
 
 Run debug and release/platform-specific checks where PLAN or GUIDE requires
 them. Documentation-only changes require at least `git diff --check` and
