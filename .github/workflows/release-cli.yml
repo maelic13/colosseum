@@ -52,7 +52,7 @@ jobs:
           echo "$metadata"
 
       - name: Reject forbidden CLI dependency edges
-        run: cargo test --locked -p colosseum-cli --test cli architecture::
+        run: cargo test --locked -p colosseum-cli --test cli -- 'architecture::'
 
       - name: Verify version-matched offline documentation
         run: cargo run --locked -p colosseum-docs -- --check
