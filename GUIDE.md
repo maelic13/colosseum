@@ -1051,6 +1051,12 @@ model as well.
   the three per-platform build scripts; both release workflows call it; the
   products stay separate artifacts; local archives equal the candidate's file
   lists and pass their archive smoke — PLAN §Phase 10(ah)
+  - Found by the 10.9w sweep, and reason enough on its own: `build_macos.sh`
+    reads its version with `grep -m1 '^version' Cargo.toml`, which matched the
+    workspace version that Phase 2 removed, so on `cli` it writes an empty
+    `CFBundleShortVersionString` into the `.app`. The version belongs to the
+    product manifest now. If 10.9y slips past the release, fix the script
+    instead; the release workflows do not use it and are unaffected
 - ☐ **10.9z** — **Model: Terra High.** User-facing documentation for the
   release: `README.md` as the front door to both products (purpose, download
   per platform with checksums, the GUI from the latest release and the CLI
