@@ -63,6 +63,8 @@ pub enum MetadataError {
     Product,
     #[error("invalid CLI artifact platform/architecture pair: {platform}/{arch}")]
     Platform { platform: String, arch: String },
+    #[error("unsupported target triple: {0}")]
+    Target(String),
     #[error("CLI artifact version {requested} does not match package version {actual}")]
     ArtifactVersion { requested: Version, actual: String },
     #[error("artifact staging directory already exists: {0}")]
@@ -153,6 +155,32 @@ pub fn release_notes(root: &Path, tag: &str) -> Result<String, MetadataError> {
     Ok(lines.join("\n").trim().to_owned() + "\n")
 }
 
+/// Map a Rust target triple to the artifact's platform and architecture
+/// tokens.
+///
+/// One mapping for both products and every caller — the build entry point, the
+/// release workflows and the archive smoke — so an artifact's name can never
+/// disagree with the triple it was built for.
+pub fn target_platform(target: &str) -> Result<(&'static str, &'static str), MetadataError> {
+    let platform = if target.contains("windows") {
+        "windows"
+    } else if target.contains("linux") {
+        "linux"
+    } else if target.contains("darwin") {
+        "macos"
+    } else {
+        return Err(MetadataError::Target(target.to_owned()));
+    };
+    let arch = if target.starts_with("x86_64") {
+        "x64"
+    } else if target.starts_with("aarch64") {
+        "arm64"
+    } else {
+        return Err(MetadataError::Target(target.to_owned()));
+    };
+    Ok((platform, arch))
+}
+
 /// Build the exact allowlisted directory later archived by the platform job.
 pub fn stage_cli(
     root: &Path,
@@ -162,9 +190,11 @@ pub fn stage_cli(
     binary: &Path,
     output: &Path,
 ) -> Result<PathBuf, MetadataError> {
+    // The released matrix, in the one naming scheme both products use:
+    // <product>-<version>-<windows|linux|macos>-<x64|arm64>.
     if !matches!(
         (platform, arch),
-        ("windows", "x86_64") | ("windows", "arm64") | ("linux", "x86_64") | ("macos", "aarch64")
+        ("windows", "x64") | ("windows", "arm64") | ("linux", "x64") | ("macos", "arm64")
     ) {
         return Err(MetadataError::Platform {
             platform: platform.into(),
@@ -228,7 +258,7 @@ fn product(name: &str) -> Result<Product, MetadataError> {
             manifest: "crates/colosseum-gui/Cargo.toml",
             changelog: "CHANGELOG-GUI.md",
             other_changelog: "CHANGELOG-CLI.md",
-            artifact_name: "colosseum",
+            artifact_name: "colosseum-gui",
             tag_prefix: "gui-v",
         }),
         "cli" => Ok(Product {
@@ -323,10 +353,57 @@ mod tests {
         let gui = validate(root.path(), "gui-v1.2.3").unwrap();
         let cli = validate(root.path(), "cli-v1.2.3").unwrap();
         assert_eq!(gui.package, "colosseum-gui");
-        assert_eq!(gui.artifact_stem, "colosseum-1.2.3");
+        assert_eq!(gui.artifact_stem, "colosseum-gui-1.2.3");
         assert_eq!(cli.package, "colosseum-cli");
         assert_eq!(cli.artifact_stem, "colosseum-cli-1.2.3");
         assert_eq!(cli.validation, "release");
+    }
+
+    /// One naming scheme for both products. The tokens are the artifact's,
+    /// not the triple's: a download called `…-windows-x64.zip` says what it
+    /// runs on, where `…-x86_64-pc-windows-msvc` says how it was compiled.
+    #[test]
+    fn every_released_triple_maps_to_the_one_naming_scheme() {
+        for (target, expected) in [
+            ("x86_64-pc-windows-msvc", ("windows", "x64")),
+            ("aarch64-pc-windows-msvc", ("windows", "arm64")),
+            ("x86_64-unknown-linux-gnu", ("linux", "x64")),
+            ("aarch64-unknown-linux-gnu", ("linux", "arm64")),
+            ("x86_64-apple-darwin", ("macos", "x64")),
+            ("aarch64-apple-darwin", ("macos", "arm64")),
+        ] {
+            assert_eq!(target_platform(target).unwrap(), expected, "{target}");
+        }
+        for unsupported in ["i686-pc-windows-msvc", "x86_64-unknown-freebsd", "nonsense"] {
+            assert!(matches!(
+                target_platform(unsupported),
+                Err(MetadataError::Target(_))
+            ));
+        }
+    }
+
+    /// The scheme is the contract, so the tokens it replaced are refused
+    /// rather than quietly staged under a name nothing else expects.
+    #[test]
+    fn staging_refuses_a_pair_outside_the_released_matrix() {
+        let root = fixture();
+        let binary = root.path().join("built-cli");
+        fs::write(&binary, "binary").unwrap();
+        let output = root.path().join("dist");
+        for (platform, arch) in [
+            ("linux", "x86_64"),
+            ("macos", "aarch64"),
+            ("windows", "x86_64"),
+            ("freebsd", "x64"),
+        ] {
+            assert!(
+                matches!(
+                    stage_cli(root.path(), "1.2.3", platform, arch, &binary, &output),
+                    Err(MetadataError::Platform { .. })
+                ),
+                "{platform}/{arch} must be refused"
+            );
+        }
     }
 
     #[test]
@@ -395,7 +472,7 @@ mod tests {
         let binary = root.path().join("built-cli");
         fs::write(&binary, "binary").unwrap();
         let output = root.path().join("dist");
-        let stage = stage_cli(root.path(), "1.2.3", "linux", "x86_64", &binary, &output).unwrap();
+        let stage = stage_cli(root.path(), "1.2.3", "linux", "x64", &binary, &output).unwrap();
         assert_eq!(
             fs::read_to_string(stage.join("colosseum-cli")).unwrap(),
             "binary"
@@ -412,7 +489,7 @@ mod tests {
         assert!(stage.join("docs/cli/quickstart.md").is_file());
         assert!(stage.join("docs/cli/formats/run.md").is_file());
         assert!(matches!(
-            stage_cli(root.path(), "1.2.3", "linux", "x86_64", &binary, &output),
+            stage_cli(root.path(), "1.2.3", "linux", "x64", &binary, &output),
             Err(MetadataError::StageExists(_))
         ));
     }

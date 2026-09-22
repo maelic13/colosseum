@@ -1905,6 +1905,44 @@ change if one were revisited.
     archives whose contents equal the candidate's file lists and each passes
     its smoke script; `docs/DEVELOPMENT.md` documents the commands and the
     three scripts are gone.
+
+  **Implementation evidence (Phase 10.9y).** `tools/xtask` carries the three
+  commands; `.cargo/config.toml` aliases them. `build` runs
+  `cargo build --locked --profile <profile> -p <package> --bin <binary>
+  --target <triple>` and prints the path. `package` builds the release
+  profile, stages, archives into `target/dist/` and smokes, then clears its
+  own scratch directories so `target/dist` holds artifacts and nothing else.
+  The two portable archives are written in-process rather than by a shelled-out
+  tool: a zip and a tarball of the same tree then have the same entries
+  whatever the host is, `package` needs nothing installed to produce the file a
+  user downloads, and the tarball's executable bit is set explicitly, which a
+  Windows host cannot carry. The installer formats shell out to the tooling
+  that owns them, and a missing tool is an error naming it.
+
+  Deviations, both narrowing rather than widening the contract: the product
+  version is read through `colosseum-release`, which parses the product's own
+  `Cargo.toml`, rather than by shelling out to `cargo metadata` — the point of
+  that instruction was that the workspace manifest must never be the source,
+  and this makes the release tool the single source for every caller; and
+  `--format` rejects a format that does not apply to the product and platform
+  rather than silently producing nothing, so `package cli --format msi` is an
+  error.
+
+  **Exit demonstrated on Windows 2026-09-22.** `cargo xtask package cli`
+  produced `colosseum-cli-0.1.0-windows-x64.zip` (29 entries: one root
+  directory, `colosseum-cli.exe`, `LICENSE`, `README.md`, `CHANGELOG-CLI.md`
+  and the 24-file `docs/cli/` tree) and `cargo xtask package gui` produced
+  `colosseum-gui-1.1.0-windows-x64.zip` (root directory, `colosseum.exe`,
+  `LICENSE`) — the candidate's file lists — each printing its SHA-256 and each
+  passing its `Smoke-*Archive.ps1`. `cargo xtask release-check` passes for
+  `gui-v1.1.0` and `cli-v0.1.0` and refuses an unscoped `v1.1.0`.
+
+  **Found and fixed while running it:** `Smoke-GuiArchive.ps1` removed its
+  scratch directory immediately after `Start-Process -Wait`, which Windows can
+  still hold open, so the script failed *after* reporting the archive good.
+  The GUI lane had never run, so nothing had caught it. It now waits for the
+  process and retries the cleanup, and a directory it still cannot remove is a
+  warning rather than a failed archive.
 - **(ai) User-facing documentation for the release** (GUIDE 10.9z, Terra
   High). `README.md` is the front door for both products: what each is for,
   which one a reader wants, download per platform with checksum

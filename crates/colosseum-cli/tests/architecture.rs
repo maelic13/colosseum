@@ -144,16 +144,34 @@ fn independent_release_lanes_are_complete_and_least_privileged() {
     assert!(!gui.contains("'cli-v*'"));
     assert!(cli.contains("'cli-v*'"));
     assert!(!cli.contains("'gui-v*'"));
-    assert!(cli.contains("workflow_dispatch:"));
     assert!(cli.contains("[cli candidate]"));
-    assert!(cli.contains("CANDIDATE.json"));
-    assert!(cli.contains("Smoke-CliArchive.ps1"));
-    assert!(cli.contains("(cd release-artifacts && sha256sum --check SHA256SUMS)"));
-    assert!(gui.contains("Smoke-GuiArchive.ps1"));
 
-    for workflow in [&gui, &cli] {
-        assert!(workflow.contains("permissions:\n  contents: read"));
-        assert_eq!(workflow.matches("contents: write").count(), 1);
+    // Each lane builds, packages and smokes exactly its own product, through
+    // the one build entry point, and never reaches across to the other's.
+    assert!(cli.contains("cargo xtask package cli"));
+    assert!(!cli.contains("xtask package gui"));
+    assert!(gui.contains("cargo xtask package gui"));
+    assert!(!gui.contains("xtask package cli"));
+
+    for (workflow, name) in [(&gui, "gui"), (&cli, "cli")] {
+        assert!(workflow.contains("permissions:\n  contents: read"), "{name}");
+        assert_eq!(workflow.matches("contents: write").count(), 1, "{name}");
+        // A candidate proves the whole lane without a tag or a release.
+        assert!(workflow.contains("workflow_dispatch:"), "{name}");
+        assert!(workflow.contains("CANDIDATE.json"), "{name}");
+        // The published set is an exact list checked by name and by count, so
+        // a release carries what its matrix produced and nothing else.
+        assert!(workflow.contains("expected=("), "{name}");
+        assert!(
+            workflow.contains(r#"for file in "${expected[@]}"; do test -f "release-artifacts/$file"; done"#),
+            "{name}"
+        );
+        assert!(
+            workflow.contains("(cd release-artifacts && sha256sum --check SHA256SUMS)"),
+            "{name}"
+        );
+        // Checksums are generated and re-checked, never published as an asset.
+        assert!(!workflow.contains("release-artifacts/SHA256SUMS\n"), "{name}");
     }
 }
 

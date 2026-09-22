@@ -1,0 +1,9 @@
+# `cargo xtask <command>` is the one entry point for building, packaging and
+# release-checking the two products. It replaces the per-platform build
+# scripts, and both release workflows call the same commands, so a local
+# archive and a published one come from one recipe.
+#
+# Deliberately no `[build] rustflags` here: it would apply to build scripts and
+# proc macros on the host as well as the target, and CI caches `target/`.
+[alias]
+xtask = "run --package xtask --"

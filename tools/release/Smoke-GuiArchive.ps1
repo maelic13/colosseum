@@ -16,7 +16,7 @@ try {
         & tar -xzf $archivePath -C $scratch
         if ($LASTEXITCODE -ne 0) { throw "tar failed with exit code $LASTEXITCODE" }
     }
-    $name = "colosseum-$Version-$Platform-$Architecture"
+    $name = "colosseum-gui-$Version-$Platform-$Architecture"
     $root = Join-Path $scratch $name
     $binaryName = if ($Platform -eq "windows") { "colosseum.exe" } else { "colosseum" }
     $binary = Join-Path $root $binaryName
@@ -30,6 +30,9 @@ try {
     $stderrPath = Join-Path $scratch "version.stderr"
     $process = Start-Process -FilePath $binary -ArgumentList "--version" -Wait -PassThru `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    # -Wait returns when the process exits, but Windows can hold the image file
+    # open a moment longer, which would then fail the cleanup below.
+    $process.WaitForExit()
     $reported = (Get-Content $stdoutPath -Raw) ?? ""
     $diagnostics = (Get-Content $stderrPath -Raw) ?? ""
     if ($process.ExitCode -ne 0) { throw "GUI --version failed: $diagnostics" }
@@ -39,5 +42,18 @@ try {
     }
     Write-Host "Exact GUI archive smoke passed: $name"
 } finally {
-    Remove-Item -LiteralPath $scratch -Recurse -Force
+    # Cleanup is not the thing being verified: a temporary directory Windows
+    # still holds open must not turn a passing archive into a failing one.
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction Stop
+            break
+        } catch {
+            if ($attempt -eq 10) {
+                Write-Warning "could not remove the smoke directory $scratch : $_"
+            } else {
+                Start-Sleep -Milliseconds 200
+            }
+        }
+    }
 }

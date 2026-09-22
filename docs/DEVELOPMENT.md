@@ -54,19 +54,51 @@ cargo run --release --bin colosseum
 cargo run -p colosseum-cli -- --help
 ```
 
-One-step scripts put a distributable artifact in `dist/`:
+## One build entry point
+
+`cargo xtask` builds, packages and release-checks both products, and the two
+release workflows call the same commands, so a local artifact and a published
+one come from one recipe:
 
 ```bash
-./build_macos.sh      # dist/Colosseum.app (double-clickable, no Terminal window)
-./build_linux.sh      # dist/colosseum
-.\build_windows.ps1   # dist\colosseum.exe
+cargo xtask build   <gui|cli> [--target <triple>] [--profile release|ci-release]
+cargo xtask package <gui|cli> [--target <triple>] [--format <list>] [--no-smoke]
+cargo xtask release-check <gui-vX.Y.Z|cli-vX.Y.Z>
+```
+
+The product is positional and one command handles one product: nothing builds
+or packages both, and the CLI archive never contains the GUI. `--target`
+defaults to the host's triple and is always passed to cargo, so every build
+lands under `target/<triple>/<profile>/`; builds are `--locked`.
+
+`build` compiles and prints the binary's path, and copies nothing. `package`
+always uses the `release` profile, writes artifacts to `target/dist/` as
+`<product>-<version>-<platform>-<arch>.<ext>`, prints each one's SHA-256, and
+reads the portable archive back with its smoke script unless `--no-smoke`.
+`--format` takes a comma-separated list and defaults to the platform's portable
+archive — `zip` on Windows, `tar.gz` elsewhere:
+
+| Product | Formats |
+|---|---|
+| `gui` | `zip`, `tar.gz`, `msi`, `deb`, `rpm`, `dmg`, `pkg.tar.zst` |
+| `cli` | `zip`, `tar.gz` |
+
+A format whose tool is not installed is an error, never a skip. The installer
+formats need their platform's tooling — WiX for `msi`, `cargo-deb` and
+`cargo-generate-rpm` for Linux, `create-dmg` for `dmg`, `makepkg` for
+`pkg.tar.zst` — which is why each one is built on its own runner.
+
+```bash
+cargo xtask package cli                       # this host's portable archive
+cargo xtask package gui --format zip,msi      # what the Windows release leg runs
+cargo xtask release-check cli-v0.1.0
 ```
 
 On macOS a bare executable opened from Finder always spawns a Terminal window,
-so the script wraps the binary in a minimal app bundle with a Dock icon. The
-bundle is ad-hoc signed: fine on the machine that built it, but distributing it
-to other Macs requires codesigning and notarization — see
-[`macos-signing.md`](macos-signing.md).
+so the `dmg` wraps the binary in an app bundle with a Dock icon, stamped with
+the product manifest's version. The bundle is ad-hoc signed: fine on the
+machine that built it, but distributing it to other Macs requires codesigning
+and notarization — see [`macos-signing.md`](macos-signing.md).
 
 ## Tests
 
@@ -120,6 +152,7 @@ colosseum/
 │  ├─ colosseum-gui/      eframe/egui GUI composition root
 │  └─ colosseum-cli/      independent headless CLI composition root
 ├─ tools/release/         product tag/version/changelog validation, archive staging and smoke
+├─ tools/xtask/           the build/package/release-check entry point both workflows call
 ├─ tools/docs/            parser-derived CLI command-reference generator
 ├─ packaging/             Linux desktop entry + icon (.deb / .rpm / Arch assets)
 ├─ tests/fixtures/        vendored statistics fixtures and their generator
@@ -145,9 +178,14 @@ Their release notes are similarly separate in
 `cli-v<semver>`; validate prepared tags locally with:
 
 ```bash
-cargo run -p colosseum-release -- gui-v1.0.2
-cargo run -p colosseum-release -- cli-v0.1.0
+cargo xtask release-check gui-v1.1.0
+cargo xtask release-check cli-v0.1.0
 ```
+
+`release-check` validates the tag's prefix and shape, that the product manifest
+carries exactly that version and that the product's changelog has a section for
+it, then checks the generated command reference against the parser and the
+working tree for whitespace damage.
 
 Push/pull-request CI runs the hermetic workspace on Windows, Linux and macOS in
 debug and optimized profiles, and independently builds the headless CLI
@@ -166,6 +204,15 @@ The shipped binary is still built with the full `release` profile; only the
 test legs use `ci-release`.
 Product release automation is split between `release-gui.yml` and
 `release-cli.yml`; only their final publication jobs receive write permission.
+Each verifies the exact artifact list by name and count before publishing it,
+so a release carries what its matrix produced and nothing else. Checksums are
+generated and re-checked between jobs but are not published as an asset: the
+per-asset digests GitHub records are what to compare a download against.
+
+Both lanes also build a candidate on a manual dispatch: every artifact is
+built, packaged and smoked, and the bundle is retained as
+`colosseum-<product>-candidate-<full-commit-sha>` with its checksums and a
+candidate identity file, without a tag and without publishing anything.
 
 ### CLI candidate before merge
 

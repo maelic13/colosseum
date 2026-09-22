@@ -1,0 +1,20 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Build, package and release-check the Colosseum products"
+
+[dependencies]
+colosseum-release = { path = "../release" }
+flate2 = "1.1.5"
+sha2 = "0.10.9"
+tar = "0.4.44"
+zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"
