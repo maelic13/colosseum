@@ -231,7 +231,10 @@ pub fn stage_cli(
     };
     copy(binary, &stage.join(binary_name))?;
     copy(&root.join("LICENSE"), &stage.join("LICENSE"))?;
-    copy(&root.join("README-CLI.md"), &stage.join("README.md"))?;
+    copy(
+        &root.join("packaging/cli/README.md"),
+        &stage.join("README.md"),
+    )?;
     copy(
         &root.join("CHANGELOG-CLI.md"),
         &stage.join("CHANGELOG-CLI.md"),
@@ -486,7 +489,8 @@ mod tests {
     fn stages_only_cli_binary_license_front_door_and_offline_docs() {
         let root = fixture();
         fs::write(root.path().join("LICENSE"), "license").unwrap();
-        fs::write(root.path().join("README-CLI.md"), "cli readme").unwrap();
+        fs::create_dir_all(root.path().join("packaging/cli")).unwrap();
+        fs::write(root.path().join("packaging/cli/README.md"), "cli readme").unwrap();
         fs::write(root.path().join("CHANGELOG-CLI.md"), "cli changes").unwrap();
         fs::create_dir_all(root.path().join("docs/cli/formats")).unwrap();
         fs::write(root.path().join("docs/cli/quickstart.md"), "quick").unwrap();

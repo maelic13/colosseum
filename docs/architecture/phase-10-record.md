@@ -1530,7 +1530,7 @@ change if one were revisited.
   which one a reader wants, download per platform with checksum
   verification, a first tournament in the GUI, a first `match`, `sprt` and
   `spsa` with a run file in the CLI, then links to `docs/cli/`.
-  `README-CLI.md` (the archive's `README.md`), both changelogs, `docs/cli/`
+  `packaging/cli/README.md` (the archive's `README.md`), both changelogs, `docs/cli/`
   and `docs/DEVELOPMENT.md` agree with it. No phase numbers or internal
   method in user documents. Every link is checked; the release links that
   exist only after the tags are listed for the maintainer to open after

@@ -99,7 +99,7 @@ consistency validation; they do not require rerunning unchanged Rust tests.
   `PLAN.md` carries the binding specifications and only the open work;
   completed phases are one line in `GUIDE.md` and a record file under
   `docs/architecture/`.
-- `README.md`, `README-CLI.md` (staged as the CLI archive's `README.md`) and
+- `README.md`, `packaging/cli/README.md` (staged as the CLI archive's `README.md`) and
   `docs/cli/`: user-facing; no phase numbers or internal method
   argumentation.
 - `docs/DEVELOPMENT.md`: implemented build/test/release facts; update it when

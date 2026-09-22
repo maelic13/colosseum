@@ -155,7 +155,7 @@ fn user_facing_documentation_links_product_tag_lists_not_repository_latest() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut documents = vec![
         root.join("README.md"),
-        root.join("README-CLI.md"),
+        root.join("packaging/cli/README.md"),
         root.join("CHANGELOG.md"),
         root.join("CHANGELOG-CLI.md"),
         root.join("CHANGELOG-GUI.md"),

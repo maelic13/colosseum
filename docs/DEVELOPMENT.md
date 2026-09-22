@@ -2,8 +2,9 @@
 
 Maintainer-facing notes: building from source, running the tests, and cutting
 a release. [`README.md`](../README.md) introduces both products;
-[`README-CLI.md`](../README-CLI.md) and [`cli/`](cli/README.md) are the CLI
-landing page and complete user guide.
+[`packaging/cli/README.md`](../packaging/cli/README.md) (the front page of
+every CLI archive) and [`cli/`](cli/README.md) are the CLI landing page and
+complete user guide.
 
 ## Prerequisites
 
@@ -183,7 +184,8 @@ colosseum/
 ├─ tools/release/         product tag/version/changelog validation, archive staging and smoke
 ├─ tools/xtask/           the build/package/release-check entry point both workflows call
 ├─ tools/docs/            parser-derived CLI command-reference generator
-├─ packaging/             Linux desktop entry + icon (.deb / .rpm / Arch assets)
+├─ packaging/             Linux desktop entry + icon (.deb / .rpm / Arch assets);
+│                         cli/README.md, the front page of every CLI archive
 ├─ tests/fixtures/        vendored statistics fixtures and their generator
 ├─ docs/cli/              CLI user guide (shipped in every CLI archive)
 ├─ docs/architecture/     architecture, ADRs, phase records and acceptance evidence
