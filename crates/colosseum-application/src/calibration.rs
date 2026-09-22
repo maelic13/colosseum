@@ -257,4 +257,44 @@ mod tests {
             CalibrationStatus::Invalid
         );
     }
+
+    #[test]
+    fn calibration_classification_is_exact_at_the_tolerance_boundaries() {
+        let design = CalibrationDesign::new(8, 0.95, 5.0).unwrap();
+        let interval = |lower_nelo, upper_nelo| CalibrationInterval {
+            confidence: 0.95,
+            estimate_nelo: (lower_nelo + upper_nelo) / 2.0,
+            lower_nelo,
+            upper_nelo,
+        };
+        for (observed, expected) in [
+            // The tolerance is inclusive on both sides.
+            (
+                classify_calibration(design, Some(interval(-5.0, 5.0)), 0, 0),
+                CalibrationStatus::Pass,
+            ),
+            (
+                classify_calibration(design, Some(interval(5.000_001, 8.0)), 0, 0),
+                CalibrationStatus::Fail,
+            ),
+            (
+                classify_calibration(design, Some(interval(-8.0, -5.000_001)), 0, 0),
+                CalibrationStatus::Fail,
+            ),
+            (
+                classify_calibration(design, Some(interval(-4.0, 6.0)), 0, 0),
+                CalibrationStatus::Inconclusive,
+            ),
+            (
+                classify_calibration(design, None, 0, 0),
+                CalibrationStatus::Inconclusive,
+            ),
+            (
+                classify_calibration(design, Some(interval(-1.0, 1.0)), 1, 0),
+                CalibrationStatus::Invalid,
+            ),
+        ] {
+            assert_eq!(observed, expected);
+        }
+    }
 }
