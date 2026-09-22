@@ -3465,6 +3465,25 @@ games" procedure at 10.10, once, on the final state.
     start-up and teardown per game against the scale run's 7.3 ms and 0.1 ms
     with kept engines, and the overhead distribution. Nothing in the release
     depends on the answer; `per-slot` stays the default either way.
+
+    **Run by the maintainer 2026-09-22.** 2,000 games in 21m46s at 5,512
+    games per hour, +61.8 ± 11.1 Elo, ptnml [37, 151, 354, 339, 119],
+    **zero time losses and zero faults of any kind**, no abnormal game. So
+    fresh processes per game cost no forfeit on an engine that has moved its
+    one-time work out of the search: the answer the item was asked for, and
+    `per-game` is a safe explicit choice. What they do cost is start-up:
+    `stats` reports 128.2 ms mean and 121.8 ms median per game (max 867.1 ms)
+    against 7.3 ms median with engines kept per slot, and 7.9 ms teardown
+    against 0.1 ms — about 1.4% of a nine-second game, which is why
+    `per-slot` remains the default. The figure is higher than the 42.0 ms the
+    10.9m baseline measured with fresh processes on the pre-fix binaries, and
+    for a coherent reason rather than noise: Rarog's fix moved its KPK
+    bitbase out of the first search and into process start-up, so a run that
+    starts 4,000 processes pays it 2,000 times instead of hiding it inside a
+    game. The two runs use different binaries, so that is an explanation, not
+    a controlled comparison. Overhead stayed bounded (p50 1 ms, p99 18 and
+    27 ms per side, max 0.6 s); 2,835 of 253,911 moves exceeded the 20 ms
+    margin without any of them reaching a forfeit.
   - Sweep for anything else unfinished: every `☐`, `◐`, `TODO`, `FIXME` and
     "owed" in GUIDE, PLAN, `docs/` and the CLI crates is either done, deferred
     with its reason, or listed for the maintainer. Tracker text that has gone
