@@ -60,6 +60,17 @@ Intel Macs are not supported. The macOS app is not signed, so the first launch
 is blocked: open **System Settings → Privacy & Security** and click
 **Open Anyway**.
 
+To check a download arrived intact, compare its SHA-256 with the digest GitHub
+shows beside that asset on the release page:
+
+```text
+Get-FileHash colosseum-gui-1.1.0-windows-x64.msi
+sha256sum colosseum-gui-1.1.0-linux-x64.deb
+shasum -a 256 colosseum-gui-1.1.0-macos-arm64.dmg
+```
+
+The three lines are Windows, Linux and macOS respectively.
+
 ### First tournament
 
 1. **Engines tab** — *Add Engine* and pick an executable, or *Scan Folder* to
@@ -114,7 +125,10 @@ colosseum-cli self-test
 
 The archive contains the executable, the licence and the complete guide for
 that exact version. On Linux and macOS run `./colosseum-cli` unless the
-directory is on your `PATH`.
+directory is on your `PATH`. To check the download arrived intact, compare its
+SHA-256 with the digest GitHub shows beside that asset on the release page
+(`Get-FileHash` on Windows, `sha256sum` on Linux, `shasum -a 256` on macOS).
+If you pin a version in automation, pin that digest with it.
 
 To build from source instead, install Rust 1.88 or newer and run:
 
@@ -142,6 +156,11 @@ Gate a change with a sequential test that stops as soon as the evidence is in:
 colosseum-cli sprt ./candidate ./baseline --preset gainer --max-pairs 5000 --book ./openings.epd --dir ./runs/gate-42
 ```
 
+A schedule draws one opening per colour-reversed pair and refuses to start if
+the book cannot cover it, rather than quietly replaying positions it has
+already played — so size the book to the run, or pass `--book-wrap` to reuse
+openings deliberately.
+
 Tune UCI options with SPSA from a small TOML file that lists the parameters:
 
 ```text
@@ -150,8 +169,31 @@ colosseum-cli spsa ./engine --tune ./tune.toml --r-end 0.002 --iterations 500 --
 
 Run directories are created under `./colosseum-runs/` unless `--dir` names
 one. Stop a long run with one interrupt and start the same command again to
-resume it. Options that every experiment in a project shares can live in a
-run file; `colosseum-cli <command> --help` lists every option.
+resume it.
+
+The conditions every experiment in a project shares — the book, the
+concurrency, the seed — belong in a run file rather than in each command line,
+so every result was measured the same way:
+
+```toml
+# colosseum.toml, beside your books/ directory
+[options]
+concurrency = 4
+placement = "auto"
+book = "books/openings.epd"
+book-order = "random"
+seed = 42
+```
+
+```text
+colosseum-cli --run-file ./colosseum.toml match ./candidate ./baseline --games 100
+```
+
+A path inside a run file is relative to the file itself, not to where you run
+the command, so the file travels with the project. A run file can carry the
+whole command instead, and anything on the command line replaces what the file
+says. `colosseum-cli <command> --help` lists every option, and
+[run files](docs/cli/run-files.md) covers inheritance and unsetting.
 
 Continue with the [quickstart](docs/cli/quickstart.md), the
 [command reference](docs/cli/command-reference.md),

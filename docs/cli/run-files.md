@@ -47,7 +47,7 @@ normally to share conditions across workflows:
 [options]
 concurrency = 4
 placement = "auto"
-book = "books/openings.epd"
+book = "../books/openings.epd"
 book-order = "random"
 seed = 42
 ```
@@ -55,6 +55,10 @@ seed = 42
 ```text
 colosseum-cli --run-file ./testing/fast.toml match ./candidate ./baseline --games 100
 ```
+
+The book path is written from the run file's own directory, not from where the
+command runs — see the resolution rule below — so this file finds a book in the
+project's `books/` directory beside `testing/`.
 
 Two options are deliberately outside the run identity: `progress-every` and
 `progress-min-secs` only decide how often a run talks to the console, so they

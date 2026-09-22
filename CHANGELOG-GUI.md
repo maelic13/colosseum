@@ -43,6 +43,11 @@ by hand once; from then on the update check works again.
   clock — still loses its game, as before
 - The update check reads the GUI's own release list and offers the newest
   stable GUI release; the fallback link is the releases page
+- **Download files are named `colosseum-gui-<version>-<platform>-<arch>`**,
+  where the architecture is `x64` or `arm64` — 1.0.2 called them
+  `colosseum-<version>-…` with `x86_64` and `aarch64`. Nothing about
+  installing changes; a script that fetches a release asset by name needs
+  the new one
 
 ### Fixed
 - The application builds on Linux and macOS hosts again (the Windows icon
