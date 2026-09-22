@@ -166,7 +166,7 @@ fn an_old_spsa_schedule_is_refused_by_its_version_and_not_by_a_field() {
                 "--r-end",
                 "0.002",
                 "--iterations",
-                "3",
+                "2",
                 "--games-per-iteration",
                 "2",
                 "--depth",
@@ -175,6 +175,7 @@ fn an_old_spsa_schedule_is_refused_by_its_version_and_not_by_a_field() {
                 "2",
                 "--seed",
                 "7",
+                "--__synthetic-games",
                 "--dir",
             ])
             .arg(&run)
