@@ -13,10 +13,11 @@
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 
 /// Seconds an in-flight game is given to finish after a stop is requested.
 pub const DEFAULT_STOP_GRACE_SECONDS: u64 = 30;
@@ -37,6 +38,7 @@ pub struct Cancellation {
     stage: Arc<watch::Sender<CancelStage>>,
     grace: Duration,
     /// When the stop was asked for. The grace period runs from here, once.
+    /// Tokio's clock: the one the grace timer runs on.
     stopped_at: Arc<OnceLock<Instant>>,
     remaining_units: Option<Arc<AtomicU64>>,
 }
@@ -146,7 +148,7 @@ impl Cancellation {
             return;
         }
         let deadline = self.stopped_at.get().copied().unwrap_or_else(Instant::now) + self.grace;
-        let grace = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline));
+        let grace = tokio::time::sleep_until(deadline);
         tokio::pin!(grace);
         loop {
             tokio::select! {
@@ -206,59 +208,69 @@ impl Drop for InterruptListener {
 mod tests {
     use super::*;
 
-    #[tokio::test]
+    // Every test runs on a paused clock: time advances only when the runtime
+    // has nothing else to do, so each wait below is exact and costs nothing.
+
+    #[tokio::test(start_paused = true)]
     async fn a_healthy_run_never_reaches_the_abandon_point() {
         let cancellation = Cancellation::new(Duration::from_millis(10));
         assert!(!cancellation.stopping());
         assert!(
-            tokio::time::timeout(Duration::from_millis(50), cancellation.abandon())
+            tokio::time::timeout(Duration::from_secs(3_600), cancellation.abandon())
                 .await
                 .is_err()
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_clean_stop_abandons_only_after_the_grace_period() {
-        let cancellation = Cancellation::new(Duration::from_millis(200));
+        let grace = Duration::from_secs(30);
+        let cancellation = Cancellation::new(grace);
         cancellation.request_stop();
+        let requested = Instant::now();
         assert!(cancellation.stopping());
         assert_eq!(cancellation.stage(), CancelStage::Stopping);
         assert!(
-            tokio::time::timeout(Duration::from_millis(50), cancellation.abandon())
+            tokio::time::timeout(grace - Duration::from_millis(1), cancellation.abandon())
                 .await
                 .is_err(),
             "in-flight work was abandoned before its grace period"
         );
-        tokio::time::timeout(Duration::from_millis(500), cancellation.abandon())
+        tokio::time::timeout(Duration::from_millis(2), cancellation.abandon())
             .await
             .expect("the bounded grace period must expire");
+        assert!(requested.elapsed() >= grace);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_second_interrupt_abandons_without_waiting() {
-        let cancellation = Cancellation::new(Duration::from_secs(3_600));
+        let grace = Duration::from_secs(3_600);
+        let cancellation = Cancellation::new(grace);
         cancellation.request_stop();
+        let requested = Instant::now();
         let escalate = cancellation.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(20)).await;
             escalate.request_abandon();
         });
-        tokio::time::timeout(Duration::from_millis(500), cancellation.abandon())
-            .await
-            .expect("a second interrupt must not wait for the grace period");
+        cancellation.abandon().await;
         assert_eq!(cancellation.stage(), CancelStage::Abandon);
+        assert!(
+            requested.elapsed() < grace,
+            "a second interrupt must not wait for the grace period"
+        );
     }
 
     /// Drivers rebuild the abandon future every time a unit completes. With
     /// more than one slot that happens constantly, so a grace period measured
     /// from each rebuild would never expire and an interrupted run would hang
     /// on its slowest game instead of stopping.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn the_grace_period_runs_once_from_the_interrupt() {
         let grace = Duration::from_millis(150);
         let cancellation = Cancellation::new(grace);
         cancellation.request_stop();
-        let requested = std::time::Instant::now();
+        let requested = Instant::now();
 
         let mut abandoned = false;
         for _ in 0..12 {
