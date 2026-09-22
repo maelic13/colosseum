@@ -1772,6 +1772,24 @@ change if they do not.
   not ship) and does not touch the CLI. If the maintainer prefers 1.0.2's loss instead,
   the runner must carry the failed side on `GameFault::Infrastructure`, which
   is a larger change and the reason it is not recommended.
+
+  **Two decisions the implementation needed, taken 2026-09-22.** First, the
+  re-queue alone does not deliver the promise above: `resume_tournament`
+  rebuilds every participant from the stored config snapshot, which is what
+  keeps a running tournament's conditions from drifting when the library is
+  edited, so a re-queued game would replay the same missing executable for
+  ever. `resume_tournament` therefore takes the caller's library and repairs
+  exactly one thing — a participant whose recorded executable no longer
+  exists, and only when the library still holds that same engine id at a path
+  that does, in which case the launch inputs (executable, arguments, working
+  directory, environment) come from the library and everything else, options
+  included, stays as recorded. A tournament whose executables are all present
+  is never touched, and an empty library resumes from the snapshots alone.
+  Second, an unscorable game is not appended to the configured PGN export
+  either: a moveless `1/2-1/2` with `[Termination "abandoned"]` is half a
+  point to any reader, and the replay after a repair would append it twice.
+  The enumeration above — points, games played, head-to-head, ratings — is
+  extended by the export for that reason.
 - **(ag) Versions and the tag contract** (GUIDE 10.9x, Sol High).
   - **The GUI's new version is 1.1.0.** (af)'s list has four user-visible
     additions — `colosseum --version`, the `gui-v` update check, the `Fixed`

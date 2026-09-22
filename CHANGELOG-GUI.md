@@ -29,6 +29,18 @@ by hand once; from then on the update check works again.
   the CLI's)
 
 ### Changed
+- **A game whose engine could not start is no longer scored.** When a
+  tournament cannot launch an engine — a moved executable, a missing DLL, a
+  permission — the game is reported as aborted and counted so the tournament
+  finishes its other pairings, but it awards no points, no head-to-head
+  record and no rating change to either side, it is left out of the PGN
+  export, and it shows in the Arena as "not scored" with the reason.
+  Previously the game was recorded as a draw, which quietly moved both
+  engines' library ratings for a game nobody played. Correct the engine in
+  the Engines tab and press Start: the tournament picks up the corrected
+  executable and plays the games that were missed. An engine that starts and
+  *then* misbehaves — a crash, an illegal move, a lost handshake or a lost
+  clock — still loses its game, as before
 - The update check reads the GUI's own release list and offers the newest
   stable GUI release; the fallback link is the releases page
 

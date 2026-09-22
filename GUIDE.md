@@ -15,11 +15,11 @@ internal naming or method argumentation.
 | | |
 |---|---|
 | Branch / versions | `cli`; Colosseum GUI **1.0.2** released (legacy `v` tag). Colosseum CLI **0.1.0**, unreleased. The first release from `cli` ships both: GUI **1.1.0** (`gui-v1.1.0`, "latest") and CLI **0.1.0** (`cli-v0.1.0`, never "latest") |
-| What exists | Phases 0–9 complete; Phase 10 corrections 10.1–10.9w complete (10.9m rejected; 10.9h, 10.9p, 10.9t deferred behind the release). Candidate `823b398` passed four-platform archive smoke; every correction since has landed with its tests; qualification and symmetry runs recorded |
-| What is missing | **10.9w.1** (the GUI must not score a game whose engine could not start), **10.9x** (versions, tag contract, updater prerelease filter), **10.9y** (`cargo xtask`, GUI workflow hardening and candidate mode), **10.9z** (user documentation, finished), then **10.10** (acceptance repeat, merge, tags). Phase 11 (GUI on the harness) after publication |
+| What exists | Phases 0–9 complete; Phase 10 corrections 10.1–10.9w.1 complete (10.9m rejected; 10.9h, 10.9p, 10.9t deferred behind the release). Candidate `823b398` passed four-platform archive smoke; every correction since has landed with its tests; qualification and symmetry runs recorded |
+| What is missing | **10.9x** (versions, tag contract, updater prerelease filter), **10.9y** (`cargo xtask`, GUI workflow hardening and candidate mode), **10.9z** (user documentation, finished), then **10.10** (acceptance repeat, merge, tags). Phase 11 (GUI on the harness) after publication |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 CLI candidate archives ☑ exact-archive smoke · the `gui-v` release lane has never run; 10.9y gives it a candidate mode |
-| Next step | **10.9w.1** — Sol High (Claude: Opus 5, high). Then 10.9x, 10.9y, 10.9z, **10.10 — EXIT** |
+| Next step | **10.9x** — Sol High (Claude: Opus 5, high). Then 10.9y, 10.9z, **10.10 — EXIT** |
 | Decisions awaiting the maintainer | The 2026-09-22 proposals in PLAN §S8 "Phase 10 — open items": exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, explicit GUI artifact list, versions kept in names, updater prerelease fix now and pagination later, throughput margin not chased, private-commit measure for the flaky test. The steps below assume them |
 
 ## Completed phases
@@ -41,7 +41,7 @@ Step identifiers are never reused.
 - ☑ **Phase 7** (7.1–7.3) — Round-robin and gauntlet tournaments with joint or anchored ML ratings, matching the GUI on a frozen fixture.
 - ☑ **Phase 8** (8.1–8.3) — Parity repeated on the candidate, ponder adopted, remaining gaps decided.
 - ☑ **Phase 9** (9.0–9.7) — Naming retained (ADR-0009), versioned `docs/cli/` with a generated reference (ADR-0010), README, candidate bundle, coverage and usability acceptance, release acceptance of candidate `823b398`.
-- ☑ **Phase 10, corrections** (10.1–10.9w) — Adjudication off by default, class-aware placement, per-move PGN annotations, final-centre SPSA estimator, graceful stop, fixed rating field, book-range refusal, command-module split, shared game slots, pair identity in PGN, review defects, unscorable tagging, progress reports, commit path off the game loop, writer hardening, latency instrument, one slot per game, fault allowance, SPSA occupancy and scale, persistent engines per slot, real-engine qualification and symmetry, adoption-audit corrections. 10.9m rejected (the forfeits were an engine defect); 10.9h, 10.9p, 10.9t deferred behind the release; 10.9g's two maintainer probes still owed and not blocking.
+- ☑ **Phase 10, corrections** (10.1–10.9w.1) — Adjudication off by default, class-aware placement, per-move PGN annotations, final-centre SPSA estimator, graceful stop, fixed rating field, book-range refusal, command-module split, shared game slots, pair identity in PGN, review defects, unscorable tagging, progress reports, commit path off the game loop, writer hardening, latency instrument, one slot per game, fault allowance, SPSA occupancy and scale, persistent engines per slot, real-engine qualification and symmetry, adoption-audit corrections, a game whose engine could not start excluded from scoring. 10.9m rejected (the forfeits were an engine defect); 10.9h, 10.9p, 10.9t deferred behind the release; 10.9g's two maintainer probes still owed and not blocking.
 
 ## Forward tracker
 
@@ -78,7 +78,7 @@ When reporting the next step, always report its model as well.
 
 ### Phase 10 — Release preparation (before `cli-v0.1.0` and `gui-v1.1.0`)
 
-- ☐ **10.9w.1** — **Model: Sol High.** The GUI honours `scorable`: a game whose
+- ☑ **10.9w.1 — DONE** — **Model: Sol High.** The GUI honours `scorable`: a game whose
   engine could not be spawned (`Termination::Aborted`, `scorable: false`) is
   excluded from standings and from the ML rating, on the live path and on
   the DB replay at resume; the recent-errors text says "not scored"; the
@@ -89,6 +89,21 @@ When reporting the next step, always report its model as well.
   unchanged); a store unit test covers the replay; `CHANGELOG-GUI.md` 1.1.0
   records it under Changed. Blocks the GUI release; the CLI is untouched —
   PLAN §Phase 10(af.1)
+  - Two additions the implementation needed, both in PLAN §Phase 10(af.1):
+    `resume_tournament` takes the caller's library and repairs one thing —
+    a participant whose recorded executable no longer exists, when the
+    library holds the same engine id at a path that does — because resume
+    otherwise rebuilds every engine from the stored snapshot and would
+    replay the same missing executable for ever; and an unscorable game is
+    left out of the PGN export too
+  - Demonstrated in the app on 2026-09-22, a `--portable` copy with "Ghost
+    1.0" at a path that does not exist: the tournament finished 2/2 with
+    both engines on zero games, zero points and unchanged Elo, terminations
+    `Aborted` 2, and the message "Ghost 1.0 vs Rarog 2.4.0 (round 1) — not
+    scored, the game was not played. Detail: io error: The system cannot
+    find the path specified. (os error 3)". Correcting Ghost's path and
+    reopening showed the tournament back at 0/2 and Stopped; Start then
+    played both games to Checkmate
 - ☐ **10.9x** — **Model: Sol High.** Versions and the tag contract: GUI
   manifest, updater and changelog at **1.1.0**; CLI stays 0.1.0 with the
   1.0.0 conditions recorded; `gui-v`/`cli-v` are the only accepted tag

@@ -625,20 +625,36 @@ async fn drive(mut driver: Driver) {
                             report.stats.plies,
                             &report.pgn,
                         );
-                        append_pgn(&driver.config, &report.pgn);
+                        // A game that was never played is not a game to
+                        // export: a moveless draw reads as half a point in
+                        // any analysis tool, and the game is replayed on the
+                        // next Start, which would append it twice.
+                        if report.scorable {
+                            append_pgn(&driver.config, &report.pgn);
+                        }
 
-                        standings.record(GameOutcome {
-                            white: report.white,
-                            black: report.black,
-                            result: report.result,
-                            termination: report.termination,
-                            white_nps: report.stats.white_nps,
-                            black_nps: report.stats.black_nps,
-                            white_depth: report.stats.white_depth,
-                            black_depth: report.stats.black_depth,
-                            white_move_ms: report.stats.white_move_ms,
-                            black_move_ms: report.stats.black_move_ms,
-                        });
+                        // A game the runner could not play is not a result.
+                        // Scoring it would hand out points, and through the
+                        // writeback after every finished game, library Elo,
+                        // for a game nobody played; the game is re-queued as
+                        // pending the next time the tournament starts.
+                        if report.scorable {
+                            standings.record(GameOutcome {
+                                white: report.white,
+                                black: report.black,
+                                result: report.result,
+                                termination: report.termination,
+                                white_nps: report.stats.white_nps,
+                                black_nps: report.stats.black_nps,
+                                white_depth: report.stats.white_depth,
+                                black_depth: report.stats.black_depth,
+                                white_move_ms: report.stats.white_move_ms,
+                                black_move_ms: report.stats.black_move_ms,
+                            });
+                        }
+                        // The counter advances either way: it drives the
+                        // tournament to Finished, and a game that cannot be
+                        // played must not stall the remaining pairings.
                         finished_count += 1;
 
                         if let Some(message) = &report.error {
@@ -650,7 +666,11 @@ async fn drive(mut driver: Driver) {
                                     .get(&id)
                                     .map_or_else(|| "?".to_string(), |t| t.name.clone())
                             };
+                            // An unscorable game has no culprit: its result
+                            // is a placeholder, so reading a loser out of it
+                            // would name an engine that never played.
                             let culprit = match report.result {
+                                _ if !report.scorable => None,
                                 GameResult::WhiteWin => Some(report.black),
                                 GameResult::BlackWin => Some(report.white),
                                 GameResult::Draw => None,
@@ -670,6 +690,11 @@ async fn drive(mut driver: Driver) {
                                         name_of(c), what, name_of(opp)
                                     )
                                 }
+                                None if !report.scorable => format!(
+                                    "{} vs {} (round {round}) — not scored, the game \
+                                     was not played. Detail: {message}",
+                                    name_of(report.white), name_of(report.black)
+                                ),
                                 None => format!(
                                     "{} vs {} (round {round}): {message}",
                                     name_of(report.white), name_of(report.black)
@@ -743,12 +768,17 @@ async fn drive(mut driver: Driver) {
 /// be replayed), then hands back the same `(Tournament, driver-future)` pair as
 /// [`create_tournament`].  Call [`Tournament::go`] to start (re)playing.
 ///
+/// `library` is the caller's current engine collection, used for one narrow
+/// repair only — see [`repair_missing_executable`]. Pass an empty slice to
+/// resume purely from the stored snapshots.
+///
 /// Returns an error if the tournament has fewer than two participants in the
 /// database, or if any participant is missing its stored config snapshot.
 pub fn resume_tournament(
     row: TournamentRow,
     store: Store,
     events: Sender<TournamentEvent>,
+    library: &[EngineConfig],
 ) -> Result<(Tournament, impl Future<Output = ()> + use<>), EngineError> {
     let id = row.id;
     let config = row.config;
@@ -773,6 +803,17 @@ pub fn resume_tournament(
                 p.engine
             ))
         })?;
+        let mut engine = engine.clone();
+        if repair_missing_executable(&mut engine, library) {
+            tracing::info!(
+                target: "scheduler",
+                "participant {} was recorded at a path that no longer exists; \
+                 using the library's current executable {}",
+                versioned_name(&engine),
+                engine.path.display()
+            );
+        }
+        let engine = &engine;
         seeds.push((p.engine, p.start_elo));
         templates.insert(
             p.engine,
@@ -800,8 +841,12 @@ pub fn resume_tournament(
     let all_games = store.list_games(id)?;
     let total_games = all_games.len();
 
-    // Reset in-flight (running) and force-stopped (discarded) games to pending
-    // so they will be replayed in this session (one statement, not per-row).
+    // Reset in-flight (running), force-stopped (discarded) and unscored
+    // (aborted) games to pending so they will be played in this session (one
+    // statement, not per-row). An aborted game is one the runner could not
+    // play at all — almost always a bad executable path, a missing DLL or a
+    // permission — so it is re-queued rather than kept: the user fixes the
+    // engine in the library and presses Start, and the game is played then.
     store.reset_unfinished_games(id)?;
 
     // Replay finished games to reconstruct the standings and the termination
@@ -815,7 +860,9 @@ pub fn resume_tournament(
     let mut schedule: Vec<ScheduledGame> = Vec::new();
 
     for game in &all_games {
-        if game.status == store::GAME_FINISHED {
+        // `all_games` was read before the reset above, so an aborted row still
+        // reads as finished here; its termination is what identifies it.
+        if game.status == store::GAME_FINISHED && !is_unscored(game) {
             if let Some(result) = game.result {
                 if let Some(t) = game.termination {
                     *termination_counts.entry(t).or_insert(0) += 1;
@@ -972,7 +1019,9 @@ pub fn load_tournament_results(
     let mut draws = 0usize;
 
     for game in &all_games {
-        if game.status != store::GAME_FINISHED {
+        // History and the live table must agree, so the same exclusion
+        // applies here: an unscored game is not a result to display.
+        if game.status != store::GAME_FINISHED || is_unscored(game) {
             continue;
         }
         let Some(result) = game.result else { continue };
@@ -1148,6 +1197,48 @@ fn insert_matched(
             values.insert(opt.name().to_string(), Some(v.to_string()));
         }
     }
+}
+
+/// Take a participant's launch inputs from the library when, and only when,
+/// its recorded executable is gone.
+///
+/// A tournament stores a snapshot of every participant so its playing
+/// conditions cannot drift when the library is edited mid-run: options,
+/// ratings and identity are read back exactly as they were. The one thing the
+/// snapshot cannot survive is an executable that is no longer there — a moved
+/// binary, a renamed folder, a drive remounted elsewhere — because every
+/// remaining game of that engine can then only abort. In that one case, if the
+/// library still holds the same engine at a path that does exist, the launch
+/// inputs (executable, arguments, working directory, environment) are taken
+/// from it, so correcting the entry in the Engines tab and pressing Start
+/// plays the games that were missed. Everything else stays as recorded, and a
+/// tournament whose executables are all present is never touched.
+fn repair_missing_executable(stored: &mut EngineConfig, library: &[EngineConfig]) -> bool {
+    if stored.path.exists() {
+        return false;
+    }
+    let Some(current) = library
+        .iter()
+        .find(|entry| entry.id == stored.id && entry.path.exists())
+    else {
+        return false;
+    };
+    stored.path = current.path.clone();
+    stored.args = current.args.clone();
+    stored.working_dir = current.working_dir.clone();
+    stored.env = current.env.clone();
+    true
+}
+
+/// Whether a stored row is a game the runner could not play, rather than a
+/// game that was played and ended.
+///
+/// `Termination::Aborted` is the stored marker for the runner's unscorable
+/// outcome (`scorable: false`): the process could not be created, so the
+/// recorded draw is a placeholder for the report shape and not a result. Such
+/// a row is never replayed into standings, and resume re-queues it as pending.
+fn is_unscored(game: &store::GameRow) -> bool {
+    game.termination == Some(Termination::Aborted)
 }
 
 fn display_name(engine: &EngineConfig) -> String {
@@ -1436,5 +1527,125 @@ mod tests {
         let resolved = resolve_options(&engine, &common, Some(&ov));
         assert!(resolved.iter().any(|(n, _)| n == "SyzygyPath"));
         assert!(resolved.iter().any(|(n, _)| n == "GaviotaTbPath"));
+    }
+    /// The History tab reads finished games back from the database. A game the
+    /// runner could not play is stored with an `Aborted` termination, and the
+    /// stored-results replay must exclude it exactly as the live path does —
+    /// otherwise reopening a tournament would show points the live table never
+    /// showed.
+    #[test]
+    fn stored_results_exclude_a_game_that_was_never_played() {
+        use crate::store::Store;
+
+        let store = Store::open_in_memory().unwrap();
+        let id = TournamentId::from_uuid(uuid::Uuid::new_v4());
+        store
+            .create_tournament(id, "Aborted", &TournamentConfig::default())
+            .unwrap();
+
+        let mut white = test_engine();
+        white.meta.name = "White".into();
+        let mut black = test_engine();
+        black.meta.name = "Black".into();
+        for (seed, engine) in [&white, &black].into_iter().enumerate() {
+            store
+                .add_tournament_engine(id, engine.id, engine, seed as u32, 1500.0)
+                .unwrap();
+        }
+
+        let played = GameId::from_uuid(uuid::Uuid::new_v4());
+        let aborted = GameId::from_uuid(uuid::Uuid::new_v4());
+        for (game, round) in [(played, 1), (aborted, 2)] {
+            store
+                .insert_pending_game(game, id, round, white.id, black.id, None, &[])
+                .unwrap();
+        }
+        let finish = |game, result, termination| {
+            store
+                .finish_game(
+                    game, result, termination, None, None, None, None, None, None, 20, "pgn",
+                )
+                .unwrap();
+        };
+        finish(played, GameResult::WhiteWin, Termination::Checkmate);
+        finish(aborted, GameResult::Draw, Termination::Aborted);
+
+        let row = store.load_tournament(id).unwrap().unwrap();
+        let results = load_tournament_results(&store, &row).unwrap();
+
+        assert_eq!(results.games_total, 2);
+        assert_eq!(results.games_finished, 1, "the aborted game is not a result");
+        assert_eq!(results.decisive, 1);
+        assert_eq!(results.draws, 0, "the placeholder draw must not be counted");
+        assert_eq!(results.standings.standing(white.id).wins, 1);
+        assert_eq!(results.standings.standing(white.id).draws, 0);
+        assert_eq!(results.standings.standing(black.id).losses, 1);
+        assert_eq!(results.standings.standing(black.id).draws, 0);
+        assert_eq!(results.standings.standing(black.id).games(), 1);
+    }
+    /// The stored snapshot is what keeps a running tournament's conditions
+    /// from drifting, so the repair must be exactly as narrow as the problem:
+    /// only a missing executable, only from the same engine, only the launch
+    /// inputs.
+    #[test]
+    fn a_missing_executable_is_taken_from_the_library_and_nothing_else_is() {
+        let present = std::env::current_exe().expect("the test binary is a file that exists");
+        let missing = PathBuf::from("no-such-directory/no-such-engine.exe");
+
+        let mut stored = test_engine();
+        stored.path = missing.clone();
+        stored.args = vec!["--old".into()];
+        stored.options.insert(
+            "Hash".into(),
+            colosseum_core::UciOptionValue::Spin(64),
+        );
+
+        let mut library_entry = stored.clone();
+        library_entry.path = present.clone();
+        library_entry.args = vec!["--new".into()];
+        library_entry.working_dir = Some(PathBuf::from("new-dir"));
+        library_entry.env.insert("NNUE".into(), "net.nnue".into());
+        library_entry.options.insert(
+            "Hash".into(),
+            colosseum_core::UciOptionValue::Spin(4096),
+        );
+
+        // The one case the repair exists for.
+        let mut repaired = stored.clone();
+        assert!(repair_missing_executable(&mut repaired, &[library_entry.clone()]));
+        assert_eq!(repaired.path, present);
+        assert_eq!(repaired.args, ["--new"]);
+        assert_eq!(repaired.working_dir, Some(PathBuf::from("new-dir")));
+        assert_eq!(repaired.env["NNUE"], "net.nnue");
+        // Playing conditions stay as the tournament recorded them.
+        assert_eq!(
+            repaired.options["Hash"],
+            colosseum_core::UciOptionValue::Spin(64)
+        );
+
+        // An executable that is there is never second-guessed.
+        let mut working = stored.clone();
+        working.path = present.clone();
+        assert!(!repair_missing_executable(&mut working, &[library_entry.clone()]));
+        assert_eq!(working.args, ["--old"]);
+
+        // A different engine's entry is not a substitute.
+        let mut other = library_entry.clone();
+        other.id = EngineId::from_uuid(uuid::Uuid::new_v4());
+        let mut unrepaired = stored.clone();
+        assert!(!repair_missing_executable(&mut unrepaired, &[other]));
+        assert_eq!(unrepaired.path, missing);
+
+        // Nor is a library entry whose own executable is also gone.
+        let mut also_missing = library_entry.clone();
+        also_missing.path = PathBuf::from("no-such-directory/another-ghost.exe");
+        let mut unrepaired = stored.clone();
+        assert!(!repair_missing_executable(&mut unrepaired, &[also_missing]));
+        assert_eq!(unrepaired.path, missing);
+
+        // An empty library is the "resume from the snapshot alone" case.
+        let mut unrepaired = stored.clone();
+        assert!(!repair_missing_executable(&mut unrepaired, &[]));
+        assert_eq!(unrepaired.path, missing);
     }
 }

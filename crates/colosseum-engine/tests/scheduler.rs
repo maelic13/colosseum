@@ -238,24 +238,28 @@ async fn force_stop_discards_in_flight() {
     handle.abort();
 }
 
+/// An engine that cannot be spawned is the host's condition — a wrong path, a
+/// missing DLL, a permission — not the engine's play, so no side has earned a
+/// result. The game is reported and counted so the tournament completes, and
+/// it enters neither the standings nor the ratings.
 #[tokio::test]
-async fn failed_engine_loses_with_error() {
+async fn failed_engine_is_not_scored() {
     let (_guard, exe) = common::smoke_engine();
-    let (_dir, store, _db_path) = temp_db();
+    let (dir, store, _db_path) = temp_db();
 
     let good = engine_cfg("Good", &exe, &[("Hash", "16")]);
     let good_id = good.id;
     let bogus = engine_cfg("Bogus", Path::new("definitely-not-a-real-engine.exe"), &[]);
+    let bogus_id = bogus.id;
     let (events_tx, events_rx) = crossbeam_channel::unbounded();
 
-    let (tournament, driver) = create_tournament(
-        "Crash",
-        fast_config(2, 8, 10),
-        vec![good, bogus],
-        store,
-        events_tx,
-    )
-    .unwrap();
+    // A PGN export is configured so the run can be checked for phantom games.
+    let pgn_output = dir.path().join("games.pgn");
+    let mut config = fast_config(2, 8, 10);
+    config.pgn_output = Some(pgn_output.clone());
+
+    let (tournament, driver) =
+        create_tournament("Crash", config, vec![good, bogus], store, events_tx).unwrap();
     let handle = tokio::spawn(driver);
 
     tournament.go();
@@ -271,12 +275,40 @@ async fn failed_engine_loses_with_error() {
     );
 
     let snap = snapshot.lock().unwrap().clone();
-    // 2 engines, double round robin => 2 games; the good engine wins both.
+    // 2 engines, double round robin => 2 games. Both are reported so the
+    // tournament reaches Finished, and neither is scored.
     assert_eq!(snap.games_finished, 2);
-    assert_eq!(snap.standings.standing(good_id).wins, 2);
+    for id in [good_id, bogus_id] {
+        let standing = snap.standings.standing(id);
+        assert_eq!(standing.games(), 0, "engine {id} was given games it never played");
+        assert_eq!((standing.wins, standing.draws, standing.losses), (0, 0, 0));
+        assert_eq!(standing.points(), 0.0);
+    }
+    // Ratings move only on games actually played, so the writeback after every
+    // finished game cannot shift the library on a tournament like this one.
+    for id in [good_id, bogus_id] {
+        let elo = snap.elo.get(&id).expect("every participant carries a rating");
+        assert_eq!(elo.delta, 0.0, "engine {id} changed rating without a game");
+    }
+    assert_eq!(
+        snap.termination_counts.get(&colosseum_core::Termination::Aborted),
+        Some(&2),
+        "both games must be recorded as aborted"
+    );
+    assert!(
+        snap.recent_errors.iter().all(|error| error.contains("not scored")),
+        "the error text must say the game was not scored: {:?}",
+        snap.recent_errors
+    );
     assert!(
         !snap.recent_errors.is_empty(),
         "expected engine errors recorded"
+    );
+    // A game that was never played is not exported: a moveless draw would
+    // read as half a point in whatever the user analyses the PGN with.
+    assert!(
+        !pgn_output.exists(),
+        "an unplayed game must not reach the PGN export"
     );
 
     let error_events = events_rx
@@ -345,7 +377,7 @@ async fn resume_across_restart() {
         .unwrap()
         .expect("tournament should still be in the database");
     let (events_tx2, _events_rx2) = crossbeam_channel::unbounded();
-    let (t2, driver2) = resume_tournament(row, store2, events_tx2).unwrap();
+    let (t2, driver2) = resume_tournament(row, store2, events_tx2, &[]).unwrap();
     let handle2 = tokio::spawn(driver2);
 
     // The resumed snapshot should already reflect the pre-restart finished games.

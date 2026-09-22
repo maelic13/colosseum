@@ -425,7 +425,11 @@ impl Backend {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
         let rating_writeback = row.config.rating_writeback.clone();
         let config_copy = row.config.clone();
-        let (handle, driver) = resume_tournament(row, resume_store, events_tx)?;
+        // The library is passed for one repair only: a participant whose
+        // recorded executable has since moved or been removed is relaunched
+        // from the library's current entry, so correcting the path in the
+        // Engines tab is enough to play the games that could not start.
+        let (handle, driver) = resume_tournament(row, resume_store, events_tx, &self.engines)?;
         let snapshot = handle.snapshot_handle();
         let finished_now = snapshot.lock().map_or(0, |s| s.games_finished);
 
