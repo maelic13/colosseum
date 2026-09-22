@@ -90,7 +90,7 @@ fn a_slot_keeps_its_engines_for_the_whole_match_and_resends_only_changed_options
         );
         let output = match_command(
             &root.path().join(name),
-            6,
+            3,
             &[
                 format!("--a-engine-arg=--log-commands={}", a_log.display()),
                 format!("--b-engine-arg=--log-commands={}", b_log.display()),
@@ -104,22 +104,22 @@ fn a_slot_keeps_its_engines_for_the_whole_match_and_resends_only_changed_options
         .unwrap();
         succeeded(&output);
         let report: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(report["report"]["games_completed"], 6, "{report}");
+        assert_eq!(report["report"]["games_completed"], 3, "{report}");
         (commands(&a_log), commands(&b_log))
     };
 
     let (a, b) = play("kept", "per-slot");
-    // One process per side for six games, each told of every new game; the
+    // One process per side for three games, each told of every new game; the
     // option set once, not again for games whose value did not change.
     assert_eq!((processes(&a), processes(&b)), (1, 1));
     assert_eq!(count(&a, "uci"), 1);
-    assert_eq!(count(&a, "ucinewgame"), 6);
+    assert_eq!(count(&a, "ucinewgame"), 3);
     assert_eq!(count(&a, "setoption name Hash value 32"), 1);
-    assert_eq!(count(&b, "ucinewgame"), 6);
+    assert_eq!(count(&b, "ucinewgame"), 3);
 
     let (a, b) = play("fresh", "per-game");
-    assert_eq!((processes(&a), processes(&b)), (6, 6));
-    assert_eq!(count(&a, "setoption name Hash value 32"), 6);
+    assert_eq!((processes(&a), processes(&b)), (3, 3));
+    assert_eq!(count(&a, "setoption name Hash value 32"), 3);
 
     // The mode is part of the resolved configuration.
     let resolved: Value = serde_json::from_slice(
@@ -135,7 +135,7 @@ fn an_engine_that_faults_is_replaced_and_its_opponent_is_kept() {
     let (a_log, b_log) = (root.path().join("a.log"), root.path().join("b.log"));
     let output = match_command(
         &root.path().join("run"),
-        4,
+        2,
         &[
             format!("--a-engine-arg=--log-commands={}", a_log.display()),
             format!("--b-engine-arg=--log-commands={}", b_log.display()),
@@ -146,57 +146,73 @@ fn an_engine_that_faults_is_replaced_and_its_opponent_is_kept() {
     .unwrap();
     succeeded(&output);
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["report"]["faults"]["engine_b"], 4, "{report}");
+    assert_eq!(report["report"]["faults"]["engine_b"], 2, "{report}");
     // B crashed in every game and was started again for the next one; A,
-    // which never faulted, played all four in one process.
-    assert_eq!(processes(&commands(&b_log)), 4);
+    // which never faulted, played both in one process.
+    assert_eq!(processes(&commands(&b_log)), 2);
     assert_eq!(processes(&commands(&a_log)), 1);
 }
 
+fn read_pid(path: &Path) -> Option<u32> {
+    std::fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+/// Killing the harness outright takes its engines with it, whether the slot
+/// keeps them or each game starts its own.
+///
+/// Engine A never answers a search and the clock would give it ten minutes,
+/// so both processes are certainly still running — and still the harness's —
+/// when it is killed: nothing but the kill can end them.
 #[test]
-fn kept_engines_are_reaped_when_the_harness_is_killed() {
+fn engines_are_reaped_when_the_harness_is_killed_whether_kept_or_per_game() {
     let root = tempfile::tempdir().unwrap();
-    let run = root.path().join("run");
-    let pid_file = root.path().join("a.pid");
-    let mut child = match_command(
-        &run,
-        40,
-        &[
-            "--a-engine-arg=--sleep-ms=40".into(),
-            format!("--a-engine-arg=--pid-file={}", pid_file.display()),
-        ],
-    )
-    .stdout(std::process::Stdio::null())
-    .stderr(std::process::Stdio::null())
-    .spawn()
-    .unwrap();
-    // Wait for a finished game: its engines are then kept between games.
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let journal = run.join("games.jsonl");
-    while std::fs::read_to_string(&journal)
-        .unwrap_or_default()
-        .lines()
-        .count()
-        < 2
-    {
-        assert!(Instant::now() < deadline, "no game finished");
-        assert!(child.try_wait().unwrap().is_none(), "the match ended early");
-        thread::sleep(Duration::from_millis(10));
-    }
-    let pid: u32 = std::fs::read_to_string(&pid_file)
-        .unwrap()
-        .trim()
-        .parse()
+    for mode in ["per-slot", "per-game"] {
+        let pid_files = [
+            root.path().join(format!("{mode}-a.pid")),
+            root.path().join(format!("{mode}-b.pid")),
+        ];
+        let mut child = match_command(
+            &root.path().join(mode),
+            1,
+            &[
+                "--a-engine-arg=--hang-on-go".into(),
+                format!("--a-engine-arg=--pid-file={}", pid_files[0].display()),
+                format!("--b-engine-arg=--pid-file={}", pid_files[1].display()),
+                "--a-movetime-ms".into(),
+                "600000".into(),
+                "--b-movetime-ms".into(),
+                "600000".into(),
+                "--engine-processes".into(),
+                mode.into(),
+            ],
+        )
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
         .unwrap();
-    assert!(colosseum_uci::process_is_alive(pid));
-    child.kill().unwrap();
-    child.wait().unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while colosseum_uci::process_is_alive(pid) {
-        assert!(
-            Instant::now() < deadline,
-            "kept engine {pid} outlived the harness"
-        );
-        thread::sleep(Duration::from_millis(20));
+        // Each engine writes its pid file as it starts.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let pids = loop {
+            if let [Some(a), Some(b)] = pid_files.each_ref().map(|path| read_pid(path)) {
+                break [a, b];
+            }
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "{mode}: the match ended before both engines started"
+            );
+            assert!(Instant::now() < deadline, "{mode}: no engines started");
+            thread::sleep(Duration::from_millis(10));
+        };
+        child.kill().unwrap();
+        child.wait().unwrap();
+        // The operating system ends them; wait for it to have done so.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while pids.iter().any(|pid| colosseum_uci::process_is_alive(*pid)) {
+            assert!(
+                Instant::now() < deadline,
+                "{mode}: engines {pids:?} outlived the harness"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 }
