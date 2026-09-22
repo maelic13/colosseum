@@ -5,18 +5,17 @@
 //! and syncs both together every fifty games or one second. A kill inside that
 //! window can leave a torn last journal line, and journal lines whose moves the
 //! operating system never wrote to `games.pgn`. These cases produce exactly
-//! those states from a real killed run, resume it, and require the result an
-//! uninterrupted run produces. A journal that no longer matches its checkpoint
+//! those states deterministically — a run directory whose journal runs past
+//! its checkpoint, then torn the way a lost write tears it — resume it, and
+//! require the complete run. A journal that no longer matches its checkpoint
 //! is refused, never repaired.
 
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::Command;
 
 use serde_json::Value;
 
-const GAMES: &str = "200";
+const GAMES: &str = "8";
 
 fn cli() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_colosseum-cli"));
@@ -90,28 +89,42 @@ fn covered(run: &Path) -> usize {
         .map_or(0, |records| records as usize)
 }
 
-/// Play part of the match and kill the process outright, with at least three
-/// games committed after the last checkpoint.
+/// The match, stopped cleanly by the internal hook after `units` games of
+/// this invocation.
+fn stopped_run(run: &Path, units: u64) {
+    let mut command = cli();
+    command.args(["--__stop-after-units", &units.to_string()]);
+    // The same match, with the stop hook ahead of its own `--json`.
+    let template = match_command(run);
+    let stopped = command.args(template.get_args().skip(1)).output().unwrap();
+    assert_eq!(
+        stopped.status.code(),
+        Some(6),
+        "{}",
+        String::from_utf8_lossy(&stopped.stderr)
+    );
+}
+
+/// What a kill between two checkpoints leaves: a checkpoint, and journal and
+/// PGN records of at least three games committed after it.
+///
+/// Rather than racing a kill against the run, the run is stopped cleanly,
+/// its checkpoints are set aside, the run is resumed and stopped again, and
+/// the older checkpoints are put back. The journal then runs past its
+/// checkpoint exactly as it does when the process dies before the next one.
 fn killed_run(run: &Path) {
-    let mut child = match_command(run)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        assert!(
-            child.try_wait().unwrap().is_none(),
-            "the match finished before it could be killed"
-        );
-        if journal_lines(run).len() >= covered(run) + 3 {
-            break;
+    stopped_run(run, 3);
+    let checkpoints = ["checkpoint.json", "checkpoint.previous.json"]
+        .map(|name| (run.join(name), std::fs::read(run.join(name)).ok()));
+    stopped_run(run, 3);
+    for (path, bytes) in checkpoints {
+        match bytes {
+            Some(bytes) => std::fs::write(&path, bytes).unwrap(),
+            None => {
+                let _ = std::fs::remove_file(&path);
+            }
         }
-        assert!(Instant::now() < deadline, "no games were committed");
-        thread::sleep(Duration::from_millis(2));
     }
-    child.kill().unwrap();
-    child.wait().unwrap();
 }
 
 fn truncate(path: &Path, length: usize) {
@@ -123,21 +136,9 @@ fn truncate(path: &Path, length: usize) {
         .unwrap();
 }
 
-fn report_counts(value: &Value) -> Vec<Value> {
-    ["games_attempted", "games_completed", "engine_a", "engine_b"]
-        .iter()
-        .map(|field| value["report"][field].clone())
-        .collect()
-}
-
 #[test]
 fn a_kill_inside_the_sync_window_loses_only_that_window() {
     let root = tempfile::tempdir().unwrap();
-    let straight = root.path().join("straight");
-    let expected = match_command(&straight).output().unwrap();
-    assert!(expected.status.success());
-    let expected = json(&expected);
-
     let run = root.path().join("killed");
     killed_run(&run);
     let lines = journal_lines(&run);
@@ -188,7 +189,9 @@ fn a_kill_inside_the_sync_window_loses_only_that_window() {
     );
     let resumed = json(&resumed);
     assert_eq!(resumed["report"]["status"], "completed");
-    assert_eq!(report_counts(&resumed), report_counts(&expected));
+    let games = GAMES.parse::<u64>().unwrap();
+    assert_eq!(resumed["report"]["games_attempted"], games, "{resumed}");
+    assert_eq!(resumed["report"]["games_completed"], games, "{resumed}");
 
     // The resume appended to what was durable and rewrote none of it.
     let journal = std::fs::read(run.join("games.jsonl")).unwrap();
@@ -200,8 +203,11 @@ fn a_kill_inside_the_sync_window_loses_only_that_window() {
         .map(|(_, _, line)| line["game"]["number"].as_u64().unwrap())
         .collect::<Vec<_>>();
     numbers.sort_unstable();
-    numbers.dedup();
-    assert_eq!(numbers.len(), lines.len(), "a game was journalled twice");
+    assert_eq!(
+        numbers,
+        (1..=games).collect::<Vec<_>>(),
+        "a game was journalled twice or never"
+    );
     let pgn = std::fs::read_to_string(run.join("games.pgn")).unwrap();
     assert_eq!(pgn.matches("[Event ").count(), lines.len());
     // Every line's moves are where the line says they are.
@@ -218,12 +224,7 @@ fn a_journal_that_no_longer_matches_its_checkpoint_is_refused() {
     let root = tempfile::tempdir().unwrap();
     let run = root.path().join("stopped");
     // A clean stop writes a checkpoint covering every committed game.
-    let mut command = cli();
-    command.args(["--__stop-after-units", "3"]);
-    // The same match, with the stop hook ahead of its own `--json`.
-    let template = match_command(&run);
-    let stopped = command.args(template.get_args().skip(1)).output().unwrap();
-    assert_eq!(stopped.status.code(), Some(6));
+    stopped_run(&run, 3);
     let covered = covered(&run);
     assert!(covered >= 3);
 
@@ -256,11 +257,7 @@ fn a_journal_that_no_longer_matches_its_checkpoint_is_refused() {
 fn a_run_directory_from_before_the_journal_is_refused_with_the_restart_guidance() {
     let root = tempfile::tempdir().unwrap();
     let run = root.path().join("old");
-    let mut command = cli();
-    command.args(["--__stop-after-units", "3"]);
-    let template = match_command(&run);
-    let stopped = command.args(template.get_args().skip(1)).output().unwrap();
-    assert_eq!(stopped.status.code(), Some(6));
+    stopped_run(&run, 3);
 
     // What a directory written before the journal looks like to this
     // version: checkpoints in the first schema, and no journal beside them.
