@@ -1,0 +1,39 @@
+[Event "Colosseum move-comment fixture"]
+[Site "?"]
+[Date "2026.09.17"]
+[Round "1"]
+[White "Alpha 1.0.0"]
+[Black "Beta 2.3.1"]
+[Result "1-0"]
+[TimeControl "white movetime/100ms; black movetime/100ms"]
+[Termination "normal"]
+[OpeningPlyCount "2"]
+[GameNumber "1"]
+[PairNumber "1"]
+[PairGame "1"]
+[OpeningIndex "0"]
+[OpeningLabel "e4 e5"]
+
+1. e4 {book} e5 {book} 2. Bc4 {s=24 d=14 t=97ms n=1204513} Nc6
+{s=-18 d=15 t=103ms n=1550922} 3. Qh5 {s=30 d=13 t=88ms} Nf6
+{s=-402 d=16 t=110ms n=1804220} 4. Qxf7# {s=#1 d=6 t=12ms n=41233} 1-0
+
+[Event "Colosseum move-comment fixture"]
+[Site "?"]
+[Date "2026.09.17"]
+[Round "2"]
+[White "Beta 2.3.1"]
+[Black "Alpha 1.0.0"]
+[Result "1-0"]
+[TimeControl "white movetime/100ms; black movetime/100ms"]
+[Termination "normal"]
+[OpeningPlyCount "2"]
+[GameNumber "2"]
+[PairNumber "1"]
+[PairGame "2"]
+[OpeningIndex "0"]
+[OpeningLabel "e4 e5"]
+
+1. e4 {book} e5 {book} 2. Qh5 {s=18 d=0 t=1ms n=0} Nc6
+{s=-12 d=11 t=64ms n=702311} 3. Bc4 {s=44 d=12 t=71ms n=845210} Nf6
+{s=#-1 d=9 t=31ms n=210044} 4. Qxf7# {s=#1 d=5 t=9ms n=30112} 1-0

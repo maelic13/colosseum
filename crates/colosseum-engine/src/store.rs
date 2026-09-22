@@ -432,8 +432,16 @@ impl Store {
         Ok(())
     }
 
-    /// Reset every non-finished game of a tournament back to pending in a
-    /// single statement (resume path). Returns how many rows changed.
+    /// Reset every game of a tournament that has no played result back to
+    /// pending in a single statement (resume path). Returns how many rows
+    /// changed.
+    ///
+    /// That is the in-flight (`running`) and force-stopped (`discarded`) rows,
+    /// and the games the runner could not play at all, which are stored
+    /// finished with an `Aborted` termination. An aborted game is almost
+    /// always a bad executable path, a missing DLL or a permission, so it is
+    /// re-queued rather than kept as a non-result: the user corrects the
+    /// engine in the library and presses Start, and the game is played then.
     pub fn reset_unfinished_games(&self, tournament: TournamentId) -> Result<usize> {
         Ok(self.conn.execute(
             "UPDATE games
@@ -442,12 +450,14 @@ impl Store {
                  white_depth = NULL, black_depth = NULL,
                  white_move_ms = NULL, black_move_ms = NULL,
                  started_at = NULL, finished_at = NULL
-             WHERE tournament_id = ?1 AND status IN (?3, ?4)",
+             WHERE tournament_id = ?1
+               AND (status IN (?3, ?4) OR termination = ?5)",
             params![
                 tournament.to_string(),
                 GAME_PENDING,
                 GAME_RUNNING,
-                GAME_DISCARDED
+                GAME_DISCARDED,
+                serde_json::to_string(&Termination::Aborted)?,
             ],
         )?)
     }
@@ -711,14 +721,19 @@ mod tests {
     #[test]
     fn bulk_insert_and_reset_round_trip() {
         let store = Store::open_in_memory().unwrap();
-        let tid = TournamentId::new();
+        let tid = TournamentId::from_uuid(uuid::Uuid::new_v4());
         store
             .create_tournament(tid, "Bulk", &TournamentConfig::default())
             .unwrap();
 
-        let (a, b) = (EngineId::new(), EngineId::new());
+        let (a, b) = (
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+        );
         let opening = vec!["e2e4".to_string(), "e7e5".to_string()];
-        let games: Vec<(GameId, u32)> = (0..500).map(|i| (GameId::new(), i / 2 + 1)).collect();
+        let games: Vec<(GameId, u32)> = (0..500)
+            .map(|i| (GameId::from_uuid(uuid::Uuid::new_v4()), i / 2 + 1))
+            .collect();
         let rows: Vec<PendingGame<'_>> = games
             .iter()
             .map(|(id, round)| PendingGame {
@@ -765,23 +780,61 @@ mod tests {
         assert!(listed.iter().filter(|g| g.status == GAME_PENDING).count() == 499);
     }
 
+    /// A schedule is inserted as one transaction: a row that fails late in
+    /// the batch leaves none of the batch behind.
+    #[test]
+    fn a_schedule_batch_is_inserted_all_or_nothing() {
+        let store = Store::open_in_memory().unwrap();
+        let tid = TournamentId::from_uuid(uuid::Uuid::new_v4());
+        store
+            .create_tournament(tid, "Batch", &TournamentConfig::default())
+            .unwrap();
+        let (a, b) = (
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+        );
+        let ids: Vec<GameId> = (0..3)
+            .map(|_| GameId::from_uuid(uuid::Uuid::new_v4()))
+            .collect();
+        let row = |id: GameId| PendingGame {
+            id,
+            round: 1,
+            white: a,
+            black: b,
+            start_fen: None,
+            opening_moves: &[],
+        };
+
+        // The last row repeats the first game's id.
+        let duplicate = [row(ids[0]), row(ids[1]), row(ids[2]), row(ids[0])];
+        assert!(store.insert_pending_games(tid, &duplicate).is_err());
+        assert!(store.list_games(tid).unwrap().is_empty());
+
+        let valid = [row(ids[0]), row(ids[1]), row(ids[2])];
+        store.insert_pending_games(tid, &valid).unwrap();
+        assert_eq!(store.list_games(tid).unwrap().len(), 3);
+    }
+
     #[test]
     fn round_trips_tournaments_and_games() {
         let store = Store::open_in_memory().unwrap();
 
-        let mut engine = EngineConfig::new("stockfish".into());
+        let mut engine = EngineConfig::new(
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            "stockfish".into(),
+        );
         engine.meta.name = "Stockfish".into();
         engine.meta.elo = Some(3600);
 
-        let tid = TournamentId::new();
+        let tid = TournamentId::from_uuid(uuid::Uuid::new_v4());
         let config = TournamentConfig::default();
         store.create_tournament(tid, "Test", &config).unwrap();
         store
             .add_tournament_engine(tid, engine.id, &engine, 0, 3600.0)
             .unwrap();
 
-        let other = EngineId::new();
-        let gid = GameId::new();
+        let other = EngineId::from_uuid(uuid::Uuid::new_v4());
+        let gid = GameId::from_uuid(uuid::Uuid::new_v4());
         store
             .insert_pending_game(gid, tid, 1, engine.id, other, None, &[])
             .unwrap();
@@ -803,7 +856,7 @@ mod tests {
             .unwrap();
 
         // A second game carrying an assigned opening (start FEN + pre-moves).
-        let gid2 = GameId::new();
+        let gid2 = GameId::from_uuid(uuid::Uuid::new_v4());
         let fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
         store
             .insert_pending_game(
@@ -848,5 +901,83 @@ mod tests {
         store.delete_tournament(tid).unwrap();
         assert!(store.load_tournament(tid).unwrap().is_none());
         assert!(store.list_games(tid).unwrap().is_empty());
+    }
+
+    /// A game the runner could not play is stored finished with an `Aborted`
+    /// termination, and the resume reset returns it to pending so the next
+    /// Start plays it — with nothing of the non-result left behind. A played
+    /// game beside it is untouched.
+    #[test]
+    fn resume_requeues_an_aborted_game_and_keeps_the_played_one() {
+        let store = Store::open_in_memory().unwrap();
+        let tid = TournamentId::from_uuid(uuid::Uuid::new_v4());
+        store
+            .create_tournament(tid, "Aborted", &TournamentConfig::default())
+            .unwrap();
+        let (white, black) = (
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+        );
+
+        let played = GameId::from_uuid(uuid::Uuid::new_v4());
+        let aborted = GameId::from_uuid(uuid::Uuid::new_v4());
+        for (id, round) in [(played, 1), (aborted, 2)] {
+            store
+                .insert_pending_game(id, tid, round, white, black, None, &[])
+                .unwrap();
+            store.mark_game_running(id).unwrap();
+        }
+        store
+            .finish_game(
+                played,
+                GameResult::WhiteWin,
+                Termination::Checkmate,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                40,
+                "played pgn",
+            )
+            .unwrap();
+        // What the runner writes for a game it could not play: the draw is a
+        // placeholder for the report shape, not a result.
+        store
+            .finish_game(
+                aborted,
+                GameResult::Draw,
+                Termination::Aborted,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0,
+                "aborted pgn",
+            )
+            .unwrap();
+
+        let before = store.list_games(tid).unwrap();
+        let stored_abort = before.iter().find(|game| game.id == aborted).unwrap();
+        assert_eq!(stored_abort.status, GAME_FINISHED);
+        assert_eq!(stored_abort.termination, Some(Termination::Aborted));
+
+        assert_eq!(store.reset_unfinished_games(tid).unwrap(), 1);
+
+        let after = store.list_games(tid).unwrap();
+        let requeued = after.iter().find(|game| game.id == aborted).unwrap();
+        assert_eq!(requeued.status, GAME_PENDING);
+        assert_eq!(requeued.result, None);
+        assert_eq!(requeued.termination, None);
+        assert_eq!(requeued.pgn, None);
+        assert_eq!(requeued.plies, None);
+
+        let kept = after.iter().find(|game| game.id == played).unwrap();
+        assert_eq!(kept.status, GAME_FINISHED);
+        assert_eq!(kept.result, Some(GameResult::WhiteWin));
+        assert_eq!(kept.termination, Some(Termination::Checkmate));
     }
 }

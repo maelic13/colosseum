@@ -1,0 +1,22 @@
+{
+  "source": "reviewed projection of Colosseum JSON stdout",
+  "status": "inconclusive",
+  "exit_code": 4,
+  "games": 8,
+  "wins": 0,
+  "draws": 8,
+  "losses": 0,
+  "complete_pairs": 4,
+  "pentanomial": [0, 0, 4, 0, 0],
+  "colour_split": {
+    "a_as_white": [0, 4, 0],
+    "a_as_black": [0, 4, 0]
+  },
+  "faults": {
+    "engine_a": 0,
+    "engine_b": 0,
+    "time_losses_a": 0,
+    "time_losses_b": 0,
+    "infrastructure": 0
+  }
+}

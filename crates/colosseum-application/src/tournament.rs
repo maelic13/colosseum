@@ -1,0 +1,751 @@
+use std::collections::{HashMap, HashSet};
+
+use colosseum_core::{
+    EngineId, ExportRow, Format, GameOutcome, GameResult, ParticipantId, Standings, Termination,
+    crosstable_csv, gauntlet, ml_ratings, ml_ratings_anchored, rating_error, round_robin,
+    standings_csv,
+};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::RuntimeParticipant;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TournamentParticipant {
+    pub participant: RuntimeParticipant,
+    pub initial_rating: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TournamentDesign {
+    pub format: Format,
+    pub games_per_pair: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TournamentScheduleGame {
+    pub number: u32,
+    pub encounter: u32,
+    pub game_in_encounter: u32,
+    pub round: u32,
+    pub white: ParticipantId,
+    pub black: ParticipantId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TournamentPlan {
+    pub design: TournamentDesign,
+    pub participants: Vec<TournamentParticipant>,
+    pub schedule: Vec<TournamentScheduleGame>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TournamentCompletedGame {
+    pub number: u32,
+    pub white: ParticipantId,
+    pub black: ParticipantId,
+    pub result: GameResult,
+    pub scorable: bool,
+    pub termination: Termination,
+}
+
+/// One participant pinned at a supplied rating for this tournament.
+///
+/// This is how a newcomer is placed in an established pool without spending
+/// games re-measuring the pool: the field is an input, and only the remaining
+/// participants are estimated against it and each other.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TournamentFixedRating {
+    pub participant: ParticipantId,
+    pub rating: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TournamentStanding {
+    pub rank: usize,
+    pub participant: ParticipantId,
+    pub name: String,
+    pub initial_rating: f64,
+    pub rating: f64,
+    /// `None` for a pinned participant: a supplied rating has no interval,
+    /// because this tournament did not estimate it.
+    pub error_95: Option<f64>,
+    /// The rating is a supplied input rather than an estimate.
+    pub fixed: bool,
+    pub points: f64,
+    pub games: u32,
+    pub wins: u32,
+    pub draws: u32,
+    pub losses: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TournamentResults {
+    pub games_scheduled: usize,
+    pub games_attempted: usize,
+    pub games_scored: usize,
+    pub anchor: Option<ParticipantId>,
+    /// Every pinned rating this tournament was given, including the degenerate
+    /// single `anchor`, retained as a run input.
+    pub fixed_ratings: Vec<TournamentFixedRating>,
+    pub standings: Vec<TournamentStanding>,
+    pub standings_csv: String,
+    pub crosstable_csv: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum TournamentPlanError {
+    #[error("a tournament requires at least two distinct participants")]
+    TooFewParticipants,
+    #[error("tournament participant IDs must be unique")]
+    DuplicateParticipant,
+    #[error("cycles and games per pair must be positive")]
+    EmptySchedule,
+    #[error("gauntlet seeds must be positive and leave at least one opponent")]
+    InvalidGauntletSeeds,
+    #[error("initial ratings must be finite")]
+    InvalidInitialRating,
+    #[error("tournament schedule is too large")]
+    ScheduleTooLarge,
+}
+
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum TournamentResultError {
+    #[error("rating anchor is not a tournament participant")]
+    UnknownAnchor,
+    #[error("fixed rating names a participant that is not in this tournament")]
+    UnknownFixedParticipant,
+    #[error("participant is given a fixed rating more than once")]
+    DuplicateFixedParticipant,
+    #[error("fixed ratings must be finite")]
+    InvalidFixedRating,
+    #[error(
+        "every participant is pinned, so the tournament would estimate nothing; leave at least one free"
+    )]
+    EverythingFixed,
+    #[error("completed game {0} is not in the tournament schedule")]
+    UnknownGame(u32),
+    #[error("completed game {0} has different participants from the schedule")]
+    GameIdentityMismatch(u32),
+    #[error("completed game {0} occurs more than once")]
+    DuplicateGame(u32),
+}
+
+pub struct PlanTournament;
+
+impl PlanTournament {
+    pub fn execute(
+        participants: Vec<TournamentParticipant>,
+        design: TournamentDesign,
+    ) -> Result<TournamentPlan, TournamentPlanError> {
+        validate(&participants, design)?;
+        let engine_ids = participants
+            .iter()
+            .map(|item| EngineId::from_uuid(item.participant.id.as_uuid()))
+            .collect::<Vec<_>>();
+        let by_engine = participants
+            .iter()
+            .map(|item| {
+                (
+                    EngineId::from_uuid(item.participant.id.as_uuid()),
+                    item.participant.id,
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let pairings = match design.format {
+            Format::RoundRobin { cycles } => {
+                round_robin(&engine_ids, cycles, design.games_per_pair)
+            }
+            Format::Gauntlet { seeds, cycles } => {
+                gauntlet(&engine_ids, seeds, cycles, design.games_per_pair)
+            }
+        };
+        let mut schedule = Vec::with_capacity(pairings.len());
+        for (index, pairing) in pairings.into_iter().enumerate() {
+            let number =
+                u32::try_from(index + 1).map_err(|_| TournamentPlanError::ScheduleTooLarge)?;
+            let encounter = u32::try_from(index / design.games_per_pair as usize + 1)
+                .map_err(|_| TournamentPlanError::ScheduleTooLarge)?;
+            schedule.push(TournamentScheduleGame {
+                number,
+                encounter,
+                game_in_encounter: index as u32 % design.games_per_pair + 1,
+                round: pairing.round,
+                white: by_engine[&pairing.white],
+                black: by_engine[&pairing.black],
+            });
+        }
+        if schedule.is_empty() {
+            return Err(TournamentPlanError::EmptySchedule);
+        }
+        Ok(TournamentPlan {
+            design,
+            participants,
+            schedule,
+        })
+    }
+}
+
+pub struct RateTournament;
+
+impl RateTournament {
+    pub fn execute(
+        plan: &TournamentPlan,
+        games: &[TournamentCompletedGame],
+        anchor: Option<ParticipantId>,
+    ) -> Result<TournamentResults, TournamentResultError> {
+        Self::execute_with_fixed_field(plan, games, anchor, &[])
+    }
+
+    /// Rate a tournament against a fixed field.
+    ///
+    /// Pinned participants keep their supplied rating exactly; everyone else is
+    /// estimated jointly against them and each other through the same anchored
+    /// maximum-likelihood rating the single-anchor case uses. A lone `anchor`
+    /// is that case: it is pinned at its own prior.
+    pub fn execute_with_fixed_field(
+        plan: &TournamentPlan,
+        games: &[TournamentCompletedGame],
+        anchor: Option<ParticipantId>,
+        fixed: &[TournamentFixedRating],
+    ) -> Result<TournamentResults, TournamentResultError> {
+        if anchor.is_some_and(|id| {
+            !plan
+                .participants
+                .iter()
+                .any(|participant| participant.participant.id == id)
+        }) {
+            return Err(TournamentResultError::UnknownAnchor);
+        }
+        let mut pinned = HashMap::new();
+        for entry in fixed {
+            let Some(participant) = plan
+                .participants
+                .iter()
+                .find(|participant| participant.participant.id == entry.participant)
+            else {
+                return Err(TournamentResultError::UnknownFixedParticipant);
+            };
+            let _ = participant;
+            if !entry.rating.is_finite() {
+                return Err(TournamentResultError::InvalidFixedRating);
+            }
+            if pinned.insert(entry.participant, entry.rating).is_some() {
+                return Err(TournamentResultError::DuplicateFixedParticipant);
+            }
+        }
+        if let Some(anchor) = anchor {
+            let prior = plan
+                .participants
+                .iter()
+                .find(|participant| participant.participant.id == anchor)
+                .map_or(0.0, |participant| participant.initial_rating);
+            if pinned.insert(anchor, prior).is_some() {
+                // Naming one participant twice is ambiguous about which rating
+                // is meant, and a silent winner is exactly the wrong answer.
+                return Err(TournamentResultError::DuplicateFixedParticipant);
+            }
+        }
+        if !pinned.is_empty() && pinned.len() >= plan.participants.len() {
+            return Err(TournamentResultError::EverythingFixed);
+        }
+        let schedule = plan
+            .schedule
+            .iter()
+            .map(|game| (game.number, game))
+            .collect::<HashMap<_, _>>();
+        let mut seen = HashSet::new();
+        for game in games {
+            let Some(planned) = schedule.get(&game.number) else {
+                return Err(TournamentResultError::UnknownGame(game.number));
+            };
+            if !seen.insert(game.number) {
+                return Err(TournamentResultError::DuplicateGame(game.number));
+            }
+            if planned.white != game.white || planned.black != game.black {
+                return Err(TournamentResultError::GameIdentityMismatch(game.number));
+            }
+        }
+
+        let ids = plan
+            .participants
+            .iter()
+            .map(|participant| engine_id(participant.participant.id))
+            .collect::<Vec<_>>();
+        let mut aggregate = Standings::with_engines(&ids);
+        for game in games.iter().filter(|game| game.scorable) {
+            aggregate.record(GameOutcome {
+                white: engine_id(game.white),
+                black: engine_id(game.black),
+                result: game.result,
+                termination: game.termination,
+                white_nps: None,
+                black_nps: None,
+                white_depth: None,
+                black_depth: None,
+                white_move_ms: None,
+                black_move_ms: None,
+            });
+        }
+        // A pinned rating replaces the participant's prior, so the fixed field
+        // is exactly the scale the free participants are measured against.
+        let priors = plan
+            .participants
+            .iter()
+            .map(|participant| {
+                (
+                    engine_id(participant.participant.id),
+                    pinned
+                        .get(&participant.participant.id)
+                        .copied()
+                        .unwrap_or(participant.initial_rating),
+                )
+            })
+            .collect::<Vec<_>>();
+        let ratings = if pinned.is_empty() {
+            ml_ratings(&aggregate, &priors)
+        } else {
+            let updatable = plan
+                .participants
+                .iter()
+                .filter(|participant| !pinned.contains_key(&participant.participant.id))
+                .map(|participant| engine_id(participant.participant.id))
+                .collect::<Vec<_>>();
+            ml_ratings_anchored(&aggregate, &priors, &updatable)
+        };
+        let by_id = plan
+            .participants
+            .iter()
+            .map(|participant| (participant.participant.id, participant))
+            .collect::<HashMap<_, _>>();
+        let mut order = ids.clone();
+        order.sort_by(|left, right| {
+            aggregate
+                .standing(*right)
+                .points()
+                .total_cmp(&aggregate.standing(*left).points())
+                .then_with(|| left.as_uuid().cmp(&right.as_uuid()))
+        });
+        let standings = order
+            .iter()
+            .enumerate()
+            .map(|(index, id)| {
+                let participant_id = ParticipantId::from_uuid(id.as_uuid());
+                let participant = by_id[&participant_id];
+                let standing = aggregate.standing(*id);
+                let is_fixed = pinned.contains_key(&participant_id);
+                TournamentStanding {
+                    rank: index + 1,
+                    participant: participant_id,
+                    name: participant_name(&participant.participant.launch),
+                    initial_rating: participant.initial_rating,
+                    rating: ratings[id],
+                    error_95: (!is_fixed)
+                        .then(|| rating_error(&aggregate, &ratings, *id))
+                        .flatten(),
+                    fixed: is_fixed,
+                    points: standing.points(),
+                    games: standing.games(),
+                    wins: standing.wins,
+                    draws: standing.draws,
+                    losses: standing.losses,
+                }
+            })
+            .collect::<Vec<_>>();
+        let export_rows = standings
+            .iter()
+            .map(|row| ExportRow {
+                rank: row.rank,
+                name: row.name.clone(),
+                version: String::new(),
+                elo: row.rating,
+                elo_delta: (!row.fixed).then_some(row.rating - row.initial_rating),
+                fixed: row.fixed,
+                points: row.points,
+                games: row.games,
+                wins: row.wins,
+                draws: row.draws,
+                losses: row.losses,
+                nps: None,
+            })
+            .collect::<Vec<_>>();
+        let cross_order = order
+            .iter()
+            .map(|id| {
+                let participant = by_id[&ParticipantId::from_uuid(id.as_uuid())];
+                (*id, participant_name(&participant.participant.launch))
+            })
+            .collect::<Vec<_>>();
+        Ok(TournamentResults {
+            games_scheduled: plan.schedule.len(),
+            games_attempted: games.len(),
+            games_scored: games.iter().filter(|game| game.scorable).count(),
+            anchor,
+            // Participant order, so the recorded inputs are stable.
+            fixed_ratings: plan
+                .participants
+                .iter()
+                .filter_map(|participant| {
+                    pinned
+                        .get(&participant.participant.id)
+                        .map(|rating| TournamentFixedRating {
+                            participant: participant.participant.id,
+                            rating: *rating,
+                        })
+                })
+                .collect(),
+            standings,
+            standings_csv: standings_csv(&export_rows),
+            crosstable_csv: crosstable_csv(&cross_order, &aggregate),
+        })
+    }
+}
+
+fn engine_id(participant: ParticipantId) -> EngineId {
+    EngineId::from_uuid(participant.as_uuid())
+}
+
+fn participant_name(launch: &crate::EngineLaunchSpec) -> String {
+    launch.label.clone().unwrap_or_else(|| {
+        launch
+            .executable
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("engine")
+            .to_owned()
+    })
+}
+
+fn validate(
+    participants: &[TournamentParticipant],
+    design: TournamentDesign,
+) -> Result<(), TournamentPlanError> {
+    if participants.len() < 2 {
+        return Err(TournamentPlanError::TooFewParticipants);
+    }
+    if participants
+        .iter()
+        .map(|item| item.participant.id)
+        .collect::<HashSet<_>>()
+        .len()
+        != participants.len()
+    {
+        return Err(TournamentPlanError::DuplicateParticipant);
+    }
+    if participants
+        .iter()
+        .any(|participant| !participant.initial_rating.is_finite())
+    {
+        return Err(TournamentPlanError::InvalidInitialRating);
+    }
+    if design.games_per_pair == 0 {
+        return Err(TournamentPlanError::EmptySchedule);
+    }
+    match design.format {
+        Format::RoundRobin { cycles: 0 } => Err(TournamentPlanError::EmptySchedule),
+        Format::Gauntlet { seeds, cycles }
+            if cycles == 0 || seeds == 0 || seeds as usize >= participants.len() =>
+        {
+            Err(TournamentPlanError::InvalidGauntletSeeds)
+        }
+        _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::EngineLaunchSpec;
+
+    fn participants(count: usize) -> Vec<TournamentParticipant> {
+        (0..count)
+            .map(|index| TournamentParticipant {
+                participant: RuntimeParticipant {
+                    id: ParticipantId::from_u128(index as u128 + 1),
+                    launch: EngineLaunchSpec::path_only(format!("engine-{index}").into()),
+                },
+                initial_rating: 1_500.0,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn round_robin_is_the_shared_core_circle_schedule_with_stable_identity() {
+        let participants = participants(3);
+        let plan = PlanTournament::execute(
+            participants.clone(),
+            TournamentDesign {
+                format: Format::RoundRobin { cycles: 2 },
+                games_per_pair: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(plan.schedule.len(), 12);
+        assert_eq!(
+            plan.schedule.iter().map(|game| game.encounter).max(),
+            Some(6)
+        );
+        assert!(
+            plan.schedule.as_chunks::<2>().0.iter().all(|games| {
+                games[0].white == games[1].black && games[0].black == games[1].white
+            })
+        );
+        let core = round_robin(
+            &participants
+                .iter()
+                .map(|item| EngineId::from_uuid(item.participant.id.as_uuid()))
+                .collect::<Vec<_>>(),
+            2,
+            2,
+        );
+        assert!(plan.schedule.iter().zip(core).all(|(planned, core)| {
+            planned.round == core.round
+                && planned.white.as_uuid() == core.white.as_uuid()
+                && planned.black.as_uuid() == core.black.as_uuid()
+        }));
+    }
+
+    #[test]
+    fn multi_seed_gauntlet_never_pairs_seeds_or_opponents_together() {
+        let plan = PlanTournament::execute(
+            participants(5),
+            TournamentDesign {
+                format: Format::Gauntlet {
+                    seeds: 2,
+                    cycles: 2,
+                },
+                games_per_pair: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(plan.schedule.len(), 24);
+        assert!(plan.schedule.iter().all(|game| {
+            let white_seed = game.white == ParticipantId::from_u128(1)
+                || game.white == ParticipantId::from_u128(2);
+            let black_seed = game.black == ParticipantId::from_u128(1)
+                || game.black == ParticipantId::from_u128(2);
+            white_seed ^ black_seed
+        }));
+    }
+
+    #[test]
+    fn invalid_designs_fail_before_scheduling() {
+        assert_eq!(
+            PlanTournament::execute(
+                participants(2),
+                TournamentDesign {
+                    format: Format::Gauntlet {
+                        seeds: 2,
+                        cycles: 1,
+                    },
+                    games_per_pair: 2,
+                },
+            ),
+            Err(TournamentPlanError::InvalidGauntletSeeds)
+        );
+    }
+
+    #[test]
+    fn ratings_and_exports_are_joint_order_independent_results() {
+        let plan = PlanTournament::execute(
+            participants(3),
+            TournamentDesign {
+                format: Format::RoundRobin { cycles: 1 },
+                games_per_pair: 2,
+            },
+        )
+        .unwrap();
+        let games = plan
+            .schedule
+            .iter()
+            .map(|scheduled| TournamentCompletedGame {
+                number: scheduled.number,
+                white: scheduled.white,
+                black: scheduled.black,
+                result: if scheduled.white == ParticipantId::from_u128(1) {
+                    GameResult::WhiteWin
+                } else if scheduled.black == ParticipantId::from_u128(1) {
+                    GameResult::BlackWin
+                } else {
+                    GameResult::Draw
+                },
+                scorable: true,
+                termination: Termination::Checkmate,
+            })
+            .collect::<Vec<_>>();
+        let mut reversed = games.clone();
+        reversed.reverse();
+        let first = RateTournament::execute(&plan, &games, None).unwrap();
+        let second = RateTournament::execute(&plan, &reversed, None).unwrap();
+        assert_eq!(first.standings, second.standings);
+        assert_eq!(first.standings[0].participant, ParticipantId::from_u128(1));
+        assert!(first.standings[0].rating > first.standings[1].rating);
+        assert!(first.standings.iter().all(|row| row.error_95.is_some()));
+        assert!(first.standings_csv.starts_with("Rank,Engine,Version,Elo"));
+        assert!(first.crosstable_csv.contains("engine-0"));
+    }
+
+    /// Schedules as `number:round:white:black` rows, participants numbered
+    /// from one in field order.
+    fn schedule_rows(plan: &TournamentPlan) -> Vec<String> {
+        plan.schedule
+            .iter()
+            .map(|game| {
+                format!(
+                    "{}:{}:{}:{}",
+                    game.number,
+                    game.round,
+                    game.white.as_uuid().as_u128(),
+                    game.black.as_uuid().as_u128()
+                )
+            })
+            .collect()
+    }
+
+    /// The GUI's shared-core schedules and its stored-result ratings for one
+    /// four-engine field, recorded in `docs/fixtures/phase7/gui-parity.json`.
+    /// The CLI must plan the same games and rate the same results to 0.01 Elo.
+    #[test]
+    fn schedules_and_ratings_match_the_recorded_gui_oracle() {
+        const FIELD: [(&str, f64); 4] = [
+            ("Alpha", 1500.0),
+            ("Beta", 1550.0),
+            ("Gamma", 1450.0),
+            ("Delta", 1600.0),
+        ];
+        const ROUND_ROBIN: [&str; 12] = [
+            "1:1:1:4", "2:1:4:1", "3:1:2:3", "4:1:3:2", "5:2:1:3", "6:2:3:1", "7:2:4:2", "8:2:2:4",
+            "9:3:1:2", "10:3:2:1", "11:3:3:4", "12:3:4:3",
+        ];
+        const RESULTS: [GameResult; 12] = [
+            GameResult::WhiteWin,
+            GameResult::BlackWin,
+            GameResult::WhiteWin,
+            GameResult::Draw,
+            GameResult::BlackWin,
+            GameResult::BlackWin,
+            GameResult::Draw,
+            GameResult::WhiteWin,
+            GameResult::WhiteWin,
+            GameResult::WhiteWin,
+            GameResult::BlackWin,
+            GameResult::Draw,
+        ];
+        const RATINGS: [f64; 4] = [1565.17, 1586.89, 1441.41, 1506.54];
+        const GAUNTLET: [&str; 8] = [
+            "1:1:1:3", "2:1:3:1", "3:1:1:4", "4:1:4:1", "5:1:2:3", "6:1:3:2", "7:1:2:4", "8:1:4:2",
+        ];
+        let field = || {
+            FIELD
+                .iter()
+                .enumerate()
+                .map(|(index, (name, prior))| TournamentParticipant {
+                    participant: RuntimeParticipant {
+                        id: ParticipantId::from_u128(index as u128 + 1),
+                        launch: EngineLaunchSpec {
+                            label: Some((*name).into()),
+                            ..EngineLaunchSpec::path_only((*name).into())
+                        },
+                    },
+                    initial_rating: *prior,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let round_robin = PlanTournament::execute(
+            field(),
+            TournamentDesign {
+                format: Format::RoundRobin { cycles: 1 },
+                games_per_pair: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(schedule_rows(&round_robin), ROUND_ROBIN);
+        let games = round_robin
+            .schedule
+            .iter()
+            .zip(RESULTS)
+            .map(|(game, result)| TournamentCompletedGame {
+                number: game.number,
+                white: game.white,
+                black: game.black,
+                result,
+                scorable: true,
+                termination: Termination::Checkmate,
+            })
+            .collect::<Vec<_>>();
+        let report = RateTournament::execute(&round_robin, &games, None).unwrap();
+        let actual = (1..=FIELD.len())
+            .map(|id| {
+                report
+                    .standings
+                    .iter()
+                    .find(|row| row.participant == ParticipantId::from_u128(id as u128))
+                    .unwrap()
+                    .rating
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            actual
+                .iter()
+                .zip(RATINGS)
+                .all(|(actual, expected)| (actual - expected).abs() <= 0.01),
+            "actual GUI-parity ratings: {actual:?}"
+        );
+
+        let gauntlet = PlanTournament::execute(
+            field(),
+            TournamentDesign {
+                format: Format::Gauntlet {
+                    seeds: 2,
+                    cycles: 1,
+                },
+                games_per_pair: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(schedule_rows(&gauntlet), GAUNTLET);
+    }
+
+    #[test]
+    fn optional_anchor_stays_fixed_and_checkpoint_identity_is_validated() {
+        let plan = PlanTournament::execute(
+            participants(2),
+            TournamentDesign {
+                format: Format::RoundRobin { cycles: 1 },
+                games_per_pair: 2,
+            },
+        )
+        .unwrap();
+        let game = TournamentCompletedGame {
+            number: 1,
+            white: plan.schedule[0].white,
+            black: plan.schedule[0].black,
+            result: GameResult::WhiteWin,
+            scorable: true,
+            termination: Termination::Checkmate,
+        };
+        let anchor = ParticipantId::from_u128(2);
+        let report =
+            RateTournament::execute(&plan, std::slice::from_ref(&game), Some(anchor)).unwrap();
+        let anchored = report
+            .standings
+            .iter()
+            .find(|row| row.participant == anchor)
+            .unwrap();
+        assert_eq!(anchored.rating, 1_500.0);
+        assert!(anchored.fixed);
+        assert!(
+            anchored.error_95.is_none(),
+            "a pinned rating is an input and carries no interval"
+        );
+
+        let mut invalid = game;
+        invalid.white = ParticipantId::from_u128(99);
+        assert_eq!(
+            RateTournament::execute(&plan, &[invalid], None),
+            Err(TournamentResultError::GameIdentityMismatch(1))
+        );
+    }
+}

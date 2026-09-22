@@ -1,0 +1,35 @@
+Started game 1 of 8 (A vs B)
+Finished game 1 (A vs B): 1/2-1/2 {Draw by adjudication}
+Score of A vs B: 0 - 0 - 1  [0.500] 1
+Started game 2 of 8 (B vs A)
+Finished game 2 (B vs A): 1/2-1/2 {Draw by adjudication}
+Score of A vs B: 0 - 0 - 2  [0.500] 2
+Started game 3 of 8 (A vs B)
+Finished game 3 (A vs B): 1/2-1/2 {Draw by adjudication}
+Score of A vs B: 0 - 0 - 3  [0.500] 3
+Started game 4 of 8 (B vs A)
+Finished game 4 (B vs A): 1/2-1/2 {Draw by adjudication}
+Score of A vs B: 0 - 0 - 4  [0.500] 4
+Started game 5 of 8 (A vs B)
+Finished game 5 (A vs B): 1/2-1/2 {Draw by adjudication}
+Score of A vs B: 0 - 0 - 5  [0.500] 5
+Started game 6 of 8 (B vs A)
+Finished game 6 (B vs A): 1/2-1/2 {Draw by adjudication}
+Score of A vs B: 0 - 0 - 6  [0.500] 6
+Started game 7 of 8 (A vs B)
+Finished game 7 (A vs B): 1/2-1/2 {Draw by adjudication}
+Score of A vs B: 0 - 0 - 7  [0.500] 7
+Started game 8 of 8 (B vs A)
+Finished game 8 (B vs A): 1/2-1/2 {Draw by adjudication}
+Score of A vs B: 0 - 0 - 8  [0.500] 8
+...      A playing White: 0 - 0 - 4  [0.500] 4
+...      A playing Black: 0 - 0 - 4  [0.500] 4
+...      White vs Black: 0 - 0 - 8  [0.500] 8
+Elo difference: 0.0 +/- 0.0, LOS: nan %, DrawRatio: 100.0 %
+SPRT: llr 0 (0.0%), lbound -inf, ubound inf
+
+Player: A
+   "Draw by adjudication": 8
+Player: B
+   "Draw by adjudication": 8
+Finished match

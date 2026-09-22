@@ -1,0 +1,108 @@
+# Colosseum agent instructions
+
+Read this file, [`CLAUDE.md`](CLAUDE.md), [`PLAN.md`](PLAN.md), and
+[`GUIDE.md`](GUIDE.md) before implementation work. `CLAUDE.md` describes the
+existing application and conventions; `PLAN.md` is the binding CLI
+specification; `GUIDE.md` is the ordered implementation tracker.
+
+## Scope and architecture
+
+- Implement numbered `GUIDE.md` steps in order. Do not skip a phase exit.
+- The evidence of completed phases lives under `docs/architecture/` (exit
+  documents, ADRs, the Phase 0–9 and Phase 10 records). Do not re-derive or
+  re-litigate what they record; extend them when a step adds evidence.
+- Dependencies point inward: domain → nothing outward; application use cases →
+  domain and ports; adapters/drivers implement ports. The CLI and GUI are
+  separate composition roots and must not depend on each other.
+- Preserve working UCI, runner, GUI, persistence, and compatibility behaviour.
+  Prefer the smallest boundary refactor that satisfies the target architecture.
+- The CLI accepts ordinary UCI executables. Do not add engine manifests, custom
+  build/bench requirements, compiler inspection, or engine-specific logic.
+- Treat existing engine crashes and protocol quirks as real supported input
+  conditions. Never hide them by weakening diagnostics or fault classification.
+- Follow `docs/design/GUIDELINES.md` for every GUI change.
+
+## Step and commit discipline
+
+One numbered `GUIDE.md` item is the normal unit of work.
+
+Agents work locally only: create the required commits, but never push, fetch,
+create tags, releases or pull requests, or perform other remote operations.
+The maintainer owns every remote operation.
+
+Use the per-step model assignment in `PLAN.md` §S8, mirrored on the numbered
+`GUIDE.md` item. When asked what comes next, state both the step and its
+recommended model/effort. If a Terra step exposes a material design choice not
+settled by the plan, stop and continue it with Sol High rather than inventing
+the contract. Keep model-label changes synchronized between PLAN and GUIDE.
+
+1. Start from a clean worktree, or identify and preserve pre-existing user
+   changes. Never stage unrelated files.
+2. Implement the step, its tests, documentation, migrations, and generated
+   files needed for that step.
+3. Run the verification required by the step and the proportionate workspace
+   checks from `CLAUDE.md`.
+4. Demonstrate the exit criterion. A compiling change is not automatically
+   complete.
+5. Always mark the finished step `☑` in `GUIDE.md` with the required outcome
+   label in the same change. Add corresponding status/evidence to `PLAN.md`
+   when it improves the durable specification or records a consequential
+   result; do not duplicate routine detail there. Use `☐` for todo and `◐`
+   only while genuinely in progress; do not use GitHub `[ ]` task syntax
+   because the Codex renderer does not display it reliably.
+6. Commit the completed step before starting another numbered step.
+
+Use a short imperative commit subject that names the outcome, preferably with
+the step identifier, for example:
+
+```text
+Phase 1.2: implement pentanomial variance
+```
+
+Do not:
+
+- combine independently completable steps in one commit;
+- mark or commit an incomplete step as done;
+- amend, rewrite, reset, or discard user commits/changes unless explicitly
+  requested;
+- add `Co-authored-by`, assistant attribution, or other authorship trailers;
+- begin the next numbered step until the current step's commit succeeds.
+
+If a step is blocked, leave it unchecked, document the blocker, and do not
+create a misleading completion commit. Small corrective commits discovered
+during verification are allowed, but each must have a precise single-purpose
+subject.
+
+## Verification baseline
+
+Unless a step specifies more, use what CI enforces, in this order:
+
+```text
+cargo fmt --all --check
+cargo check --workspace --tests
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --all-targets
+```
+
+`cargo fmt --all --check` is not optional and is not cosmetic: `ci.yml` fails
+the pull request on it, and a formatting failure is indistinguishable from a
+real one in a release gate. The same applies to `--all-targets -- -D
+warnings`, which lints the test code the shorter form skips.
+
+Run debug and release/platform-specific checks where PLAN or GUIDE requires
+them. Documentation-only changes require at least `git diff --check` and
+consistency validation; they do not require rerunning unchanged Rust tests.
+
+## Documentation ownership
+
+- `PLAN.md` and `GUIDE.md`: maintainer-facing specification and tracker.
+  `PLAN.md` carries the binding specifications and only the open work;
+  completed phases are one line in `GUIDE.md` and a record file under
+  `docs/architecture/`.
+- `README.md`, `packaging/cli/README.md` (staged as the CLI archive's `README.md`) and
+  `docs/cli/`: user-facing; no phase numbers or internal method
+  argumentation.
+- `docs/DEVELOPMENT.md`: implemented build/test/release facts; update it when
+  the workspace or release process actually changes, not merely when planned.
+- `CHANGELOG-GUI.md` and `CHANGELOG-CLI.md`: released user-visible changes for
+  their independently versioned products; root `CHANGELOG.md` is only the index.

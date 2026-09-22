@@ -1,6 +1,7 @@
-//! Integration tests for the tournament scheduler, driven by real engines (copied to
-//! a temp dir). Cover a full round-robin, Stop→drain→resume, Force-Stop→discard, and
-//! the engine-failure path (a bogus executable). Skips when no engine is available.
+//! Explicitly opt-in real-engine smoke coverage for the tournament scheduler.
+//!
+//! Cargo compiles this target only with `real-engine-smoke`; it requires
+//! `COLOSSEUM_SMOKE_ENGINE` and is never part of required CI or release evidence.
 
 mod common;
 
@@ -15,7 +16,10 @@ use colosseum_engine::scheduler::{TournamentStatus, create_tournament, resume_to
 use colosseum_engine::store::{self, Store};
 
 fn engine_cfg(name: &str, exe: &Path, opts: &[(&str, &str)]) -> EngineConfig {
-    let mut cfg = EngineConfig::new(exe.to_path_buf());
+    let mut cfg = EngineConfig::new(
+        colosseum_core::EngineId::from_uuid(uuid::Uuid::new_v4()),
+        exe.to_path_buf(),
+    );
     cfg.meta.name = name.to_string();
     for (key, value) in opts {
         cfg.options.insert(
@@ -66,10 +70,7 @@ fn temp_db() -> (tempfile::TempDir, Store, std::path::PathBuf) {
 
 #[tokio::test]
 async fn full_round_robin_completes() {
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping full_round_robin_completes: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
     let (_dir, store, db_path) = temp_db();
 
     let engines = vec![
@@ -127,10 +128,7 @@ async fn full_round_robin_completes() {
 
 #[tokio::test]
 async fn stop_drains_then_resume_completes() {
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping stop_drains_then_resume_completes: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
     let (_dir, store, _db_path) = temp_db();
 
     let engines = vec![
@@ -182,10 +180,7 @@ async fn stop_drains_then_resume_completes() {
 
 #[tokio::test]
 async fn force_stop_discards_in_flight() {
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping force_stop_discards_in_flight: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
     let (_dir, store, db_path) = temp_db();
 
     let engines = vec![
@@ -243,27 +238,28 @@ async fn force_stop_discards_in_flight() {
     handle.abort();
 }
 
+/// An engine that cannot be spawned is the host's condition — a wrong path, a
+/// missing DLL, a permission — not the engine's play, so no side has earned a
+/// result. The game is reported and counted so the tournament completes, and
+/// it enters neither the standings nor the ratings.
 #[tokio::test]
-async fn failed_engine_loses_with_error() {
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping failed_engine_loses_with_error: no engine");
-        return;
-    };
-    let (_dir, store, _db_path) = temp_db();
+async fn failed_engine_is_not_scored() {
+    let (_guard, exe) = common::smoke_engine();
+    let (dir, store, _db_path) = temp_db();
 
     let good = engine_cfg("Good", &exe, &[("Hash", "16")]);
     let good_id = good.id;
     let bogus = engine_cfg("Bogus", Path::new("definitely-not-a-real-engine.exe"), &[]);
+    let bogus_id = bogus.id;
     let (events_tx, events_rx) = crossbeam_channel::unbounded();
 
-    let (tournament, driver) = create_tournament(
-        "Crash",
-        fast_config(2, 8, 10),
-        vec![good, bogus],
-        store,
-        events_tx,
-    )
-    .unwrap();
+    // A PGN export is configured so the run can be checked for phantom games.
+    let pgn_output = dir.path().join("games.pgn");
+    let mut config = fast_config(2, 8, 10);
+    config.pgn_output = Some(pgn_output.clone());
+
+    let (tournament, driver) =
+        create_tournament("Crash", config, vec![good, bogus], store, events_tx).unwrap();
     let handle = tokio::spawn(driver);
 
     tournament.go();
@@ -279,12 +275,50 @@ async fn failed_engine_loses_with_error() {
     );
 
     let snap = snapshot.lock().unwrap().clone();
-    // 2 engines, double round robin => 2 games; the good engine wins both.
+    // 2 engines, double round robin => 2 games. Both are reported so the
+    // tournament reaches Finished, and neither is scored.
     assert_eq!(snap.games_finished, 2);
-    assert_eq!(snap.standings.standing(good_id).wins, 2);
+    for id in [good_id, bogus_id] {
+        let standing = snap.standings.standing(id);
+        assert_eq!(
+            standing.games(),
+            0,
+            "engine {id} was given games it never played"
+        );
+        assert_eq!((standing.wins, standing.draws, standing.losses), (0, 0, 0));
+        assert_eq!(standing.points(), 0.0);
+    }
+    // Ratings move only on games actually played, so the writeback after every
+    // finished game cannot shift the library on a tournament like this one.
+    for id in [good_id, bogus_id] {
+        let elo = snap
+            .elo
+            .get(&id)
+            .expect("every participant carries a rating");
+        assert_eq!(elo.delta, 0.0, "engine {id} changed rating without a game");
+    }
+    assert_eq!(
+        snap.termination_counts
+            .get(&colosseum_core::Termination::Aborted),
+        Some(&2),
+        "both games must be recorded as aborted"
+    );
+    assert!(
+        snap.recent_errors
+            .iter()
+            .all(|error| error.contains("not scored")),
+        "the error text must say the game was not scored: {:?}",
+        snap.recent_errors
+    );
     assert!(
         !snap.recent_errors.is_empty(),
         "expected engine errors recorded"
+    );
+    // A game that was never played is not exported: a moveless draw would
+    // read as half a point in whatever the user analyses the PGN with.
+    assert!(
+        !pgn_output.exists(),
+        "an unplayed game must not reach the PGN export"
     );
 
     let error_events = events_rx
@@ -301,10 +335,7 @@ async fn failed_engine_loses_with_error() {
 /// `resume_tournament`, and verifies the full schedule completes.
 #[tokio::test]
 async fn resume_across_restart() {
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping resume_across_restart: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
 
     // ── Phase 1: start tournament, let at least 1 game finish, then stop ──
     let (_dir, store1, db_path) = temp_db();
@@ -356,7 +387,7 @@ async fn resume_across_restart() {
         .unwrap()
         .expect("tournament should still be in the database");
     let (events_tx2, _events_rx2) = crossbeam_channel::unbounded();
-    let (t2, driver2) = resume_tournament(row, store2, events_tx2).unwrap();
+    let (t2, driver2) = resume_tournament(row, store2, events_tx2, &[]).unwrap();
     let handle2 = tokio::spawn(driver2);
 
     // The resumed snapshot should already reflect the pre-restart finished games.
@@ -410,69 +441,13 @@ async fn resume_across_restart() {
     handle2.abort();
 }
 
-/// Opening assignment is engine-independent: one opening per *encounter*, both
-/// colours sharing it, cycling when there are more encounters than openings.
-/// This exercises `create_tournament`'s scheduling/persistence without engines.
-#[test]
-fn openings_assigned_per_encounter_and_persisted() {
-    use colosseum_core::{OpeningBook, StartPosition};
-
-    let dir = tempfile::tempdir().unwrap();
-    let epd = dir.path().join("book.epd");
-    // Two distinct positions (1.e4 and 1.d4 reached as Black-to-move EPDs).
-    std::fs::write(
-        &epd,
-        "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3\n\
-         rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d3\n",
-    )
-    .unwrap();
-
-    let db = dir.path().join("colosseum.sqlite");
-    let store = Store::open(&db).unwrap();
-
-    let mut config = TournamentConfig {
-        format: Format::RoundRobin { cycles: 1 },
-        games_per_pair: 2,
-        ..Default::default()
-    };
-    config.start_position = StartPosition::Book(OpeningBook::new(epd));
-
-    // 3 engines -> 3 encounters; with 2 openings the third encounter cycles back.
-    let engines = vec![
-        EngineConfig::new("/nonexistent/a".into()),
-        EngineConfig::new("/nonexistent/b".into()),
-        EngineConfig::new("/nonexistent/c".into()),
-    ];
-    let (events_tx, _rx) = crossbeam_channel::unbounded();
-    let (tournament, _driver) =
-        create_tournament("Book", config, engines, store, events_tx).unwrap();
-
-    let reopened = Store::open(&db).unwrap();
-    let games = reopened.list_games(tournament.id).unwrap();
-    assert_eq!(games.len(), 6, "3 pairs * 2 games");
-
-    // Every game has an assigned opening FEN.
-    assert!(games.iter().all(|g| g.start_fen.is_some()));
-    // Both games of an encounter share an opening (colours swap, position is the same).
-    assert_eq!(games[0].start_fen, games[1].start_fen);
-    assert_eq!(games[2].start_fen, games[3].start_fen);
-    assert_eq!(games[4].start_fen, games[5].start_fen);
-    // Distinct encounters draw distinct openings...
-    assert_ne!(games[0].start_fen, games[2].start_fen);
-    // ...and the book cycles: encounter 3 reuses opening 1.
-    assert_eq!(games[4].start_fen, games[0].start_fen);
-}
-
 /// Capstone: a full tournament with an EPD opening book, driven by real engines,
 /// runs to completion and every game starts from a book position (FEN-tagged PGN).
 #[tokio::test]
 async fn tournament_with_openings_runs_to_completion() {
     use colosseum_core::{OpeningBook, StartPosition};
 
-    let Some((_guard, exe)) = common::engine_or_skip() else {
-        eprintln!("skipping tournament_with_openings_runs_to_completion: no engine");
-        return;
-    };
+    let (_guard, exe) = common::smoke_engine();
     let (_dir, store, db_path) = temp_db();
 
     let book_path = _dir.path().join("book.epd");

@@ -17,6 +17,9 @@ pub struct ExportRow {
     /// `None` when the tournament does not update this engine's rating
     /// (exports as an empty field).
     pub elo_delta: Option<f64>,
+    /// The rating is a supplied input pinned for this tournament rather than
+    /// an estimate produced by it.
+    pub fixed: bool,
     pub points: f64,
     pub games: u32,
     pub wins: u32,
@@ -52,8 +55,8 @@ fn csv_line<I: IntoIterator<Item = String>>(fields: I) -> String {
 pub fn standings_csv(rows: &[ExportRow]) -> String {
     let mut out = csv_line(
         [
-            "Rank", "Engine", "Version", "Elo", "EloDelta", "Points", "Games", "Wins", "Draws",
-            "Losses", "AvgNps",
+            "Rank", "Engine", "Version", "Elo", "EloDelta", "Fixed", "Points", "Games", "Wins",
+            "Draws", "Losses", "AvgNps",
         ]
         .into_iter()
         .map(str::to_string),
@@ -65,6 +68,9 @@ pub fn standings_csv(rows: &[ExportRow]) -> String {
             csv_field(&r.version),
             format!("{:.1}", r.elo),
             r.elo_delta.map_or(String::new(), |d| format!("{d:+.1}")),
+            // A pinned rating is an input, not an estimate; saying so in the
+            // export keeps a reader from averaging it with the measured ones.
+            if r.fixed { "yes" } else { "no" }.to_string(),
             format!("{:.1}", r.points),
             r.games.to_string(),
             r.wins.to_string(),
@@ -109,6 +115,7 @@ mod tests {
 
     fn row(rank: usize, name: &str, pts: f64, w: u32, d: u32, l: u32) -> ExportRow {
         ExportRow {
+            fixed: false,
             rank,
             name: name.to_string(),
             version: String::new(),
@@ -129,9 +136,9 @@ mod tests {
         let lines: Vec<&str> = csv.lines().collect();
         assert_eq!(
             lines[0],
-            "Rank,Engine,Version,Elo,EloDelta,Points,Games,Wins,Draws,Losses,AvgNps"
+            "Rank,Engine,Version,Elo,EloDelta,Fixed,Points,Games,Wins,Draws,Losses,AvgNps"
         );
-        assert_eq!(lines[1], "1,Alpha,,1500.0,+0.0,1.5,2,1,1,0,");
+        assert_eq!(lines[1], "1,Alpha,,1500.0,+0.0,no,1.5,2,1,1,0,");
         assert!(csv.ends_with("\r\n"));
     }
 

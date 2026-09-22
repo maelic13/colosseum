@@ -94,6 +94,27 @@ pub fn is_thread_option(name: &str) -> bool {
     THREAD_COUNT_OPTIONS.contains(&n.as_str())
 }
 
+/// True when `name` asks an engine to play Chess960 rather than standard chess.
+///
+/// The harness plays standard chess only (PLAN S4), so this is a refusal, not
+/// a capability check. Forwarding the option would let an engine castle by a
+/// move encoding the harness reads as something else, which is worse than not
+/// supporting the variant at all.
+#[must_use]
+pub fn is_chess960_option(name: &str) -> bool {
+    let name = normalize_option_name(name);
+    matches!(
+        name.as_str(),
+        "uci_chess960" | "uci960" | "chess960" | "frc"
+    )
+}
+
+/// True when `value` sets a UCI check option on.
+#[must_use]
+pub fn is_uci_true(value: &str) -> bool {
+    value.trim().eq_ignore_ascii_case("true")
+}
+
 /// True when `name` is an engine's main transposition-table size option
 /// ("Hash", "Hash Size", "Memory"…). Deliberately exact-ish so hash-adjacent
 /// options ("Clear Hash", "Hash File") don't match.

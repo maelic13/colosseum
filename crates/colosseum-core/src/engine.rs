@@ -50,9 +50,9 @@ pub struct EngineConfig {
 impl EngineConfig {
     /// Create a new, minimally-populated engine config for the given executable.
     #[must_use]
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(id: EngineId, path: PathBuf) -> Self {
         Self {
-            id: EngineId::new(),
+            id,
             meta: EngineMeta::default(),
             path,
             args: Vec::new(),

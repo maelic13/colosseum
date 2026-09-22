@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "phase": "8.2",
+  "criterion": "Does a general engine developer need this capability, and can Colosseum provide it correctly within the 1.0 architecture?",
+  "decisions": [
+    {
+      "id": "ponder",
+      "decision": "adopt",
+      "release": "1.0",
+      "reason": "Engine developers need to compare and validate ordinary UCI pondering behavior under real game clocks; the shared runner already owns the complete protocol.",
+      "scope": "Explicit --ponder on match, sprt, calibrate, spsa and tournament run; clock controls only; default off; recorded in resolved configuration, run record and result.",
+      "evidence": "crates/colosseum-cli/tests/command_line.rs::fixed_match_drives_the_uci_ponder_protocol"
+    },
+    {
+      "id": "chess960",
+      "decision": "defer",
+      "release": "post-1.0",
+      "reason": "Chess960 developers need it, but a trustworthy implementation needs variant-aware position validation, opening ingestion, castling serialization, UCI_Chess960 negotiation, PGN tags and cross-runner fixtures; a flag over standard-chess state would be unsafe.",
+      "scope": "No 1.0 claim of Chess960 support.",
+      "evidence": "docs/architecture/phase-8-gap-decisions.md#chess960"
+    },
+    {
+      "id": "harness-syzygy-adjudication",
+      "decision": "defer",
+      "release": "post-1.0",
+      "reason": "Harness probing can improve termination and adjudication, but correct WDL/DTZ, 50-move-rule, castling/en-passant, file-set and probe-failure semantics require a dedicated tablebase port and fixtures.",
+      "scope": "1.0 continues forwarding ordinary engine tablebase UCI options without inspecting tablebase files.",
+      "evidence": "docs/architecture/phase-8-gap-decisions.md#harness-side-syzygy-adjudication"
+    },
+    {
+      "id": "additional-tournament-formats",
+      "decision": "decline",
+      "release": "1.0",
+      "reason": "Static round-robin and multi-seed gauntlet cover engine comparison and regression work; Swiss and knockout formats add result-dependent scheduling without a demonstrated engine-development requirement.",
+      "scope": "Keep the shared scheduler focused on round-robin and gauntlet.",
+      "evidence": "docs/architecture/phase-8-gap-decisions.md#additional-tournament-formats"
+    },
+    {
+      "id": "additional-output-formats",
+      "decision": "decline",
+      "release": "1.0",
+      "reason": "Versioned JSON plus PGN and RFC-4180 CSV provide machine interchange, games and tabular results; no missing general consumer contract has been identified.",
+      "scope": "New formats require a named consumer and a stable schema requirement.",
+      "evidence": "docs/architecture/phase-8-gap-decisions.md#additional-output-formats"
+    },
+    {
+      "id": "dedicated-datagen-command",
+      "decision": "decline",
+      "release": "1.0",
+      "reason": "Finite fixed-node/depth self-play, deterministic seeds, paired opening randomization, durable resume and PGN already come from match; trainer records and labels are project-specific.",
+      "scope": "Document the match recipe; revisit only for concrete generic sharding, deterministic game-ID, deduplication, controlled-randomization or unbounded-horizon requirements.",
+      "evidence": "PLAN.md#513-data-generation--deferred-as-a-separate-command"
+    }
+  ]
+}

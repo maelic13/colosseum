@@ -1,0 +1,221 @@
+name: Colosseum CLI candidate and release
+run-name: CLI ${{ github.ref_type == 'tag' && github.ref_name || format('candidate {0}', github.sha) }}
+
+on:
+  # A candidate builds, packages and smokes every archive and retains the
+  # bundle, without a tag and without publishing anything.
+  workflow_dispatch:
+  push:
+    tags:
+      - 'cli-v*'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  prepare:
+    name: Validate source and packaging inputs
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.metadata.outputs.mode }}
+      version: ${{ steps.metadata.outputs.version }}
+      source_sha: ${{ steps.metadata.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-cli-metadata
+
+      - name: Validate version and release ownership
+        id: metadata
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            metadata="$(cargo run --locked -q -p colosseum-release -- "$GITHUB_REF_NAME")"
+            mode=release
+          else
+            metadata="$(cargo run --locked -q -p colosseum-release -- candidate cli)"
+            mode=candidate
+          fi
+          test "$(jq -r .product <<<"$metadata")" = cli
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "version=$(jq -r .version <<<"$metadata")" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "$metadata"
+
+      - name: Reject forbidden CLI dependency edges
+        run: cargo test --locked -p colosseum-cli --test cli architecture::
+
+      - name: Verify version-matched offline documentation
+        run: cargo run --locked -p colosseum-docs -- --check
+
+  build:
+    name: Archive and smoke (${{ matrix.target }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows
+            arch: x64
+            extension: zip
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            platform: windows
+            arch: arm64
+            extension: zip
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux
+            arch: x64
+            extension: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: macos
+            arch: arm64
+            extension: tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-cli-${{ matrix.target }}
+
+      # One entry point: the same command a maintainer runs locally builds the
+      # product, stages the allowlisted contents, writes the archive to
+      # target/dist/ and reads it back with the archive smoke script.
+      - name: Build, package and smoke the headless CLI product
+        run: cargo xtask package cli --target ${{ matrix.target }}
+
+      - name: Upload exact platform archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-archive-${{ matrix.platform }}-${{ matrix.arch }}
+          path: target/dist/colosseum-cli-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.extension }}
+          if-no-files-found: error
+          retention-days: 30
+
+  collect:
+    name: Verify and retain exact bundle
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          fetch-depth: 0
+
+      - name: Download all exact platform archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: cli-archive-*
+          merge-multiple: true
+          path: release-artifacts
+
+      - name: Verify the complete matrix and generate checksums
+        shell: bash
+        run: |
+          version='${{ needs.prepare.outputs.version }}'
+          expected=(
+            "colosseum-cli-${version}-windows-x64.zip"
+            "colosseum-cli-${version}-windows-arm64.zip"
+            "colosseum-cli-${version}-linux-x64.tar.gz"
+            "colosseum-cli-${version}-macos-arm64.tar.gz"
+          )
+          test "$(find release-artifacts -maxdepth 1 -type f | wc -l)" -eq 4
+          for file in "${expected[@]}"; do test -f "release-artifacts/$file"; done
+          (cd release-artifacts && sha256sum "${expected[@]}" > SHA256SUMS)
+          (cd release-artifacts && sha256sum --check SHA256SUMS)
+
+      - name: Record candidate identity
+        if: needs.prepare.outputs.mode == 'candidate'
+        shell: bash
+        run: |
+          cat > release-artifacts/CANDIDATE.json <<EOF
+          {"product":"colosseum-cli","version":"${{ needs.prepare.outputs.version }}","commit":"${{ needs.prepare.outputs.source_sha }}","workflow_run":${{ github.run_id }}}
+          EOF
+
+      - name: Retain candidate bundle without publishing a release
+        if: needs.prepare.outputs.mode == 'candidate'
+        uses: actions/upload-artifact@v7
+        with:
+          name: colosseum-cli-candidate-${{ needs.prepare.outputs.source_sha }}
+          path: release-artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Add product-owned release notes to the stable bundle
+        if: needs.prepare.outputs.mode == 'release'
+        run: cargo run --locked -q -p colosseum-release -- notes "$GITHUB_REF_NAME" release-artifacts/RELEASE-NOTES.md
+
+      - name: Retain verified stable bundle for the publish job
+        if: needs.prepare.outputs.mode == 'release'
+        uses: actions/upload-artifact@v7
+        with:
+          name: colosseum-cli-release-${{ needs.prepare.outputs.source_sha }}
+          path: release-artifacts/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish stable release
+    if: needs.prepare.outputs.mode == 'release'
+    needs: [prepare, collect]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          fetch-depth: 0
+
+      - name: Prove the tagged commit is reachable from the default branch
+        shell: bash
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor '${{ needs.prepare.outputs.source_sha }}' origin/main
+
+      - name: Download the verified stable bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: colosseum-cli-release-${{ needs.prepare.outputs.source_sha }}
+          path: release-artifacts
+
+      - name: Recheck downloaded archive checksums
+        run: cd release-artifacts && sha256sum --check SHA256SUMS
+
+      - name: Publish the product-scoped GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: Colosseum CLI v${{ needs.prepare.outputs.version }}
+          body_path: release-artifacts/RELEASE-NOTES.md
+          # GitHub keeps one repository-wide "latest" release for both products.
+          # The CLI never claims it, so a CLI tag cannot displace the GUI
+          # download the repository front page offers.
+          make_latest: false
+          # SHA256SUMS is generated and re-checked between jobs, but not
+          # published: a checksum file beside the archives it describes proves
+          # nothing an attacker who can replace one cannot also replace. The
+          # per-asset digests GitHub records are the ones to compare against.
+          files: |
+            release-artifacts/colosseum-cli-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

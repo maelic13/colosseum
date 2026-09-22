@@ -1,0 +1,24 @@
+Warning: No opening book specified! Consider using one, otherwise all games will be played from the starting position.
+Warning: Unknown opening format, 2. All games will be played from the starting position.
+Started game 1 of 6 (Rarog vs Stockfish)
+Finished game 1 (Rarog vs Stockfish): 0-1 {White loses on time (9ms overrun)}
+Score of Rarog vs Stockfish: 0 - 1 - 0  [0.000] 1
+Started game 2 of 6 (Stockfish vs Rarog)
+Finished game 2 (Stockfish vs Rarog): 1-0 {Black loses on time (7ms overrun)}
+Score of Rarog vs Stockfish: 0 - 2 - 0  [0.000] 2
+Started game 3 of 6 (Rarog vs Stockfish)
+Finished game 3 (Rarog vs Stockfish): 0-1 {White loses on time (3ms overrun)}
+Score of Rarog vs Stockfish: 0 - 3 - 0  [0.000] 3
+Started game 4 of 6 (Stockfish vs Rarog)
+Finished game 4 (Stockfish vs Rarog): 1-0 {Black loses on time (4ms overrun)}
+Score of Rarog vs Stockfish: 0 - 4 - 0  [0.000] 4
+Started game 5 of 6 (Rarog vs Stockfish)
+Finished game 5 (Rarog vs Stockfish): 0-1 {White loses on time (3ms overrun)}
+Score of Rarog vs Stockfish: 0 - 5 - 0  [0.000] 5
+Started game 6 of 6 (Stockfish vs Rarog)
+Finished game 6 (Stockfish vs Rarog): 1-0 {Black loses on time (2ms overrun)}
+Score of Rarog vs Stockfish: 0 - 6 - 0  [0.000] 6
+Elo difference: -inf +/- nan, LOS: 0.00 %, DrawRatio: 0.00 %
+SPRT: llr -0.17 (5.9%), lbound -2.94, ubound 2.94
+Finished match
+Total Time: 00:00:03 (hours:minutes:seconds)

@@ -1,0 +1,509 @@
+//! Versioned official state read by the common `status` command.
+
+use std::collections::BTreeMap;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use thiserror::Error;
+
+use crate::RunDirectory;
+use crate::progress::ProgressBlock;
+use crate::run_writer::RunWriter;
+
+/// Bumped when the record's shape changes, including the command-specific
+/// `workflow` payload. Version 3 added the last-level cache domain to every
+/// engine CPU placement; version 4 replaced the execution plan's
+/// `cores_per_engine` count with the slot allocation mode that produced it;
+/// version 5 retains the run's most recent progress block so `status` reports
+/// what the console last showed.
+pub const RUN_RECORD_SCHEMA_VERSION: u64 = 5;
+static RECORD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RunStatus {
+    Running,
+    Completed,
+    Cancelled,
+    Aborted,
+    Invalid,
+}
+
+impl RunStatus {
+    #[must_use]
+    pub fn is_terminal(self) -> bool {
+        !matches!(self, Self::Running)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct OfficialSample {
+    pub committed_units: u64,
+    pub scored_games: u64,
+    pub completed_pairs: u64,
+    pub pentanomial: [u64; 5],
+    pub unpaired_games: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CapabilityLevel {
+    Enforced,
+    Available,
+    Unavailable,
+    Deferred,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostSummary {
+    pub operating_system: String,
+    pub architecture: String,
+    pub logical_cpus_visible: usize,
+    pub capabilities: BTreeMap<String, CapabilityLevel>,
+}
+
+impl HostSummary {
+    #[must_use]
+    pub fn current() -> Self {
+        let mut capabilities = BTreeMap::new();
+        capabilities.insert("process-tree-containment".into(), CapabilityLevel::Enforced);
+        capabilities.insert("bounded-engine-pipes".into(), CapabilityLevel::Enforced);
+        capabilities.insert("cpu-affinity".into(), CapabilityLevel::Deferred);
+        Self {
+            operating_system: std::env::consts::OS.into(),
+            architecture: std::env::consts::ARCH.into(),
+            logical_cpus_visible: std::thread::available_parallelism()
+                .map(usize::from)
+                .unwrap_or(0),
+            capabilities,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Anomaly {
+    pub code: String,
+    pub message: String,
+}
+
+// The retained progress block carries measured rates, so the record is
+// comparable but not `Eq`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunRecord {
+    pub schema_version: u64,
+    pub stats_version: u32,
+    pub product_version: String,
+    pub command: String,
+    pub config_sha256: String,
+    pub status: RunStatus,
+    pub started_unix_ms: u64,
+    pub updated_unix_ms: u64,
+    pub official_sample: OfficialSample,
+    /// The last progress block this run published, absent until it publishes
+    /// one. `status` prints exactly this, so a closed console loses nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<ProgressBlock>,
+    pub host: HostSummary,
+    pub workflow: Value,
+    pub anomalies: Vec<Anomaly>,
+}
+
+impl RunRecord {
+    fn new(directory: &RunDirectory, command: &str) -> Self {
+        let now = unix_ms();
+        Self {
+            schema_version: RUN_RECORD_SCHEMA_VERSION,
+            stats_version: colosseum_core::STATS_VERSION,
+            product_version: env!("CARGO_PKG_VERSION").into(),
+            command: command.into(),
+            config_sha256: directory.config_sha256().into(),
+            status: RunStatus::Running,
+            started_unix_ms: now,
+            updated_unix_ms: now,
+            official_sample: OfficialSample::default(),
+            progress: None,
+            host: HostSummary::current(),
+            workflow: json!({
+                "applicability": "not-yet-populated",
+                "reason": "the workflow owner has not published its command-specific record"
+            }),
+            anomalies: Vec::new(),
+        }
+    }
+
+    pub fn read(root: &Path) -> Result<Self, RunRecordError> {
+        let path = root.join("run-record.json");
+        let bytes = fs::read(&path).map_err(|source| RunRecordError::Io {
+            operation: "read run record",
+            path: path.clone(),
+            source,
+        })?;
+        let record: Self = serde_json::from_slice(&bytes)?;
+        if record.schema_version != RUN_RECORD_SCHEMA_VERSION {
+            return Err(RunRecordError::UnsupportedSchema {
+                path,
+                version: record.schema_version,
+            });
+        }
+        Ok(record)
+    }
+}
+
+/// Lifecycle owner. Dropping a still-running recorder persists an aborted state.
+pub struct RunRecorder {
+    path: PathBuf,
+    record: RunRecord,
+    /// Once a run is going, the record is written by the run's writer on its
+    /// blocking thread, in order with everything else the run writes.
+    writer: Option<RunWriter>,
+}
+
+impl std::fmt::Debug for RunRecorder {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RunRecorder")
+            .field("path", &self.path)
+            .field("record", &self.record)
+            .field("written_through", &self.writer.is_some())
+            .finish()
+    }
+}
+
+impl RunRecorder {
+    pub fn begin(directory: &RunDirectory, command: &str) -> Result<Self, RunRecordError> {
+        let mut recorder = Self {
+            path: directory.paths().root.join("run-record.json"),
+            record: RunRecord::new(directory, command),
+            writer: None,
+        };
+        recorder.persist()?;
+        Ok(recorder)
+    }
+
+    /// Resume ownership of an interrupted run without replacing its identity,
+    /// timestamps, sample or anomaly history.
+    pub fn resume(directory: &RunDirectory) -> Result<Self, RunRecordError> {
+        let path = directory.paths().root.join("run-record.json");
+        let mut record = RunRecord::read(&directory.paths().root)?;
+        if record.config_sha256 != directory.config_sha256() {
+            return Err(RunRecordError::ConfigMismatch {
+                stored: record.config_sha256,
+                requested: directory.config_sha256().to_owned(),
+            });
+        }
+        if matches!(record.status, RunStatus::Completed | RunStatus::Invalid) {
+            return Err(RunRecordError::TerminalResume(record.status));
+        }
+        record.status = RunStatus::Running;
+        record.anomalies.push(Anomaly {
+            code: "run-resumed".into(),
+            message: "workflow resumed from its durable run directory".into(),
+        });
+        let mut recorder = Self {
+            path,
+            record,
+            writer: None,
+        };
+        recorder.touch();
+        recorder.persist()?;
+        Ok(recorder)
+    }
+
+    #[must_use]
+    pub fn record(&self) -> &RunRecord {
+        &self.record
+    }
+
+    /// From now on, write the record through the run's writer instead of
+    /// blocking the caller on a synced rename. The caller waits for the writer
+    /// before it exits, so the terminal record is durable when the process
+    /// ends.
+    pub fn write_through(&mut self, writer: RunWriter) {
+        self.writer = Some(writer);
+    }
+
+    pub fn update_sample(&mut self, sample: OfficialSample) -> Result<(), RunRecordError> {
+        self.require_running()?;
+        self.record.official_sample = sample;
+        self.touch();
+        self.persist()
+    }
+
+    /// Retain the block a run just published. The record keeps only the most
+    /// recent one; `run.log` keeps the whole trajectory.
+    pub fn update_progress(&mut self, block: ProgressBlock) -> Result<(), RunRecordError> {
+        self.require_running()?;
+        self.record.progress = Some(block);
+        self.touch();
+        self.persist()
+    }
+
+    pub fn set_workflow(&mut self, workflow: Value) -> Result<(), RunRecordError> {
+        self.require_running()?;
+        self.record.workflow = workflow;
+        self.touch();
+        self.persist()
+    }
+
+    pub fn add_anomaly(
+        &mut self,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Result<(), RunRecordError> {
+        self.record.anomalies.push(Anomaly {
+            code: code.into(),
+            message: message.into(),
+        });
+        self.touch();
+        self.persist()
+    }
+
+    pub fn finish(mut self, status: RunStatus) -> Result<(), RunRecordError> {
+        if !status.is_terminal() {
+            return Err(RunRecordError::NonTerminalFinish);
+        }
+        self.require_running()?;
+        self.record.status = status;
+        self.touch();
+        self.persist()
+    }
+
+    fn require_running(&self) -> Result<(), RunRecordError> {
+        if self.record.status == RunStatus::Running {
+            Ok(())
+        } else {
+            Err(RunRecordError::AlreadyTerminal(self.record.status))
+        }
+    }
+
+    fn touch(&mut self) {
+        self.record.updated_unix_ms = unix_ms();
+    }
+
+    fn persist(&mut self) -> Result<(), RunRecordError> {
+        let Some(writer) = &self.writer else {
+            return write_atomic(&self.path, &self.record);
+        };
+        if !self.record.status.is_terminal() {
+            return writer
+                .replace(self.path.clone(), serde_json::to_vec(&self.record)?)
+                .map_err(RunRecordError::Writer);
+        }
+        // The terminal record must reach the disk whatever became of the
+        // writer: a run that ended must never be left reading `running`. The
+        // writer is asked, and waited for; one that has failed writes nothing
+        // more, so the record is then written here, directly, with the
+        // failure beside it.
+        match writer.replace_and_report(self.path.clone(), serde_json::to_vec(&self.record)?) {
+            Ok(()) => Ok(()),
+            Err(failure) => {
+                self.record.anomalies.push(Anomaly {
+                    code: "writer-failed".into(),
+                    message: format!(
+                        "the run directory writer failed, so this final record was written directly: {failure}"
+                    ),
+                });
+                write_atomic(&self.path, &self.record)
+            }
+        }
+    }
+}
+
+impl Drop for RunRecorder {
+    fn drop(&mut self) {
+        if self.record.status == RunStatus::Running {
+            self.record.status = RunStatus::Aborted;
+            self.record.anomalies.push(Anomaly {
+                code: "workflow-owner-dropped".into(),
+                message: "workflow ended without an explicit terminal transition".into(),
+            });
+            self.touch();
+            let _ = self.persist();
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum RunRecordError {
+    #[error("run-record JSON failed: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("unsupported run-record schema {version} at {path}")]
+    UnsupportedSchema { path: PathBuf, version: u64 },
+    #[error("cannot finish a run with running status")]
+    NonTerminalFinish,
+    #[error("run is already terminal: {0:?}")]
+    AlreadyTerminal(RunStatus),
+    #[error("completed or invalid run cannot be resumed: {0:?}")]
+    TerminalResume(RunStatus),
+    #[error("run-record configuration mismatch: stored {stored}, requested {requested}")]
+    ConfigMismatch { stored: String, requested: String },
+    #[error("could not {operation} at {path}: {source}")]
+    Io {
+        operation: &'static str,
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("the run directory writer failed: {0}")]
+    Writer(String),
+}
+
+fn write_atomic(path: &Path, value: &RunRecord) -> Result<(), RunRecordError> {
+    let bytes = serde_json::to_vec(value)?;
+    let parent = path.parent().expect("run-record path has a parent");
+    let temporary = parent.join(format!(
+        ".run-record.{}.{}.tmp",
+        std::process::id(),
+        RECORD_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|source| RunRecordError::Io {
+                operation: "create run-record temporary",
+                path: temporary.clone(),
+                source,
+            })?;
+        file.write_all(&bytes)
+            .and_then(|()| file.sync_all())
+            .map_err(|source| RunRecordError::Io {
+                operation: "write run-record temporary",
+                path: temporary.clone(),
+                source,
+            })?;
+        replace_atomic(&temporary, path).map_err(|source| RunRecordError::Io {
+            operation: "publish run record",
+            path: path.to_path_buf(),
+            source,
+        })
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+#[cfg(not(windows))]
+fn replace_atomic(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace_atomic(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    // SAFETY: both paths are valid, nul-terminated UTF-16 buffers for this call.
+    if unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+fn unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::{built_in_defaults, resolve_config};
+
+    fn config(root: &Path) -> crate::ResolvedConfig {
+        resolve_config(
+            built_in_defaults(),
+            None,
+            json!({"command": "match"}),
+            &[],
+            root,
+            &[],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn dropped_owner_records_an_aborted_run_with_zero_official_sample() {
+        let root = tempfile::tempdir().unwrap();
+        let run = RunDirectory::create_unique(root.path(), "match", &config(root.path()))
+            .unwrap()
+            .directory;
+        {
+            let _recorder = RunRecorder::begin(&run, "match").unwrap();
+        }
+        let record = RunRecord::read(&run.paths().root).unwrap();
+        assert_eq!(record.status, RunStatus::Aborted);
+        assert_eq!(record.official_sample, OfficialSample::default());
+        assert_eq!(record.schema_version, RUN_RECORD_SCHEMA_VERSION);
+        assert_eq!(record.stats_version, colosseum_core::STATS_VERSION);
+        // A run that never published a block has no block to report.
+        assert!(record.progress.is_none());
+        assert!(
+            record
+                .host
+                .capabilities
+                .contains_key("process-tree-containment")
+        );
+        assert_eq!(record.anomalies[0].code, "workflow-owner-dropped");
+    }
+
+    #[test]
+    fn terminal_record_keeps_the_official_committed_sample() {
+        let root = tempfile::tempdir().unwrap();
+        let run = RunDirectory::create_unique(root.path(), "sprt", &config(root.path()))
+            .unwrap()
+            .directory;
+        let mut recorder = RunRecorder::begin(&run, "sprt").unwrap();
+        recorder
+            .set_workflow(json!({"kind": "sprt", "model": "normalized"}))
+            .unwrap();
+        let sample = OfficialSample {
+            committed_units: 4,
+            scored_games: 4,
+            completed_pairs: 2,
+            pentanomial: [0, 0, 1, 1, 0],
+            unpaired_games: 0,
+        };
+        recorder.update_sample(sample.clone()).unwrap();
+        recorder
+            .add_anomaly("clock-resolution", "coarse timer")
+            .unwrap();
+        recorder.finish(RunStatus::Completed).unwrap();
+        let record = RunRecord::read(&run.paths().root).unwrap();
+        assert_eq!(record.status, RunStatus::Completed);
+        assert_eq!(record.official_sample, sample);
+        assert_eq!(record.workflow["model"], "normalized");
+        assert_eq!(record.anomalies.len(), 1);
+    }
+}

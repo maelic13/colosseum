@@ -3,6 +3,9 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[cfg(test)]
+static TEST_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 macro_rules! id_type {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
@@ -10,16 +13,32 @@ macro_rules! id_type {
         pub struct $name(pub Uuid);
 
         impl $name {
-            /// Generate a fresh random (v4) identifier.
+            /// Construct an opaque identifier from bytes supplied by an outer
+            /// identity adapter.
             #[must_use]
-            pub fn new() -> Self {
-                Self(Uuid::new_v4())
+            pub const fn from_uuid(value: Uuid) -> Self {
+                Self(value)
             }
-        }
 
-        impl Default for $name {
-            fn default() -> Self {
-                Self::new()
+            /// Deterministic constructor used by persisted input and tests.
+            #[must_use]
+            pub const fn from_u128(value: u128) -> Self {
+                Self(Uuid::from_u128(value))
+            }
+
+            #[must_use]
+            pub const fn as_uuid(self) -> Uuid {
+                self.0
+            }
+
+            /// Deterministic convenience constructor available only to this
+            /// crate's unit tests. Production identity comes from an adapter.
+            #[cfg(test)]
+            #[must_use]
+            #[allow(clippy::new_without_default)]
+            pub fn new() -> Self {
+                use std::sync::atomic::Ordering;
+                Self::from_u128(u128::from(TEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed)))
             }
         }
 
@@ -36,10 +55,26 @@ id_type!(
     EngineId
 );
 id_type!(
+    /// Identifies one run-local participant independently of any GUI library.
+    ParticipantId
+);
+id_type!(
     /// Identifies a single game within a tournament.
     GameId
 );
 id_type!(
     /// Identifies a tournament.
     TournamentId
+);
+id_type!(
+    /// Identifies a durable experiment run.
+    RunId
+);
+id_type!(
+    /// Identifies one immutable scheduled execution unit.
+    UnitId
+);
+id_type!(
+    /// Identifies one colour-reversed opening pair.
+    PairId
 );

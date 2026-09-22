@@ -1,28 +1,87 @@
 [package]
 name = "colosseum-engine"
-version.workspace = true
+version = "0.1.0"
+publish = false
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+default = ["tournament", "platform"]
+# Lightweight OS adapter surface used by the independent CLI capability probe.
+platform = []
+# One-game UCI runner, PGN rendering and incident forensics. This remains
+# independent of the GUI scheduler and SQLite storage adapter.
+runner = [
+    "dep:colosseum-core",
+    "dep:colosseum-uci",
+    "dep:shakmaty",
+    "dep:time",
+    "dep:tokio",
+    "dep:tracing",
+]
+# Existing GUI/backend scheduler and persistence implementation. Kept as the
+# default for compatibility.
+tournament = [
+    "runner",
+    "dep:anyhow",
+    "dep:crossbeam-channel",
+    "dep:rusqlite",
+    "dep:serde_json",
+    "dep:uuid",
+]
+# Explicit local interoperability coverage only. Required CI never enables it.
+real-engine-smoke = ["tournament"]
+# Explicit host affinity/residency coverage only. Required CI never enables it.
+platform-smoke = ["platform"]
+
 [dependencies]
-anyhow = "1.0.102"
-toml = "1.1.2"
-colosseum-core = { path = "../colosseum-core" }
-colosseum-uci = { path = "../colosseum-uci" }
-crossbeam-channel = "0.5.15"
-directories = "6.0.0"
-rusqlite = { version = "0.40.1", features = ["bundled"] }
+anyhow = { version = "1.0.102", optional = true }
+colosseum-application = { path = "../colosseum-application" }
+colosseum-core = { path = "../colosseum-core", optional = true }
+colosseum-uci = { path = "../colosseum-uci", optional = true }
+crossbeam-channel = { version = "0.5.15", optional = true }
+rusqlite = { version = "0.40.1", features = ["bundled"], optional = true }
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
-shakmaty = "0.30.0"
+serde_json = { version = "1.0.150", optional = true }
+shakmaty = { version = "0.30.0", optional = true }
 thiserror = "2.0.18"
-time = "0.3.47"
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
-tracing = "0.1.44"
-uuid = { version = "1.23.2", features = ["v4", "serde"] }
+time = { version = "0.3.47", optional = true }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"], optional = true }
+tracing = { version = "0.1.44", optional = true }
+uuid = { version = "1.23.2", features = ["v4", "serde"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Kernel", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.180"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2.180"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[[bin]]
+name = "colosseum-affinity-fixture"
+path = "src/bin/affinity_fixture.rs"
+test = false
+required-features = ["platform"]
+
+[[test]]
+name = "runner_smoke"
+path = "tests/runner.rs"
+required-features = ["real-engine-smoke"]
+
+[[test]]
+name = "scheduler_smoke"
+path = "tests/scheduler.rs"
+required-features = ["real-engine-smoke"]
+
+[[test]]
+name = "affinity_smoke"
+path = "tests/affinity_residency.rs"
+required-features = ["platform-smoke"]

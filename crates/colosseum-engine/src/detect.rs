@@ -5,11 +5,11 @@
 //! scans a folder. The result populates the engine's metadata and
 //! detected-options schema stored in [`colosseum_core::EngineConfig`].
 
-use std::path::Path;
-use std::time::Duration;
-
+use colosseum_application::{EngineLaunchSpec, InspectEngine, RuntimeParticipant, UciOptionSchema};
+use colosseum_core::ParticipantId;
 use colosseum_core::UciOption;
-use colosseum_uci::{EngineProcess, SpawnOptions};
+use colosseum_uci::UciSessionFactory;
+use std::path::Path;
 
 use crate::error::EngineError;
 
@@ -31,19 +31,45 @@ pub struct DetectResult {
 /// `uciok`. The engine is killed on drop regardless of how `detect_engine`
 /// returns.
 pub async fn detect_engine(path: &Path) -> Result<DetectResult, EngineError> {
-    let opts = SpawnOptions::new(path);
-    let mut proc = EngineProcess::spawn(opts).await?;
-    proc.handshake(Duration::from_secs(10)).await?;
-
-    let result = DetectResult {
-        name: proc.name().map(str::to_string),
-        author: proc.author().map(str::to_string),
-        options: proc.options().to_vec(),
+    let participant = RuntimeParticipant {
+        id: ParticipantId::from_uuid(uuid::Uuid::new_v4()),
+        launch: EngineLaunchSpec::path_only(path.to_path_buf()),
     };
-
-    // Best-effort graceful quit; if it times out the engine is killed on drop.
-    let _ = proc.quit(Duration::from_secs(2)).await;
+    let inspection = InspectEngine::execute(&UciSessionFactory, &participant).await?;
+    let result = DetectResult {
+        name: inspection.name,
+        author: inspection.author,
+        options: inspection.options.into_iter().map(core_option).collect(),
+    };
     Ok(result)
+}
+
+fn core_option(option: UciOptionSchema) -> UciOption {
+    match option {
+        UciOptionSchema::Check { name, default } => UciOption::Check { name, default },
+        UciOptionSchema::Spin {
+            name,
+            default,
+            min,
+            max,
+        } => UciOption::Spin {
+            name,
+            default,
+            min,
+            max,
+        },
+        UciOptionSchema::Combo {
+            name,
+            default,
+            values,
+        } => UciOption::Combo {
+            name,
+            default,
+            vars: values,
+        },
+        UciOptionSchema::Button { name } => UciOption::Button { name },
+        UciOptionSchema::String { name, default } => UciOption::Str { name, default },
+    }
 }
 
 /// Split a UCI `id name` into a display name and an optional version.

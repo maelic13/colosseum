@@ -1,25 +1,28 @@
 # Colosseum
 
-Desktop GUI (Rust + egui/eframe) for running UCI chess-engine-vs-engine
-tournaments: round robin and gauntlet formats, parallel games, live board
-view, ML Elo ratings, PGN/CSV export. GPL-3.0. Windows/Linux/macOS via
-cargo-dist; the primary dev machine is Windows.
+One repository for the independently versioned Colosseum desktop GUI and
+headless Colosseum CLI chess-engine testing products. GPL-3.0. The primary
+development machine is Windows.
 
 ## Workspace
 
 | Crate | Role |
 |---|---|
 | `colosseum-core` | Pure domain logic, no I/O: config types, pairings, standings, rating math (`ml_ratings`, `performance_rating`, `rating_error`), SPRT/LOS stats, adjudication |
+| `colosseum-application` | Runtime-neutral use cases, launch/run models and driven ports |
 | `colosseum-uci` | UCI protocol + engine process management (spawn, handshake, search) |
-| `colosseum-engine` | Tournament scheduler/driver (tokio), game runner, SQLite store, PGN, openings, incident forensics, app dirs/config |
-| `colosseum-gui` | eframe app; one module per tab (`tournament_tab`, `results_tab` = the Arena tab, `engines_tab`) plus `live_view`, `theme`, `widgets`, `backend` (GUI↔engine bridge) |
+| `colosseum-engine` | Tournament scheduler/driver, game runner, SQLite store, PGN/openings, incident forensics and OS topology/affinity adapters |
+| `colosseum-gui` | eframe GUI composition root plus GUI-owned library/config/path adapters |
+| `colosseum-cli` | Independent headless composition root; ordinary UCI executables only. `composition.rs` holds the parser, dispatch and shared resolvers, with one module per command in `composition/` |
 
 Commands: `cargo check --workspace --tests`, `cargo clippy --workspace`,
-`cargo test --workspace`, run with `cargo run -p colosseum-gui`.
-Docs split: `README.md` and `CHANGELOG.md` are **user-facing** (keep them
-simple, no build/internals detail); `docs/DEVELOPMENT.md` holds the
-maintainer material (build prerequisites, tests, workspace layout, release
-process).
+`cargo test --workspace --all-targets`; run the GUI with
+`cargo run -p colosseum-gui` and the CLI with `cargo run -p colosseum-cli -- --help`.
+Before implementation work, read `AGENTS.md`, `PLAN.md` and `GUIDE.md`.
+`PLAN.md` and `GUIDE.md` are the maintainer-facing CLI specification/tracker;
+`README.md` and the product changelogs are **user-facing** (keep them simple, no
+phase/internal-method detail); `docs/DEVELOPMENT.md` holds implemented build,
+test, workspace and release facts.
 App data lives in `%APPDATA%\colosseum\` (`config/engines.json`,
 `data/colosseum.db`, `data/logs/` incl. per-game incident reports);
 `--portable` keeps everything next to the exe. The user's real engine
@@ -63,12 +66,15 @@ aborts).
 - **The Arena tab is live-only**: no per-game browsing/viewer in-app; users
   export PGN for analysis elsewhere. One tournament is always selected and
   auto-loaded; there is no "close tournament".
-- **Engines are spawned per game, deliberately — do not add a process pool.**
-  Measured on the real library (spawn+handshake+ucinewgame): modern engines
-  17–350 ms, worst case Rybka 3 ~840 ms, vs ~34 s average game time — a 1–3%
-  overhead. Reuse would break crash isolation and per-game forensics, keep
-  idle Hash allocations alive, and trust `ucinewgame` state resets in exactly
-  the old engines known to leak state (learning files, etc.).
+- **The GUI spawns engines per game, deliberately.** Measured on the real
+  library (spawn+handshake+ucinewgame): modern engines 17–350 ms, worst case
+  Rybka 3 ~840 ms, vs ~34 s average game time — a 1–3% overhead; reuse would
+  keep idle Hash allocations alive and trust `ucinewgame` in exactly the old
+  engines known to leak state. **The CLI keeps each slot's engines between
+  games by default** (`--engine-processes per-slot`, the Phase 10 record, item (ae)),
+  replacing one after any fault: fresh processes put an engine's one-time
+  work inside a game's search (Rarog's KPK bitbase forfeited games that way),
+  and fastchess keeps its engines too. Tournaments keep fresh processes.
 - **Store writes are batched**: schedule inserts are one transaction
   (`insert_pending_games`) — per-row inserts froze the UI for minutes.
 - GUI: all visual rules live in `docs/design/GUIDELINES.md` (binding). The
@@ -83,8 +89,20 @@ aborts).
 
 ## Verifying changes
 
-Unit/integration tests cover core math, store, scheduler, and GUI logic
-(`cargo test --workspace`; scheduler integration tests stub engines with
-`cmd /c`). Live-view/UI changes need a real run: launch the app, start a
-short tournament (e.g. 2 engines, 100 ms/move) with engines from
-`D:\chess\engines\`, and delete the test tournament afterwards.
+Unit/integration tests cover core math, committed statistics fixtures, store,
+scheduler, and GUI logic (`cargo test --workspace --all-targets`). The required
+suite is repository-only. Real-engine runner/scheduler/UCI smoke targets require
+the explicit `real-engine-smoke` feature and `COLOSSEUM_SMOKE_ENGINE`; they do
+not count as release or platform evidence. Live-view/UI changes need a real
+run: launch the app, start a short tournament (e.g. 2 engines, 100 ms/move)
+with engines from `D:\chess\engines\`, and delete the test tournament
+afterwards.
+
+## Implementation and commits
+
+`GUIDE.md` numbered items are implemented in order, with the phase exit
+demonstrated before proceeding. Complete one numbered step—including tests,
+documentation and status evidence—then commit it before starting the next.
+Use a short imperative subject naming the outcome, preferably including the
+step identifier. Never add `Co-authored-by` or assistant-attribution trailers.
+The full worktree, architecture and commit rules are binding in `AGENTS.md`.

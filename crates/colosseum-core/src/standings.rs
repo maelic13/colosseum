@@ -117,6 +117,18 @@ pub enum PairGameResult {
     Loss,
 }
 
+impl PairGameResult {
+    /// This game's score in half-points from the recorded engine's perspective.
+    #[must_use]
+    pub const fn points_twice(self) -> u8 {
+        match self {
+            Self::Win => 2,
+            Self::Draw => 1,
+            Self::Loss => 0,
+        }
+    }
+}
+
 /// Aggregated standings for a tournament.
 #[derive(Debug, Clone, Default)]
 pub struct Standings {

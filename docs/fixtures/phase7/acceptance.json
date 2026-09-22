@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "phase": "7",
+  "gates": [
+    {
+      "id": "gui-schedule-parity",
+      "evidence": "phase7_acceptance::stored_gui_fixture_matches_both_cli_schedules_and_ratings"
+    },
+    {
+      "id": "gui-rating-parity-0.01-elo",
+      "evidence": "phase7_acceptance::stored_gui_fixture_matches_both_cli_schedules_and_ratings"
+    },
+    {
+      "id": "round-robin-kill-resume",
+      "evidence": "phase7_acceptance::both_formats_resume_to_uninterrupted_standings"
+    },
+    {
+      "id": "multi-seed-gauntlet-kill-resume",
+      "evidence": "phase7_acceptance::both_formats_resume_to_uninterrupted_standings"
+    },
+    {
+      "id": "workspace-regression",
+      "evidence": "cargo check --workspace --tests; cargo clippy --workspace; cargo test --workspace --all-targets"
+    }
+  ]
+}

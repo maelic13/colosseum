@@ -13,6 +13,7 @@
 mod app;
 mod backend;
 mod board;
+mod config;
 mod dialog;
 mod eco;
 mod engines_tab;
@@ -21,18 +22,20 @@ mod icon;
 mod live_view;
 mod logo;
 mod presets;
+mod product;
 mod results_tab;
+mod runtime_adapter;
 mod theme;
 mod tournament_tab;
 mod update;
 mod widgets;
 
-use colosseum_core::branding::DISPLAY_NAME;
-use colosseum_engine::AppDirs;
 use eframe::egui;
 
 use crate::app::ColosseumApp;
 use crate::backend::Backend;
+use crate::config::AppDirs;
+use crate::product::DISPLAY_NAME;
 
 /// Re-attach stdout/stderr to the parent process's console (if any), so a GUI-
 /// subsystem binary still prints tracing output when launched from a terminal.
@@ -106,6 +109,11 @@ fn main() -> eframe::Result<()> {
     {
         attach_parent_console();
         set_app_user_model_id();
+    }
+
+    if std::env::args().any(|argument| argument == "--version") {
+        println!("colosseum {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
     }
 
     // `--portable` keeps all data (config, database, engines) next to the binary.

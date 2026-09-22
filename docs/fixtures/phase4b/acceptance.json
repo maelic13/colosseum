@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "phase": "4B",
+  "gates": [
+    {
+      "id": "analytic-statistics-oracle",
+      "evidence": "statistics_fixtures::analytic_fixture_covers_every_phase_one_statistics_contract"
+    },
+    {
+      "id": "external-terminal-replay",
+      "evidence": "statistics_fixtures::phase_4b_ordered_fastchess_stream_has_the_same_terminal_pair"
+    },
+    {
+      "id": "completion-order-invariance",
+      "evidence": "sprt_runner::tests::worker_completion_order_cannot_change_either_terminal_sample"
+    },
+    {
+      "id": "h0-h1-terminal-cuts",
+      "evidence": "sprt_runner::tests::{boundary_pair_is_official_and_every_later_completion_is_separate,losing_stream_crosses_h0}"
+    },
+    {
+      "id": "finite-cap-inconclusive",
+      "evidence": "command_line::sprt_live_report_is_pair_atomic_durable_and_inconclusive_at_its_cap"
+    },
+    {
+      "id": "engine-fault-matrix",
+      "evidence": "sprt_runner::tests::strict_sprt_fault_policy_covers_every_engine_fault_and_rejects_infrastructure"
+    },
+    {
+      "id": "invalid-and-infrastructure-exits",
+      "evidence": "command_line::sprt_live_exit_distinguishes_invalid_and_infrastructure_error"
+    },
+    {
+      "id": "configuration-exit",
+      "evidence": "command_line::sprt_refuses_missing_or_invalid_design_before_launch"
+    },
+    {
+      "id": "automation-exit-map",
+      "evidence": "main::tests::sprt_terminal_classes_have_distinct_automation_exit_codes"
+    },
+    {
+      "id": "live-shared-field-parity",
+      "evidence": "statistics_fixtures::phase_4b_controlled_live_parity_compares_only_shared_fields"
+    },
+    {
+      "id": "workspace-regression",
+      "evidence": "cargo check --workspace --tests; cargo clippy --workspace; cargo test --workspace --all-targets"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+[package]
+name = "colosseum-release"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+semver = "1.0.27"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+thiserror = "2.0.18"
+toml = "1.0.6"
+
+[dev-dependencies]
+tempfile = "3.27.0"

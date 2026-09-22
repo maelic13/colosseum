@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "phase": "8",
+  "accepted_on": "2026-08-03",
+  "gates": [
+    {
+      "id": "current-external-runners",
+      "evidence": "docs/fixtures/phase8/parity.json#version_sources",
+      "owner": "crates/colosseum-cli/tests/phase8_parity.rs::candidate_identity_versions_and_divergences_are_durable"
+    },
+    {
+      "id": "exact-candidate-identity",
+      "evidence": "docs/fixtures/phase8/parity.json#observations",
+      "owner": "crates/colosseum-cli/tests/phase8_parity.rs::candidate_identity_versions_and_divergences_are_durable"
+    },
+    {
+      "id": "shared-field-parity",
+      "evidence": "docs/fixtures/phase8/parity.json#shared_fields",
+      "owner": "crates/colosseum-cli/tests/phase8_parity.rs::release_candidate_matches_the_external_oracles_on_shared_fields"
+    },
+    {
+      "id": "reasoned-divergences",
+      "evidence": "docs/fixtures/phase8/parity.json#divergences",
+      "owner": "crates/colosseum-cli/tests/phase8_parity.rs::candidate_identity_versions_and_divergences_are_durable"
+    },
+    {
+      "id": "complete-gap-decisions",
+      "evidence": "docs/fixtures/phase8/gaps.json#decisions",
+      "owner": "crates/colosseum-cli/tests/phase8_gaps.rs::every_phase_eight_gap_has_one_reasoned_decision"
+    },
+    {
+      "id": "adopted-ponder-protocol",
+      "evidence": "docs/architecture/phase-8-gap-decisions.md#ponder",
+      "owner": "crates/colosseum-cli/tests/command_line.rs::fixed_match_drives_the_uci_ponder_protocol"
+    },
+    {
+      "id": "workspace-regression",
+      "evidence": "cargo check --workspace --tests; cargo clippy --workspace; cargo test --workspace --all-targets",
+      "owner": "Phase 8.3 verification"
+    }
+  ]
+}

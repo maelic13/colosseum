@@ -6,6 +6,12 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum EngineError {
     #[error(transparent)]
+    Opening(#[from] crate::openings::OpeningError),
+
+    #[error(transparent)]
+    Application(#[from] colosseum_application::ApplicationError),
+
+    #[error(transparent)]
     Uci(#[from] colosseum_uci::UciError),
 
     #[error(transparent)]
@@ -19,12 +25,6 @@ pub enum EngineError {
 
     #[error("corrupt stored data: {0}")]
     Corrupt(String),
-
-    #[error("config file parse error: {0}")]
-    TomlDe(#[from] toml::de::Error),
-
-    #[error("config file write error: {0}")]
-    TomlSer(#[from] toml::ser::Error),
 
     #[error("could not determine application directories")]
     NoProjectDirs,

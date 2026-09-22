@@ -6,7 +6,6 @@
 //! game/result types.
 
 pub mod adjudication;
-pub mod branding;
 pub mod engine;
 pub mod event;
 pub mod export;
@@ -15,6 +14,8 @@ pub mod ids;
 pub mod options;
 pub mod pairing;
 pub mod rating;
+pub mod rng;
+pub mod spsa;
 pub mod standings;
 pub mod stats;
 pub mod time;
@@ -28,14 +29,33 @@ pub use engine::{EngineConfig, EngineMeta};
 pub use event::TournamentEvent;
 pub use export::{ExportRow, crosstable_csv, standings_csv};
 pub use game::{GameResult, GameStats, Pairing, Termination};
-pub use ids::{EngineId, GameId, TournamentId};
+pub use ids::{EngineId, GameId, PairId, ParticipantId, RunId, TournamentId, UnitId};
 pub use options::{
-    UciOption, UciOptionValue, is_hash_option, is_tablebase_option, is_thread_option,
+    UciOption, UciOptionValue, is_chess960_option, is_hash_option, is_tablebase_option,
+    is_thread_option, is_uci_true,
 };
 pub use pairing::{gauntlet, generate_schedule, round_robin};
 pub use rating::{ml_ratings, ml_ratings_anchored, performance_rating, rating_error};
+pub use rng::{
+    NamedRng, RNG_ALGORITHM_ID, RNG_DERIVATION_ID, RNG_U64_SAMPLING_ID, RngError,
+    derive_stream_seed,
+};
+pub use spsa::{
+    SPSA_ALPHA, SPSA_END_STATE_RELATIVE_TOLERANCE, SPSA_GAMMA, SPSA_PERTURBATION_BYTES_PER_DRAW,
+    SPSA_PERTURBATION_DRAW_ORDER, SPSA_PERTURBATION_SAMPLER_ID, SPSA_SCHEDULE_SCHEMA_VERSION,
+    SPSA_STABILITY_FRACTION, SpsaArmValue, SpsaCoefficients, SpsaDerivedKnob, SpsaEndSpec,
+    SpsaError, SpsaIteration, SpsaKnob, SpsaPerturbationContract, SpsaSchedule,
+    SpsaScheduleArtifact, perturbations_for_iteration, prepare_iteration,
+    round_half_away_from_zero, update_centers,
+};
 pub use standings::{EngineStanding, GameOutcome, HeadToHead, PairGameResult, Standings};
-pub use stats::{EloEstimate, SprtDecision, SprtResult, elo_with_error, los, sprt};
+pub use stats::{
+    EloEstimate, EloModel, FixedNAchievedResolution, FixedNPlan, FixedNTestTails,
+    NormalizedEloEstimate, PentanomialBin, PentanomialDistribution, PentanomialSprtResult,
+    PentanomialStatistics, PentanomialVector, STATS_VERSION, SprtDecision, SprtResult,
+    StatisticsError, elo_with_error, fixed_n_achieved_resolution, fixed_n_plan, los,
+    pentanomial_sprt, pentanomial_statistics, sprt, sprt_wald_bounds,
+};
 pub use time::{TimeControl, TimeUnit};
 pub use tournament::{
     CommonEngineOptions, Format, OpeningBook, OpeningFormat, OpeningOrder, RatingWriteback,

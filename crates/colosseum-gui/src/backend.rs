@@ -22,10 +22,11 @@ use colosseum_core::{
     EngineConfig, EngineId, RatingWriteback, TournamentConfig, TournamentEvent, TournamentId,
 };
 use colosseum_engine::{
-    AppConfig, AppDirs, EngineLibrary, Store, Tournament, TournamentResults, TournamentRow,
-    TournamentSnapshot, TournamentStatus, create_tournament, load_tournament_results,
-    resume_tournament,
+    Store, Tournament, TournamentResults, TournamentRow, TournamentSnapshot, TournamentStatus,
+    create_tournament, load_tournament_results, resume_tournament,
 };
+
+use crate::config::{AppConfig, AppDirs, EngineLibrary};
 
 /// Target redraw cadence while a tournament is running (~30 Hz).
 pub const LIVE_REPAINT: Duration = Duration::from_millis(33);
@@ -270,6 +271,11 @@ impl Backend {
         config: TournamentConfig,
         engines: Vec<EngineConfig>,
     ) -> anyhow::Result<()> {
+        let runtime_participants: Vec<_> = engines
+            .iter()
+            .map(crate::runtime_adapter::runtime_participant)
+            .collect();
+        debug_assert_eq!(runtime_participants.len(), engines.len());
         let participants: Vec<ParticipantInfo> = engines
             .iter()
             .map(|e| ParticipantInfo {
@@ -357,12 +363,18 @@ impl Backend {
         Ok(())
     }
 
-    /// Concatenate the PGN of every finished game in a tournament, in play
+    /// Concatenate the PGN of every played game in a tournament, in play
     /// order, separated by blank lines. Empty if no games have finished yet.
+    /// A game the runner could not play (stored with an `Aborted`
+    /// termination) is left out, as the on-disk PGN file leaves it out: its
+    /// moveless placeholder draw is not a game.
     pub fn collect_pgn(&self, id: TournamentId) -> anyhow::Result<String> {
         let games = self.store.list_games(id)?;
         let mut out = String::new();
         for g in games {
+            if g.termination == Some(colosseum_core::Termination::Aborted) {
+                continue;
+            }
             if let Some(pgn) = g.pgn.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
                 if !out.is_empty() {
                     out.push_str("\n\n");
@@ -419,7 +431,11 @@ impl Backend {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
         let rating_writeback = row.config.rating_writeback.clone();
         let config_copy = row.config.clone();
-        let (handle, driver) = resume_tournament(row, resume_store, events_tx)?;
+        // The library is passed for one repair only: a participant whose
+        // recorded executable has since moved or been removed is relaunched
+        // from the library's current entry, so correcting the path in the
+        // Engines tab is enough to play the games that could not start.
+        let (handle, driver) = resume_tournament(row, resume_store, events_tx, &self.engines)?;
         let snapshot = handle.snapshot_handle();
         let finished_now = snapshot.lock().map_or(0, |s| s.games_finished);
 

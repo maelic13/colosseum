@@ -1,0 +1,11 @@
+[package]
+name = "colosseum-docs"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+clap = { version = "4.5.51", features = ["derive"] }
+colosseum-cli = { path = "../../crates/colosseum-cli" }

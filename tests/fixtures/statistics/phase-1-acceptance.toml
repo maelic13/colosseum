@@ -1,0 +1,137 @@
+schema_version = 1
+description = "Executed Phase 1 oracle-matrix cells; fields absent here are not silently compared."
+
+[[comparison]]
+id = "analytic.pair-binning"
+matrix_row = "Pair binning and official pair count"
+source = "analytic-pentanomial.toml"
+fixture = "all-pair-outcomes"
+fields = ["counts", "central pair split", "drawn games"]
+
+[[comparison]]
+id = "analytic.pentanomial-moments"
+matrix_row = "Pentanomial mean, variance, SE"
+source = "analytic-pentanomial.toml"
+fixture = "symmetric-nine-pair"
+fields = ["score", "variance", "standard error"]
+
+[[comparison]]
+id = "analytic.normalized-sprt"
+matrix_row = "Normalized-Elo pentanomial SPRT LLR and Wald bounds"
+source = "analytic-pentanomial.toml"
+fixture = "both-models-1150-pairs"
+fields = ["LLR", "lower bound", "upper bound", "model", "pair count"]
+
+[[comparison]]
+id = "analytic.logistic-sprt"
+matrix_row = "Logistic-Elo pentanomial SPRT LLR and Wald bounds"
+source = "analytic-pentanomial.toml"
+fixture = "both-models-1150-pairs"
+fields = ["LLR", "lower bound", "upper bound", "model", "pair count"]
+
+[[comparison]]
+id = "analytic.trinomial-sprt"
+matrix_row = "Trinomial logistic SPRT LLR and Wald bounds"
+source = "analytic-pentanomial.toml"
+fixture = "logistic-1000-games"
+fields = ["LLR", "lower bound", "upper bound", "decision"]
+
+[[comparison]]
+id = "analytic.score-and-draw-ratio"
+matrix_row = "W/D/L score and draw ratio"
+source = "analytic-pentanomial.toml"
+fixture = "symmetric-nine-pair"
+fields = ["score", "draw ratio"]
+
+[[comparison]]
+id = "analytic.logistic-interval-los"
+matrix_row = "Logistic Elo / interval / LOS"
+source = "analytic-pentanomial.toml"
+fixture = "symmetric-nine-pair"
+fields = ["Elo", "interval margin", "LOS"]
+
+[[comparison]]
+id = "analytic.normalized-resolution"
+matrix_row = "Normalized-Elo interval and achieved fixed-N resolution"
+source = "analytic-pentanomial.toml"
+fixture = "both-models-1150-pairs"
+fields = ["estimate", "lower", "upper", "resolution", "confidence"]
+
+[[comparison]]
+id = "analytic.fixed-n-plan"
+matrix_row = "Fixed-N prospective plan"
+source = "analytic-pentanomial.toml"
+fixture = "symmetric-assumed-distribution"
+fields = ["assumed variance", "normalized required pairs", "logistic required pairs"]
+
+[[comparison]]
+id = "analytic.unpaired-exclusion"
+matrix_row = "Unpaired-game exclusion"
+source = "analytic-pentanomial.toml"
+fixture = "symmetric-nine-pair"
+fields = ["unpaired game count", "unchanged complete-pair statistics"]
+
+[[comparison]]
+id = "analytic.typed-errors"
+matrix_row = "Typed invalid-input and `NaN`/`Inf` prevention"
+source = "analytic-pentanomial.toml"
+fixture = "zero-pairs, one-pair, all-draws, clean-sweep"
+fields = ["StatisticsError variant"]
+
+[[comparison]]
+id = "fastchess.pair-binning"
+matrix_row = "Pair binning and official pair count"
+source = "external-observations.toml"
+fixture = "fastchess-clean-sweep"
+fields = ["complete pairs", "pentanomial counts"]
+
+[[comparison]]
+id = "cutechess.pair-binning"
+matrix_row = "Pair binning and official pair count"
+source = "external-observations.toml"
+fixture = "cutechess-clean-sweep"
+fields = ["complete pairs", "pentanomial counts"]
+
+[[comparison]]
+id = "fastchess.score-and-draw-ratio"
+matrix_row = "W/D/L score and draw ratio"
+source = "external-observations.toml"
+fixture = "fastchess-clean-sweep"
+fields = ["wins", "draws", "losses", "score", "draw ratio"]
+
+[[comparison]]
+id = "cutechess.score-and-draw-ratio"
+matrix_row = "W/D/L score and draw ratio"
+source = "external-observations.toml"
+fixture = "cutechess-clean-sweep"
+fields = ["wins", "draws", "losses", "score", "draw ratio"]
+
+[[exclusion]]
+id = "external.clean-sweep-estimates"
+matrix_rows = [
+  "Pentanomial mean, variance, SE",
+  "Logistic Elo / interval / LOS",
+  "Normalized-Elo interval and achieved fixed-N resolution",
+]
+sources = ["fastchess-clean-sweep", "cutechess-clean-sweep"]
+reason = "Both observations are zero-score clean sweeps; Colosseum returns a typed error and never adopts external infinity or NaN output."
+
+[[exclusion]]
+id = "external.unmatched-sequential-models"
+matrix_rows = [
+  "Normalized-Elo pentanomial SPRT LLR and Wald bounds",
+  "Logistic-Elo pentanomial SPRT LLR and Wald bounds",
+  "Trinomial logistic SPRT LLR and Wald bounds",
+]
+sources = ["fastchess-clean-sweep", "cutechess-clean-sweep"]
+reason = "The degenerate samples and recorded commands do not establish matching Colosseum likelihood support and draw-rate conventions."
+
+[[exclusion]]
+id = "external.analytic-only-contracts"
+matrix_rows = [
+  "Fixed-N prospective plan",
+  "Unpaired-game exclusion",
+  "Typed invalid-input and `NaN`/`Inf` prevention",
+]
+sources = ["fastchess-clean-sweep", "cutechess-clean-sweep"]
+reason = "The oracle matrix assigns these contracts to analytic fixtures and explicitly forbids external approximation."

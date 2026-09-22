@@ -2075,6 +2075,8 @@ impl LiveData {
                 version: r.version.clone(),
                 elo: r.elo,
                 elo_delta: r.elo_delta,
+                // The GUI has no fixed field; every rating here is estimated.
+                fixed: false,
                 points: r.points,
                 games: r.games,
                 wins: r.wins,
@@ -2931,6 +2933,7 @@ fn export_rows(res: &TournamentResults) -> Vec<colosseum_core::ExportRow> {
             version: r.version,
             elo: r.elo,
             elo_delta: r.elo_delta,
+            fixed: false,
             points: r.points,
             games: r.games,
             wins: r.wins,
@@ -3386,7 +3389,11 @@ mod tests {
 
     #[test]
     fn sort_rows_by_points_descending() {
-        let (a, b, c) = (EngineId::new(), EngineId::new(), EngineId::new());
+        let (a, b, c) = (
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+        );
         let mut rows = vec![
             row(a, 1.0, 1500.0, None),
             row(b, 3.0, 1500.0, None),
@@ -3406,7 +3413,10 @@ mod tests {
 
     #[test]
     fn sort_rows_by_nps_handles_missing() {
-        let (a, b) = (EngineId::new(), EngineId::new());
+        let (a, b) = (
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+        );
         let mut rows = vec![row(a, 0.0, 1500.0, None), row(b, 0.0, 1500.0, Some(5))];
         sort_rows(
             &mut rows,

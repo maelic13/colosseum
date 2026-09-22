@@ -1,0 +1,25 @@
+{
+  "source": "reviewed projection of the exact release-mode result.json from the 10.10 acceptance repeat",
+  "candidate_commit": "628449db2c5223c61464cd178ab527398b132e7a",
+  "candidate_sha256": "3206ce79a6aab188c2b2f6b90ac6d6739c0f99f55265d9b88ba5ea6cf45a646f",
+  "raw_result_sha256": "f6de16f1dcfc3c7fae1edaadc22af967fc74ad7a095b16ea8060e3266139ed7e",
+  "status": "inconclusive",
+  "exit_code": 4,
+  "games": 8,
+  "wins": 0,
+  "draws": 8,
+  "losses": 0,
+  "complete_pairs": 4,
+  "pentanomial": [0, 0, 4, 0, 0],
+  "colour_split": {
+    "a_as_white": [0, 4, 0],
+    "a_as_black": [0, 4, 0]
+  },
+  "faults": {
+    "engine_a": 0,
+    "engine_b": 0,
+    "time_losses_a": 0,
+    "time_losses_b": 0,
+    "infrastructure": 0
+  }
+}

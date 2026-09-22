@@ -14,13 +14,22 @@
 //! from the book's seed (a small self-contained PRNG, so no `rand` dependency and
 //! reproducible across resume), then `count` truncates the list.
 
-use colosseum_core::{OpeningBook, OpeningFormat, OpeningOrder};
+use colosseum_core::rng::stream_names;
+use colosseum_core::{NamedRng, OpeningBook, OpeningFormat, OpeningOrder};
+use serde::{Deserialize, Serialize};
 use shakmaty::fen::Fen;
 use shakmaty::san::San;
 use shakmaty::uci::UciMove;
 use shakmaty::{CastlingMode, Chess, EnPassantMode, Position};
+use thiserror::Error;
 
-use crate::error::EngineError;
+#[derive(Debug, Error)]
+pub enum OpeningError {
+    #[error("could not read opening book: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("invalid opening book: {0}")]
+    Invalid(String),
+}
 
 /// A concrete opening: where to start and which moves to pre-play before the
 /// engines take over.
@@ -46,12 +55,184 @@ impl ResolvedOpening {
     }
 }
 
+/// A loaded book, held compactly: the text of every opening in one buffer, and
+/// per opening only where its parts begin and how long they are.
+///
+/// A book can hold millions of openings. As one owned FEN, one owned label and
+/// one vector per opening, a 2.6-million-line EPD took gigabytes and seconds to
+/// build; here it is the text itself plus a fixed-size entry per opening.
+/// An opening is materialised as a [`ResolvedOpening`] only when a game is
+/// assigned it.
+///
+/// It is deliberately not `Clone`. Launch settings are cloned once per game,
+/// and a book carried in them by value was copied with every launch: half a
+/// second each with a 2.6-million-line book, on the one task that starts games.
+/// Sharing it behind an `Arc` is the only way to hand it on.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct OpeningList {
+    buffer: String,
+    entries: Vec<CompactOpening>,
+}
+
+/// Where one opening's parts sit in the buffer, laid out as
+/// `[start FEN][UCI moves, space-separated][label]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CompactOpening {
+    start: usize,
+    /// Zero for the standard start position.
+    fen_len: u32,
+    moves_len: u32,
+    /// Zero when the label is the start FEN, as it is for every EPD line.
+    label_len: u32,
+}
+
+impl OpeningList {
+    /// A list of the given openings, in order.
+    #[must_use]
+    pub fn from_resolved(openings: impl IntoIterator<Item = ResolvedOpening>) -> Self {
+        let mut list = Self::default();
+        for opening in openings {
+            let label = (opening.start_fen.as_deref() != Some(opening.label.as_str()))
+                .then_some(opening.label.as_str());
+            list.push(opening.start_fen.as_deref(), &opening.moves, label);
+        }
+        list
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn part(&self, start: usize, len: u32) -> &str {
+        &self.buffer[start..start + len as usize]
+    }
+
+    /// The opening's starting FEN; `None` for the standard start position.
+    #[must_use]
+    pub fn start_fen(&self, index: usize) -> Option<&str> {
+        let entry = self.entries[index];
+        (entry.fen_len > 0).then(|| self.part(entry.start, entry.fen_len))
+    }
+
+    /// The opening's pre-played UCI moves.
+    pub fn moves(&self, index: usize) -> impl Iterator<Item = &str> {
+        self.moves_text(index)
+            .split(' ')
+            .filter(|mv| !mv.is_empty())
+    }
+
+    /// The opening's pre-played UCI moves as stored: one space between moves.
+    #[must_use]
+    pub fn moves_text(&self, index: usize) -> &str {
+        let entry = self.entries[index];
+        self.part(entry.start + entry.fen_len as usize, entry.moves_len)
+    }
+
+    /// The opening's label: its FEN, or its SAN line.
+    #[must_use]
+    pub fn label(&self, index: usize) -> &str {
+        let entry = self.entries[index];
+        if entry.label_len == 0 {
+            self.part(entry.start, entry.fen_len)
+        } else {
+            self.part(
+                entry.start + entry.fen_len as usize + entry.moves_len as usize,
+                entry.label_len,
+            )
+        }
+    }
+
+    /// The opening at `index`, materialised.
+    #[must_use]
+    pub fn get(&self, index: usize) -> ResolvedOpening {
+        ResolvedOpening {
+            start_fen: self.start_fen(index).map(str::to_owned),
+            moves: self.moves(index).map(str::to_owned).collect(),
+            label: self.label(index).to_owned(),
+        }
+    }
+
+    /// Every opening, materialised one at a time.
+    pub fn iter(&self) -> impl Iterator<Item = ResolvedOpening> + '_ {
+        (0..self.len()).map(|index| self.get(index))
+    }
+
+    fn push(&mut self, fen: Option<&str>, moves: &[String], label: Option<&str>) {
+        let start = self.buffer.len();
+        let fen = fen.unwrap_or_default();
+        self.buffer.push_str(fen);
+        let moves_start = self.buffer.len();
+        for (index, mv) in moves.iter().enumerate() {
+            if index > 0 {
+                self.buffer.push(' ');
+            }
+            self.buffer.push_str(mv);
+        }
+        let moves_len = self.buffer.len() - moves_start;
+        let label = label.unwrap_or_default();
+        self.buffer.push_str(label);
+        self.entries.push(CompactOpening {
+            start,
+            fen_len: fen.len() as u32,
+            moves_len: moves_len as u32,
+            label_len: label.len() as u32,
+        });
+    }
+
+    /// Append another list after this one, keeping both orders.
+    fn extend(&mut self, other: Self) {
+        let shift = self.buffer.len();
+        self.buffer.push_str(&other.buffer);
+        self.entries
+            .extend(other.entries.into_iter().map(|entry| CompactOpening {
+                start: entry.start + shift,
+                ..entry
+            }));
+    }
+}
+
 /// Load and order the openings described by `book`.
 ///
 /// Returns an error if the file cannot be read, or if it parses to zero usable
 /// openings (so the caller can surface a clear message instead of silently
 /// falling back to the start position).
-pub fn load_openings(book: &OpeningBook) -> Result<Vec<ResolvedOpening>, EngineError> {
+pub fn load_openings(book: &OpeningBook) -> Result<OpeningList, OpeningError> {
+    load_openings_with_order(book, |entries| {
+        if book.order == OpeningOrder::Random {
+            shuffle(entries, book.seed);
+        }
+        Ok(())
+    })
+}
+
+/// Load openings using the versioned named RNG contract used by CLI runs.
+pub fn load_openings_named(
+    book: &OpeningBook,
+    master_seed: u64,
+) -> Result<OpeningList, OpeningError> {
+    load_openings_with_order(book, |entries| {
+        if book.order == OpeningOrder::Random {
+            NamedRng::new(master_seed, stream_names::OPENING_ORDER)
+                .map_err(|error| OpeningError::Invalid(error.to_string()))?
+                .shuffle(entries);
+        }
+        Ok(())
+    })
+}
+
+/// Load a book and order it. Ordering permutes the fixed-size entries, with
+/// the same swaps an owned list of openings received, so a seed selects the
+/// same sequence it always did.
+fn load_openings_with_order(
+    book: &OpeningBook,
+    order: impl FnOnce(&mut [CompactOpening]) -> Result<(), OpeningError>,
+) -> Result<OpeningList, OpeningError> {
     let text = std::fs::read_to_string(&book.path)?;
     let mut openings = match book.format {
         OpeningFormat::Epd => parse_epd(&text),
@@ -59,40 +240,93 @@ pub fn load_openings(book: &OpeningBook) -> Result<Vec<ResolvedOpening>, EngineE
     };
 
     if openings.is_empty() {
-        return Err(EngineError::Corrupt(format!(
+        return Err(OpeningError::Invalid(format!(
             "no usable openings found in {}",
             book.path.display()
         )));
     }
 
-    if book.order == OpeningOrder::Random {
-        shuffle(&mut openings, book.seed);
-    }
+    order(&mut openings.entries)?;
 
     if let Some(count) = book.count {
-        openings.truncate(count.max(1) as usize);
+        openings.entries.truncate(count.max(1) as usize);
     }
 
     Ok(openings)
 }
 
-/// Parse EPD lines into resolved openings (each is a bare FEN, no pre-moves).
-fn parse_epd(text: &str) -> Vec<ResolvedOpening> {
-    let mut out = Vec::new();
+/// Lines per parsing chunk below which a book is parsed on one thread.
+const EPD_PARALLEL_LINES: usize = 20_000;
+
+/// Parse EPD lines into openings (each is a bare FEN, no pre-moves).
+///
+/// Every line is validated as a position, which is most of the cost of loading
+/// a large book; the text is cut at line boundaries into one chunk per
+/// available core and the chunks are joined in file order, so the result is
+/// the one a single pass produces.
+fn parse_epd(text: &str) -> OpeningList {
+    let threads = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(text.len() / (EPD_PARALLEL_LINES * 40) + 1);
+    parse_epd_in_chunks(text, threads)
+}
+
+/// Parse EPD text cut at line boundaries into at most `threads` chunks, each
+/// on its own thread, joined in file order.
+fn parse_epd_in_chunks(text: &str, threads: usize) -> OpeningList {
+    if threads <= 1 {
+        return parse_epd_lines(text);
+    }
+    let mut bounds = vec![0];
+    for chunk in 1..threads {
+        let target = text.len() * chunk / threads;
+        // A byte search, so a cut never lands inside a multi-byte character:
+        // the byte after a newline always starts one.
+        let cut = text.as_bytes()[target..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(text.len(), |offset| target + offset + 1);
+        if cut > *bounds.last().expect("bounds start at zero") {
+            bounds.push(cut);
+        }
+    }
+    bounds.push(text.len());
+    bounds.dedup();
+    let parts = std::thread::scope(|scope| {
+        bounds
+            .windows(2)
+            .map(|window| {
+                let part = &text[window[0]..window[1]];
+                scope.spawn(move || parse_epd_lines(part))
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|handle| handle.join().expect("an EPD parsing thread panicked"))
+            .collect::<Vec<_>>()
+    });
+    let mut list = OpeningList::default();
+    for part in parts {
+        list.extend(part);
+    }
+    list
+}
+
+fn parse_epd_lines(text: &str) -> OpeningList {
+    let mut list = OpeningList {
+        buffer: String::with_capacity(text.len()),
+        entries: Vec::new(),
+    };
+    let mut fen = String::new();
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if let Some(fen) = epd_to_fen(line) {
-            out.push(ResolvedOpening {
-                label: fen.clone(),
-                start_fen: Some(fen),
-                moves: Vec::new(),
-            });
+        if epd_fen_into(line, &mut fen) {
+            list.push(Some(&fen), &[], None);
         }
     }
-    out
+    list
 }
 
 /// Complete an EPD line into a full, validated FEN string.
@@ -100,27 +334,42 @@ fn parse_epd(text: &str) -> Vec<ResolvedOpening> {
 /// EPD carries `board stm castling ep` plus optional opcodes; FEN additionally
 /// needs halfmove and fullmove counters, which we default to `0 1`.
 fn epd_to_fen(line: &str) -> Option<String> {
-    let fields: Vec<&str> = line.split_whitespace().collect();
-    if fields.len() < 4 {
-        return None;
+    let mut fen = String::new();
+    epd_fen_into(line, &mut fen).then_some(fen)
+}
+
+/// Write the FEN of an EPD line into `fen` and say whether it is a valid
+/// standard-chess position.
+fn epd_fen_into(line: &str, fen: &mut String) -> bool {
+    fen.clear();
+    let mut fields = line.split_whitespace();
+    for index in 0..4 {
+        let Some(field) = fields.next() else {
+            return false;
+        };
+        if index > 0 {
+            fen.push(' ');
+        }
+        fen.push_str(field);
     }
-    let fen = format!(
-        "{} {} {} {} 0 1",
-        fields[0], fields[1], fields[2], fields[3]
-    );
+    fen.push_str(" 0 1");
     // Validate by round-tripping through shakmaty.
     fen.parse::<Fen>()
         .ok()
         .and_then(|f| f.into_position::<Chess>(CastlingMode::Standard).ok())
-        .map(|_| fen)
+        .is_some()
 }
 
 /// Parse PGN games, taking the first `plies` half-moves of each as an opening.
-fn parse_pgn(text: &str, plies: usize) -> Vec<ResolvedOpening> {
-    let mut out = Vec::new();
+fn parse_pgn(text: &str, plies: usize) -> OpeningList {
+    let mut out = OpeningList::default();
     for game in split_pgn_games(text) {
         if let Some(opening) = parse_pgn_game(&game, plies) {
-            out.push(opening);
+            out.push(
+                opening.start_fen.as_deref(),
+                &opening.moves,
+                Some(&opening.label),
+            );
         }
     }
     out
@@ -293,23 +542,92 @@ fn shuffle<T>(items: &mut [T], seed: u64) {
 }
 
 /// Quick metadata for the GUI preview without retaining every opening.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpeningSummary {
     pub count: usize,
     pub first_label: Option<String>,
 }
 
-/// Load a book only to report how many openings it yields and a sample label.
-pub fn summarize(book: &OpeningBook) -> Result<OpeningSummary, EngineError> {
-    let openings = load_openings(book)?;
-    Ok(OpeningSummary {
-        count: openings.len(),
-        first_label: openings.first().map(|o| o.label.clone()),
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpeningAudit {
+    pub format: String,
+    pub candidates: usize,
+    pub usable: usize,
+    pub rejected_indices: Vec<usize>,
+}
+
+impl OpeningAudit {
+    #[must_use]
+    pub fn valid(&self) -> bool {
+        self.usable > 0 && self.rejected_indices.is_empty()
+    }
+}
+
+/// Strictly account for every non-comment EPD line or PGN game. Normal match
+/// loading may skip malformed candidates; this audit makes those skips visible.
+pub fn audit_opening_book(book: &OpeningBook) -> Result<OpeningAudit, OpeningError> {
+    let text = std::fs::read_to_string(&book.path)?;
+    let validity = match book.format {
+        OpeningFormat::Epd => text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| epd_to_fen(line).is_some())
+            .collect::<Vec<_>>(),
+        OpeningFormat::Pgn => split_pgn_games(&text)
+            .iter()
+            .map(|game| parse_pgn_game(game, book.plies.max(1) as usize).is_some())
+            .collect::<Vec<_>>(),
+    };
+    let rejected_indices = validity
+        .iter()
+        .enumerate()
+        .filter_map(|(index, valid)| (!valid).then_some(index + 1))
+        .collect::<Vec<_>>();
+    Ok(OpeningAudit {
+        format: book.format.label().into(),
+        candidates: validity.len(),
+        usable: validity.iter().filter(|valid| **valid).count(),
+        rejected_indices,
     })
 }
 
+/// Load a book only to report how many openings it yields and a sample label.
+pub fn summarize(book: &OpeningBook) -> Result<OpeningSummary, OpeningError> {
+    let openings = load_openings(book)?;
+    Ok(OpeningSummary {
+        count: openings.len(),
+        first_label: (!openings.is_empty()).then(|| openings.label(0).to_owned()),
+    })
+}
+
+/// True when a FEN's castling field uses the Shredder/X-FEN file letters that
+/// encode Chess960 castling rights.
+///
+/// The harness plays standard chess only, and a shuffled start position is
+/// otherwise indistinguishable from an ordinary one. This is the encoding that
+/// says so explicitly, so it is the one place a Chess960 position can be
+/// refused instead of silently misread.
+#[must_use]
+pub fn is_chess960_fen(fen: &str) -> bool {
+    let Some(castling) = fen.split_whitespace().nth(2) else {
+        return false;
+    };
+    castling != "-"
+        && castling
+            .chars()
+            .any(|right| matches!(right, 'a'..='h' | 'A'..='H') && !matches!(right, 'k' | 'K'))
+}
+
 /// Validate a starting FEN, returning a usable [`Chess`] position.
+///
+/// A Chess960 castling encoding yields `None`: it is refused rather than
+/// reinterpreted as standard castling.
 #[must_use]
 pub fn position_from_fen(fen: &str) -> Option<Chess> {
+    if is_chess960_fen(fen) {
+        return None;
+    }
     fen.parse::<Fen>()
         .ok()
         .and_then(|f| f.into_position(CastlingMode::Standard).ok())
@@ -336,13 +654,168 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn write_temp(name: &str, contents: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("colosseum-openings-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(name);
+    /// The loader as it was before the book was held compactly: one owned
+    /// opening per line, shuffled as a list. The compact loader must give the
+    /// same openings in the same order for the same seed.
+    fn owned_reference(book: &OpeningBook, master_seed: u64) -> Vec<ResolvedOpening> {
+        let text = std::fs::read_to_string(&book.path).unwrap();
+        let mut openings = match book.format {
+            OpeningFormat::Epd => text
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .filter_map(epd_to_fen)
+                .map(|fen| ResolvedOpening {
+                    label: fen.clone(),
+                    start_fen: Some(fen),
+                    moves: Vec::new(),
+                })
+                .collect::<Vec<_>>(),
+            OpeningFormat::Pgn => split_pgn_games(&text)
+                .iter()
+                .filter_map(|game| parse_pgn_game(game, book.plies.max(1) as usize))
+                .collect(),
+        };
+        if book.order == OpeningOrder::Random {
+            NamedRng::new(master_seed, stream_names::OPENING_ORDER)
+                .unwrap()
+                .shuffle(&mut openings);
+        }
+        if let Some(count) = book.count {
+            openings.truncate(count.max(1) as usize);
+        }
+        openings
+    }
+
+    /// Distinct legal positions: walk a few pseudo-random legal moves from the
+    /// start position for each line.
+    fn synthetic_epd(lines: usize) -> String {
+        let mut text = String::with_capacity(lines * 64);
+        let mut state = 0x2545_F491_4F6C_DD1D_u64;
+        for index in 0..lines {
+            let mut position = Chess::default();
+            for _ in 0..(4 + index % 5) {
+                let moves = position.legal_moves();
+                if moves.is_empty() {
+                    break;
+                }
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                let chosen = moves[(state % moves.len() as u64) as usize];
+                position.play_unchecked(chosen);
+            }
+            let fen = Fen::from_position(&position, EnPassantMode::Legal).to_string();
+            let epd = fen.split_whitespace().take(4).collect::<Vec<_>>().join(" ");
+            text.push_str(&epd);
+            if index % 97 == 0 {
+                text.push_str(" bm e4; id \"line\";");
+            }
+            text.push('\n');
+            if index % 1_001 == 0 {
+                text.push_str("# a comment, é and all\n\nnot a position\n");
+            }
+        }
+        text
+    }
+
+    #[test]
+    fn the_compact_book_gives_the_same_openings_in_the_same_order() {
+        let (_dir, path) = write_temp("identity.epd", &synthetic_epd(300));
+        for (order, count) in [
+            (OpeningOrder::Sequential, None),
+            (OpeningOrder::Random, None),
+            (OpeningOrder::Random, Some(100)),
+        ] {
+            let mut book = OpeningBook::new(path.clone());
+            book.order = order;
+            book.count = count;
+            let compact = load_openings_named(&book, 42).unwrap();
+            let reference = owned_reference(&book, 42);
+            assert_eq!(compact.len(), reference.len());
+            assert_eq!(
+                compact.iter().collect::<Vec<_>>(),
+                reference,
+                "{order:?} {count:?}"
+            );
+        }
+        let pgn = "[Event \"a\"]
+
+1. e4 e5 2. Nf3 Nc6 1-0
+
+[Event \"b\"]
+[FEN \"8/8/8/8/8/8/K7/7k w - - 0 1\"]
+
+1. Ka3 Kg1 1/2-1/2
+
+[Event \"c\"]
+
+1. d4 d5 0-1
+";
+        let (_pgn_dir, pgn_path) = write_temp("identity.pgn", pgn);
+        let mut book = OpeningBook::new(pgn_path);
+        book.format = OpeningFormat::Pgn;
+        book.plies = 3;
+        book.order = OpeningOrder::Random;
+        assert_eq!(
+            load_openings_named(&book, 7)
+                .unwrap()
+                .iter()
+                .collect::<Vec<_>>(),
+            owned_reference(&book, 7)
+        );
+    }
+
+    /// A large book is cut into chunks parsed on separate threads; whatever
+    /// the number of chunks, the joined list is the one a single pass gives.
+    #[test]
+    fn a_book_parsed_in_chunks_is_the_book_parsed_in_one_pass() {
+        let text = synthetic_epd(300);
+        let single = parse_epd_lines(&text);
+        assert_eq!(single.len(), 300);
+        for threads in [2, 3, 7, 64] {
+            assert_eq!(
+                parse_epd_in_chunks(&text, threads),
+                single,
+                "{threads} chunks"
+            );
+        }
+    }
+
+    #[test]
+    fn only_a_file_letter_castling_field_marks_a_chess960_position() {
+        // The standard start and ordinary castling rights are standard chess.
+        assert!(!is_chess960_fen(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        ));
+        assert!(!is_chess960_fen("8/8/8/8/8/8/K7/7k w - - 0 1"));
+        // A shuffled start with KQkq is indistinguishable from standard chess.
+        assert!(!is_chess960_fen(
+            "bqnbrkrn/pppppppp/8/8/8/8/PPPPPPPP/BQNBRKRN w KQkq - 0 1"
+        ));
+        // Shredder-FEN and X-FEN name the castling rooks by file.
+        assert!(is_chess960_fen(
+            "bqnbrkrn/pppppppp/8/8/8/8/PPPPPPPP/BQNBRKRN w GEge - 0 1"
+        ));
+        assert!(is_chess960_fen(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w HAha - 0 1"
+        ));
+        assert!(is_chess960_fen(
+            "nrbbqkrn/pppppppp/8/8/8/8/PPPPPPPP/NRBBQKRN w Kkb - 0 1"
+        ));
+        // No castling field at all is not an encoding of anything.
+        assert!(!is_chess960_fen("8/8/8/8/8/8/K7/7k w"));
+        assert!(
+            position_from_fen("bqnbrkrn/pppppppp/8/8/8/8/PPPPPPPP/BQNBRKRN w GEge - 0 1").is_none()
+        );
+    }
+
+    fn write_temp(name: &str, contents: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(name);
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(contents.as_bytes()).unwrap();
-        path
+        (dir, path)
     }
 
     #[test]
@@ -352,20 +825,28 @@ mod tests {
 rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
 r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - bm Nf6;
 ";
-        let path = write_temp("test.epd", epd);
+        let (_dir, path) = write_temp("test.epd", epd);
         let book = OpeningBook::new(path);
         let openings = load_openings(&book).unwrap();
         assert_eq!(openings.len(), 2);
-        assert!(
-            openings[0]
-                .start_fen
-                .as_deref()
-                .unwrap()
-                .starts_with("rnbqkbnr")
-        );
-        assert!(openings[0].moves.is_empty());
+        assert!(openings.start_fen(0).unwrap().starts_with("rnbqkbnr"));
+        assert!(openings.get(0).moves.is_empty());
         // The second line's trailing opcode is ignored; FEN is still valid.
-        assert!(position_from_fen(openings[1].start_fen.as_deref().unwrap()).is_some());
+        assert!(position_from_fen(openings.start_fen(1).unwrap()).is_some());
+    }
+
+    #[test]
+    fn strict_audit_accounts_for_rejected_candidates() {
+        let (_dir, path) = write_temp(
+            "audit.epd",
+            "8/8/8/8/8/8/K7/7k w - -\nnot a valid epd\n# ignored\n",
+        );
+        let book = OpeningBook::new(path);
+        let audit = audit_opening_book(&book).unwrap();
+        assert_eq!(audit.candidates, 2);
+        assert_eq!(audit.usable, 1);
+        assert_eq!(audit.rejected_indices, [2]);
+        assert!(!audit.valid());
     }
 
     #[test]
@@ -381,16 +862,17 @@ r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - bm Nf6;
 
 1. d4 d5 2. c4 *
 ";
-        let path = write_temp("test.pgn", pgn);
+        let (_dir, path) = write_temp("test.pgn", pgn);
         let mut book = OpeningBook::new(path);
         book.plies = 4;
         let openings = load_openings(&book).unwrap();
         assert_eq!(openings.len(), 2);
         // First game, first 4 plies.
-        assert_eq!(openings[0].moves, vec!["e2e4", "e7e5", "g1f3", "b8c6"]);
-        assert!(openings[0].start_fen.is_none());
+        assert_eq!(openings.get(0).moves, vec!["e2e4", "e7e5", "g1f3", "b8c6"]);
+        assert_eq!(openings.moves_text(0), "e2e4 e7e5 g1f3 b8c6");
+        assert!(openings.start_fen(0).is_none());
         // Second game has only 3 plies available -> truncated to what's there.
-        assert_eq!(openings[1].moves, vec!["d2d4", "d7d5", "c2c4"]);
+        assert_eq!(openings.get(1).moves, vec!["d2d4", "d7d5", "c2c4"]);
     }
 
     #[test]
@@ -408,7 +890,7 @@ rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -
 r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq -
 rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -
 ";
-        let path = write_temp("order.epd", epd);
+        let (_dir, path) = write_temp("order.epd", epd);
         let mut book = OpeningBook::new(path);
         book.order = OpeningOrder::Random;
         book.seed = 42;
@@ -420,8 +902,29 @@ rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -
     }
 
     #[test]
+    fn cli_named_random_order_is_reproducible_from_the_master_seed() {
+        let epd = "\
+8/8/8/8/8/8/8/4K2k w - -
+rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -
+r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq -
+rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -
+";
+        let (_dir, path) = write_temp("named-order.epd", epd);
+        let mut book = OpeningBook::new(path);
+        book.order = OpeningOrder::Random;
+        let first = load_openings_named(&book, 42).unwrap();
+        let repeated = load_openings_named(&book, 42).unwrap();
+        assert_eq!(first, repeated);
+        assert_ne!(
+            first,
+            load_openings_named(&book, 43).unwrap(),
+            "the reviewed fixture exercises the seed"
+        );
+    }
+
+    #[test]
     fn missing_or_empty_book_errors() {
-        let path = write_temp("empty.epd", "\n# only a comment\n");
+        let (_dir, path) = write_temp("empty.epd", "\n# only a comment\n");
         let book = OpeningBook::new(path);
         assert!(load_openings(&book).is_err());
     }

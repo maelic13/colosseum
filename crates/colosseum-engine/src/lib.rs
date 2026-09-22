@@ -6,28 +6,82 @@
 //! updater, SQLite persistence with tournament history + resume (Steps 5–6), and
 //! config/engine-library file I/O with `--portable` mode (Step 6).
 
-pub mod config;
+pub mod affinity;
+pub mod allowed_cpus;
+pub mod characteristics;
+#[cfg(feature = "tournament")]
 pub mod detect;
+#[cfg(feature = "tournament")]
 pub mod error;
+#[cfg(feature = "runner")]
 pub mod incidents;
+#[cfg(feature = "runner")]
 pub mod live;
+#[cfg(feature = "runner")]
 pub mod openings;
-pub mod paths;
+#[cfg(feature = "runner")]
 pub mod pgn;
+pub mod placement;
+#[cfg(feature = "runner")]
+pub mod round_trip;
+#[cfg(feature = "runner")]
 pub mod runner;
+#[cfg(feature = "tournament")]
 pub mod scheduler;
+#[cfg(feature = "tournament")]
 pub mod store;
+#[cfg(feature = "runner")]
+pub mod suite_input;
+pub mod topology;
 
+pub use affinity::{
+    AffinityCapability, AffinityError, AffinityOutcome, AffinitySupportLevel, AppliedAffinity,
+    affinity_capability, apply_process_affinity, process_affinity_groups,
+};
+pub use allowed_cpus::{AllowedCpuError, AllowedCpuSet, AllowedCpuSource, detect_allowed_cpu_set};
+pub use characteristics::{
+    CacheDomainId, CharacteristicsError, CharacteristicsSource, CoreClass, CpuCharacteristics,
+    NumaNodeId, PhysicalCoreCharacteristics, detect_cpu_characteristics,
+};
+#[cfg(feature = "runner")]
 pub use colosseum_uci::Score;
-pub use config::{AppConfig, AppDirs, EngineLibrary};
+#[cfg(feature = "tournament")]
 pub use detect::{DetectResult, detect_engine, split_name_version};
+#[cfg(feature = "tournament")]
 pub use error::EngineError;
+#[cfg(feature = "runner")]
 pub use live::{EvalPoint, LiveGameHandle, LiveGameState, LiveSearch};
-pub use openings::{ResolvedOpening, load_openings, summarize};
-pub use runner::{EngineGameSpec, GameReport, GameSpec, run_game};
+#[cfg(feature = "runner")]
+pub use openings::{
+    OpeningAudit, OpeningError, OpeningList, OpeningSummary, ResolvedOpening, audit_opening_book,
+    fen_after, is_chess960_fen, load_openings, load_openings_named, summarize,
+};
+#[cfg(feature = "runner")]
+pub use pgn::GamePairIdentity;
+pub use placement::{
+    CpuPlacementError, CpuPlacementPlan, CpuPlacementPolicy, DEFAULT_AUTO_HEADROOM_PHYSICAL_CORES,
+    EngineCpuPlacement, GameSlotCpuAllocation, PlacementAsymmetry, SlotAllocation,
+    allocate_game_slots, plan_cpu_placement,
+};
+#[cfg(feature = "runner")]
+pub use round_trip::RoundTripMaxima;
+#[cfg(feature = "runner")]
+pub use runner::{
+    CLOCK_MODEL_ID, CLOCK_MODEL_VERSION, ChargedElapsedSummary, ClockAccountingReport,
+    EngineFaultKind, EngineGameSpec, GameFault, GamePhases, GameReport, GameSide, GameSpec,
+    KeptEngine, run_game, run_game_keeping,
+};
+#[cfg(feature = "tournament")]
 pub use scheduler::{
     Command, EloEntry, InFlightGame, ResultParticipant, Tournament, TournamentResults,
     TournamentSnapshot, TournamentStatus, create_tournament, load_tournament_results,
     resume_tournament,
 };
+#[cfg(feature = "tournament")]
 pub use store::{GameRow, PendingGame, Store, TournamentEngineRow, TournamentRow};
+#[cfg(feature = "runner")]
+pub use suite_input::{SuiteInputFormat, parse_suite_input};
+pub use topology::{
+    CpuTopology, LogicalCpuId, PhysicalCore, SiblingMapping, TopologyError, TopologySource,
+    detect_cpu_topology,
+};

@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "generated_utc": "2026-07-31T20:43:30Z",
+  "host": {
+    "os": "Windows 11 Version 25H2/x86_64"
+  },
+  "tools": {
+    "fastchess": {
+      "version": "fastchess alpha 1.8.2 compiled for windows-latest 20260726-f618e34 (CI)",
+      "sha256": "c6d7e4458a58025983c81bf38c524cb213e6f27559657dcfd72543392a431a71",
+      "source": "https://github.com/Disservin/fastchess/releases/tag/v1.8.2-alpha",
+      "license": "MIT"
+    },
+    "cutechess": {
+      "version": "cutechess-cli 1.5.1 (Qt 6.8.3)",
+      "sha256": "8889f9582dc688c567704cf083f6025baf77f791cde903698c70b3420caf5d7e",
+      "source": "https://github.com/cutechess/cutechess/releases/tag/v1.5.1",
+      "license": "GPL-3.0-or-later"
+    }
+  },
+  "engines": {
+    "a": {
+      "name": "Rarog 2.3.1",
+      "sha256": "6f75e4ff72b435fcbf9008086069936fdb8578d33ea3a26e5c1a3eb6a0234774",
+      "source": "https://github.com/maelic13/rarog/tree/a5fd288efa913bd4e82a53ef9a6ef3432e99403f",
+      "license": "GPL-3.0-or-later"
+    },
+    "b": {
+      "name": "Stockfish dev-20260711-9a8dd81d",
+      "sha256": "c5d7dbd8842607df6508622c280b541512e637e5e2a54ca4321bf09552240422",
+      "source": "https://github.com/official-stockfish/Stockfish",
+      "license": "GPL-3.0-or-later"
+    }
+  },
+  "runs": {
+    "fastchess": {
+      "conditions": {
+        "rounds": 3,
+        "games_per_round": 2,
+        "pairing": "colours reversed by Fastchess",
+        "time_control": "0.05+0.001",
+        "book": null,
+        "concurrency": 1,
+        "sprt": {
+          "model": "normalized",
+          "elo0": -5,
+          "elo1": 5,
+          "alpha": 0.05,
+          "beta": 0.05
+        }
+      },
+      "console_sha256": "752dd2c41900a22b607041e2a53880a9198f9125125c69a0471dee397a35cf6f",
+      "pgn_sha256": "cad42a232e393d27de81ee0dbdf374d790cb3b103db72bd19695fbfeec1abfd0"
+    },
+    "cutechess": {
+      "conditions": {
+        "rounds": 1,
+        "games_per_round": 2,
+        "pairing": "colours reversed by cutechess-cli",
+        "time_control": "0.2+0.01",
+        "book": null,
+        "concurrency": 1,
+        "sprt": {
+          "elo0": -5,
+          "elo1": 5,
+          "alpha": 0.05,
+          "beta": 0.05
+        }
+      },
+      "console_sha256": "696602036911b029cc6d574fbcc6da91ffe4987def55a329e5de34bc261c361b",
+      "pgn_sha256": "09329fc7d69a69d642098e400169d1cff08fd01881c9fc1acffff76d5cab49b7"
+    }
+  },
+  "command_templates": {
+    "fastchess": "<fastchess> -engine cmd=<engine-a> name=Rarog -engine cmd=<engine-b> name=Stockfish -each tc=0.05+0.001 option.Threads=1 option.Hash=16 -rounds 3 -repeat -concurrency 1 -pgnout file=<fastchess.pgn> -sprt elo0=-5 elo1=5 alpha=0.05 beta=0.05 model=normalized -output format=cutechess",
+    "cutechess": "<cutechess-cli> -engine name=Rarog cmd=<engine-a> proto=uci -engine name=Stockfish cmd=<engine-b> proto=uci -each tc=0.2+0.01 option.Threads=1 option.Hash=16 -rounds 1 -games 2 -repeat -pgnout <cutechess.pgn> fi -sprt elo0=-5 elo1=5 alpha=0.05 beta=0.05"
+  }
+}

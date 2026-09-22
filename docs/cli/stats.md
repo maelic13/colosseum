@@ -1,0 +1,220 @@
+# Statistics replay
+
+`colosseum-cli stats <PATH>` reconstructs match results without launching an
+engine. `PATH` may be a CLI run directory, structured JSON, PGN, JSON-lines log,
+or plain console text.
+
+For a run directory, authority is fixed and visible:
+
+1. final structured `result.json`;
+2. the checksummed game journal `games.jsonl`, every verified line;
+3. portable `games.pgn`;
+4. forensic `run.log`;
+5. observational `console.txt`.
+
+Every attempted source and rejection reason is included in JSON. A corrupt
+stronger source therefore cannot silently pretend to be authoritative, while a
+valid weaker artifact remains usable.
+
+Structured match games carry schedule number, side and opening assignment.
+Only the two consecutive colour assignments of one pair, with identical opening
+identity, enter the pentanomial vector. Incomplete or inconsistent games stay
+counted as unpaired. The usual paired statistics block is calculated when the complete
+sample is sufficient and non-degenerate; otherwise its precise reason is
+reported.
+
+PGN and console text do not prove Colosseum pair/opening identity, so replay
+reports labelled unpaired W/D/L and never guesses pairs from file order. Pass
+`--subject "Engine name"` to select an engine perspective for PGN; without it,
+PGN/console results use White's perspective. A journal passed directly
+(`games.jsonl`) retains structured match identity and reconstructs pairs when
+complete.
+
+## Prospective experiment planning
+
+Planning is engine-free and requires the statistical assumptions on the
+command line. A fixed-sample difference design can also describe the interval
+resolution already achieved by an observed pentanomial sample:
+
+```text
+colosseum-cli stats plan fixed --objective difference --model normalized \
+  --effect-or-margin 5 --significance 0.05 --power 0.8 \
+  --distribution 0.05,0.20,0.50,0.20,0.05 \
+  --observed-pentanomial 5,20,50,20,5
+```
+
+Use `--objective equivalence` for a symmetric two-one-sided-test (TOST)
+approximation. Here `--effect-or-margin` is the positive equivalence margin,
+the assumed true effect is zero, and both one-sided tests must pass during the
+actual fixed-sample analysis. Difference planning uses a two-sided test around
+zero. Both calculations use a normal approximation and the supplied
+pentanomial distribution for pair-score variance; output is in complete pairs
+and twice as many games.
+
+Expected SPRT length is a seeded Monte Carlo planning aid:
+
+```text
+colosseum-cli stats plan sprt --model normalized --elo0 0 --elo1 5 \
+  --alpha 0.05 --beta 0.05 \
+  --distribution 0.05,0.20,0.50,0.20,0.05 \
+  --simulations 1000 --max-pairs 100000 --seed 42
+```
+
+The distribution is the assumed true pentanomial distribution. The report
+retains it together with the hypotheses, error rates, seed, simulation cap,
+stable named RNG stream and sampling algorithm. Capped trials are reported,
+not discarded. The resulting length distribution is neither an SPRT stopping
+rule nor a guarantee for the eventual engines or workload. Use `--json` for
+the complete machine-readable reports.
+
+## PGN search telemetry
+
+When the authoritative source is PGN, `stats` reads search annotations from
+mainline move comments. It supports exactly these forms:
+
+```text
+{[%depth 18] [%emt 0.250] [%nodes 500000]}
+{depth=18 time=250ms nodes=500000}
+{d=18 t=0.250s n=500000}
+{s=24 d=18 t=250ms h=3ms n=500000}
+```
+
+The last form is what Colosseum itself writes; see
+[fixed matches](match.md) for the annotations it produces. `%emt` is
+elapsed move time in seconds (a `H:M:S` value is also accepted). Key/value
+`time`/`t` requires an explicit `ms` or `s` suffix, and with that suffix a
+zero is read as a real sub-millisecond measurement rather than a placeholder.
+Depth and nodes must be positive integers. `s`/`score` is the mover’s own
+score in centipawns, or `#N` / `#-N` for mate in `N`. `h` is the harness
+overhead in milliseconds — charged time minus the time the engine reported —
+and may be negative. Other comments and annotation tags are left untouched and
+ignored by telemetry analysis.
+
+An explicit zero is a report, not a missing field: a move commented
+`{s=18 d=0 t=1ms n=0}` counts towards depth, time and node coverage, because
+the writer omits a field it has no value for. Only an absent field is absent.
+
+Each engine receives an eligible post-opening move count, an annotated-move
+coverage fraction, and separate coverage/mean/median reports for score,
+mean absolute score, depth, elapsed seconds, nodes and implied NPS. A metric
+with no valid samples is labelled `unavailable`; missing data is never
+converted to zero. Implied NPS requires nodes and positive elapsed time on the
+same move. A mate score counts towards score coverage but is deliberately left
+out of the centipawn values: it is a claim about distance to mate, not an
+evaluation on the same scale.
+
+Where moves carry `h=`, each engine also gets its harness-overhead
+distribution: the 50th, 99th and 99.9th percentiles and the maximum, in
+milliseconds, and how many moves' overhead exceeded that side's time margin
+as the game's `WhiteTimeMarginMs` / `BlackTimeMarginMs` tags record it:
+
+```text
+Engine A: harness overhead p50 3 ms, p99 11 ms, p999 164 ms, max 320 ms over 58112 moves; 7 of 58112 moves over the time margin
+```
+
+A move over the margin is a move that would have forfeited had the engine
+spent its whole remaining clock: overhead is time the engine never saw. A
+search that lost on time, written `{forfeit t=…ms h=…ms}` before the result,
+counts towards the side that forfeited — it is the move that mattered — and
+towards nothing but the overhead. A PGN without the margin tags still gets the
+distribution, and says the margin was not recorded. Percentiles use the nearest rank, so a quantile finer than the
+sample can resolve is the largest value.
+
+## Where a game's time went
+
+Given a run directory, or its `games.jsonl`, `stats` also reports how each
+game's wall time divided, over every journalled game, counted or not:
+
+```text
+game phases over 90 games, ms mean / p50 / p90 / p99 / max:
+  startup               149.8      86.0     273.4     289.7     289.7
+  play                 2516.2    2661.1    3243.0    4043.6    4043.6
+  charged              2502.2    2649.2    3225.0    4011.7    4011.7
+  uncharged-play         14.0      13.6      20.9      31.9      31.9
+  between-searches        2.4       2.2       3.9       7.2       7.2
+  position-write          9.7       9.5      14.7      20.9      20.9
+  after-bestmove          1.8       1.7       2.7       4.0       4.0
+  teardown               12.1      11.6      14.0      20.1      20.1
+  outside-runner          0.3       0.2       0.4       0.6       0.6
+```
+
+`startup` runs from the game starting to its first search: both engines
+spawned, handshaken, configured and readied. `play` runs from the first search
+to the end of the last, and is `charged` (both clocks) plus `uncharged-play`,
+which divides into the harness's own work between searches, the `position`
+written before each `go`, and each `bestmove`'s arrival to its search
+returning. `teardown` runs to both engine processes having exited, or to
+both being ready for the slot's next game when it keeps its engines, and
+`outside-runner` is what the CPU slot's span holds beyond those three. None of
+this is charged to an engine; it is the time a run spends on neither clock.
+
+## Pair identity in a Colosseum PGN
+
+The seven-tag roster says who played and how a game ended. It cannot say which
+colour-reversed pair a game belongs to, and that pair is the unit every paired
+statistic is computed over. Every game Colosseum writes therefore carries five
+more tags beside `OpeningPlyCount`:
+
+| Tag | Meaning |
+|---|---|
+| `GameNumber` | Harness game number in schedule order, counting from one |
+| `PairNumber` | The colour-reversed pair, or the tournament encounter, counting from one |
+| `PairGame` | Which colour assignment of that pair this is, counting from one; every even assignment is the odd one before it with the colours reversed |
+| `OpeningIndex` | Zero-based index into the resolved opening order; absent without a book |
+| `OpeningLabel` | The opening's label, `startpos` when no book supplied one |
+
+`stats` reads them back, so replaying a Colosseum PGN reports the same
+pentanomial vector as the checkpoint it came from. Pairing follows
+`PairNumber` and `PairGame` alone, never the game numbers: a tournament
+encounter played with four games per pair is two pentanomial units, and one
+game per pair is none at all, whatever the games are numbered. Without a
+subject the outcome is taken from the pair's first engine — the one that had
+White in assignment `1` — which is the perspective the checkpoint uses.
+
+A Colosseum PGN also names, per game, the CPU slot the game ran on
+(`GameSlot`, counting from zero) and each side's time margin
+(`WhiteTimeMarginMs`, `BlackTimeMarginMs`). Statistics never depend on the
+slot; it is there so a game can be placed on the machine it ran on, and the
+run directory's journal records when the game held it.
+
+## Games a run kept but did not count
+
+A run's own `games.pgn` holds every game it played. Some of those games are
+deliberately outside its official sample: a game the harness abandoned on an
+infrastructure fault, the pairs an SPRT was still playing in its other slots
+when it crossed a boundary, and the games of an SPSA iteration an engine fault
+invalidated. They are kept because they are evidence, and they are marked so no
+reader has to guess:
+
+| Tag | Values |
+|---|---|
+| `ColosseumSample` | `official`, `unscorable` (abandoned on an infrastructure fault), `post-terminal` (played after an SPRT boundary), `invalid` (an invalidated SPSA iteration) |
+| `ColosseumSpsaIteration` | Zero-based SPSA iteration the game belongs to |
+
+An abandoned game carries a result only because the PGN shape requires one;
+nobody may score it, and no run ever did. `unscorable` is per game, so it is
+what a game of an otherwise counted pair carries.
+
+`stats` counts only `official` games, so `stats <pgn>` reports the same pair
+count and the same pentanomial vector as `stats <run-dir>` for the same run. It
+reports how many games it left out in `excluded_games`, broken down by class in
+`excluded_by_sample`, and warns about them in text. A file in which nothing is
+official — the export of a single invalidated SPSA iteration, for example — is
+refused with that reason rather than replayed as statistics. A game with no
+`ColosseumSample` tag is official, so a PGN from any other source is unaffected.
+
+A PGN that does not carry these tags is not paired by guesswork: the order
+games appear in is not evidence that two of them share an opening, so such a
+file falls back to labelled unpaired statistics. That includes exports from
+other runners, and a Colosseum export whose tags were stripped.
+
+Colosseum-generated PGNs record the non-standard `OpeningPlyCount` tag whenever
+the harness pre-plays book moves. Those plies are excluded. For PGNs without
+that tag, individual comments containing the word `book` are excluded. If an
+external producer records opening moves in neither way, they cannot be
+identified and the coverage denominator includes them.
+
+Node accounting is engine-defined. Compare implied NPS only when node semantics
+are compatible—normally versions or builds from the same engine lineage. The
+JSON report and stderr warning retain this limitation whenever telemetry is
+available.

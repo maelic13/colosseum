@@ -1,0 +1,114 @@
+{
+  "schema_version": 3,
+  "checked_on": "2026-09-22",
+  "host": "Microsoft Windows 11 Enterprise x86_64",
+  "oracle_matrix": "tests/fixtures/statistics/oracle-matrix.md",
+  "conditions": "same Rarog 2.3.1 executable (SHA-256 033f66334385e30ad358293a411e72508fa5edf04d6fc57310bc545b39046898) on both arms; depth 1; startpos/no book; 4 colour-reversed pairs; concurrency 1; draw after move 5 when 2 consecutive scores are within 10000 cp",
+  "shared_fields": [
+    "game count",
+    "complete pair count",
+    "colour reversal",
+    "W/D/L",
+    "draw ratio",
+    "termination class",
+    "engine faults"
+  ],
+  "conditionally_shared_fields": [
+    "pentanomial vector (FastChess and Colosseum only)"
+  ],
+  "excluded_fields": [
+    "Elo",
+    "confidence interval",
+    "LOS",
+    "LLR",
+    "Wald bounds"
+  ],
+  "exclusion_reason": "The all-draw smoke sample has zero variance, and Cute Chess was not given a matched normalized pentanomial SPRT design. NaN/infinity presentation is not an oracle.",
+  "version_sources": [
+    {
+      "runner": "fastchess",
+      "version": "fastchess alpha 1.8.0 compiled for windows-latest 20260128-072859b (CI)",
+      "source": "https://github.com/Disservin/fastchess/releases/tag/v1.8.0-alpha",
+      "latest_confirmed": true
+    },
+    {
+      "runner": "cutechess-cli",
+      "version": "cutechess-cli 1.5.1 (Qt 6.8.3)",
+      "source": "https://github.com/cutechess/cutechess/releases/tag/v1.5.1",
+      "latest_confirmed": true
+    }
+  ],
+  "observations": [
+    {
+      "runner": "fastchess",
+      "runner_version": "fastchess alpha 1.8.0 compiled for windows-latest 20260128-072859b (CI)",
+      "runner_sha256": "8444e73965ae44e716cde1bb546a7d7c8c9fc7a442a44194a0c71a3bffa7dd0d",
+      "artifact": "tests/fixtures/statistics/external/phase4b5-live-fastchess.console.txt",
+      "artifact_sha256": "4cbd54276e9706d1818f5c29980afba7f7135ae220707d11e7e7dc9a7ca6a5a0",
+      "rerun_byte_identical": true,
+      "command": "<fastchess> -engine cmd=<rarog> name=A -engine cmd=<rarog> name=B -each depth=1 -rounds 4 -repeat -concurrency 1 -draw movenumber=5 movecount=2 score=10000 -ratinginterval 8",
+      "exit_code": 0,
+      "status": "completed",
+      "games": 8,
+      "wins": 0,
+      "draws": 8,
+      "losses": 0,
+      "complete_pairs": 4,
+      "pentanomial": [0, 0, 4, 0, 0],
+      "faults": 0
+    },
+    {
+      "runner": "cutechess-cli",
+      "runner_version": "cutechess-cli 1.5.1 (Qt 6.8.3)",
+      "runner_sha256": "8889f9582dc688c567704cf083f6025baf77f791cde903698c70b3420caf5d7e",
+      "artifact": "tests/fixtures/statistics/external/phase4b5-live-cutechess.console.txt",
+      "artifact_sha256": "e1179aee6f2f23bdf6e23002acd4caa489793c2041de0121be694b7158e0d222",
+      "rerun_byte_identical": true,
+      "command": "<cutechess-cli> -engine cmd=<rarog> name=A -engine cmd=<rarog> name=B -each proto=uci tc=inf depth=1 -rounds 4 -games 2 -repeat -concurrency 1 -draw movenumber=5 movecount=2 score=10000 -ratinginterval 8",
+      "exit_code": 0,
+      "status": "completed",
+      "games": 8,
+      "wins": 0,
+      "draws": 8,
+      "losses": 0,
+      "complete_pairs": 4,
+      "pentanomial": null,
+      "faults": 0
+    },
+    {
+      "runner": "colosseum-cli",
+      "runner_version": "0.1.0 release source at 628449db2c5223c61464cd178ab527398b132e7a",
+      "runner_sha256": "3206ce79a6aab188c2b2f6b90ac6d6739c0f99f55265d9b88ba5ea6cf45a646f",
+      "artifact": "tests/fixtures/statistics/external/phase8-colosseum.json",
+      "artifact_sha256": "ac337d4759e389bdd39c505c9155d136f8662f8d9035c5aba0ea8eaf2184aac6",
+      "raw_result_sha256": "f6de16f1dcfc3c7fae1edaadc22af967fc74ad7a095b16ea8060e3266139ed7e",
+      "rerun_byte_identical": false,
+      "command": "<colosseum-cli> sprt <rarog> <rarog> --max-pairs 4 --preset gainer --a-depth 1 --b-depth 1 --draw-adjudication --draw-move 5 --draw-moves 2 --draw-score-cp 10000 --dir <run-dir> --json --seed 123 --placement off",
+      "command_note": "The recorded command is the command that runs, and the command to repeat this comparison with. The 2026-08-03 run used the same arguments without --draw-adjudication, which enabled adjudication implicitly; adjudication is now off unless asked for, so the enabling flag is required and the record carries it. Never drop the draw parameters to make the command parse: the deliberately early draw rule is what makes all eight games draw and gives the three runners one outcome to compare, and without it the games play out and the comparison is against different conditions, which reads as a parity divergence that is not one.",
+      "command_proved_on": "2026-09-22",
+      "command_proof": "Run as recorded for the release acceptance repeat: exit 4, inconclusive, 8 games, 0/8/0, 4 complete pairs, pentanomial [0, 0, 4, 0, 0], 0 faults. The pre-Phase-10(b) form, without --draw-adjudication, exits 2 with a usage error naming the flag.",
+      "exit_code": 4,
+      "status": "inconclusive",
+      "games": 8,
+      "wins": 0,
+      "draws": 8,
+      "losses": 0,
+      "complete_pairs": 4,
+      "pentanomial": [0, 0, 4, 0, 0],
+      "faults": 0
+    }
+  ],
+  "divergences": [
+    {
+      "field": "terminal status and process exit",
+      "classification": "expected interface difference",
+      "reason": "The external fixed runs complete normally; the capped Colosseum SPRT correctly reports INCONCLUSIVE with exit 4 at four zero-variance pairs."
+    },
+    {
+      "field": "zero-variance statistical presentation",
+      "classification": "excluded by oracle matrix",
+      "reason": "FastChess/Cute Chess display NaN or infinity while Colosseum retains typed unavailability; no finite statistic exists to compare."
+    }
+  ],
+  "engine_note": "Re-recorded on 2026-09-22 for the release acceptance repeat. The 2026-08-03 matrix used a different build of Rarog 2.3.1 (SHA-256 2a95390ddff846ffcc132494d1a28dcde8b703d1d9ec57aa7199a3b856ab916b) that could not be located on the reference host, so the matrix was repeated on the build that is there rather than left pointing at a binary nobody can obtain. Both external runners are the exact recorded binaries, and both external transcripts came back byte-identical to the ones recorded in August: the deliberately early draw rule ends all eight games the same way whatever the engine plays, and the transcripts carry no timing. Only the Colosseum observation moved, onto the source being released."
+}

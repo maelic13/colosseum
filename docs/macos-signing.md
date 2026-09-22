@@ -2,7 +2,7 @@
 
 ## Current state (v0.1)
 
-The `release.yml` CI produces an **unsigned** `.dmg` for macOS.
+The `release-gui.yml` CI produces an **unsigned** `.dmg` for macOS.
 Users who download it will see a Gatekeeper warning on first launch:
 
 > "colosseum" can't be opened because it is from an unidentified developer.
@@ -58,7 +58,7 @@ xcrun notarytool submit colosseum.dmg \
 xcrun stapler staple colosseum.dmg
 ```
 
-### 4 — Add signing to release.yml
+### 4 — Add signing to release-gui.yml
 
 Store your `APPLE_CERTIFICATE` (base-64 encoded .p12), `APPLE_CERTIFICATE_PASSWORD`,
 `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_ID_PASSWORD` as GitHub Actions secrets,

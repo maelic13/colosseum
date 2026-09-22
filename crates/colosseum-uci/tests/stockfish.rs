@@ -1,23 +1,25 @@
-//! Integration tests against a real engine. The engine is copied into a temp dir
-//! first so the original is never touched or locked. If no engine is available the
-//! test skips (so CI on machines without the engine stays green). Point the tests at
-//! any UCI engine with `COLOSSEUM_TEST_ENGINE=/path/to/engine`.
+//! Explicitly opt-in UCI interoperability smoke coverage.
+//!
+//! Cargo compiles this target only with `real-engine-smoke`; it requires
+//! `COLOSSEUM_SMOKE_ENGINE` and is never part of required CI or release evidence.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use colosseum_uci::{EngineProcess, GoLimits, SpawnOptions, UciPosition};
 
-/// Locate a UCI engine: `COLOSSEUM_TEST_ENGINE` env, else the known dev path.
-fn locate_engine() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("COLOSSEUM_TEST_ENGINE") {
-        let path = PathBuf::from(path);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-    let default = PathBuf::from(r"D:\chess\engines\stockfish.exe");
-    default.exists().then_some(default)
+/// Resolve an explicitly supplied UCI executable for this opt-in test target.
+fn smoke_engine_path() -> PathBuf {
+    let path = PathBuf::from(
+        std::env::var("COLOSSEUM_SMOKE_ENGINE")
+            .expect("UCI smoke test requires COLOSSEUM_SMOKE_ENGINE to name a UCI executable"),
+    );
+    assert!(
+        path.is_file(),
+        "COLOSSEUM_SMOKE_ENGINE must name an existing executable file: {}",
+        path.display()
+    );
+    path
 }
 
 /// Copy the engine into a fresh temp dir; returns the guard (kept alive) and the path.
@@ -30,10 +32,7 @@ fn copy_to_temp(src: &Path) -> (tempfile::TempDir, PathBuf) {
 
 #[tokio::test]
 async fn stockfish_full_cycle() {
-    let Some(src) = locate_engine() else {
-        eprintln!("skipping stockfish_full_cycle: no engine (set COLOSSEUM_TEST_ENGINE)");
-        return;
-    };
+    let src = smoke_engine_path();
     let (_guard, exe) = copy_to_temp(&src);
 
     let mut engine = EngineProcess::spawn(SpawnOptions::new(&exe))

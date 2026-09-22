@@ -1,0 +1,337 @@
+name: Colosseum GUI candidate and release
+# Title runs by the product-scoped tag, or by the commit a candidate came from.
+run-name: GUI ${{ github.ref_type == 'tag' && github.ref_name || format('candidate {0}', github.sha) }}
+
+on:
+  # A candidate builds, packages and smokes every artifact and retains the
+  # bundle, without a tag and without publishing anything — the GUI lane's
+  # equivalent of the CLI's, so the first real tag is not the first time this
+  # workflow has run end to end.
+  workflow_dispatch:
+  push:
+    tags:
+      - 'gui-v*'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  validate:
+    name: Validate GUI release identity
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.metadata.outputs.mode }}
+      version: ${{ steps.metadata.outputs.version }}
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
+      source_sha: ${{ steps.metadata.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Validate tag, manifest and GUI release notes
+        id: metadata
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            metadata="$(cargo run --locked -q -p colosseum-release -- "$GITHUB_REF_NAME")"
+            mode=release
+          else
+            metadata="$(cargo run --locked -q -p colosseum-release -- candidate gui)"
+            mode=candidate
+          fi
+          test "$(jq -r .product <<<"$metadata")" = gui
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "version=$(jq -r .version <<<"$metadata")" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$(jq -r .prerelease <<<"$metadata")" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "$metadata"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Build release binaries and produce platform-specific packages
+  # ────────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.target }})
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows x86-64 → portable ZIP + MSI installer
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows
+            arch: x64
+            wix_arch: x64
+
+          # Windows ARM64 → portable ZIP + MSI installer
+          # Built natively on a GitHub-hosted Arm runner (free for public repos).
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            platform: windows
+            arch: arm64
+            wix_arch: arm64
+
+          # Linux x86-64 → .tar.gz + .deb + .rpm
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux
+            arch: x64
+
+          # macOS Apple Silicon → .dmg + .tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: macos
+            arch: arm64
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      # eframe/egui needs GTK + XCB headers on Linux
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
+
+      # ── Build and package ───────────────────────────────────────────────────
+      # One entry point: the same commands a maintainer runs locally build the
+      # product, stage the allowlisted contents, write every artifact to
+      # target/dist/ under one naming scheme, print each one's SHA-256 and read
+      # the portable archive back with the archive smoke script.
+      #
+      # WiX is a cross-platform .NET tool; a single main.wxs builds both x64 and
+      # arm64 — the architecture follows the artifact's own token. The OSMF EULA
+      # v1.1 must be accepted before any command runs (WIX7015 otherwise; the
+      # unversioned extension add is gated behind it too, surfacing as WIX0144).
+      # Accepting is the documented CI mechanism; the maintenance fee applies
+      # only from US$10,000/yr of revenue, and Colosseum is free software.
+      - name: Install .NET SDK and WiX (Windows)
+        if: runner.os == 'Windows' && needs.validate.outputs.prerelease != 'true'
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Prepare WiX (Windows)
+        if: runner.os == 'Windows' && needs.validate.outputs.prerelease != 'true'
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix
+          $env:PATH = "$env:USERPROFILE/.dotnet/tools;$env:PATH"
+          "$env:USERPROFILE/.dotnet/tools" | Out-File -FilePath $env:GITHUB_PATH -Append
+          wix eula accept wix7
+          wix extension add -g WixToolset.UI.wixext
+
+      - name: Install the Linux packaging tools
+        if: runner.os == 'Linux'
+        run: cargo install cargo-deb cargo-generate-rpm --locked
+
+      - name: Install the macOS packaging tools
+        if: runner.os == 'macOS'
+        run: |
+          # The runner image ships an untrusted third-party tap that makes every
+          # brew command print a trust warning; we do not use it.
+          brew untap aws/tap >/dev/null 2>&1 || true
+          brew install create-dmg
+
+      # A prerelease ships no MSI: an installer that writes to Program Files and
+      # registers an upgrade code is not what a release candidate is for.
+      - name: Package (Windows, with installer)
+        if: runner.os == 'Windows' && needs.validate.outputs.prerelease != 'true'
+        run: cargo xtask package gui --target ${{ matrix.target }} --format zip,msi
+
+      - name: Package (Windows, prerelease)
+        if: runner.os == 'Windows' && needs.validate.outputs.prerelease == 'true'
+        run: cargo xtask package gui --target ${{ matrix.target }} --format zip
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: cargo xtask package gui --target ${{ matrix.target }} --format tar.gz,deb,rpm
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: cargo xtask package gui --target ${{ matrix.target }} --format tar.gz,dmg
+
+      # One upload per platform leg: every artifact it produced, by the one
+      # naming scheme, from the directory the xtask wrote them to.
+      - name: Upload the platform's artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: gui-artifacts-${{ matrix.platform }}-${{ matrix.arch }}
+          path: target/dist/colosseum-gui-*
+          if-no-files-found: error
+          retention-days: 30
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Arch Linux package (.pkg.tar.zst, installable with `pacman -U`) — built in
+  # an Arch container because makepkg only exists there. Covers Arch and its
+  # derivatives (CachyOS, EndeavourOS, Manjaro, …).
+  # ────────────────────────────────────────────────────────────────────────────
+  build-arch:
+    name: Build (x86_64 Arch package)
+    needs: validate
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      # base-devel has the toolchain and makepkg; add rust + the same GUI build
+      # deps the Ubuntu leg installs (gtk3 for the rfd file dialogs, xkbcommon
+      # for winit).
+      - name: Install build dependencies
+        run: pacman -Syu --noconfirm --needed git rust gtk3 libxkbcommon openssl
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-arch-x86_64
+
+      - name: Build, package and name the Arch package
+        run: cargo xtask package gui --format pkg.tar.zst --no-smoke
+
+      - name: Upload Arch package
+        uses: actions/upload-artifact@v7
+        with:
+          name: gui-artifacts-linux-arch
+          path: target/dist/colosseum-gui-*.pkg.tar.zst
+          if-no-files-found: error
+          retention-days: 30
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Collect all platform artifacts and attach them to the triggering release
+  # ────────────────────────────────────────────────────────────────────────────
+  collect:
+    name: Verify the exact artifact list
+    needs: [validate, build, build-arch]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          fetch-depth: 0
+
+      - name: Download the named platform artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: gui-artifacts-*
+          merge-multiple: true
+          path: release-artifacts
+
+      # The release is this list and nothing else. A glob would publish
+      # whatever happened to be in the directory, including another product's
+      # archive if the two lanes ever shared a run.
+      - name: Verify the complete matrix and generate checksums
+        shell: bash
+        run: |
+          version='${{ needs.validate.outputs.version }}'
+          expected=(
+            "colosseum-gui-${version}-windows-x64.zip"
+            "colosseum-gui-${version}-windows-arm64.zip"
+            "colosseum-gui-${version}-linux-x64.tar.gz"
+            "colosseum-gui-${version}-linux-x64.deb"
+            "colosseum-gui-${version}-linux-x64.rpm"
+            "colosseum-gui-${version}-linux-x64.pkg.tar.zst"
+            "colosseum-gui-${version}-macos-arm64.tar.gz"
+            "colosseum-gui-${version}-macos-arm64.dmg"
+          )
+          # A prerelease ships no Windows installers.
+          if [[ '${{ needs.validate.outputs.prerelease }}' != 'true' ]]; then
+            expected+=(
+              "colosseum-gui-${version}-windows-x64.msi"
+              "colosseum-gui-${version}-windows-arm64.msi"
+            )
+          fi
+          ls -lh release-artifacts/
+          test "$(find release-artifacts -maxdepth 1 -type f | wc -l)" -eq "${#expected[@]}"
+          for file in "${expected[@]}"; do test -f "release-artifacts/$file"; done
+          (cd release-artifacts && sha256sum "${expected[@]}" > SHA256SUMS)
+          (cd release-artifacts && sha256sum --check SHA256SUMS)
+
+      - name: Record candidate identity
+        if: needs.validate.outputs.mode == 'candidate'
+        shell: bash
+        run: |
+          cat > release-artifacts/CANDIDATE.json <<EOF
+          {"product":"colosseum-gui","version":"${{ needs.validate.outputs.version }}","commit":"${{ needs.validate.outputs.source_sha }}","workflow_run":${{ github.run_id }}}
+          EOF
+
+      - name: Retain candidate bundle without publishing a release
+        if: needs.validate.outputs.mode == 'candidate'
+        uses: actions/upload-artifact@v7
+        with:
+          name: colosseum-gui-candidate-${{ needs.validate.outputs.source_sha }}
+          path: release-artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Install Rust toolchain
+        if: needs.validate.outputs.mode == 'release'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add product-owned release notes to the stable bundle
+        if: needs.validate.outputs.mode == 'release'
+        run: cargo run --locked -q -p colosseum-release -- notes "$GITHUB_REF_NAME" release-artifacts/RELEASE-NOTES.md
+
+      - name: Retain verified stable bundle for the publish job
+        if: needs.validate.outputs.mode == 'release'
+        uses: actions/upload-artifact@v7
+        with:
+          name: colosseum-gui-release-${{ needs.validate.outputs.source_sha }}
+          path: release-artifacts/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish stable release
+    if: needs.validate.outputs.mode == 'release'
+    needs: [validate, collect]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the verified bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: colosseum-gui-release-${{ needs.validate.outputs.source_sha }}
+          path: release-artifacts
+
+      - name: Recheck downloaded archive checksums
+        run: cd release-artifacts && sha256sum --check SHA256SUMS
+
+      - name: Publish product-scoped release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: Colosseum GUI v${{ needs.validate.outputs.version }}
+          body_path: release-artifacts/RELEASE-NOTES.md
+          prerelease: ${{ needs.validate.outputs.prerelease == 'true' }}
+          # GitHub keeps one repository-wide "latest" release for both products.
+          # A stable GUI release claims it; a GUI prerelease never does.
+          make_latest: ${{ needs.validate.outputs.prerelease == 'true' && 'false' || 'true' }}
+          # SHA256SUMS is generated and re-checked between jobs, but not
+          # published: a checksum file beside the archives it describes proves
+          # nothing an attacker who can replace one cannot also replace. The
+          # per-asset digests GitHub records are the ones to compare against.
+          files: |
+            release-artifacts/colosseum-gui-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -7,7 +7,7 @@
 
 use eframe::egui::{self, Align, Layout, RichText, Ui, ViewportCommand};
 
-use colosseum_core::branding::DISPLAY_NAME;
+use crate::product::DISPLAY_NAME;
 use colosseum_engine::TournamentStatus;
 
 use crate::backend::Backend;

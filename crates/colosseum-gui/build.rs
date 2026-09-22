@@ -12,17 +12,12 @@
 //! runtime-set icon.
 
 fn main() {
-    // Only meaningful for a Windows *target*.
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
-        return;
-    }
-
     // `winresource` is only available as a build-dependency on a Windows
     // *host* (see `[target.'cfg(windows)'.build-dependencies]` in Cargo.toml),
     // so gate its use on the host to keep the build script compiling on other
     // platforms (e.g. cross-compiling to Windows from macOS/Linux).
     #[cfg(windows)]
-    {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rerun-if-changed=assets/colosseum.ico");
 
         let mut res = winresource::WindowsResource::new();

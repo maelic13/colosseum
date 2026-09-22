@@ -7,6 +7,7 @@
 # (kept — do not ignore)
 
 # Local app data produced during development / testing
+/colosseum-runs/
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
@@ -14,6 +15,9 @@
 *.db
 /pgn/
 *.pgn
+# Reviewed fixture PGNs are committed test evidence, not local output.
+!tests/fixtures/*.pgn
+!tests/fixtures/statistics/**/*.pgn
 
 # Temporary engine copies created by tests (real engine copied into temp dirs)
 /test-engines/
@@ -43,9 +47,6 @@ $RECYCLE.BIN/
 *.iml
 *.swp
 *.swo
-
-# Build / packaging output
-/dist/
 
 # Claude Code local tooling state (un-ignore specific shared files if needed)
 .claude/

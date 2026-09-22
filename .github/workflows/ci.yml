@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  quality:
+    name: Format, architecture and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # eframe/egui needs GTK + XCB headers on Linux.
+      - name: Install Linux GUI dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Check generated CLI documentation
+        run: cargo run -p colosseum-docs -- --check
+
+      - name: Check workspace tests
+        run: cargo check --workspace --tests
+
+      - name: Lint workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build independent headless CLI artifact
+        run: cargo build --release -p colosseum-cli --bin colosseum-cli
+
+  platform-tests:
+    name: ${{ matrix.os }} / ${{ matrix.profile }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        profile: [debug, release]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
+
+      # Both matrix legs of one OS are the same job, so without this they share
+      # a cache key: they race to save it, the loser never saves, and every run
+      # of that leg rebuilds the whole graph from cold.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.profile }}
+
+      - name: Run required hermetic tests (debug)
+        if: matrix.profile == 'debug'
+        run: cargo test --workspace --all-targets
+
+      # `ci-release` is the shipped release profile without the distribution-only
+      # LTO and single-codegen-unit settings; see the workspace manifest.
+      - name: Run required hermetic tests (release)
+        if: matrix.profile == 'release'
+        run: cargo test --workspace --all-targets --profile ci-release
