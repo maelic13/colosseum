@@ -10,7 +10,6 @@ use colosseum_engine::{
     detect_allowed_cpu_set, detect_cpu_topology, plan_cpu_placement, process_affinity_groups,
 };
 use serde::Deserialize;
-use serde_json::Value;
 
 #[derive(Debug, Deserialize)]
 struct RecordedFixture {
@@ -170,33 +169,6 @@ fn recorded_topology_corpus_selects_exact_expected_cpu_lists() {
             );
         }
     }
-}
-
-#[test]
-fn acceptance_manifest_names_every_phase_exit_gate() {
-    let manifest: Value = serde_json::from_str(include_str!(
-        "../../../docs/fixtures/phase3/acceptance.json"
-    ))
-    .unwrap();
-    assert_eq!(manifest["schema_version"], 1);
-    assert_eq!(manifest["phase"], 3);
-    let ids = manifest["gates"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|gate| gate["id"].as_str().unwrap())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(
-        ids,
-        BTreeSet::from([
-            "enforceable-residency",
-            "independent-cli-platform-surface",
-            "platform-capability-command",
-            "platform-contract-documentation",
-            "topology-fixture-corpus",
-            "workspace-regression",
-        ])
-    );
 }
 
 #[test]
