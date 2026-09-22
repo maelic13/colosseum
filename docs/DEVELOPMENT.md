@@ -136,6 +136,15 @@ On PowerShell, set `$env:COLOSSEUM_SMOKE_ENGINE` before running the same Cargo
 commands. These opt-in checks are useful local interoperability evidence only;
 they never count as required CI, supported-platform, or release evidence.
 
+Hard CPU affinity has its own opt-in `platform-smoke` tier. `affinity_smoke`
+pins two busy fixture processes to one logical CPU each and checks that they
+ran only there; it needs a host with enforceable affinity (Windows or Linux)
+and fails elsewhere rather than passing by skip:
+
+```bash
+cargo test -p colosseum-engine --features platform-smoke --test affinity_smoke
+```
+
 GUI and live-view changes need a real run as well: launch the app, play a short
 tournament (two engines, 100 ms/move), and delete the test tournament
 afterwards.

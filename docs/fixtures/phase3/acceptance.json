@@ -9,8 +9,8 @@
     },
     {
       "id": "enforceable-residency",
-      "owner": "crates/colosseum-engine/tests/phase3_acceptance.rs",
-      "evidence": "Two busy children sample only their assigned logical CPU on Windows/Linux; unavailable platforms emit an explicit skip reason"
+      "owner": "crates/colosseum-engine/tests/affinity_residency.rs (opt-in platform-smoke feature)",
+      "evidence": "Two busy children sample only their assigned logical CPU on Windows/Linux; a host without enforceable affinity fails the opt-in target instead of skipping"
     },
     {
       "id": "platform-capability-command",
