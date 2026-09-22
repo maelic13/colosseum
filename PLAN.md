@@ -1727,9 +1727,9 @@ version stays 0.1.0 because nothing has been published. The recurring "after
 changing anything that runs games" procedure runs once, at 10.10, on the
 final state.
 
-**Decisions proposed 2026-09-22, for the maintainer to confirm.** The items
-below are written on the assumption that they stand; each names the line to
-change if they do not.
+**Decisions of 2026-09-22, confirmed by the maintainer.** The items below
+implement them and are not reopened; each still names the line that would
+change if one were revisited.
 
 - **(af.1) The GUI must honour `scorable`** (GUIDE 10.9w.1, Sol High). Found
   by (af): a game whose engine cannot be spawned is classified by the runner

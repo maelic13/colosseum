@@ -20,7 +20,7 @@ internal naming or method argumentation.
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 CLI candidate archives ☑ exact-archive smoke · the `gui-v` release lane has never run; 10.9y gives it a candidate mode |
 | Next step | **10.9x** — Sol High (Claude: Opus 5, high). Then 10.9y, 10.9z, **10.10 — EXIT** |
-| Decisions awaiting the maintainer | The 2026-09-22 proposals in PLAN §S8 "Phase 10 — open items": exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, explicit GUI artifact list, versions kept in names, updater prerelease fix now and pagination later, throughput margin not chased, private-commit measure for the flaky test. The steps below assume them |
+| Confirmed decisions | The 2026-09-22 set in PLAN §S8 "Phase 10 — open items", confirmed by the maintainer and not reopened: exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, explicit GUI artifact list, versions kept in names, updater prerelease fix now and pagination later, throughput margin not chased, private-commit measure for the flaky test |
 
 ## Completed phases
 
