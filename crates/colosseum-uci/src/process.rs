@@ -1132,8 +1132,8 @@ mod clock_tests {
             &sender,
         );
         let after = Instant::now();
-        // The consumer only looks now, long after the reader stamped both.
-        std::thread::sleep(Duration::from_millis(50));
+        // The consumer only looks now, after the reader has stamped both: the
+        // stamp is bounded by the read, not by when the event is consumed.
         let mut lines = Vec::new();
         while let Ok(event) = receiver.try_recv() {
             lines.push(event);

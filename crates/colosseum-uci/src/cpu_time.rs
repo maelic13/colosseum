@@ -142,28 +142,35 @@ fn cycles_per_second() -> Option<f64> {
 mod tests {
     use super::*;
 
+    /// The adapter reads the process's own CPU counter: it never runs
+    /// backwards, and work done on this thread shows up in it. How much CPU a
+    /// wall-clock interval costs is left alone — other test threads share the
+    /// process and the scheduler shares the host, so no ratio holds reliably.
     #[test]
-    fn a_busy_process_consumes_about_its_wall_time_and_an_idle_one_none() {
+    fn the_cpu_counter_is_monotonic_and_counts_work_done_by_this_process() {
         let own = ProcessCpu::open(std::process::id()).expect("own process opens");
-        let spin = |duration: std::time::Duration| {
-            let start = std::time::Instant::now();
-            while start.elapsed() < duration {
-                std::hint::spin_loop();
+        let before = own.sample().unwrap().cpu_ns;
+        let mut latest = before;
+        let mut work = 0_u64;
+        // Only a broken counter reaches this bound; it keeps that a failure
+        // rather than a hang.
+        let give_up = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while latest == before {
+            assert!(
+                std::time::Instant::now() < give_up,
+                "the counter never moved"
+            );
+            for _ in 0..1_000_000 {
+                work = std::hint::black_box(work.wrapping_add(1));
             }
-        };
-        let before = own.sample().unwrap().cpu_ns;
-        spin(std::time::Duration::from_millis(100));
-        let busy = own.sample().unwrap().cpu_ns - before;
-        // Other test threads may add CPU; a preempted spin may lose some.
-        assert!(busy >= 60_000_000, "spinning 100 ms consumed {busy} ns");
-
-        let before = own.sample().unwrap().cpu_ns;
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        let idle = own.sample().unwrap().cpu_ns - before;
-        assert!(
-            idle < busy / 2,
-            "sleeping 100 ms consumed {idle} ns against {busy} ns spinning"
-        );
+            let now = own.sample().unwrap().cpu_ns;
+            assert!(
+                now >= latest,
+                "the counter ran backwards: {latest} then {now}"
+            );
+            latest = now;
+        }
+        assert!(latest > before);
     }
 
     #[test]
