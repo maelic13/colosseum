@@ -1,25 +1,47 @@
 # Colosseum — development guide
 
-The short operational view: where the harness stands and what to do next.
-Rationale, specifications, success criteria and evidence live in
-[`PLAN.md`](PLAN.md).
+The short operational view: where the work stands and what to do next.
+Rationale, specifications, success criteria and the open items' full form
+live in [`PLAN.md`](PLAN.md); the evidence of completed phases lives in
+[`docs/architecture/`](docs/architecture/README.md).
 
 **This file and `PLAN.md` are the maintainer-facing pair.** `README.md` is the
-user-facing front door for the whole project (the GUI and CLI);
-the user documentation is user-facing CLI detail. Neither may carry phase
-numbers, internal naming or method argumentation.
+user-facing front door for the whole project (the GUI and the CLI);
+`docs/cli/` is the user-facing CLI detail. Neither may carry phase numbers,
+internal naming or method argumentation.
 
 ## Current checkpoint
 
 | | |
 |---|---|
-| Branch / version | `cli`; Colosseum GUI **1.0.2** released. Independent Colosseum CLI foundation: **0.1.0**, unreleased |
-| What exists | **Phases 0–9 are complete, and 10.1–10.9w with them** (10.9m rejected; 10.9h, 10.9p and 10.9t deferred behind the release). Candidate `823b398` passed four-platform archive smoke and exact-artifact Rarog/Basilisk gates on Windows and WSL Linux; every first-release correction has landed since |
-| What is missing | **10.9x–10.9z**, release preparation (versions and tag contract, the xtask build, user documentation); then **10.10**, the release acceptance repeat on the corrected source, then merge and `cli-v0.1.0`; **Phase 11** GUI on the harness after the release. One decision is open for the maintainer, from 10.9w: the GUI records a game whose engine could not be spawned as an unscorable draw, where 1.0.2 gave the failing engine a loss |
+| Branch / versions | `cli`; Colosseum GUI **1.0.2** released (legacy `v` tag). Colosseum CLI **0.1.0**, unreleased. The first release from `cli` ships both: GUI **1.1.0** (`gui-v1.1.0`, "latest") and CLI **0.1.0** (`cli-v0.1.0`, never "latest") |
+| What exists | Phases 0–9 complete; Phase 10 corrections 10.1–10.9w complete (10.9m rejected; 10.9h, 10.9p, 10.9t deferred behind the release). Candidate `823b398` passed four-platform archive smoke; every correction since has landed with its tests; qualification and symmetry runs recorded |
+| What is missing | **10.9w.1** (the GUI must not score a game whose engine could not start), **10.9x** (versions, tag contract, updater prerelease filter), **10.9y** (`cargo xtask`, GUI workflow hardening and candidate mode), **10.9z** (user documentation, finished), then **10.10** (acceptance repeat, merge, tags). Phase 11 (GUI on the harness) after publication |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 candidate archives ☑ exact-archive smoke |
-| Next step | **10.9x**, versions and the tag contract — the CLI at 0.1.0 and the GUI at its own new version, which 10.9w's change list feeds; then 10.9y, 10.9z and **10.10 — EXIT**, release acceptance; 10.9h, 10.9p and 10.9t deferred behind the release |
-| Recommended model | **Sol High** for 10.9x (and 10.9y, 10.10; Terra High for 10.9z) (Claude: Opus 5 — High for Sol High steps, Sonnet 5 — High for Terra High steps) |
+| Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 CLI candidate archives ☑ exact-archive smoke · the `gui-v` release lane has never run; 10.9y gives it a candidate mode |
+| Next step | **10.9w.1** — Sol High (Claude: Opus 5, high). Then 10.9x, 10.9y, 10.9z, **10.10 — EXIT** |
+| Decisions awaiting the maintainer | The 2026-09-22 proposals in PLAN §S8 "Phase 10 — open items": exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, explicit GUI artifact list, versions kept in names, updater prerelease fix now and pagination later, throughput margin not chased, private-commit measure for the flaky test. The steps below assume them |
+
+## Completed phases
+
+One line each; the numbered steps, their model labels and their evidence are
+in [`docs/architecture/phases-0-9-record.md`](docs/architecture/phases-0-9-record.md)
+and [`docs/architecture/phase-10-record.md`](docs/architecture/phase-10-record.md).
+Step identifiers are never reused.
+
+- ☑ **Phase 0** (0.1–0.8) — Current-state audit, Clean Architecture target, ADRs 0001–0008, independent product releases in one repository, the Colosseum naming decision.
+- ☑ **Phase 1** (1.1–1.9) — Pentanomial statistics and normalized Elo in `colosseum-core`, the analytic and external oracle fixture corpus, the hermetic required suite.
+- ☑ **Phase 2** (2.1–2.10) — Boundary migration, the independently versioned `colosseum-cli` package, run files, run records, run directories, `self-test`, `status`.
+- ☑ **Phase 3** (3.1–3.8) — OS topology adapters, deterministic placement, hard affinity where the OS allows it, `capabilities`.
+- ☑ **Phase 4A** (4A.1–4A.8) — Fixed-match runner with explicit clock accounting, typed engine faults, books and durability.
+- ☑ **Phase 4B** (4B.1–4B.6) — Pair-atomic capped SPRT, oracle replay and live parity against fastchess and cutechess.
+- ☑ **Phase 4C** (4C.1–4C.3) — Optional identical-binary calibration.
+- ☑ **Phase 5** (5.1–5.10) — SPSA kernel and driver, `spsa plan`, `spsa status`, `sprt --apply`.
+- ☑ **Phase 6** (6.1–6.9) — `nps` and scaling sweeps, `book` tools, `stats` replay and planning, `suite`.
+- ☑ **Phase 7** (7.1–7.3) — Round-robin and gauntlet tournaments with joint or anchored ML ratings, matching the GUI on a frozen fixture.
+- ☑ **Phase 8** (8.1–8.3) — Parity repeated on the candidate, ponder adopted, remaining gaps decided.
+- ☑ **Phase 9** (9.0–9.7) — Naming retained (ADR-0009), versioned `docs/cli/` with a generated reference (ADR-0010), README, candidate bundle, coverage and usability acceptance, release acceptance of candidate `823b398`.
+- ☑ **Phase 10, corrections** (10.1–10.9w) — Adjudication off by default, class-aware placement, per-move PGN annotations, final-centre SPSA estimator, graceful stop, fixed rating field, book-range refusal, command-module split, shared game slots, pair identity in PGN, review defects, unscorable tagging, progress reports, commit path off the game loop, writer hardening, latency instrument, one slot per game, fault allowance, SPSA occupancy and scale, persistent engines per slot, real-engine qualification and symmetry, adoption-audit corrections. 10.9m rejected (the forfeits were an engine defect); 10.9h, 10.9p, 10.9t deferred behind the release; 10.9g's two maintainer probes still owed and not blocking.
 
 ## Forward tracker
 
@@ -35,7 +57,8 @@ numbers, internal naming or method argumentation.
      4. Continuation lines indent 2 spaces. Sub-items indent 2 more spaces,
         use a normal `-` bullet, and indent their continuations another 2.
      5. Once implementation starts, NEVER renumber existing items — commits
-        reference them. To insert before the first item use a .0.
+        reference them. To insert before an item use a dotted suffix on the
+        previous one (10.9w.1 follows 10.9w).
      6. Always mark a completed step here in the same commit. Add status or
         evidence to PLAN.md when it improves the durable specification; do not
         duplicate routine tracker detail there.
@@ -44,1061 +67,87 @@ numbers, internal naming or method argumentation.
      8. ONLY NUMBERED STEPS live here. Recurring procedures go in their own
         section and never get a status marker.
      9. Every numbered step includes its PLAN §S8 model assignment. Keep the
-        label and the authoritative routing table synchronized. -->
+        label and the routing table synchronized.
+    10. When a phase completes, collapse its steps to one line under
+        "Completed phases" and move its PLAN text to a record file under
+        docs/architecture/. -->
 
 Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
 "done" because it compiles; it is done when its criterion is demonstrated.
-The model labels below are defaults from PLAN §S8, not substitutes for the
-step's tests or exit criterion. When reporting the next step, always report its
-model as well.
+When reporting the next step, always report its model as well.
 
-### Phase 0 — Current-state analysis and target architecture
+### Phase 10 — Release preparation (before `cli-v0.1.0` and `gui-v1.1.0`)
 
-- ☑ **0.1 — DONE** — **Model: Terra High.** Inventory the current crate/module dependency graph with
-  `cargo metadata`, `cargo tree` and source inspection — evidence:
-  [`docs/architecture/dependency-inventory.md`](docs/architecture/dependency-inventory.md)
-- ☑ **0.2 — DONE** — **Model: Sol High.** Write `docs/architecture/current-state.md`: responsibilities, public
-  boundary types, I/O/global state, framework dependencies, GUI/release
-  coupling and every violation of PLAN §S4; explicitly audit UUID
-  generation and branding/path policy in `colosseum-core`, GUI config/store
-  seams, incident globals, SQLite scheduling, external-engine test paths,
-  workspace-version inheritance, GUI-only release automation and CI coverage —
-  evidence: [`docs/architecture/current-state.md`](docs/architecture/current-state.md)
-- ☑ **0.3 — DONE** — **Model: Sol High.** Write `docs/architecture/target-architecture.md` using Clean
-  Architecture: domain, application use cases/ports, adapters, drivers,
-  composition roots, error/cancellation flow and current-to-target migration —
-  evidence: [`docs/architecture/target-architecture.md`](docs/architecture/target-architecture.md)
-- ☑ **0.4 — DONE** — **Model: Sol High.** Record ADRs for package boundaries, runtime `EngineLaunchSpec`,
-  injected persistence/artifact/affinity/identity/master-seed ports,
-  GUI-library mapping and the smallest refactor that enforces inward
-  dependencies — evidence:
-  [`docs/architecture/adr/README.md`](docs/architecture/adr/README.md)
-- ☑ **0.5 — DONE** — **Model: Sol High.** Design independent CLI/GUI versions, tags, artifacts, release notes
-  and shared-layer regression CI. Prefer one repo; split only with a
-  documented concrete advantage — evidence:
-  [`docs/architecture/release-architecture.md`](docs/architecture/release-architecture.md)
-  and [ADR-0006](docs/architecture/adr/0006-one-repository-independent-product-releases.md)
-- ☑ **0.6 — DONE** — **Model: Terra High.** Research the existing “Coliseum” naming/search/package collision
-  and record the proposal plus rejected alternatives — outcome: material
-  Colosseum collision risks are documented; the CLI-only **UCI Rig** proposal
-  was rejected before implementation and is retained as evidence:
-  [`docs/architecture/naming-decision.md`](docs/architecture/naming-decision.md)
-  and [ADR-0007](docs/architecture/adr/0007-name-the-cli-uci-rig.md)
-- ☑ **0.7 — DONE** — **Model: Sol High.** Review the current/target architecture, ADRs and release design as one
-  contract; demonstrate that every module has a target owner, dependency and
-  release diagrams agree, and every independence invariant has an executable
-  test owner; correct inconsistencies and record review evidence — evidence:
-  [`docs/architecture/phase-0-review.md`](docs/architecture/phase-0-review.md)
-- ☑ **0.8 — DONE / EXIT** — **Model: Sol High.** Bind **Colosseum** / `colosseum` /
-  `colosseum-gui` and **Colosseum CLI** / `colosseum-cli` as the coherent
-  implementation identity; preserve the Phase 0.6 collision research, reject
-  speculative rename indirection and defer an optional full keep-or-rename
-  decision to Phase 9.0 — evidence:
-  [ADR-0008](docs/architecture/adr/0008-use-colosseum-through-implementation.md)
+- ☐ **10.9w.1** — **Model: Sol High.** The GUI honours `scorable`: a game whose
+  engine could not be spawned (`Termination::Aborted`, `scorable: false`) is
+  excluded from standings and from the ML rating, on the live path and on
+  the DB replay at resume; the recent-errors text says "not scored"; the
+  tournament still completes without retrying the game; an aborted game is
+  re-queued as pending on the next Start so it is played once the engine's
+  path is fixed; smoke test `failed_engine_loses_with_error`
+  becomes `failed_engine_is_not_scored` (zero games for both sides, rating
+  unchanged); a store unit test covers the replay; `CHANGELOG-GUI.md` 1.1.0
+  records it under Changed. Blocks the GUI release; the CLI is untouched —
+  PLAN §Phase 10(af.1)
+- ☐ **10.9x** — **Model: Sol High.** Versions and the tag contract: GUI
+  manifest, updater and changelog at **1.1.0**; CLI stays 0.1.0 with the
+  1.0.0 conditions recorded; `gui-v`/`cli-v` are the only accepted tag
+  forms; `colosseum-release`, both workflows and both manifests agree and
+  both tags validate; the updater also filters releases marked prerelease,
+  with a test; the `per_page=100` limit recorded, not fixed — PLAN §Phase
+  10(ag)
+- ☐ **10.9y** — **Model: Sol High.** One build entry point: `tools/xtask`
+  with `build <gui|cli>`, `package <gui|cli>` (archives, smoke) and
+  `release-check <tag>`; `.cargo/config.toml` alias; the three build
+  scripts and the `/dist/` ignore rule deleted; one artifact naming scheme
+  for both products, `<colosseum-gui|colosseum-cli>-<version>-<windows|linux|macos>-<x64|arm64>.<ext>`,
+  applied to `tools/release`, both smoke scripts, both workflows and the
+  README; both workflows call the xtask; no `SHA256SUMS` published;
+  `release-gui.yml` downloads named patterns, asserts the exact ten-file
+  list and count, publishes that list, and gains a `workflow_dispatch`
+  candidate mode; `docs/DEVELOPMENT.md` updated. Exit: on Windows,
+  `cargo xtask package cli` and `package gui` produce archives equal to the
+  candidate's file lists, each passing its `Smoke-*Archive.ps1` — PLAN
+  §Phase 10(ah)
+- ☐ **10.9z** — **Model: Terra High.** User-facing documentation finished:
+  `README.md` (front door, both products, downloads per platform under the
+  unified names, first tournament, first `match`/`sprt`/`spsa` with a run
+  file), `README-CLI.md`, both changelogs, `docs/cli/` and
+  `docs/DEVELOPMENT.md` in agreement with the versions and commands 10.9x
+  and 10.9y fixed; every link checked; post-tag links listed for the
+  maintainer. The 2026-09-22 pass drafted README and the changelog section;
+  this step reconciles them — PLAN §Phase 10(ai)
+- ☐ **10.10 — EXIT** — **Model: Sol High.** Release acceptance repeat: the
+  flaky working-set test moved to private commit first (PLAN §Phase
+  10(af.2)); command reference regenerated; both changelogs dated; Phase 4B
+  oracle replay and Phase 8.1 parity matrix on the corrected source, run
+  exactly as recorded (locate the Rarog 2.3.1 build the hashes belong to,
+  SHA-256 `2a95390d…`, or re-record); short third-party usability flows; CLI
+  candidate and GUI candidate dispatched and their exact archives smoked on
+  all four platforms; full suite green in debug and `ci-release`. Then the
+  maintainer opens the pull request, waits for green CI, squash-merges,
+  tags the squash commit `gui-v1.1.0` and `cli-v0.1.0`, and checks both
+  release pages (artifact lists, names, "Latest" on the GUI only, notes) —
+  PLAN §Phase 10(j)
 
-### Phase 1 — Pentanomial statistics and nElo (`colosseum-core`)
-
-- ☑ **1.1 — DONE** — **Model: Terra High.** Pair-level scoring maps every
-  complete colour-reversed pair to the `[0, 0.5, 1, 1.5, 2]` pentanomial
-  vector; incomplete games are explicitly counted as unpaired and cannot enter
-  a pentanomial SPRT input — evidence:
-  [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
-- ☑ **1.2 — DONE** — **Model: Sol High.** Implement population pentanomial
-  variance and paired standard error, normalized and logistic Elo intervals,
-  paired LOS, draw ratio, pairs ratio and WL/DD ratio; retain the WL/DD split
-  inside the central bin and return undefined ratios without NaN/Inf — evidence:
-  [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
-  and the exact formulas in PLAN §5.1
-- ☑ **1.3 — DONE** — **Model: Sol High.** Implement selectable generalized
-  multinomial SPRT for both normalized and logistic Elo over complete pairs;
-  retain the selected model, hypotheses, error rates, LLR, Wald bounds and
-  H0/H1/continue decision in the result, with unpaired games excluded —
-  evidence: [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
-  and the exact likelihood contract in PLAN §5.1
-- ☑ **1.4 — DONE** — **Model: Sol High.** Implement one-/two-sided fixed-N
-  difference planning with explicit Elo model, target effect, significance,
-  power and assumed five-bin distribution, plus empirical achieved intervals
-  and conservative resolution that cannot carry an SPRT verdict — evidence:
-  [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
-  and the exact normal-approximation contract in PLAN §5.1
-- ☑ **1.5 — DONE** — **Model: Terra High.** Replace temporary `Option` failure
-  signals across pentanomial estimates, SPRT, fixed-N planning and achieved
-  resolution with the public `StatisticsError` contract; validate scalar
-  inputs, probabilities and hypotheses precisely, while retaining optional
-  diagnostic ratios for unavailable denominators. Zero games, one pair, all
-  draws and clean sweeps now return named errors rather than `NaN`/`Inf` —
-  evidence: [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
-- ☑ **1.6 — DONE** — **Model: Terra High.** Add deterministic property sweeps
-  for both pentanomial models: the low-level empty-sample LLR is zero, LLR is
-  strictly monotone as score rises at fixed pair count, swapping engine arms
-  negates the LLR, and Wald bounds exactly equal `log(β/(1−α))` and
-  `log((1−β)/α)` — evidence:
-  [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
-- ☑ **1.7 — DONE** — **Model: Terra High. Fixture corpus:** add a documented
-  generator for arbitrary UCI pairs through `fastchess` and `cutechess-cli`,
-  with committed runner/engine identity, version, SHA-256, licence/source
-  provenance, commands, console logs and PGNs. Add hand-derived pentanomial
-  fixtures and a binding field-by-field oracle matrix that excludes unsupported
-  comparisons — evidence:
-  [`tests/fixtures/statistics/`](tests/fixtures/statistics/),
-  [`scripts/Generate-StatisticsFixture.ps1`](scripts/Generate-StatisticsFixture.ps1)
-- ☑ **1.8 — DONE** — **Model: Terra High. Hermetic CI suite:** add repository-only required CI and
-  regression assertions; isolate runner, scheduler and UCI real-engine checks
-  behind the `real-engine-smoke` feature and `COLOSSEUM_SMOKE_ENGINE`, with no
-  implicit machine path, skip, platform, or release evidence — evidence:
-  [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
-  [`crates/colosseum-engine/tests/hermetic_ci.rs`](crates/colosseum-engine/tests/hermetic_ci.rs),
-  [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
-- ☑ **1.9 — EXIT PASSED** — **Model: Sol High.** Parse and execute every analytic statistics fixture;
-  reconstruct complete colour pairs and W/D/L from the reviewed Fastchess and
-  Cutechess PGNs; enforce a machine-readable list of all accepted matrix cells
-  and reasoned exclusions, with no unsupported comparison or guessed value —
-  evidence:
-  [`crates/colosseum-core/tests/statistics_fixtures.rs`](crates/colosseum-core/tests/statistics_fixtures.rs),
-  [`tests/fixtures/statistics/phase-1-acceptance.toml`](tests/fixtures/statistics/phase-1-acceptance.toml)
-
-### Phase 2 — Architecture migration, CLI skeleton and durable foundation
-
-- ☑ **2.1 — DONE** — **Model: Sol High.** Implement the Phase-0 boundary migration: generic runtime
-  participant and launch types, framework-independent application use cases and
-  ports, a concrete UCI session adapter, and a GUI library-to-runtime adapter.
-  Identity entropy and product/config path policy now live outside the domain;
-  GUI engine-library/config serialization remains compatible — evidence:
-  [`crates/colosseum-application/`](crates/colosseum-application/),
-  [`crates/colosseum-uci/src/session.rs`](crates/colosseum-uci/src/session.rs),
-  [`crates/colosseum-gui/src/runtime_adapter.rs`](crates/colosseum-gui/src/runtime_adapter.rs),
-  [`crates/colosseum-application/tests/architecture.rs`](crates/colosseum-application/tests/architecture.rs)
-- ☑ **2.2 — DONE** — **Model: Terra High.** Add the independently versioned,
-  non-publishable `colosseum-cli` package and headless composition root with
-  tested `--version`/`--help` and a dependency-graph rejection of GUI/windowing
-  packages. GUI/CLI versions and changelogs now have separate authorities; the
-  cross-platform push/PR workflow tests debug and release workspaces and builds
-  the CLI independently. The shared release-metadata tool validates product tag,
-  version and changelog routing; publication workflows remain 9.4 — evidence:
-  [`crates/colosseum-cli/`](crates/colosseum-cli/),
-  [`tools/release/`](tools/release/),
-  [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
-  [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
-- ☑ **2.3 — DONE** — **Model: Terra High.** Add reusable direct engine controls:
-  required executable plus optional display label, ordered process arguments,
-  cwd, environment, arbitrary UCI values/buttons and logical-core allocation.
-  Path-only input resolves to the minimal application launch spec; duplicate
-  names, malformed values and ambiguous/unsafe core lists are rejected — evidence:
-  [`crates/colosseum-cli/src/engine_args.rs`](crates/colosseum-cli/src/engine_args.rs),
-  [`docs/cli/engine-controls.md`](docs/cli/engine-controls.md)
-- ☑ **2.4 — DONE** — **Model: Sol High.** Implement deterministic resolution as
-  built-in defaults < inherited run TOML < CLI. One-parent chains resolve
-  relative to each declaring file, stop at depth 16 and reject canonical cycles;
-  tables merge recursively, scalars/arrays replace, and per-layer RFC 6901
-  `unset` is strict. Leaf origins survive inheritance, declared path fields are
-  canonicalized, and exact stable JSON bytes plus SHA-256 and origin sidecars are
-  written. Fixtures cover flattened/all-CLI byte identity and malformed chains,
-  pointers, arrays and Windows path aliases — evidence:
-  [`crates/colosseum-cli/src/config.rs`](crates/colosseum-cli/src/config.rs),
-  [`crates/colosseum-cli/tests/config_resolution.rs`](crates/colosseum-cli/tests/config_resolution.rs),
-  [`docs/cli/run-files.md`](docs/cli/run-files.md)
-- ☑ **2.4a — DONE** — **Model: Sol High.** Implement the exact u64/SHA-256
-  named-stream derivation and explicit ChaCha12 generator, little-endian draws,
-  rejection-bounded integers, Fisher–Yates shuffle, Rademacher signs and
-  bootstrap sampling. Stable consumer names and independent-stream properties
-  have golden vectors. A supplied seed is retained; otherwise OS entropy creates
-  and inserts it before resolved-config hashing/writing. RNG version is bound to
-  the built-in `stats_version` — evidence:
-  [`crates/colosseum-core/src/rng.rs`](crates/colosseum-core/src/rng.rs),
-  [`crates/colosseum-cli/src/master_seed.rs`](crates/colosseum-cli/src/master_seed.rs),
-  [`docs/cli/randomness.md`](docs/cli/randomness.md)
-- ☑ **2.5 — DONE** — **Model: Terra High.** Add `engine inspect` for UCI identity
-  and advertised schema plus `engine check` with individual handshake,
-  synchronization, requested-value/schema validation, option acceptance plus
-  readyok, legal bounded start-position search, bounded stop/bestmove,
-  ucinewgame/readyok and quit checks. Reports explicitly say UCI has no option
-  read-back; failures produce nonzero status. Application fake-port tests pin
-  orchestration and prevent invalid options from being sent — evidence:
-  [`crates/colosseum-application/src/check.rs`](crates/colosseum-application/src/check.rs),
-  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
-  [`crates/colosseum-uci/src/session.rs`](crates/colosseum-uci/src/session.rs)
-- ☑ **2.6 — DONE** — **Model: Terra High.** `--dry-run` resolves path-aware
-  configuration identity and prints exact structured process invocations
-  without launching; `--json` emits one typed JSON document on successful
-  stdout while failures leave stdout empty and diagnostics use stderr — evidence:
-  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/output.md`](docs/cli/output.md)
-- ☑ **2.7 — DONE** — **Model: Sol High.** `self-test` launches the exact
-  executable's hidden deterministic UCI stub and verifies compliance, a
-  deterministic four-ply two-process exchange, finite stdout/stderr handling,
-  over-limit protocol rejection, required persistence-failure propagation and
-  bounded process-tree reaping of an ignored-quit engine with a descendant.
-  Engine processes use Windows kill-on-close Job Objects or Unix process groups
-  — evidence: [`crates/colosseum-cli/src/self_test.rs`](crates/colosseum-cli/src/self_test.rs),
-  [`crates/colosseum-cli/src/uci_stub.rs`](crates/colosseum-cli/src/uci_stub.rs),
-  [`crates/colosseum-uci/src/process.rs`](crates/colosseum-uci/src/process.rs),
-  [`docs/cli/self-test.md`](docs/cli/self-test.md)
-- ☑ **2.8 — DONE** — **Model: Sol High.** The reusable CLI run-directory
-  adapter creates collision-safe defaults under `./colosseum-runs`, treats an
-  explicit directory as resume with exact configuration-hash refusal, archives
-  complete old state before restart, syncs append-only logs, and atomically
-  publishes checksummed current/previous checkpoint generations with fallback
-  recovery — evidence:
-  [`crates/colosseum-cli/src/run_directory.rs`](crates/colosseum-cli/src/run_directory.rs),
-  [`crates/colosseum-cli/tests/run_directory.rs`](crates/colosseum-cli/tests/run_directory.rs),
-  [`docs/cli/run-directories.md`](docs/cli/run-directories.md)
-- ☑ **2.9 — DONE** — **Model: Terra High.** Common read-only
-  `status <run-dir>` reports a versioned atomic run record containing exact
-  configuration identity, official committed/pentanomial sample,
-  host/capability summary and structured anomalies. A lifecycle owner writes
-  running state immediately and records `aborted` on an unclosed exit, including
-  zero-sample attempts; tests prove status changes no run bytes — evidence:
-  [`crates/colosseum-cli/src/run_record.rs`](crates/colosseum-cli/src/run_record.rs),
-  [`crates/colosseum-cli/tests/run_record.rs`](crates/colosseum-cli/tests/run_record.rs),
-  [`docs/cli/status.md`](docs/cli/status.md)
-- ☑ **2.10 — EXIT PASSED** — **Model: Sol High.** Hermetic acceptance proves
-  two independently copied ordinary UCI executables pass path-only compliance,
-  isolated CLI execution does not touch sentinel GUI state, and every exit gate
-  has an executable owner. Local path-only checks also passed with Rarog and
-  Basilisk without committing either path. Configuration/randomness,
-  durable/status, copied-executable self-test, bounded flood/descendant reaping,
-  inward-dependency and complete GUI/workspace suites pass; the unused legacy
-  engine/SQLite CLI dependency was removed — evidence:
-  [`crates/colosseum-cli/tests/phase2_acceptance.rs`](crates/colosseum-cli/tests/phase2_acceptance.rs),
-  [`docs/fixtures/phase2/acceptance.json`](docs/fixtures/phase2/acceptance.json),
-  [`docs/architecture/phase-2-exit.md`](docs/architecture/phase-2-exit.md)
-
-### Phase 3 — CPU topology and affinity
-
-- ☑ **3.1 — DONE** — **Model: Sol High.** OS topology adapters use Windows
-  `GetLogicalProcessorInformationEx` group masks, Linux
-  `thread_siblings_list`, and macOS `sysctl` counts. Logical identities retain
-  Windows processor groups; exact sibling sets are validated for overlap and
-  consistency. macOS explicitly reports the public sibling map unavailable
-  instead of inferring from numbering — evidence:
-  [`crates/colosseum-engine/src/topology.rs`](crates/colosseum-engine/src/topology.rs),
-  [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
-- ☑ **3.2 — DONE** — **Model: Terra High.** Deterministic placement policy
-  resolves `auto`, `off` and group-qualified explicit logical CPU lists.
-  `auto` selects whole reported physical cores and leaves a configurable two-core
-  default headroom; unresolved sibling maps fail rather than guessing — evidence:
-  [`crates/colosseum-engine/src/placement.rs`](crates/colosseum-engine/src/placement.rs),
-  [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
-- ☑ **3.3 — DONE** — **Model: Sol High.** Current-process availability uses
-  Linux scheduler affinity (including cpuset/cgroup restrictions) and Windows
-  group/process affinity plus CPU Set restrictions. Portable identities retain
-  processor groups, and planning intersects the allowed set before counting
-  physical-core headroom — evidence:
-  [`crates/colosseum-engine/src/allowed_cpus.rs`](crates/colosseum-engine/src/allowed_cpus.rs),
-  [`crates/colosseum-engine/src/placement.rs`](crates/colosseum-engine/src/placement.rs),
-  [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
-- ☑ **3.4 — DONE** — **Model: Terra High.** Each concurrent game slot receives
-  two disjoint allocations of the configured physical `cores-per-engine`, with
-  available SMT siblings kept together and capacity checked independently of
-  UCI worker-thread options — evidence:
-  [`crates/colosseum-engine/src/placement.rs`](crates/colosseum-engine/src/placement.rs),
-  [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
-- ☑ **3.5 — DONE** — **Model: Sol High.** OS-native core-class and NUMA metadata
-  keep A/B engines on the same class and node where possible, prefer per-engine
-  node locality when perfect symmetry is impossible, and record every class/node
-  set plus visible asymmetry — evidence:
-  [`crates/colosseum-engine/src/characteristics.rs`](crates/colosseum-engine/src/characteristics.rs),
-  [`crates/colosseum-engine/src/placement.rs`](crates/colosseum-engine/src/placement.rs),
-  [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
-- ☑ **3.6 — DONE** — **Model: Terra High.** Hard affinity is applied and read
-  back on Windows/Linux or fails as a typed error, never silently degrading;
-  `off` is a recorded successful no-op, and macOS reports hard placement as
-  unavailable while permitting `off` clock matches — evidence:
-  [`crates/colosseum-engine/src/affinity.rs`](crates/colosseum-engine/src/affinity.rs),
-  [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
-- ☑ **3.7 — DONE** — **Model: Terra High.** The read-only `capabilities`
-  command prints stable text/JSON topology, allowed-set, core-class/NUMA and
-  hard-affinity availability/limitations without launching engines or pulling
-  the legacy tournament/SQLite backend into the independent CLI artifact —
-  evidence:
-  [`crates/colosseum-cli/src/capabilities.rs`](crates/colosseum-cli/src/capabilities.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/cpu-topology.md`](docs/cli/cpu-topology.md)
-- ☑ **3.8 — DONE · EXIT** — **Model: Sol High.** Recorded SMT 16c/32t, P/E,
-  restricted-cpuset, processor-group, no-SMT and dual-socket fixtures select
-  exact CPU lists; two busy children remain on their enforced processors where
-  supported; capability reporting, limitations and gate ownership are durable —
-  evidence:
-  [`crates/colosseum-engine/tests/phase3_acceptance.rs`](crates/colosseum-engine/tests/phase3_acceptance.rs),
-  [`docs/fixtures/phase3/topologies.json`](docs/fixtures/phase3/topologies.json),
-  [`docs/architecture/phase-3-exit.md`](docs/architecture/phase-3-exit.md)
-
-### Phase 4A — Fixed-match runner
-
-- ☑ **4A.1 — DONE** — **Model: Terra High.** `match --games N` runs exactly N
-  direct UCI games with alternating colours and no sequential stopping; each
-  side has independent executable, process and UCI-option controls, including
-  same-path option comparisons; strict JSON and dry-run work for both sides —
-  evidence:
-  [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/match.md`](docs/cli/match.md)
-- ☑ **4A.2 — DONE** — **Model: Sol High.** Per-side movetime, sudden-death,
-  base-plus-increment, fixed-node and fixed-depth controls resolve independently,
-  including asymmetric odds matches and per-side configurable margins; omitted
-  controls use the documented `3+0.03` default — evidence:
-  [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/match.md`](docs/cli/match.md)
-- ☑ **4A.2a — DONE** — **Model: Sol High. Clock accounting (PLAN §5.4a), explicit/versioned/recorded:**
-  clock runs from finishing the write of `go` to finishing the read of
-  `bestmove`, charging harness read latency and engine search start-up to the
-  mover; `position` setup is not charged; monotonic source only; increment
-  follows `E > R + M` forfeit, otherwise `max(0, R-E) + I`, with equality
-  accepted; the margin is not sent to the engine; record model/version,
-  margin, clock resolution and charged-elapsed min/median/max without
-  claiming engine/harness overhead can be separated — evidence:
-  [`crates/colosseum-uci/src/process.rs`](crates/colosseum-uci/src/process.rs),
-  [`crates/colosseum-engine/src/runner.rs`](crates/colosseum-engine/src/runner.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs)
-- ☑ **4A.3 — DONE** — **Model: Terra High.** Draw, two-sided resignation and
-  maximum-move adjudication are independently configurable and disableable;
-  conservative draw/resign defaults are resolved into structured output, while
-  arbitrary engine tablebase UCI options continue through the ordinary option
-  path without harness probing — evidence:
-  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/match.md`](docs/cli/match.md)
-- ☑ **4A.4 — DONE** — **Model: Sol High.** Typed engine faults retain their
-  attributable forfeit and side, with zero-default engine/time-loss thresholds
-  invalidating the run; pre-play spawn and infrastructure faults are explicitly
-  non-scorable and terminate without changing W/L/D; there is no selective
-  retry/discard path — evidence:
-  [`crates/colosseum-engine/src/runner.rs`](crates/colosseum-engine/src/runner.rs),
-  [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs)
-- ☑ **4A.5 — DONE** — **Model: Sol High.** Explicit concurrency runs bounded
-  parallel slots with deterministic report order; off/auto/explicit placement
-  composes the Phase-3 topology allocator and verified child affinity, including
-  direct per-side lists; configured Hash is reported only as a conservative
-  lower bound and refusal requires a trusted explicit budget — evidence:
-  [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
-  [`crates/colosseum-engine/src/runner.rs`](crates/colosseum-engine/src/runner.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs)
-- ☑ **4A.6 — DONE** — **Model: Terra High.** Optional EPD/PGN books support
-  deterministic sequential or versioned named-stream random order, validated
-  start and PGN-ply controls, colour-pair assignment and reuse-fraction
-  reporting; no-book stays path-only startpos with a diversity warning —
-  evidence:
-  [`crates/colosseum-engine/src/openings.rs`](crates/colosseum-engine/src/openings.rs),
-  [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs)
-- ☑ **4A.7 — DONE** — **Model: Terra High.** Fixed matches use the common
-  recoverable run directory with per-game checksummed checkpoints, append-only
-  JSON-lines log, rebuilt PGN, final JSON report and retained abnormal-game UCI
-  traffic; interval progress stays on stderr, JSON stdout remains a single
-  document, and valid/invalid/configuration/infrastructure exit codes are
-  documented and tested — evidence:
-  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
-  [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/match.md`](docs/cli/match.md)
-- ☑ **4A.8 — DONE** — **EXIT · Model: Sol High.** Hermetic path-only/no-book
-  and paired-book matches pass; infrastructure injection remains non-scorable;
-  kill/resume and concurrency-independent schedule replay pass; a commanded
-  sleep is charged within the cross-platform tolerance, sub/super-margin
-  outcomes and attribution pass, and monotonic wall-jump plus exact
-  below/equal/above increment-margin fixtures pin the clock contract — evidence:
-  [`crates/colosseum-cli/tests/phase4a_acceptance.rs`](crates/colosseum-cli/tests/phase4a_acceptance.rs),
-  [`crates/colosseum-engine/src/runner.rs`](crates/colosseum-engine/src/runner.rs),
-  [`crates/colosseum-uci/src/process.rs`](crates/colosseum-uci/src/process.rs),
-  [`docs/architecture/phase-4a-exit.md`](docs/architecture/phase-4a-exit.md)
-
-### Phase 4B — Pair-atomic SPRT and parity
-
-- ☑ **4B.1 — DONE** — **Model: Terra High.** The runtime-neutral design
-  validates and records an explicit normalized/logistic model, ordered
-  hypotheses, alpha/beta, exact Wald bounds and mandatory finite `max-pairs`;
-  transparent `gainer` `[0,5]` and `simplify` `[-5,0]` normalized 5%/5%
-  bundles remain field-overridable — evidence:
-  [`crates/colosseum-application/src/sprt.rs`](crates/colosseum-application/src/sprt.rs),
-  [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/sprt.md`](docs/cli/sprt.md)
-- ☑ **4B.2 — DONE** — **Model: Sol High.** A typed complete-pair value requires
-  both colour-reversed games; concurrent completions enter a fail-closed queue
-  that publishes only the contiguous pair-ID prefix, while the UCI adapter
-  plays both colours of one assigned opening before submission—there is no
-  half-pair input to statistics — evidence:
-  [`crates/colosseum-application/src/pair_commit.rs`](crates/colosseum-application/src/pair_commit.rs),
-  [`crates/colosseum-cli/src/sprt_runner.rs`](crates/colosseum-cli/src/sprt_runner.rs),
-  [`crates/colosseum-cli/src/match_runner.rs`](crates/colosseum-cli/src/match_runner.rs)
-- ☑ **4B.3 — DONE** — **Model: Sol High.** Only the deterministic committed
-  prefix is evaluated; the boundary pair is official, no new pair launches
-  afterward, already-running pairs finish both colours and enter a separate
-  post-terminal collection that cannot change LLR/verdict/terminal identity,
-  while cap exhaustion retains the full official prefix — evidence:
-  [`crates/colosseum-cli/src/sprt_runner.rs`](crates/colosseum-cli/src/sprt_runner.rs),
-  [`crates/colosseum-core/src/stats.rs`](crates/colosseum-core/src/stats.rs)
-- ☑ **4B.4 — DONE** — **Model: Terra High.** Live `sprt` shares all fixed-match
-  conditions and recoverable artifacts; human/JSON/result/run-record evidence
-  names model, hypotheses, alpha/beta, bounds, LLR when defined, cap,
-  pentanomial sample, terminal/invalid pair and post-terminal work, with
-  distinct H1=0/H0=1/config=2/error=3/inconclusive=4/invalid=5 exits — evidence:
-  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
-  [`crates/colosseum-cli/src/sprt_runner.rs`](crates/colosseum-cli/src/sprt_runner.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/sprt.md`](docs/cli/sprt.md)
-- ☑ **4B.5 — DONE** — **Model: Sol High.** A reviewed non-degenerate
-  Fastchess normalized-SPRT stream replays to the same first H0 terminal pair
-  (10) and displayed LLR/bounds; a bounded Fastchess/Cute Chess/Colosseum
-  same-binary live smoke agrees on shared schedule, W/D/L, draw-termination and
-  fault fields while zero-variance Elo/LOS/LLR presentation stays explicitly
-  excluded — evidence: [`tests/fixtures/statistics/phase-4b-parity.toml`](tests/fixtures/statistics/phase-4b-parity.toml),
-  [`crates/colosseum-core/tests/statistics_fixtures.rs`](crates/colosseum-core/tests/statistics_fixtures.rs)
-- ☑ **4B.6 — EXIT DONE** — **Model: Sol High.** The reviewed external stream
-  and analytic fixtures pass; ascending/interleaved/reverse completion orders
-  preserve both H0 and H1 terminal samples; cap, configuration, every engine
-  fault kind, non-scorable infrastructure failure and all automation exits are
-  covered; every controlled-live difference is documented and excluded by the
-  oracle matrix — evidence:
-  [`docs/architecture/phase-4b-exit.md`](docs/architecture/phase-4b-exit.md),
-  [`docs/fixtures/phase4b/acceptance.json`](docs/fixtures/phase4b/acceptance.json),
-  [`crates/colosseum-cli/tests/phase4b_acceptance.rs`](crates/colosseum-cli/tests/phase4b_acceptance.rs)
-
-### Phase 4C — Optional calibration
-
-- ☑ **4C.1 — DONE** — **Model: Terra High.** `calibrate` resolves optional
-  representative fixed-N conditions and requires equal SHA-256 executable
-  identities before launch; defaults are 30k games / 95% / ±5 nElo and every
-  match control, optional book and durable artifact remains available —
-  evidence: [`crates/colosseum-application/src/calibration.rs`](crates/colosseum-application/src/calibration.rs),
-  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/calibration.md`](docs/cli/calibration.md)
-- ☑ **4C.2 — DONE** — **Model: Terra High.** Calibration evaluates a
-  normalized-Elo fixed-N interval as PASS only by full containment, FAIL only
-  outside one edge, otherwise INCONCLUSIVE; any engine fault is INVALID and
-  non-scorable infrastructure remains a runtime error — evidence:
-  [`crates/colosseum-application/src/calibration.rs`](crates/colosseum-application/src/calibration.rs),
-  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/calibration.md`](docs/cli/calibration.md)
-- ☑ **4C.3 — EXIT DONE** — **Model: Sol High.** Unequal hashes are refused;
-  exact config/design/identity round-trip through kill/resume while mismatch is
-  rejected; boundary fixtures cover PASS/FAIL/INCONCLUSIVE/INVALID and exits;
-  the recorded Basilisk 1.9.0 Windows smoke completed two pairs over enforced
-  disjoint affinity with no faults and the correct zero-variance INCONCLUSIVE —
-  evidence: [`crates/colosseum-cli/tests/phase4c_acceptance.rs`](crates/colosseum-cli/tests/phase4c_acceptance.rs),
-  [`docs/architecture/phase-4c-exit.md`](docs/architecture/phase-4c-exit.md),
-  [`docs/fixtures/phase4c/acceptance.json`](docs/fixtures/phase4c/acceptance.json)
-
-### Phase 5 — SPSA
-
-- ☑ **5.1 — DONE** — **Model: Sol High.** The pure core kernel uses the
-  versioned `spsa-perturbations` stream in iteration-major knob order, computes
-  the exact `alpha=.601` / `gamma=.102` / `A=.1N` `c/a/r` schedule, constructs
-  clamped integer arms with half-away-from-zero ties, and applies unclipped
-  floating-centre updates before rail clipping; golden schedules, seed replay,
-  arm/score symmetry, rounding and typed invalid input tests pass — evidence:
-  [`crates/colosseum-core/src/spsa.rs`](crates/colosseum-core/src/spsa.rs),
-  [`crates/colosseum-core/src/rng.rs`](crates/colosseum-core/src/rng.rs)
-- ☑ **5.2 — DONE** — **Model: Sol High.** Every knob's `c0/a0` is back-solved
-  from `c_end`, run `r_end` and horizon and its terminal `c/a/r` is asserted;
-  `spsa-schedule.json` explicitly records the versioned RNG algorithm,
-  derivation, master/stream seed, sampler and iteration-major knob draw order,
-  then is read back and must exactly match before the application can issue a
-  launch-capable verified token; mutation and differing-input resume tests
-  refuse that token — evidence:
-  [`crates/colosseum-core/src/spsa.rs`](crates/colosseum-core/src/spsa.rs),
-  [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs),
-  [`crates/colosseum-cli/src/spsa_schedule.rs`](crates/colosseum-cli/src/spsa_schedule.rs),
-  [`crates/colosseum-cli/tests/spsa_schedule.rs`](crates/colosseum-cli/tests/spsa_schedule.rs)
-- ☑ **5.3 — DONE** — **Model: Terra High.** A strict ordered TOML
-  `[[parameters]]` vector carries exactly a numeric UCI option `name`,
-  `initial`, `min`, `max` and `c_end`; the application binds every entry to the
-  ordinary executable's live advertised `spin` schema, preserving file order
-  for the versioned perturbation stream and rejecting absent/non-spin options —
-  evidence:
-  [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs),
-  [`crates/colosseum-cli/src/spsa_tune.rs`](crates/colosseum-cli/src/spsa_tune.rs),
-  [`crates/colosseum-cli/tests/spsa_tune.rs`](crates/colosseum-cli/tests/spsa_tune.rs)
-- ☑ **5.4 — DONE** — **Model: Terra High.** Runtime-neutral, serializable SPSA
-  run settings default to 5,000 iterations and 32 games (16 pairs) per
-  mini-match, while one iteration/two games is accepted for short runs; only
-  zero counts or an odd game count that cannot form colour-reversed pairs are
-  rejected — evidence:
-  [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs)
-- ☑ **5.5 — DONE** — **Model: Sol High.** The real `spsa` command keeps one
-  driver and one in-memory optional book across the tune, accepts only a
-  written-and-read-back schedule token; an application-owned state machine
-  commits complete fault-free paired mini-matches as single durable iterations,
-  records engine-fault iterations as invalid without applying a gradient, and
-  replays exact centres/RNG/arms/scores across hard-kill resume while the CLI
-  adapter owns execution, persistence and executable-content checking — evidence:
-  [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs),
-  [`crates/colosseum-cli/src/spsa_driver.rs`](crates/colosseum-cli/src/spsa_driver.rs),
-  [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
-  [`docs/cli/spsa.md`](docs/cli/spsa.md)
-- ☑ **5.6 — DONE** — **Model: Terra High.** The application-owned audit rejects
-  duplicate names, invalid tuning bounds, initial values outside their
-  tuning range, and final perturbations that round to zero; its live-schema
-  pass rejects values outside the advertised spin range while recording ordered
-  warnings for engine-default disagreement and lower/upper rail seeds. The CLI
-  performs safe checks in dry-run, displays live warnings, and stores them in
-  the result and run record — evidence:
-  [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs),
-  [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
-  [`docs/cli/spsa.md`](docs/cli/spsa.md)
-- ☑ **5.7 — DONE** — **Model: Sol High. Close the loop:** application policy
-  freezes the configurable final horizon window and produces the rounded mean
-  with original/tuned vectors and version/hash provenance. Completed tunes write
-  ready `setoption`, JSON and TOML views; `sprt --apply` consumes `result.json`
-  unedited, makes tuned A/original B the only UCI difference, verifies the
-  executable before dry-run or launch, and records any explicit mismatch
-  override prominently — evidence:
-  [`crates/colosseum-application/src/spsa.rs`](crates/colosseum-application/src/spsa.rs),
-  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
-  [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
-  [`docs/cli/spsa.md`](docs/cli/spsa.md),
-  [`docs/cli/sprt.md`](docs/cli/sprt.md)
-- ☑ **5.8 — DONE** — **Model: Terra High.** Offline `spsa plan` validates the
-  exact ordered schedule and reports per-knob `c/a/r` trajectories, the first
-  sub-half-unit rounding hazard, checked iteration/game/pair and durability
-  counts, comparison horizons, and a wall-time range only from explicit
-  seconds/game assumptions or pilot observations. Every output labels this as
-  workload arithmetic rather than a chess-convergence forecast — evidence:
-  [`crates/colosseum-application/src/spsa_plan.rs`](crates/colosseum-application/src/spsa_plan.rs),
-  [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
-  [`docs/cli/spsa.md`](docs/cli/spsa.md)
-- ☑ **5.9 — DONE** — **Model: Terra High.** Read-only `spsa status` verifies
-  the persisted schedule and checksum-protected checkpoint, replays the durable
-  centre prefix, and reports percent/ETA, normalized trajectory and thirds plus
-  explicitly thresholded bound-contact, seed-movement, recent-stability and
-  rounding-resolution heuristics. Short runs remain insufficient, every signal
-  carries non-causal caveats, no advice is emitted, and live/stopped fixtures
-  prove non-blocking and byte-preserving observation — evidence:
-  [`crates/colosseum-application/src/spsa_status.rs`](crates/colosseum-application/src/spsa_status.rs),
-  [`crates/colosseum-cli/src/run_directory.rs`](crates/colosseum-cli/src/run_directory.rs),
-  [`crates/colosseum-cli/tests/spsa_driver.rs`](crates/colosseum-cli/tests/spsa_driver.rs),
-  [`docs/cli/spsa.md`](docs/cli/spsa.md)
-- ☑ **5.10 — EXIT PASSED** — **Model: Sol High.** Schedule/RNG/rounding and
-  written-artifact properties, every hard audit class, pair-atomic fault
-  policy, exact kill/resume, plan/status fixtures and the unedited
-  hash-verified `sprt --apply` loop pass together. A reproducible noisy
-  quadratic converges within its declared RMSE band without being presented as
-  a chess forecast; no long real-engine job is an implementation prerequisite —
-  evidence:
-  [`crates/colosseum-core/src/spsa.rs`](crates/colosseum-core/src/spsa.rs),
-  [`crates/colosseum-cli/tests/phase5_acceptance.rs`](crates/colosseum-cli/tests/phase5_acceptance.rs),
-  [`docs/fixtures/phase5/acceptance.json`](docs/fixtures/phase5/acceptance.json),
-  [`docs/architecture/phase-5-exit.md`](docs/architecture/phase-5-exit.md)
-
-### Phase 6 — Speed, planning, replay, books and position suites
-
-- ☑ **6.1 — DONE** — **Model: Sol High.** `nps` uses the UCI process adapter's
-  charged monotonic interval over a typed fixed-node application search;
-  `info nodes` must verify completion, while engine time/nps remains separately
-  labelled diagnostic data that cannot affect authoritative speed — evidence:
-  [`crates/colosseum-application/src/nps.rs`](crates/colosseum-application/src/nps.rs),
-  [`crates/colosseum-uci/src/process.rs`](crates/colosseum-uci/src/process.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs)
-- ☑ **6.2 — DONE** — **Model: Sol High.** One or more executables per arm use a
-  persisted named-stream schedule over positions and Cartesian build pairs;
-  strict A/B alternation, excluded warm-up, explicit cold/warm lifecycle,
-  per-executable and arm medians, best-build summary, seeded bootstrap CI,
-  optional self pair/tolerance and per-round ratio SD are structured output —
-  evidence: [`crates/colosseum-application/src/nps.rs`](crates/colosseum-application/src/nps.rs),
-  [`crates/colosseum-cli/src/main.rs`](crates/colosseum-cli/src/main.rs),
-  [`docs/cli/nps.md`](docs/cli/nps.md)
-- ☑ **6.3 — DONE** — **Model: Sol High.** Scaling requires an explicit
-  advertised thread option and one-thread baseline, pins each process to the
-  matching number of whole allowed physical cores from a stable pool, keeps the
-  seeded workload fixed, records fixed-total/per-thread Hash plus class/NUMA,
-  and reports wall-time speedup/efficiency — evidence:
-  [`crates/colosseum-application/src/nps.rs`](crates/colosseum-application/src/nps.rs),
-  [`crates/colosseum-uci/src/session.rs`](crates/colosseum-uci/src/session.rs),
-  [`docs/cli/nps.md`](docs/cli/nps.md)
-- ☑ **6.4 — DONE** — **Model: Terra High.** Engine-free `book hash`, strict
-  candidate-accounting `verify`, parsed uniqueness/ply `stats`, and seeded
-  canonical-EPD `slice` share the production EPD/PGN parser; slices refuse
-  malformed input and accidental overwrite and record both hashes — evidence:
-  [`crates/colosseum-engine/src/openings.rs`](crates/colosseum-engine/src/openings.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/book.md`](docs/cli/book.md)
-- ☑ **6.5 — DONE** — **Model: Terra High.** `stats` records and follows
-  structured result/checksummed checkpoint/current-previous > PGN > forensic
-  JSON-lines log > console authority; only exact structured schedule/opening
-  companions form pairs, while missing identity stays visibly unpaired —
-  evidence: [`crates/colosseum-cli/src/stats_replay.rs`](crates/colosseum-cli/src/stats_replay.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/stats.md`](docs/cli/stats.md)
-- ☑ **6.6 — DONE** — **Model: Sol High.** Engine-free `stats plan fixed|sprt`
-  records every assumption; fixed difference/equivalence designs report pairs
-  and optional achieved resolution, while seeded capped Monte Carlo reports an
-  expected SPRT length distribution without presenting it as a stopping
-  guarantee — evidence:
-  [`crates/colosseum-application/src/stats_plan.rs`](crates/colosseum-application/src/stats_plan.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/stats.md`](docs/cli/stats.md)
-- ☑ **6.7 — DONE** — **Model: Terra High.** Read-only PGN telemetry documents
-  bracketed and key/value annotations, reports per-engine and per-metric
-  coverage/mean/median, excludes tagged or `book` opening moves, labels missing
-  values unavailable and warns about node compatibility — evidence:
-  [`crates/colosseum-cli/src/pgn_telemetry.rs`](crates/colosseum-cli/src/pgn_telemetry.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/stats.md`](docs/cli/stats.md)
-- ☑ **6.8 — DONE** — **Model: Terra High.** Durable `suite` drives ordinary UCI
-  EPD/FEN searches at fixed time/nodes/depth; legal multi-move `bm`/`am`,
-  unscored/malformed entries, unknown-operation evidence, per-position latency,
-  aggregate pass rate, compatible baseline comparison and kill/resume are
-  covered by hermetic fixtures — evidence:
-  [`crates/colosseum-application/src/suite.rs`](crates/colosseum-application/src/suite.rs),
-  [`crates/colosseum-engine/src/suite_input.rs`](crates/colosseum-engine/src/suite_input.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/suite.md`](docs/cli/suite.md)
-- ☑ **6.9 — DONE** — **EXIT · Model: Sol High.** One hermetic manifest binds
-  fake-NPS resistance, left-skew robustness, cold/warm process behavior,
-  scaling/Hash arithmetic, book reproducibility, replay/planning/telemetry and
-  durable suite fixtures; the complete workspace baseline is green — evidence:
-  [`docs/architecture/phase-6-exit.md`](docs/architecture/phase-6-exit.md),
-  [`docs/fixtures/phase6/acceptance.json`](docs/fixtures/phase6/acceptance.json),
-  [`crates/colosseum-cli/tests/phase6_acceptance.rs`](crates/colosseum-cli/tests/phase6_acceptance.rs)
-
-### Phase 7 — Tournaments
-
-- ☑ **7.1 — DONE** — **Model: Terra High.** One application use case produces deterministic
-  round-robin and one/multi-seed gauntlet schedules through the shared core;
-  `tournament plan` and the optional `gauntlet` alias dispatch to that same
-  implementation — evidence:
-  [`crates/colosseum-application/src/tournament.rs`](crates/colosseum-application/src/tournament.rs),
-  [`crates/colosseum-cli/tests/command_line.rs`](crates/colosseum-cli/tests/command_line.rs),
-  [`docs/cli/tournament.md`](docs/cli/tournament.md)
-- ☑ **7.2 — DONE** — **Model: Sol High.** Shared joint ML ratings and 95% error bars,
-  optional one-participant anchor, standings/crosstable CSV, ordinary-engine
-  controls and checksum-protected per-game resume drive both formats without
-  GUI or SQLite coupling — evidence:
-  [`crates/colosseum-application/src/tournament.rs`](crates/colosseum-application/src/tournament.rs),
-  [`crates/colosseum-cli/src/tournament_driver.rs`](crates/colosseum-cli/src/tournament_driver.rs),
-  [`crates/colosseum-cli/tests/tournament.rs`](crates/colosseum-cli/tests/tournament.rs),
-  [`docs/cli/tournament.md`](docs/cli/tournament.md)
-- ☑ **7.3 — DONE · EXIT** — **Model: Sol High.** Frozen GUI-origin round-robin and
-  two-seed-gauntlet schedules match exactly and joint ratings agree within
-  0.01 Elo; deterministic kill/resume produces the uninterrupted schedule,
-  standings, error bars and crosstable with each game committed once in both
-  formats — evidence:
-  [`docs/architecture/phase-7-exit.md`](docs/architecture/phase-7-exit.md),
-  [`docs/fixtures/phase7/acceptance.json`](docs/fixtures/phase7/acceptance.json),
-  [`crates/colosseum-cli/tests/phase7_acceptance.rs`](crates/colosseum-cli/tests/phase7_acceptance.rs)
-
-### Phase 8 — Parity against external runners, and remaining gaps
-
-- ☑ **8.1 DONE** — **Model: Sol High.** Release-candidate parity repeated with current FastChess and
-  Cute Chess; exact executable/artifact hashes and every shared-field result or
-  reasoned exclusion are frozen and hermetically tested
-- ☑ **8.2 DONE** — **Model: Sol High.** Adopted explicit clock-based UCI ponder across gameplay
-  workflows; deferred Chess960 and harness Syzygy probing with correctness
-  requirements; declined additional 1.0 formats and dedicated datagen with
-  recorded reasons and revisit triggers
-- ☑ **8.3 DONE** — **EXIT · Model: Sol High.** Exact-candidate parity, divergences, all gap
-  decisions, adopted ponder behavior and workspace regression have durable
-  evidence and explicit test ownership
-
-### Phase 9 — Documentation and release
-
-- ☑ **9.0 — DONE** — **Model: Sol High. Optional final naming review:** judge the
-  implemented product and either retain Colosseum with a recorded decision or
-  choose one replacement and perform the complete one-time migration before
-  documentation and release. Recheck dated web, same-domain, GitHub,
-  package-channel and preliminary trademark evidence. A rename covers the
-  repository, packages/crates, binaries, releases/artifacts, installer and app
-  IDs, config/data compatibility, updater URLs and docs; do not build neutral
-  aliases or a speculative branding framework merely to prepare for it —
-  retained Colosseum and Colosseum CLI after the dated review; ADR-0009 records
-  the unchanged collision evidence, descriptive qualifier policy, accepted
-  risk and future revisit triggers
-- ☑ **9.1 — DONE** — **Model: Sol High. Documentation placement analysis:** in-repo `docs/` published as a
-  static site, GitHub wiki, or generated reference plus guides. Criteria:
-  versioning with the binary (a wiki does not version, which matters once
-  `stats_version` exists), discoverability, offline availability,
-  contribution friction, and whether the command reference can be generated
-  from the argument parser so it cannot drift. Record the decision — ADR-0010
-  selects versioned `docs/cli/` Markdown, release-archive inclusion and a
-  generated, CI-checked Clap command reference; the tagged repository render
-  is the V1 website and a separate wiki/site source is unnecessary
-- ☑ **9.2 — DONE** — **Model: Terra High.** README as the project front door — what Colosseum GUI and
-  Colosseum CLI are (or their Phase 9.0 replacement), install, links
-  — presents both independent products, accurate current release state,
-  platform-specific GUI installation, source CLI installation, first commands
-  and separate documentation/release histories
-- ☑ **9.3 — DONE** — **Model: Terra High.** User documentation: quickstart, command reference, run-file and
-  tune-file reference, a worked example per command, "how to trust a result"
-  from PLAN §S3 Tier C, and a compatibility page (what the tool needs from a
-  UCI engine, what it does with non-conforming ones). State that engines are
-  separate processes and direct users to applicable licences; make no
-  blanket legal conclusion — versioned offline guides now cover every required
-  subject and public command; `colosseum-docs --check` prevents parser/reference
-  drift. Review also connected the previously library-only run-file resolver to
-  the real CLI with inheritance, unsetting, path origins and tested all-CLI
-  normalized-config/hash equivalence
-- ☑ **9.4 — DONE** — **Model: Sol High.** Ship per Phase 0.5's release model; all supported platforms;
-  use the Phase 9.0 identity and its dated
-  web/GitHub/package-channel/preliminary-trademark screen;
-  first build an unpublished candidate bundle from `cli` and
-  smoke-test its exact archives (`--version`, `--help`, `self-test`, one
-  deterministic JSON workflow, dependency inspection). Publish no GitHub
-  prerelease. After 9.5–9.7 accept the final candidate, merge `cli` to `main`,
-  then tag and publish the independently versioned stable product through the
-  same archive gates — candidate commit, workflow-run identity, four exact
-  archive checksums and green CI/smoke evidence are retained in
-  [`docs/architecture/phase-9.4-candidate.md`](docs/architecture/phase-9.4-candidate.md)
-- ☑ **9.5 — DONE** — **Model: Sol High. Coverage acceptance** (PLAN §5.14) —
-  Rarog `8f35647` and Basilisk `3cbf90b` archive replaced generic
-  implementations in Git history, retain validated declarative Colosseum
-  profiles/tune vectors and classified engine-specific residuals; the one
-  generic gap found (external one-sided resignation selection) is closed and
-  no workflow is lost — evidence:
-  [`docs/architecture/phase-9.5-coverage.md`](docs/architecture/phase-9.5-coverage.md)
-- ☑ **9.6 — DONE** — **Model: Terra High. Release-candidate usability exercise:** public third-party
-  UCI binaries, supplied only as executable paths, completed the published
-  fixed-match, capped-SPRT and short-SPSA workflows. The current-source local
-  package passed archive smoke; no usability defect was found. Its evidence and
-  the required fresh CI-candidate action are in
-  [`docs/architecture/phase-9.6-usability.md`](docs/architecture/phase-9.6-usability.md).
-- ☑ **9.7 — EXIT / ACCEPTANCE PASSED** — **Model: Sol High.** Corrected final
-  candidate `823b398` passed checksums and four-platform exact-archive smoke;
-  every package has the CLI-only README, changelog and complete link-checked
-  offline guide. Its byte-identical Linux executable retains the accepted Rarog
-  and Basilisk gates; the rebuilt Windows executable repeated both gates with
-  eight draws, four pairs, `[0,0,4,0,0]`, adjudicated draws, zero faults and
-  expected capped-inconclusive exit. Independent version/tag/artifact and
-  release-note validation passed — evidence:
-  [`docs/architecture/phase-9.7-release-acceptance.md`](docs/architecture/phase-9.7-release-acceptance.md)
-
-### Phase 10 — First-release corrections (before `cli-v0.1.0`)
-
-- ☑ **10.1 — DONE** — **Model: Terra High.** Product-latest release handling: CLI
-  release workflow sets `make_latest: false`, GUI workflow sets it true for a
-  stable release and false for a prerelease; the architecture test asserts
-  both; README and product docs link to product tag lists, never
-  `/releases/latest` — PLAN §Phase 10(a)
-- ☑ **10.2 — DONE** — **Model: Sol High.** Adjudication off by default in `match`,
-  `sprt`, `calibrate`, `spsa` and `tournament`; explicit enabling flags carry
-  their parameters; `--no-*` flags removed; `--one-sided-resign-adjudication`
-  requires resignation enabled; run files, config hashing, dry-run, fixtures,
-  acceptance tests and user docs updated; docs name common public-framework
-  settings — PLAN §S3 Tier B, §5.4, §Phase 10(b)
-- ☑ **10.3 — DONE** — **Model: Sol High.** Class-aware CPU placement: headroom one
-  physical core with siblings; highest-performance class only when classes
-  differ; last-level cache domains detected (Windows `RelationCache`, Linux
-  `cache/index3/shared_cpu_list`) and slots kept inside one domain and node;
-  refusal naming the topology when OS evidence is insufficient;
-  `capabilities` reports class, NUMA and cache domains; fixtures for hybrid,
-  dual-domain, homogeneous SMT and no-SMT hosts assert pool and slots — PLAN
-  §5.2, §Phase 10(c)
-- ☑ **10.4 — DONE** — **Model: Terra High.** Per-move PGN annotations
-  `{s= d= t= n=}` from every game-playing command, `{book}` on pre-played
-  moves, score added to the telemetry parser and `stats`, frozen annotated
-  fixture, writer form versioned in the run record — PLAN §5.4b, §Phase 10(d)
-- ☑ **10.5 — DONE** — **Model: Sol High.** SPSA estimator: final centre vector
-  rounded is the default, tail-window mean optional and recorded, result
-  schema version bumped, `spsa status` follows the same policy;
-  `--stop-after-iteration N` clean stop at an iteration boundary without
-  changing the stored horizon — PLAN §5.5, §Phase 10(e)
-- ☑ **10.6 — DONE** — **Model: Sol High.** Graceful stop for every durable command:
-  one cancellation path through the drivers, bounded grace for in-flight
-  games, checkpoint, `cancelled` run status, documented exit code, `status`
-  shows it; shared kill/resume suite gains a clean-stop case per command with
-  resumed statistics equal to an uninterrupted run — PLAN §5.11, §Phase 10(f)
-- ☑ **10.7 — DONE** — **Model: Terra High.** Fixed rating field on `tournament run`:
-  repeatable `--fixed <index>:<rating>` using the core anchored ML rating
-  with an anchor set; pinned participants carry no error bar; fixed ratings
-  retained as run inputs; JSON/CSV/text labelled — PLAN §5.7, §Phase 10(g)
-- ☑ **10.8 — DONE** — **Model: Terra High.** Book range policy: refuse a schedule
-  that needs more entries than remain from `--book-start`, `--book-wrap`
-  opt-in recorded, dry-run reports the index range; datagen recipe written in
-  the match documentation against it — PLAN §5.9, §5.13, §Phase 10(h)
-- ☑ **10.9 — DONE** — **Model: Terra High.** Split `composition.rs` into one module
-  per command with no behaviour change (generated command reference
-  byte-identical, tests unchanged); Chess960 recorded as a non-goal and
-  refused with a clear message — PLAN §S4, §Phase 10(i)
-- ☑ **10.9a — DONE** — **Model: Sol High.** Shared game slots: `--cores-per-game N`
-  (default 1) pins both engines of a ponder-off game to one core set;
-  `--cores-per-engine N` keeps the disjoint allocation and is the only mode
-  accepted with `--ponder`; pool arithmetic per mode; mode and allocations
-  in run record and dry-run; fixtures assert 15 shared and 7 disjoint
-  one-thread slots on a 16-core single-class host; `cpu-topology.md` and
-  `match.md` updated — PLAN §5.2, §Phase 10(k)
-- ☑ **10.9b — DONE** — **Model: Sol High.** Pair identity in every written PGN game
-  (game number, pair number, opening index and label, colour assignment);
-  `stats <pgn>` reconstructs pairs and the pentanomial vector from the tags
-  and agrees with the checkpoint; `stats <run-dir>` reads its own
-  `games.pgn` for telemetry; parser accepts explicit `d=0`/`n=0`; annotated
-  fixture regenerated; `stats.md` and `output.md` updated — PLAN §5.4b,
-  §5.10, §Phase 10(l)
-- ☑ **10.9c — DONE** — **Model: Sol High.** Review defects with regression tests:
-  late-interrupt verdicts for `match` (`match_runner.rs` completion guard)
-  and `sprt` (`sprt_runner.rs` cap verdict), `suite` cancelled exit code,
-  idempotent `--stop-after-iteration` on resume, one bounded stop grace
-  period per interrupt, `--anchor` with `--fixed` refused at resolution and
-  dry-run with exit 2 — PLAN §Phase 10(m)
-- ☑ **10.9d — DONE** — **Model: Sol High.** Pair-identity replay defects:
-  `stats` pairs by `PairNumber`/`PairGame` tags (any `--games-per-pair`);
-  post-terminal SPRT pairs and invalid SPSA iterations carry a PGN tag the
-  replay excludes from the official vector; tournament games carry the
-  encounter's real `OpeningIndex`; SPSA schedule artifact field renamed
-  from `stats_version` to the RNG version it holds; regression test per
-  item and a run-dir-versus-PGN equality test on a boundary-crossing SPRT
-  at concurrency above one — PLAN §Phase 10(n)
-- ☑ **10.9e — DONE** — **Model: Terra High.** Unscorable games tagged
-  `ColosseumSample "unscorable"` and excluded by the replay with a count;
-  run-dir-versus-PGN equality test on a run with one aborted game; `rng.rs`
-  doc comment corrected; versioned schema refusal kept reachable for old
-  SPSA schedule and result files — PLAN §Phase 10(o)
-- ☑ **10.9f — DONE** — **Model: Terra High.** Progress reports on stderr every
-  `--progress-every N` units (pairs, games or iterations; defaults 10, 20,
-  1) with a `--progress-min-secs` floor (default 5) and at termination,
-  never per commit; `--progress-interval-secs` removed: `sprt` and
-  `calibrate` show games, pairs, W/D/L, pentanomial, Elo and nElo with 95%
-  intervals, LLR against bounds, faults, games per hour and expected
-  remaining games; `match` shows score, Elo with interval and rate; `spsa`
-  shows iteration and percentage, elapsed and ETA, last mini-match score,
-  current gain and perturbation scale, and the three centres that moved
-  most since the previous report; `tournament` shows games, standings
-  header, rate and ETA; `status` prints the same block; every block is
-  appended to `run.log`; tests assert the block content and the interval
-  — PLAN §Phase 10(p)
-- ☑ **10.9g — DONE** — **Model: Sol High.** Commit path off the game loop:
-  `bestmove` timestamped by the pipe reader at arrival; `games.jsonl`
-  journal and appended `games.pgn`, constant-size aggregate checkpoint
-  every K units or seconds and on stop, `run.log` human events only,
-  group-committed fsync, resume verifies the journal by hash and replays
-  the tail; all file I/O on blocking threads; `auto`
-  headroom taken from CPU 0 upward; time losses documented inside engine
-  faults with a non-zero default for `calibrate`, `match` and
-  `tournament`; flat per-commit wall time over a 30,000-game stub run and
-  the real-host scramble and movetime probes as evidence — PLAN §Phase
-  10(q). **Owed, maintainer-run on the 16-core host:** (1) scramble probe —
-  a 2,000-game 3+0.03 match whose charged-time distribution with under
-  100 ms remaining shows no move charged above the engine's reported time
-  plus 20 ms; (2) fixed-movetime outlier probe — 100 ms, 14 slots, 50,000
-  moves, at or below fastchess's outlier rate. Both are recorded in PLAN
-  §Phase 10(q) when run. **Still owed after the 10.9w sweep** — the only
-  maintainer run Phase 10 still owes; neither probe blocks the release
-- ☑ **10.9i — DONE** — **Model: Terra High.** Writer hardening: bounded writer
-  queue with off-runtime back-pressure; terminal run record written directly
-  when the writer has failed; pre-10.9g directories refused with the
-  `--restart` guidance; over-long protocol line a per-read fault; unscorable
-  games keep their pair or iteration class in the journal; regression test
-  per item — PLAN §Phase 10(s)
-- ☑ **10.9j — DONE** — **Model: Sol High.** Round-trip latency instrument: per-move
-  phase stamps (`go` stamped, write returned, first and last `info` with
-  the engine's reported time, `bestmove` arrived, consumed) taken by the
-  thread doing each step; per-side maxima in the journal, `h=<ms>` overhead
-  in `games.pgn`, full breakdown of the last five moves in a forfeit
-  forensic, overhead distribution and over-margin count in `stats`; the
-  maintainer's 2,000-game 3+0.03 run then names the guilty phase — PLAN
-  §Phase 10(t). **Owed run discharged (recorded 10.9w):** the instrument
-  named the phase at 10.9k — all harness phases under 1.3 ms, every
-  forfeiting `bestmove` 42–64 ms after the engine's own hard cap, a second
-  mode and not noise (PLAN §Phase 10(u)); 10.9r's 2,000-game 3+0.03 scale
-  run at 14 slots then read the overhead distribution with no forfeit to
-  take a forensic from
-  - Landed with 10.9k: `h=` under `--ponder`, the forfeited move's
-    overhead in `games.pgn` and the `stats` over-margin count, the late
-    wait on a per-read fault, ms/ns rounding, and the SPSA unscorable
-    resume message — PLAN §Phase 10(t)
-- ☑ **10.9k — DONE** — **Model: Sol High.** A slot belongs to one game at a time:
-  replace `(number − 1) % slots.len()` in `match_runner`, `sprt_runner`,
-  `spsa_driver` and `tournament_driver` with one free-slot pool per run; a
-  unit (game, or pair for `sprt`/`spsa`) takes a slot before its first spawn
-  and returns it after its last engine process exits; launch, pairing,
-  openings and commit order unchanged; slot recorded in journal and PGN;
-  invariant and uneven-length stub test that fails on the modulo rule; the
-  10.9j owed corrections land here too; maintainer's 2,000-game run shows
-  zero time losses — PLAN §Phase 10(u). **Owed run discharged (recorded
-  10.9w):** 10.9r's scale run is that run — 2,000 games at 3+0.03 on 14
-  slots, zero time losses, no fault of any kind, no overlapping slot span,
-  5,579 games per hour (`docs/architecture/phase-10-qualification.md` §1)
-- ☑ **10.9l — DONE** — **Model: Sol High.** A rare forfeit must not void a sequential
-  test: `sprt` and `spsa` score an engine-attributable forfeit as a loss, keep
-  the pair in the official sample in order, and invalidate only above a
-  documented fault rate (default 0.5% of games, minimum 3); count and rate in
-  every block and the final report; `--max-time-losses 0` restores strict
-  behaviour; infrastructure faults unchanged — PLAN §Phase 10(v)
-- ☑ **10.9n — DONE** — **Model: Sol High.** An SPSA iteration fills the machine: games
-  take free slots individually within an iteration (a pair's two games may run
-  on different slots at once), the iteration still commits atomically and the
-  gradient still uses whole pairs; `spsa plan` and the dry run report wave
-  shape, idle slots and expected occupancy and warn when games per iteration
-  is not a multiple of the slot count; occupancy test that fails on pair-held
-  slots; `sprt` keeps the pair as its unit; asynchronous SPSA recorded as
-  post-release research — PLAN §Phase 10(x). **Owed run done, thresholds
-  missed (recorded 10.9w):** the tune ran at 15 slots and 30 games per
-  iteration and measured 83% occupancy and 4,517 games per hour
-  (10.9r's recovery tune at the same shape, 4,913), against the 85% and
-  5,000 fixed beforehand — up from 2,745 before this item and above
-  weather-factory's 3,720, but short. Chasing the margin is 10.9p or 10.9t,
-  both deferred behind the release; nothing in the release depends on it
-- ☑ **10.9o — DONE** — **Model: Sol High.** SPSA at the scale of a real tune:
-  `result.json` carries per-iteration summaries and refers to the journal;
-  driver memory bounded by the iteration in flight; 5,000-iteration stub tune
-  with flat commit time, bounded memory and result size; launch-spread
-  regression test for `spsa` and `sprt` on a large synthetic book plus an audit
-  of per-launch clones; `--total-games` budget; compact, fast-loading book;
-  `status` says when the first block is due — PLAN §Phase 10(y)
-- ☑ **10.9q — DONE** — **Model: Terra High.** Corrections from review of 10.9o: drop
-  the replayed journal records on a resumed tune and cover resume in the
-  scale test; `result.json` keeps centres, pair score and faults per
-  iteration, not derivable vectors and coefficients (schema bump, `spsa
-  status` and `sprt --apply` unchanged); `book stats` and `load_openings`
-  stop materialising the book; dead self-comparison removed; `stats` reads a
-  `result.json` file; run-file `iterations` yields to `--total-games`; the
-  maintainer's 15-slot, 30-game throughput figures recorded — PLAN §Phase
-  10(aa)
-- ☑ **10.9p — DEFERRED → after `cli-v0.1.0`** — **Model: Sol High.** Two games per physical core, experiment for
-  tuning only: explicit `--games-per-core 2` for `spsa` and `match`, refused
-  elsewhere; one logical CPU per game, a core's two games on its two siblings;
-  recorded in run record, PGN and dry run; maintainer-run evidence of
-  throughput and per-engine speed, forfeits and late moves over 2,000 games,
-  and transfer (the same short tune in both modes, each gated under ordinary
-  conditions); adopt only if the sibling-mode tune gates no worse; never a
-  gate condition; deferred behind the release by maintainer decision
-  2026-09-18, with a no-code ten-minute pre-check recorded — PLAN §Phase 10(z)
-- ☑ **10.9m — REJECTED** — **Model: Sol High.** Residual time losses, research before any
-  fix: fastchess source study in `docs/architecture/fastchess-mechanics.md`
-  (process lifetime, creation flags and priority, affinity, pipes and
-  readers, where its clock starts and stops, `timemargin`, between-game
-  traffic, every mechanism Colosseum lacks marked adopt, decline or test);
-  forfeit count from the desktop application's incident logs; one
-  maintainer-run 2,000-game discriminating run per untested difference
-  (persistent against fresh engine processes, job object, one logical CPU
-  against whole core, creation flags and priority, pipe construction, clock
-  trajectory), read by the late-mode metric and the forfeit count; the fix
-  is its own later step; target 0 time losses in 10,000 games or a documented
-  floor fastchess shares; does not block use — PLAN §Phase 10(w)
-  - Closed by maintainer decision 2026-09-19: the study found the forfeits
-    were Rarog's lazily built KPK bitbase (fixed in Rarog), not the harness;
-    the 10,000-game target is not pursued; persistent processes became 10.9u
-- ☑ **10.9h — DEFERRED → after `cli-v0.1.0`** — **Model: Sol High.** Placement per platform research note:
-  Linux isolated-core and IRQ-affinity detection and preference, macOS
-  advisory contract, WSL excluded as evidence; implementation follows as
-  its own step if the note calls for it — PLAN §Phase 10(r)
-- ☑ **10.9s — DONE** — **Model: Sol High.** Harness time that belongs to neither
-  clock: per-game start-up, play, uncharged play and teardown in the journal
-  and in `stats`; reduce the largest phase, with persistent engine processes
-  per slot as the candidate (fresh processes stay selectable); target under
-  0.3 s uncharged per game at 15 slots (measured 1.22 s, 9% of throughput)
-  with `h=` and the fault rate unchanged — PLAN §Phase 10(ac)
-- ☑ **10.9t — DEFERRED → after `cli-v0.1.0`** — **Model: Sol High.** Overlapped SPSA iterations, `--overlap 1`,
-  default off: next iteration's games start on freed slots around the newest
-  committed centre, updates in order, staleness bounded at one and recorded;
-  zero-game study on noisy synthetic objectives over many seeds, then the
-  recovery test in both modes; becomes the tuning default only if it
-  recovers no worse; `spsa` only, the other commands have no tail; may
-  follow the release — PLAN §Phase 10(ad)
-- ☑ **10.9u — DONE** — **Model: Sol High.** Persistent engine processes per
-  slot, `--engine-processes per-slot` (default) or `per-game`, for `match`,
-  `calibrate`, `sprt` and `spsa`; a kept engine is refreshed with its changed
-  options, `isready`, `ucinewgame`, `isready`, replaced after a fault, a failed
-  post-game `isready` or a change of launch or option names, and quit at the
-  end of the run; tournaments keep fresh processes — PLAN §Phase 10(ae)
-- ☑ **10.9r — DONE** — **Model: Sol High.** Qualification on a real engine,
-  part of the release and recorded in
-  `docs/architecture/phase-10-qualification.md`: maintainer-run on the release
-  candidate, one command at a time, each result analysed from its run
-  directory. Scale +54.3 ± 10.6 Elo against fastchess's +52.2 ± 10.7 and
-  +54.3 ± 11.1; verdict H1 at 241 pairs where fastchess took 216; ratings
-  3201.9 ± 14.0 against the desktop's 3191; tuning recovered a −56.2 ± 10.2
-  Elo detune to +9.6 ± 10.0 against the defaults, its gate accepting H1 at 252
-  pairs, with two of four coordinates short of the per-coordinate criterion
-  inside the schedule's noise. Zero time losses in every run; symmetry is
-  10.9v; an adopting project trusts the released binary and repeats none of
-  it — PLAN §Phase 10(ab)
-- ☑ **10.9v — DONE** — **Model: Sol High.** Symmetry qualification: an
-  identical-binary `calibrate` of 30,000 games, whole 95% nElo interval
-  inside ±5, zero time losses. Run 2026-09-21 on `rarog-b24a-core-pext-pgo`:
-  **−0.0 ± 3.9 nElo**, −0.0 ± 2.0 Elo, W-D-L 7727-14545-7728, status `pass`,
-  no fault of any kind, 5,800 games per hour, stopped and resumed once from
-  its own directory — PLAN §Phase 10(ab)
-- ☑ **10.9w — DONE** — **Model: Sol High.** Corrections from the adoption audit:
-  the recorded parity command repaired and run; the GUI changes `cli` carries
-  since 1.0.2 listed, user-visible ones marked, because the GUI is released
-  too (1.0.2's updater not seeing a `gui-v` tag is accepted, maintainer
-  decision 2026-09-21: no user base, hidden updater); the optional fresh-process
-  run on a post-fix engine offered as a command; a sweep of every `☐`, `◐`,
-  `TODO`, `FIXME` and "owed" so each is done, deferred with its reason or
-  listed for the maintainer; stale tracker text corrected — PLAN §Phase 10(af)
-  - The parity record now carries `--draw-adjudication` and a test parses it
-    against the shipped command surface; proved by running it, every shared
-    field equal to the recorded observation
-  - GUI: 12 files over six commits, three of them user-visible (`--version`,
-    the `gui-v` update check, the `Fixed` CSV column), plus the annotated PGN
-    the shared crates now write. It builds, its tests pass, and it played a
-    real two-game tournament at 100 ms per move
-  - **Open for the maintainer, found by this step:** a game whose engine
-    cannot be spawned is an unscorable draw the GUI scheduler still records
-    into standings and ratings, where 1.0.2 gave the failing engine a loss.
-    The choice between those two and the CLI's exclusion is a policy
-    decision, and Phase 11.2 is where fault classification reaches the
-    desktop, so it is not decided here — PLAN §Phase 10(af)
-  - No `TODO` or `FIXME` exists anywhere in the crates or docs; every other
-    `☐`/`◐` is a future numbered step. Owed runs: 10.9j and 10.9k discharged,
-    10.9n run and short of its thresholds, 10.9g's two probes still owed and
-    not blocking
-- ☐ **10.9x** — **Model: Sol High.** Versions and the tag contract: the CLI's
-  first version is 0.1.0, with the conditions for 1.0.0 recorded; the GUI
-  is released alongside it with its own new version for the merged source
-  (minor if anything user-visible was added), tagged `gui-v<semver>` as
-  designed; "latest" stays the stable GUI release; `colosseum-release`, both workflows
-  and the manifests accept exactly that and refuse the rest — PLAN §Phase 10(ag)
-  - The GUI's version follows from 10.9w's change list in PLAN §Phase 10(af):
-    it records three user-visible additions in the GUI crate and the
-    annotated PGN the shared crates now write, which is the "minor" case
-- ☐ **10.9y** — **Model: Sol High.** One build entry point: a `cargo xtask`
-  with `build gui|cli`, `package gui|cli` and `release-check <tag>` replaces
-  the three per-platform build scripts; both release workflows call it; the
-  products stay separate artifacts; local archives equal the candidate's file
-  lists and pass their archive smoke — PLAN §Phase 10(ah)
-  - Found by the 10.9w sweep, and reason enough on its own: `build_macos.sh`
-    reads its version with `grep -m1 '^version' Cargo.toml`, which matched the
-    workspace version that Phase 2 removed, so on `cli` it writes an empty
-    `CFBundleShortVersionString` into the `.app`. The version belongs to the
-    product manifest now. If 10.9y slips past the release, fix the script
-    instead; the release workflows do not use it and are unaffected
-- ☐ **10.9z** — **Model: Terra High.** User-facing documentation for the
-  release: `README.md` as the front door to both products (purpose, download
-  per platform with checksums, the GUI from the latest release and the CLI
-  from the newest `cli-v` release, first tournament, first `match`, `sprt` and
-  `spsa` with a run file); `README-CLI.md`, both changelogs, `docs/cli/` and
-  `docs/DEVELOPMENT.md` in agreement; links checked, post-tag links listed
-  for the maintainer — PLAN §Phase 10(ai)
-- ☐ **10.10 — EXIT** — **Model: Sol High.** Release acceptance repeat:
-  regenerate the command reference, update `CHANGELOG-CLI.md` under 0.1.0,
-  Phase 4B oracle replay and Phase 8.1 parity matrix on the corrected source,
-  short third-party usability flows, fresh four-platform CI candidate and
-  exact archive smoke; then the maintainer merges `cli` to `main` and tags
-  `cli-v0.1.0` — PLAN §Phase 10(j)
-  - Run the parity commands exactly as recorded in
-    [`docs/fixtures/phase8/parity.json`](docs/fixtures/phase8/parity.json);
-    10.9w repaired the Colosseum one to carry `--draw-adjudication` and proved
-    it by running it. Never drop the draw parameters to make a command parse —
-    that would compare different conditions. The recorded artifact hashes
-    belong to one Rarog 2.3.1 build (SHA-256 `2a95390d…`); the copy in
-    `D:\chess\engines\rarog` hashes `033f6633…`, so locate that exact build
-    first or re-record the whole matrix on the build actually used
-  - `CHANGELOG-CLI.md` under 0.1.0 is written but dated `unreleased`; set the
-    date when the tag is cut
-
-### Phase 11 — The GUI on the harness (after `cli-v0.1.0`)
+### Phase 11 — The GUI on the harness (after publication)
 
 - ☐ **11.1** — **Model: Sol High.** Harness library crate
   (`colosseum-harness`): run directory, run record, placement resolution and
   the match/SPRT/tournament drivers moved out of `colosseum-cli`; observer
   port for per-game live state and run snapshots; CLI becomes a thin
   composition root; architecture tests keep GUI/windowing packages out of the
-  harness graph; CLI tests, fixtures and generated reference unchanged — PLAN
-  §Phase 11(a)
+  harness graph; CLI tests, fixtures and generated reference unchanged; no
+  CLI version change — PLAN §Phase 11(a)
 - ☐ **11.2** — **Model: Sol High.** GUI tournaments run through the harness
-  driver: placement, adjudication default, fault classification, annotated
+  driver, consuming the `runtime_adapter.rs` seam: placement, adjudication
+  default, fault classification and unscorable exclusion, annotated
   `games.pgn` and run directories under the app data directory; SQLite stays
   the GUI-owned history index and resume mapping, not the game store; live
-  view reads the observer port; every Phase 10 mechanism (slot pool, arrival
-  clock model and journal, placement, annotations and overhead, pair
-  identity, fault allowance, fixed field, progress, the 10.9m outcome)
-  reaches desktop tournaments here with no second implementation — PLAN
-  §Phase 11(b)
+  view reads the observer port; every Phase 10 mechanism reaches desktop
+  tournaments here with no second implementation; engine-process policy a
+  per-tournament choice with fresh processes the GUI default — PLAN §Phase
+  11(b)
 - ☐ **11.3** — **Model: Sol High.** Retire `engine::scheduler` and the
   `tournament` feature's game-store execution path; read-only migration keeps
   old SQLite history openable; `CLAUDE.md`, architecture docs and a new ADR
@@ -1106,14 +155,24 @@ model as well.
 - ☐ **11.4 — EXIT** — **Model: Terra High.** GUI release: stored-data rating
   parity within 0.01 Elo, design guidelines checked, changelog records the
   adjudication default and run directories, version chosen by the maintainer
-  (major bump recommended), GUI archive smoke passes — PLAN §Phase 11(d)
+  (2.0.0 recommended), GUI candidate passes archive smoke — PLAN §Phase 11(d)
 
-### Post-release research (not numbered steps)
+### Deferred and post-release (not steps until reopened)
 
-- Asynchronous SPSA in the fishtest manner: the next games start on free
-  slots with the current parameters and results are applied as they return;
-  needs its own evidence that it reaches the same optimum for less game
-  budget before it becomes a step — PLAN §Phase 11, Post-release research
+- **10.9h** — Placement per platform research note (Linux isolated cores and
+  IRQ affinity, macOS advisory contract, WSL excluded). Reopens on a Linux
+  or macOS placement report, or before CLI 1.0.0 — PLAN §Phase 10(r)
+- **10.9t** — Overlapped SPSA iterations, `--overlap 1`, off by default.
+  Reopens when a real Rarog tune on the released binary shows wall-clock
+  that matters; taken before 10.9p — PLAN §Phase 10(ad)
+- **10.9p** — Two games per physical core for `spsa` and `match` only, as a
+  measured experiment. Reopens only if 10.9t leaves a margin worth it —
+  PLAN §Phase 10(z)
+- **10.9g probes** — the 2,000-game 3+0.03 scramble probe and the 100 ms,
+  14-slot, 50,000-move outlier probe, maintainer-run, informative, recorded
+  in `docs/architecture/phase-10-record.md` when done
+- **Asynchronous SPSA** — research, needs its own evidence — PLAN §S8
+  Post-release research
 
 ## Recurring procedures
 
@@ -1146,15 +205,27 @@ Not steps — they are never "done".
 - Record an exception as either a CLI mechanism gap or intentional
   engine-specific policy.
 
+### Cutting a release (maintainer)
+
+- `cargo xtask release-check gui-vX.Y.Z` and `cli-vX.Y.Z` pass on the
+  branch; both changelogs are dated.
+- Open a pull request to `main`; wait for green CI; squash-merge; keep the
+  working branch (its commits carry the step identifiers); tag the squash
+  commit; push the tags; watch both release workflows; check both release
+  pages and open the post-tag links listed by 10.9z. Wrong release: delete
+  release and tag, fix on `main`, tag again.
+- A GUI patch found in use goes to `main` as `gui-vX.Y.(Z+1)` on its own;
+  the CLI is not re-released for it, and vice versa.
+
 ## What to do now
 
-**Phase 10 is open; the next step is 10.9x.** Work the steps in order, one commit per step.
-10.9w–10.9z were added on 2026-09-21 and precede 10.10. Steps 10.2 through 10.8 change game-playing behaviour or its
-record; do not repeat the recurring "after changing anything that runs
-games" procedure per step, run it once at 10.10 on the final state. The
-merge of `cli` to `main`, the `cli-v0.1.0` tag and publication remain
-maintainer-owned operations and happen only after 10.10 passes. Phase 11
-starts after publication.
+**Phase 10 is open; the next step is 10.9w.1.** Work the steps in order, one
+commit per step. Steps 10.2 through 10.9w changed game-playing behaviour or
+its record; do not repeat the "after changing anything that runs games"
+procedure per step, run it once at 10.10 on the final state. The merge of
+`cli` to `main`, the two tags and publication remain maintainer-owned
+operations and happen only after 10.10 passes. Phase 11 starts after
+publication and is the main line of development from then on.
 
 ```
 git diff --check
@@ -1184,8 +255,9 @@ repository workflow.
 | External tools disagree or do not expose the same model | Record the matrix limitation; prefer analytic fixtures; never average or compare unsupported fields |
 | OS cannot support a capability (e.g. hard macOS affinity) | Record the advisory/off fallback in the run record and PLAN; fail only if the capability was explicitly requested |
 | Tempted to make one of our defaults mandatory | It belongs in PLAN §S3 Tier B with a reason, or Tier C as advice — Tier A needs a silent-wrong-number failure mode |
-| Feature exists in an external runner but not here | Phase 8.2 decides, with "does a general engine developer need it?" as the tie-breaker |
+| Feature exists in an external runner but not here | Phase 8.2 decided the first set; "does a general engine developer need it?" is the tie-breaker for the next |
 | Tempted to add engine-specific logic | It belongs in the engine's own tooling, not here |
 | Engine project still needs scheduling/statistics/tuning/recovery code | Generic mechanism gap: add or explicitly decline it |
 | Engine project keeps a run file or thin CI command | Expected project policy, not a CLI gap |
 | Diagnostic heuristic looks stable | Report the observation; do not call it convergence or causation |
+| A GUI behaviour differs from the CLI's for the same mechanism | The CLI's is the specification (PLAN §S5); Phase 11 removes the second implementation, so do not add a third |

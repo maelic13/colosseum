@@ -119,11 +119,15 @@ colosseum/
 │  ├─ colosseum-engine/   Runner/store plus OS topology and affinity adapters
 │  ├─ colosseum-gui/      eframe/egui GUI composition root
 │  └─ colosseum-cli/      independent headless CLI composition root
-├─ tools/release/         product tag/version/changelog validation
+├─ tools/release/         product tag/version/changelog validation, archive staging and smoke
 ├─ tools/docs/            parser-derived CLI command-reference generator
 ├─ packaging/             Linux desktop entry + icon (.deb / .rpm / Arch assets)
-├─ docs/                  This guide, design guidelines, macOS signing notes
-└─ .github/workflows/     push/PR CI plus the legacy GUI release workflow
+├─ tests/fixtures/        vendored statistics fixtures and their generator
+├─ docs/cli/              CLI user guide (shipped in every CLI archive)
+├─ docs/architecture/     architecture, ADRs, phase records and acceptance evidence
+├─ docs/design/           binding GUI visual guidelines and design assets
+├─ docs/                  this guide and the macOS signing notes
+└─ .github/workflows/     push/PR CI plus the GUI and CLI release workflows
 ```
 
 The GUI never blocks on engine I/O: a tokio runtime drives all engine

@@ -6,6 +6,38 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.0] — unreleased
+
+The first release from the shared code base with Colosseum CLI. The GUI
+itself changes little; the engine-playing core underneath it is the one the
+CLI was built and tested on.
+
+**Installed 1.0.2 does not notice this release.** Its update check only
+understands the old tag form. Download 1.1.0 from the
+[GUI release list](https://github.com/maelic13/colosseum/releases?q=tag%3Agui-v)
+by hand once; from then on the update check works again.
+
+### Added
+- **`colosseum --version`** prints the installed version and exits
+- **Search comments in every exported PGN** — after each engine move the
+  score, depth, time, harness overhead and nodes as `{s= d= t= h= n=}`,
+  `{book}` on pre-played opening moves, and the `OpeningPlyCount`,
+  `WhiteTimeMarginMs` and `BlackTimeMarginMs` tags, so a game can be
+  analysed elsewhere without the log
+- **`Fixed` column** in the standings CSV export, `no` on every row (the
+  GUI has no pinned ratings; the column keeps the export compatible with
+  the CLI's)
+
+### Changed
+- The update check reads the GUI's own release list and offers the newest
+  stable GUI release; the fallback link is the releases page
+
+### Fixed
+- The application builds on Linux and macOS hosts again (the Windows icon
+  resource is only compiled when both host and target are Windows)
+
+---
+
 ## [1.0.2] — 2026-07-30
 
 A quality-of-life release: a new performance rating and tiebreak in the

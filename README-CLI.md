@@ -8,6 +8,11 @@ opening-book utilities and statistics analysis.
 Engines need only implement UCI. They do not need a Colosseum manifest,
 custom build command or source-tree integration.
 
+It is one of two Colosseum products. The other, the Colosseum desktop
+application, runs and shows engine tournaments; it is versioned and released
+separately and is not part of this archive. The
+[project page](https://github.com/maelic13/colosseum#readme) introduces both.
+
 ## Start here
 
 Download the archive for your platform from the

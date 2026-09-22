@@ -8,9 +8,9 @@ specification; `GUIDE.md` is the ordered implementation tracker.
 ## Scope and architecture
 
 - Implement numbered `GUIDE.md` steps in order. Do not skip a phase exit.
-- Phase 0 is mandatory before CLI feature code: document the current
-  architecture, design the Clean Architecture target, record ADRs, and map the
-  migration.
+- The evidence of completed phases lives under `docs/architecture/` (exit
+  documents, ADRs, the Phase 0–9 and Phase 10 records). Do not re-derive or
+  re-litigate what they record; extend them when a step adds evidence.
 - Dependencies point inward: domain → nothing outward; application use cases →
   domain and ports; adapters/drivers implement ports. The CLI and GUI are
   separate composition roots and must not depend on each other.
@@ -89,9 +89,13 @@ consistency validation; they do not require rerunning unchanged Rust tests.
 
 ## Documentation ownership
 
-- `PLAN.md` and `GUIDE.md`: maintainer-facing CLI specification and tracker.
-- `README.md` and CLI user documentation: user-facing; no phase numbers or
-  internal method argumentation.
+- `PLAN.md` and `GUIDE.md`: maintainer-facing specification and tracker.
+  `PLAN.md` carries the binding specifications and only the open work;
+  completed phases are one line in `GUIDE.md` and a record file under
+  `docs/architecture/`.
+- `README.md`, `README-CLI.md` (staged as the CLI archive's `README.md`) and
+  `docs/cli/`: user-facing; no phase numbers or internal method
+  argumentation.
 - `docs/DEVELOPMENT.md`: implemented build/test/release facts; update it when
   the workspace or release process actually changes, not merely when planned.
 - `CHANGELOG-GUI.md` and `CHANGELOG-CLI.md`: released user-visible changes for
