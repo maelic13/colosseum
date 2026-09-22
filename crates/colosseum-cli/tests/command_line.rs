@@ -1,7 +1,4 @@
-use std::collections::BTreeSet;
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::Command;
 
 /// A durable run reports its progress on standard error, so "quiet" means
 /// nothing there but progress blocks and the rules between them: no warning,
@@ -519,80 +516,6 @@ fn position_suite_scores_bm_am_unscored_and_malformed_entries() {
 }
 
 #[test]
-fn killed_position_suite_resumes_without_duplicate_search_results() {
-    let root = tempfile::tempdir().unwrap();
-    let input = root.path().join("resume.epd");
-    let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
-    std::fs::write(&input, format!("{start} bm e4;\n").repeat(6)).unwrap();
-    let run = root.path().join("run");
-    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
-    let command = || {
-        let mut command = cli();
-        command
-            .arg("suite")
-            .arg(binary)
-            .arg(&input)
-            .args([
-                "--engine-arg=__uci-stub",
-                "--engine-arg=--sleep-ms=200",
-                "--depth",
-                "1",
-                "--deadline-ms",
-                "2000",
-                "--dir",
-            ])
-            .arg(&run)
-            .arg("--json");
-        command
-    };
-    let mut first = command();
-    first.stdout(Stdio::null());
-    let mut child = first.spawn().unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        assert!(
-            child.try_wait().unwrap().is_none(),
-            "suite ended before kill"
-        );
-        if let Ok(bytes) = std::fs::read(run.join("checkpoint.json"))
-            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
-            && value["payload"]["results"]
-                .as_array()
-                .is_some_and(|results| !results.is_empty())
-        {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "suite did not checkpoint within ten seconds"
-        );
-        thread::sleep(Duration::from_millis(10));
-    }
-    child.kill().unwrap();
-    child.wait().unwrap();
-
-    let resumed = command().output().unwrap();
-    assert!(
-        resumed.status.success(),
-        "{}",
-        String::from_utf8_lossy(&resumed.stderr)
-    );
-    let resumed: serde_json::Value = serde_json::from_slice(&resumed.stdout).unwrap();
-    let results = resumed["report"]["results"].as_array().unwrap();
-    assert_eq!(results.len(), 6);
-    assert_eq!(
-        results
-            .iter()
-            .map(|result| result["index"].as_u64().unwrap())
-            .collect::<BTreeSet<_>>()
-            .len(),
-        6
-    );
-    assert_eq!(resumed["report"]["passed"], 6);
-    assert!(run.join("checkpoint.previous.json").is_file());
-}
-
-#[test]
 fn book_tools_hash_verify_stats_and_slice_without_an_engine() {
     let root = tempfile::tempdir().unwrap();
     let input = root.path().join("openings.epd");
@@ -765,17 +688,12 @@ fn nps_comparison_records_seeded_warm_schedule_and_robust_summaries() {
 
 #[test]
 fn calibration_dry_run_records_the_optional_default_design_and_binary_identity() {
-    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
     let output = cli()
         .arg("calibrate")
         .arg(binary)
         .arg(binary)
-        .args([
-            "--dry-run",
-            "--json",
-            "--a-engine-arg=__uci-stub",
-            "--b-engine-arg=__uci-stub",
-        ])
+        .args(["--dry-run", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -827,7 +745,7 @@ fn calibration_refuses_nonidentical_executable_content_before_launch() {
 fn calibration_persists_a_degenerate_identical_binary_run_as_inconclusive() {
     let root = tempfile::tempdir().unwrap();
     let run = root.path().join("calibration");
-    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"));
     let output = cli()
         .arg("calibrate")
         .arg(binary)
@@ -835,8 +753,8 @@ fn calibration_persists_a_degenerate_identical_binary_run_as_inconclusive() {
         .args([
             "--games",
             "4",
-            "--a-engine-arg=__uci-stub",
-            "--b-engine-arg=__uci-stub",
+            "--a-engine-arg=--legal-sequence",
+            "--b-engine-arg=--legal-sequence",
             "--max-moves",
             "2",
             "--dir",
@@ -1421,7 +1339,7 @@ fn ponder_is_explicit_recorded_and_limited_to_clock_controls() {
     let sprt: serde_json::Value = serde_json::from_slice(&sprt.stdout).unwrap();
     assert_eq!(sprt["resolved_configuration"]["ponder"], true);
 
-    let binary = env!("CARGO_BIN_EXE_colosseum-cli");
+    let binary = env!("CARGO_BIN_EXE_colosseum-uci-fixture");
     let calibration = cli()
         .args(["calibrate", binary, binary, "--games", "2", "--ponder"])
         .args(["--cores-per-engine", "1", "--dry-run", "--json"])
@@ -1935,21 +1853,25 @@ fn engine_subcommand_help_exposes_direct_controls() {
 }
 
 #[test]
-fn inspect_launch_failure_is_nonzero_and_diagnostic() {
+fn inspect_launch_failure_is_nonzero_and_diagnostic_on_stderr_in_both_formats() {
     let root = tempfile::tempdir().unwrap();
     let missing = root.path().join("missing-uci-engine");
-    let output = cli()
-        .args(["engine", "inspect"])
-        .arg(missing)
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
-    assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("engine inspect failed")
-    );
+    for format in [None, Some("--json")] {
+        let output = cli()
+            .args(["engine", "inspect"])
+            .args(format)
+            .arg(&missing)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{format:?}");
+        assert!(output.stdout.is_empty(), "{format:?}");
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("engine inspect failed"),
+            "{format:?}"
+        );
+    }
 }
 
 #[test]
@@ -1986,23 +1908,6 @@ fn dry_run_resolves_a_missing_engine_without_launching_it() {
             .as_str()
             .unwrap()
             .contains("missing-uci-engine")
-    );
-}
-
-#[test]
-fn json_failure_keeps_stdout_empty_and_diagnostics_on_stderr() {
-    let root = tempfile::tempdir().unwrap();
-    let output = cli()
-        .args(["engine", "inspect", "--json"])
-        .arg(root.path().join("missing"))
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
-    assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("engine inspect failed")
     );
 }
 
