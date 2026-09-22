@@ -158,8 +158,9 @@ fn an_old_spsa_schedule_is_refused_by_its_version_and_not_by_a_field() {
         let mut command = cli();
         command
             .arg("spsa")
-            .arg(engine())
-            .arg("--engine-arg=__uci-stub")
+            // Synthetic games: the engine is only probed and hashed, so the
+            // small fixture serves.
+            .arg(env!("CARGO_BIN_EXE_colosseum-uci-fixture"))
             .arg("--tune")
             .arg(&tune)
             .args([

@@ -23,6 +23,12 @@ fn engine() -> &'static Path {
     Path::new(env!("CARGO_BIN_EXE_colosseum-cli"))
 }
 
+/// A small ordinary UCI executable with a `Hash` option, for a tune whose
+/// games are synthetic and whose engine is only probed and hashed.
+fn probed_engine() -> &'static Path {
+    Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"))
+}
+
 fn json(output: &std::process::Output) -> Value {
     serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
@@ -102,8 +108,7 @@ fn stop_after_iteration_is_cumulative_across_resumes() {
         command
             .arg("--json")
             .arg("spsa")
-            .arg(engine())
-            .arg("--engine-arg=__uci-stub")
+            .arg(probed_engine())
             .arg("--tune")
             .arg(&tune)
             .args([
