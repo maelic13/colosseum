@@ -3440,19 +3440,22 @@ games" procedure at 10.10, once, on the final state.
     maintainer-run `match --engine-processes per-game` of 2,000 games on a
     post-fix Rarog pair is offered as a command, not required, and does not
     block the release. It is the qualification's scale command with the
-    post-fix pair and fresh processes per game:
+    post-fix pair and fresh processes per game, written for PowerShell and
+    run from `D:\code\rarog\tools\results`, so the run directory lands beside
+    the other `colosseum-qual-*` ones (dry-run from there, exit 0, 2026-09-22):
 
     ```text
-    colosseum-cli match ^
-      D:\code\rarog\tools\test_engines\rarog-startupfix-core-pext-pgo.exe ^
-      D:\code\rarog\tools\test_engines\rarog-startupfix-base-pext-pgo.exe ^
-      --a-label startupfix-core --b-label startupfix-base --games 2000 ^
-      --engine-processes per-game ^
-      --a-base-ms 3000 --a-increment-ms 30 --b-base-ms 3000 --b-increment-ms 30 ^
-      --a-option Hash=64 --a-option Threads=1 ^
-      --b-option Hash=64 --b-option Threads=1 ^
-      --a-margin-ms 20 --b-margin-ms 20 --book UHO_Lichess_4852_v1.epd ^
-      --book-order random --seed 48 --placement auto --concurrency 14 ^
+    D:\code\colosseum\target\release\colosseum-cli.exe match `
+      D:\code\rarog\tools\test_engines\rarog-startupfix-core-pext-pgo.exe `
+      D:\code\rarog\tools\test_engines\rarog-startupfix-base-pext-pgo.exe `
+      --a-label startupfix-core --b-label startupfix-base --games 2000 `
+      --engine-processes per-game `
+      --a-base-ms 3000 --a-increment-ms 30 --b-base-ms 3000 --b-increment-ms 30 `
+      --a-option Hash=64 --a-option Threads=1 `
+      --b-option Hash=64 --b-option Threads=1 `
+      --a-margin-ms 20 --b-margin-ms 20 `
+      --book D:\code\rarog\tools\books\UHO_Lichess_4852_v1.epd `
+      --book-order random --seed 48 --placement auto --concurrency 14 `
       --dir colosseum-freshproc-postfix
     ```
 
