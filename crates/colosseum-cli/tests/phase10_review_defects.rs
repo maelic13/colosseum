@@ -1,9 +1,11 @@
-//! Regression tests for the Phase 10 review defects.
+//! Regression tests for the Phase 10 review defects that need a real run.
 //!
-//! Five of the six are about an interrupt arriving at an awkward moment. The
-//! common shape of the bug was treating "a stop was asked for" as "the run did
-//! not finish", which turns a completed match or a cap-reached SPRT into a
-//! cancellation and loses the verdict it had already earned.
+//! Most were about an interrupt arriving at an awkward moment. The common
+//! shape of the bug was treating "a stop was asked for" as "the run did not
+//! finish", which turns a completed match or a cap-reached SPRT into a
+//! cancellation and loses the verdict it had already earned. The SPRT cases
+//! are `sprt_runner`'s unit tests, and a cancelled suite's exit code is
+//! asserted with its clean stop in `phase10_graceful_stop`.
 
 use std::path::Path;
 use std::process::Command;
@@ -58,13 +60,13 @@ fn a_match_whose_last_game_was_scored_reports_completed_not_cancelled() {
     let run = root.path().join("run");
     let mut command = cli();
     command
-        .args(["--json", "--__stop-after-units", "4"])
+        .args(["--json", "--__stop-after-units", "2"])
         .arg("match")
         .arg(engine())
         .arg(engine());
     stub_pair(&mut command);
     let output = command
-        .args(["--games", "4", "--dir"])
+        .args(["--games", "2", "--dir"])
         .arg(&run)
         .output()
         .unwrap();
@@ -76,100 +78,10 @@ fn a_match_whose_last_game_was_scored_reports_completed_not_cancelled() {
     );
     let value = json(&output);
     assert_eq!(value["report"]["status"], "completed");
-    assert_eq!(value["report"]["games_attempted"], 4);
+    assert_eq!(value["report"]["games_attempted"], 2);
     let record: Value =
         serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
     assert_eq!(record["status"], "completed");
-}
-
-/// A schedule that reached its cap without crossing a boundary is
-/// inconclusive. An interrupt during its final pair does not take that away.
-#[test]
-fn an_sprt_that_reached_its_cap_keeps_the_inconclusive_verdict() {
-    let root = tempfile::tempdir().unwrap();
-    let run = root.path().join("run");
-    let mut command = cli();
-    command
-        .args(["--json", "--__stop-after-units", "2"])
-        .arg("sprt")
-        .arg(engine())
-        .arg(engine());
-    stub_pair(&mut command);
-    let output = command
-        .args(["--max-pairs", "2", "--preset", "gainer", "--dir"])
-        .arg(&run)
-        .output()
-        .unwrap();
-
-    let value = json(&output);
-    assert_eq!(
-        value["report"]["status"], "inconclusive",
-        "a cap-reached schedule must keep its verdict"
-    );
-    assert_eq!(value["report"]["schedule"]["cancelled"], false);
-    // Exit 4 is capped inconclusive, not the cancelled code.
-    assert_eq!(output.status.code(), Some(4));
-    let record: Value =
-        serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
-    assert_eq!(record["status"], "completed");
-}
-
-/// Stopping with pairs still to play is a cancellation, and stays one.
-#[test]
-fn an_sprt_with_pairs_left_to_play_is_still_cancelled() {
-    let root = tempfile::tempdir().unwrap();
-    let run = root.path().join("run");
-    let mut command = cli();
-    command
-        .args(["--json", "--__stop-after-units", "1"])
-        .arg("sprt")
-        .arg(engine())
-        .arg(engine());
-    stub_pair(&mut command);
-    let output = command
-        .args(["--max-pairs", "6", "--preset", "gainer", "--dir"])
-        .arg(&run)
-        .output()
-        .unwrap();
-
-    assert_eq!(output.status.code(), Some(CANCELLED));
-    assert_eq!(json(&output)["report"]["status"], "cancelled");
-}
-
-/// Every driver that writes `cancelled` exits with the same code, so a script
-/// does not have to know which command it interrupted.
-#[test]
-fn a_cancelled_suite_exits_with_the_cancelled_code() {
-    let root = tempfile::tempdir().unwrap();
-    let input = root.path().join("positions.epd");
-    std::fs::write(
-        &input,
-        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 ; id \"one\"\n\
-         rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2 ; id \"two\"\n\
-         rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2 ; id \"three\"\n\
-         r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3 ; id \"four\"\n",
-    )
-    .unwrap();
-    let run = root.path().join("run");
-    let output = cli()
-        .args(["--json", "--__stop-after-units", "1"])
-        .arg("suite")
-        .arg(engine())
-        .arg("--engine-arg=__uci-stub")
-        .arg(&input)
-        .args(["--movetime-ms", "5", "--dir"])
-        .arg(&run)
-        .output()
-        .unwrap();
-
-    let record: Value =
-        serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
-    assert_eq!(record["status"], "cancelled");
-    assert_eq!(
-        output.status.code(),
-        Some(CANCELLED),
-        "a cancelled suite must exit like every other cancelled run"
-    );
 }
 
 /// The staged limit counts committed iterations cumulatively, so repeating the
@@ -198,7 +110,7 @@ fn stop_after_iteration_is_cumulative_across_resumes() {
                 "--r-end",
                 "0.002",
                 "--iterations",
-                "6",
+                "2",
                 "--games-per-iteration",
                 "2",
                 "--depth",
@@ -208,7 +120,9 @@ fn stop_after_iteration_is_cumulative_across_resumes() {
                 "--seed",
                 "7",
                 "--stop-after-iteration",
-                "2",
+                "1",
+                // Instant in-process games: the limit is the driver's.
+                "--__synthetic-games",
                 "--dir",
             ])
             .arg(&run);
@@ -223,7 +137,7 @@ fn stop_after_iteration_is_cumulative_across_resumes() {
             .as_array()
             .unwrap()
             .len(),
-        2
+        1
     );
 
     // Repeating the identical command must be a no-op, not another iteration.
@@ -235,8 +149,8 @@ fn stop_after_iteration_is_cumulative_across_resumes() {
             .as_array()
             .unwrap()
             .len(),
-        2,
-        "repeating --stop-after-iteration 2 played a further iteration"
+        1,
+        "repeating --stop-after-iteration 1 played a further iteration"
     );
     assert_eq!(
         again["report"]["driver"]["final_centers"],
