@@ -1,7 +1,8 @@
 # Phase 0 integrated architecture review
 
 This is the evidence artifact for GUIDE step 0.7. The review was performed on
-2026-07-31 after commit `9ceedc6`, using the actual workspace plus the Phase 0
+2026-07-31, after Phase 0.8 (shared product naming) was planned, using the
+actual workspace (still the GUI 1.0.2 source, `46e9dda`) plus the Phase 0
 inventory, current-state report, target architecture, ADRs and release design.
 It reviews responsibility placement and testability; it does not claim that the
 target has already been implemented.

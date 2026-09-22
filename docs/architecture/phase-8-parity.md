@@ -22,7 +22,7 @@ Colosseum observation moved, onto the source being released.
 |---|---|---|
 | FastChess | 1.8.0-alpha, CI commit `072859b` | `8444e73965ae44e716cde1bb546a7d7c8c9fc7a442a44194a0c71a3bffa7dd0d` |
 | Cute Chess CLI | 1.5.1, Qt 6.8.3 | `8889f9582dc688c567704cf083f6025baf77f791cde903698c70b3420caf5d7e` |
-| Colosseum CLI | 0.1.0 release source at `628449db2c5223c61464cd178ab527398b132e7a` | `3206ce79a6aab188c2b2f6b90ac6d6739c0f99f55265d9b88ba5ea6cf45a646f` |
+| Colosseum CLI | 0.1.0 release source, Phase 10.10 | `3206ce79a6aab188c2b2f6b90ac6d6739c0f99f55265d9b88ba5ea6cf45a646f` |
 | Rarog | 2.3.1 Windows PEXT PGO | `033f66334385e30ad358293a411e72508fa5edf04d6fc57310bc545b39046898` |
 
 The versions were checked against the official

@@ -276,12 +276,11 @@ router proves that shared changes cannot skip either product.
 
 ## Release workflow design
 
-CLI acceptance is branch-first. A `cli` push whose commit subject contains
-`[cli candidate]` (or a manual dispatch after the workflow reaches `main`)
-creates four unpublished workflow archives plus
-`SHA256SUMS` and `CANDIDATE.json`; it does not create a tag or GitHub Release.
-The run ID, full commit SHA and checksums identify the candidate used by
-acceptance. After `cli` is merged, only a stable tag on `main` can publish.
+A candidate is a manual dispatch of a product's release workflow on `main`. It
+creates unpublished workflow archives plus `SHA256SUMS` and `CANDIDATE.json`;
+it does not create a tag or GitHub Release. The run ID, full commit SHA and
+checksums identify the candidate used by acceptance. Only a stable tag on
+`main` can publish.
 This avoids a public prerelease while retaining exact cross-platform artifact
 evidence.
 
@@ -291,7 +290,6 @@ flowchart TD
     CMETA["Validate CLI version, docs and dependency boundary"]
     CBUILD["Build, smoke and checksum CLI archives"]
     ACCEPT["Acceptance on exact workflow archives"]
-    MERGE["Merge tested commit to main"]
     TAG["Push gui-v* or cli-v* tag"]
     META["Validate product, version and release notes"]
     ROUTE{"Product"}
@@ -302,8 +300,7 @@ flowchart TD
     CANDIDATE --> CMETA
     CMETA --> CBUILD
     CBUILD --> ACCEPT
-    ACCEPT --> MERGE
-    MERGE --> TAG
+    ACCEPT --> TAG
     TAG --> META
     META --> ROUTE
     ROUTE -->|gui| GUI
@@ -317,9 +314,8 @@ Use two product-specific workflows rather than one conditional workflow:
 - `release-gui.yml` owns GUI system dependencies, WiX, DEB/RPM/Arch, app bundle
   and DMG behavior migrated from the current `release.yml`;
 - `release-cli.yml` owns only headless builds/archives and therefore installs no
-  GUI or installer toolchain; an explicit candidate marker/manual dispatch
-  produces only an unpublished commit-addressed candidate, while `cli-v*`
-  produces a public release;
+  GUI or installer toolchain; a manual dispatch produces only an unpublished
+  commit-addressed candidate, while `cli-v*` produces a public release;
 - repository-owned release metadata/packaging helpers provide common version,
   filename, checksum and note extraction;
 - build jobs use read-only permissions; only the final publish job receives
@@ -337,8 +333,8 @@ generated lock state. All artifacts for one release come from that same tag and
 validated product version.
 
 Rerun the candidate after a change to CLI source, Cargo inputs, user
-documentation or packaging. After acceptance, merge `cli` to `main` using the
-normal project merge strategy and tag the resulting stable source. The tag
+documentation or packaging. After acceptance, tag the accepted commit on
+`main`. The tag
 workflow verifies that source is on `main`, rebuilds it, re-runs the
 exact-archive smoke matrix and publishes only after every platform succeeds.
 The ordinary CI workflow owns the complete cross-platform debug/release test

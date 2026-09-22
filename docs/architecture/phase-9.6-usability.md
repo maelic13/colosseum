@@ -19,7 +19,7 @@ isolated unpack directory.
 | Field | Value |
 |---|---|
 | Product / version | `colosseum-cli` / `0.1.0` |
-| Source commit | `f74e5e96a869910cffaedf5fbe476dc13ecf7c05` |
+| Source | The Phase 9.5 acceptance commit (validation-engine coverage) |
 | Local archive SHA-256 | `95f8c9174ca5ba799804f6854e87e147030daa1eaa1b12361fd31148f890cc9d` |
 | Engine A | Stockfish development build (`stockfish.exe`) |
 | Engine A SHA-256 | `c5d7dbd8842607df6508622c280b541512e637e5e2a54ca4321bf09552240422` |
@@ -64,12 +64,14 @@ compatibility guide already distinguishes protocol acceptance from an
 engine's internal observance of a selected limit, so this needs no product
 change.
 
-The Phase 9.4 GitHub candidate predates commit `89d24a0`, which changes a CLI
-argument and package contents.  Per the Phase 9.4 invalidation rule, this
-local archive is only usability evidence.  Before Phase 9.7/final acceptance,
-the maintainer must push the intended `cli` source with `[cli candidate]` in
-the commit subject and retain the resulting fresh four-platform CI candidate.
-That remote operation is deliberately not performed here.
+The Phase 9.4 GitHub candidate predates the Phase 9.5 commit that exposes the
+resignation policy, which changes a CLI argument and package contents.  Per
+the Phase 9.4 invalidation rule, this local archive is only usability
+evidence.  Before Phase 9.7/final acceptance, the maintainer had to build a
+fresh four-platform CI candidate from the intended source and retain it (at
+the time by a push carrying a candidate marker in its commit subject, a
+trigger since replaced by a manual dispatch of the release workflow).  That
+remote operation is deliberately not performed here.
 
 ## Repeated for the release, 2026-09-22
 
@@ -83,7 +85,7 @@ specific package did on a specific date.
 |---|---|
 | Archive | `colosseum-cli-0.1.0-windows-x64.zip` |
 | Archive SHA-256 | `fb82e404f1f71aae4288f7c74cee704d31f6e4223a7f85f4d0fefb7db0f9a1c4` |
-| Source commit | `628449db2c5223c61464cd178ab527398b132e7a` |
+| Source | The Phase 10.10 commit (release acceptance repeat) |
 | Engine A | Stockfish 19 Windows x86-64 universal, `45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0` |
 | Engine B | Stockfish 18 Windows x86-64 BMI2, `bf2d8bf60ac6f3ba58df08b1b0c5f4dec759b994d8f4532b07fe62986dc03288` |
 

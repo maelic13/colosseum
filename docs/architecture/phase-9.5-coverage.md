@@ -58,7 +58,8 @@ two-sided resignation default was externally overridable, but the CLI could
 only change its threshold or disable it. Rarog had real one-sided historical
 conditions, so silently converting them would have changed the experiment.
 
-Commit `89d24a0` adds `--one-sided-resign-adjudication` to fixed matches, SPRT,
+The Phase 9.5 commit that exposes the resignation policy adds
+`--one-sided-resign-adjudication` to fixed matches, SPRT,
 calibration, tournaments and SPSA, records the choice in resolved
 configuration, preserves two-sided deserialization as the compatibility
 default, and tests both decision rules. Rarog profiles use the compatibility

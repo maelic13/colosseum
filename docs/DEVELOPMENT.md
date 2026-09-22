@@ -243,24 +243,31 @@ built, packaged and smoked, and the bundle is retained as
 `colosseum-<product>-candidate-<full-commit-sha>` with its checksums and a
 candidate identity file, without a tag and without publishing anything.
 
-### CLI candidate before merge
+### Candidates and tags
 
-Push the exact `cli` commit with `[cli candidate]` in its subject. This marker
-is needed before the workflow exists on `main`; afterward a manual dispatch of
-**Colosseum CLI candidate and release** is equivalent. Ordinary `cli` pushes
-skip the heavyweight jobs. A candidate creates no tag or GitHub Release. It
-builds Windows x64/Arm64, Linux x64 and macOS Arm64 archives, stages only the
-CLI, license, CLI-specific README, CLI changelog and `docs/cli/`, then checks
-packaged documentation links and runs version/help/self-test/deterministic JSON
-smoke against each unpacked archive. The retained aggregate artifact is named
-`colosseum-cli-candidate-<full-commit-sha>` and contains checksums plus a
-candidate identity file.
+A candidate is made from **Actions → Colosseum CLI candidate and release**
+(or **Colosseum GUI candidate and release**) **→ Run workflow**, on `main`, or
+from a terminal:
 
-Rerun the candidate after changing CLI code, dependencies, user documentation
-or packaging. After acceptance, merge `cli` to `main` using the repository's
-preferred merge strategy and tag the resulting stable source with
-`cli-v<version>`. The tag workflow rebuilds, smokes and publishes the final
-artifacts. The ordinary CI workflow remains responsible for the complete
+```bash
+gh workflow run release-cli.yml --ref main
+gh workflow run release-gui.yml --ref main
+```
+
+A candidate creates no tag or GitHub Release. The CLI lane builds Windows
+x64/Arm64, Linux x64 and macOS Arm64 archives, stages only the CLI, license,
+CLI-specific README, CLI changelog and `docs/cli/`, then checks packaged
+documentation links and runs version/help/self-test/deterministic JSON smoke
+against each unpacked archive. The GUI lane builds and smokes every installer
+and archive. Download the retained bundle from the run's **Artifacts** section
+to inspect it; Actions keeps it for the repository's artifact retention period.
+
+Rerun a candidate after changing that product's code, dependencies, user
+documentation or packaging. Once it is accepted, tag the same commit on `main`
+with `gui-v<version>` or `cli-v<version>` and push the tag. The tag workflow
+proves the commit is on `main`, rebuilds and re-smokes every artifact, and only
+then creates the product's GitHub Release with the artifacts attached as
+release assets. The ordinary CI workflow remains responsible for the complete
 debug/release workspace test matrix; release packaging does not duplicate it.
 
 ## CLI documentation

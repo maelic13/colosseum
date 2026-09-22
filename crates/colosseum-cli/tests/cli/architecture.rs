@@ -83,7 +83,12 @@ fn independent_release_lanes_are_complete_and_least_privileged() {
     assert!(!gui.contains("'cli-v*'"));
     assert!(cli.contains("'cli-v*'"));
     assert!(!cli.contains("'gui-v*'"));
-    assert!(cli.contains("[cli candidate]"));
+    // Both lanes build a candidate only on a manual dispatch, never on a
+    // branch push.
+    for workflow in [&gui, &cli] {
+        assert!(workflow.contains("workflow_dispatch:"));
+        assert!(!workflow.contains("branches:"));
+    }
 
     // Each lane builds, packages and smokes exactly its own product, through
     // the one build entry point, and never reaches across to the other's.

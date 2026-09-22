@@ -1136,11 +1136,11 @@ games" procedure at 10.10, once, on the final state.
     decision 2026-09-21:** the application has no user base to strand and
     the updater is hidden, so no bridge release, no legacy tag and no test
     for the old parser. One sentence in the GUI changelog tells a 1.0.2 user
-    to download the new version by hand. The updater on `cli` reads the
-    release list and accepts both forms; nothing here changes it.
-  - The `cli` branch carries GUI source changes since 1.0.2 (the pinned
+    to download the new version by hand. The updater in the release source
+    reads the release list and accepts both forms; nothing here changes it.
+  - The release source carries GUI source changes since 1.0.2 (the pinned
     field, the resignation policy, the application boundary, the updater):
-    12 files, about 600 lines. Merging `cli` to `main` therefore changes the
+    12 files, about 600 lines. Merging it to `main` therefore changes the
     GUI that `main` builds. List them, and say which are user-visible, so
     (ag) can version the GUI.
   - Qualification §4's per-coordinate criterion is recorded as missed. Keep
@@ -1205,7 +1205,7 @@ games" procedure at 10.10, once, on the final state.
   says why the 2026-08-03 form differs and forbids dropping the draw
   parameters, and a test parses the recorded command against the shipped
   clap surface, so the two cannot drift apart again. Proved by running it on
-  2026-09-21: colosseum-cli 0.1.0 built from `cli` at `6fd0150`,
+  2026-09-21: colosseum-cli 0.1.0 built from the Phase 10.9w source,
   `rarog-v2.3.1-windows-pext-pgo.exe` (sha256 `033f6633…`) on both arms,
   exit 4, `inconclusive`, 8 games, 0/8/0, 4 complete pairs, pentanomial
   `[0, 0, 4, 0, 0]`, 0 faults — every shared field equal to the recorded
@@ -1214,30 +1214,31 @@ games" procedure at 10.10, once, on the final state.
   hashes belong to (`2a95390d…`), which is not in `D:\chess\engines\rarog`.
 
   **Implementation evidence (Phase 10.9w) — the GUI source since 1.0.2.**
-  `git diff main..cli -- crates/colosseum-gui`: 12 files, 600 insertions, 38
-  deletions, from six commits. What a user of the GUI can see is marked
-  **user-visible**; the rest is internal.
+  The diff of `crates/colosseum-gui` between `main` and the release source,
+  before the merge: 12 files, 600 insertions, 38 deletions, from six commits.
+  What a user of the GUI can see is marked **user-visible**; the rest is
+  internal.
 
-  | Change | Kind | Commit |
+  | Change | Kind | Step |
   |---|---|---|
-  | `colosseum --version` prints the product version and exits | **user-visible** | `9c3a03f` |
-  | Update check reads the whole release list, takes the newest stable `gui-v` tag and accepts the legacy `v` form only up to 1.0.2; the fallback link is the releases page, not `/releases/latest` | **user-visible** | `f3a5bbf` |
-  | Standings CSV export carries the `Fixed` column, `no` on every GUI row (the GUI has no fixed field) | **user-visible** | `01254ed` |
-  | GUI package pinned to its own `1.0.2` instead of the workspace version, and `publish = false` | internal (release mechanics) | `9c3a03f` |
-  | `AppDirs`, `AppConfig` and `EngineLibrary` moved from `colosseum-engine` into the GUI crate with their own `ConfigError`; paths, file names and formats unchanged | internal | `d2fdf4c` |
-  | Product identity (`DISPLAY_NAME`, `APP_DIR_NAME`, `QUALIFIER`, `ORGANIZATION`) moved from `colosseum-core::branding` into the GUI's `product.rs`, same values | internal | `d2fdf4c` |
-  | `runtime_adapter.rs`: library entry to `RuntimeParticipant`/`EngineLaunchSpec`, with tests that the launch spec leaks no library metadata; computed in `Backend::start_tournament` behind a `debug_assert` and not yet consumed — the seam Phase 11 consumes | internal | `d2fdf4c` |
-  | Engine and tournament identifiers created by the caller (`EngineId::from_uuid(Uuid::new_v4())`) instead of the domain | internal | `d2fdf4c` |
-  | The tournament form passes `two_sided: true` for resignation, which is the serde default and 1.0.2's behaviour | internal (behaviour-preserving) | `89d24a0` |
-  | Live and export rows pass `fixed: false` | internal (the CSV column above is its visible half) | `01254ed` |
-  | Build script gates `winresource` on the Windows *host* and the Windows *target* together, so the GUI builds on Unix hosts | internal | `4ab58ef` |
-  | `colosseum-application`, `directories`, `thiserror`, `toml` and `uuid` added to the GUI's dependencies | internal | `d2fdf4c`, `9c3a03f` |
+  | `colosseum --version` prints the product version and exits | **user-visible** | 2.2 |
+  | Update check reads the whole release list, takes the newest stable `gui-v` tag and accepts the legacy `v` form only up to 1.0.2; the fallback link is the releases page, not `/releases/latest` | **user-visible** | 9.4 |
+  | Standings CSV export carries the `Fixed` column, `no` on every GUI row (the GUI has no fixed field) | **user-visible** | 10.7 |
+  | GUI package pinned to its own `1.0.2` instead of the workspace version, and `publish = false` | internal (release mechanics) | 2.2 |
+  | `AppDirs`, `AppConfig` and `EngineLibrary` moved from `colosseum-engine` into the GUI crate with their own `ConfigError`; paths, file names and formats unchanged | internal | 2.1 |
+  | Product identity (`DISPLAY_NAME`, `APP_DIR_NAME`, `QUALIFIER`, `ORGANIZATION`) moved from `colosseum-core::branding` into the GUI's `product.rs`, same values | internal | 2.1 |
+  | `runtime_adapter.rs`: library entry to `RuntimeParticipant`/`EngineLaunchSpec`, with tests that the launch spec leaks no library metadata; computed in `Backend::start_tournament` behind a `debug_assert` and not yet consumed — the seam Phase 11 consumes | internal | 2.1 |
+  | Engine and tournament identifiers created by the caller (`EngineId::from_uuid(Uuid::new_v4())`) instead of the domain | internal | 2.1 |
+  | The tournament form passes `two_sided: true` for resignation, which is the serde default and 1.0.2's behaviour | internal (behaviour-preserving) | 9.5 |
+  | Live and export rows pass `fixed: false` | internal (the CSV column above is its visible half) | 10.7 |
+  | Build script gates `winresource` on the Windows *host* and the Windows *target* together, so the GUI builds on Unix hosts | internal | 9.4 |
+  | `colosseum-application`, `directories`, `thiserror`, `toml` and `uuid` added to the GUI's dependencies | internal | 2.1, 2.2 |
 
   **Implementation evidence (Phase 10.9w) — GUI behaviour arriving through
-  the shared crates.** The GUI crate is only half the picture: `cli` also
-  changes `colosseum-core` and `colosseum-engine`, which the GUI's scheduler,
-  runner and store use. Two effects reach a GUI user and belong in the
-  version decision and the changelog:
+  the shared crates.** The GUI crate is only half the picture: the release
+  source also changes `colosseum-core` and `colosseum-engine`, which the GUI's
+  scheduler, runner and store use. Two effects reach a GUI user and belong in
+  the version decision and the changelog:
   - **user-visible.** Every PGN the GUI writes now carries per-move search
     comments (`{s= d= t= h= n=}`, `{book}` on pre-played moves) and the
     `OpeningPlyCount`, `WhiteTimeMarginMs` and `BlackTimeMarginMs` tags.
@@ -1249,11 +1250,11 @@ games" procedure at 10.10, once, on the final state.
     not read it, so it records the draw into standings and into the ML
     rating. In 1.0.2 the engine that failed to start lost both its games and
     the working engine won them. Reproduced by the existing GUI smoke test
-    `failed_engine_loses_with_error`, which passes at `main` and fails on
-    `cli` (`wins` 0, expected 2). The fix is a policy choice between 1.0.2's
-    loss and the CLI's exclusion, and PLAN §Phase 11(b) is where fault
-    classification reaches desktop tournaments, so it is left for the
-    maintainer rather than decided here.
+    `failed_engine_loses_with_error`, which passed on `main` before the merge
+    and fails on the release source (`wins` 0, expected 2). The fix is a
+    policy choice between 1.0.2's loss and the CLI's exclusion, and PLAN
+    §Phase 11(b) is where fault classification reaches desktop tournaments,
+    so it is left for the maintainer rather than decided here.
 
   **Implementation evidence (Phase 10.9w) — the GUI is buildable and runs
   games.** `cargo build --release -p colosseum-gui` succeeds and the binary
@@ -1436,7 +1437,7 @@ change if one were revisited.
     `cargo-generate-rpm`, `makepkg`, `hdiutil`) is an error, never a skip.
     The macOS `.app` bundle is assembled here with the version from the
     product manifest, which retires the empty `CFBundleShortVersionString`
-    that `build_macos.sh` writes on `cli`.
+    that `build_macos.sh` wrote.
   - Versions come from `cargo metadata` for the product package, never from
     the workspace manifest. **One naming scheme for both products, readable
     by a user** (maintainer decision 2026-09-22):
@@ -1566,11 +1567,10 @@ change if one were revisited.
   candidate and pass exact archive smoke on all four platforms; run the full
   suite in debug and `ci-release` as evidence, with (af.2) done first so it
   cannot flake. Then the maintainer's release process (decided 2026-09-22):
-  open a pull request from `cli` to `main`; `ci.yml` runs on the pull
-  request on all three platforms in both profiles and must be green;
-  **squash-merge** it (the step-by-step history stays on the `cli` branch,
-  which is kept, not deleted, because commit subjects there are the only
-  place the step identifiers survive); tag the squash commit `gui-v1.1.0`
+  open a pull request to `main`; `ci.yml` runs on the pull request on all
+  three platforms in both profiles and must be green; **squash-merge** it
+  into one commit on `main` (the step identifiers are kept in GUIDE and
+  these records, not in the merged history); tag the squash commit `gui-v1.1.0`
   and `cli-v0.1.0` and push the tags; both release workflows build, smoke
   and publish with release notes extracted from the two changelog sections
   by `colosseum-release notes`; then check the two release pages — the
@@ -1582,7 +1582,8 @@ change if one were revisited.
   publish job proves the tagged commit is reachable from `main`, which the
   squash commit is.
 
-  **Implementation evidence (Phase 10.10), 2026-09-22, at `628449d`.**
+  **Implementation evidence (Phase 10.10), 2026-09-22, on this step's
+  source.**
   - **(af.2) and a second flake, first.** The scale test now reads private
     commit — `PrivateUsage` on Windows, `VmData` on Linux — instead of the
     resident set, at the same limits: a resident set is what the OS chose to

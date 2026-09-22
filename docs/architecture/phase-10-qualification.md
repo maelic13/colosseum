@@ -16,12 +16,12 @@ adjudication.
 
 ## Candidates
 
-| Colosseum source | CLI binary sha256 | Used for |
+| Colosseum source (its last change, all 2026-09-19) | CLI binary sha256 | Used for |
 |---|---|---|
-| `22782ec` | `cb324c221edfe4be438204c815bd05e28ddd36417de81bd6e22e4b70d80f77c1` | scale |
-| `9f7fafc` | `6998bf8dde5a88fac971f4d5f7a3bdeaa342892df250a0b099c710db6428bc85` | verdict |
-| `99091bc` | `9bb751e045654413881c35f2e5776e4cc3dd9cfb27214450714e9b4ed79344d8` | ratings |
-| `9f94aa9` | `da248afc4a3debc2b71f3a05987ff20de9b2a72a15ecd55c34ff695bd4ae40d0` | tuning onward |
+| Phase 10 tracker: 10.9m rejected, 10.9v split out | `cb324c221edfe4be438204c815bd05e28ddd36417de81bd6e22e4b70d80f77c1` | scale |
+| `faults` line counts joined by a hyphen | `6998bf8dde5a88fac971f4d5f7a3bdeaa342892df250a0b099c710db6428bc85` | verdict |
+| round-trip journal test race fixed | `9bb751e045654413881c35f2e5776e4cc3dd9cfb27214450714e9b4ed79344d8` | ratings |
+| pinned rating reads `[fixed]` | `da248afc4a3debc2b71f3a05987ff20de9b2a72a15ecd55c34ff695bd4ae40d0` | tuning onward |
 
 Between them: the text of the `faults` line (`time: 0-2` for `time: b22core
 0, b22base 2`), at the maintainer's request; the SPRT progress block's time
@@ -101,7 +101,7 @@ Same decision, intervals overlapping; where a sequential test stops depends
 on the openings drawn. Sixteen pairs finished after the terminal pair and are
 kept outside the official sample. 5,402 games per hour, a pair holding its
 slot for both colours. The run's last progress block showed "time remaining
-2h52m" beside "accept H1": a display defect, fixed in `22637fd`.
+2h52m" beside "accept H1": a display defect, fixed before the ratings candidate.
 
 ## 3. Ratings — passed
 
@@ -156,7 +156,7 @@ score is within the noise of 400 and 600 games (largest difference 4.0
 points, Stockfish 5). 2,400 official games, W-D-L 937-643-820 for Rarog, no
 fault of any kind, 14 slots with no overlapping span, 5,066 games per hour.
 The report printed a pinned rating as "3192.0 unavailable [fixed]"; a display
-defect, fixed in `9f94aa9`.
+defect, fixed in the tuning candidate.
 
 ## 4. Tuning — passed on strength, with one criterion missed
 
@@ -251,6 +251,6 @@ Status `pass`: 30,000 games, 15,000 complete pairs, no unpaired game and no
 fault of any kind, 5,800 games per hour across 14 slots. Start-up is 8.1 ms
 per game at the median with engines kept per slot. The run was stopped after
 613 pairs and resumed from its directory the same day, which the journal
-records; both sessions used the same CLI binary (`9f94aa9`,
+records; both sessions used the same CLI binary (the tuning candidate,
 `da248afc4a3d…`). The rate the progress block printed in pairs per hour is
-reported in games per hour from `c63b71c`, after this run.
+reported in games per hour since a change of 2026-09-21, after this run.

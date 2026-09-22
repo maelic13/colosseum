@@ -442,8 +442,8 @@ boundary are recorded in
   whether a general engine developer needs it**, not whether the validation
   engines do.
 
-**Accepted (8.1):** the 0.1.0 release candidate at commit
-`86fc42b442d0f2a354a1fcc1ec5c09cad47a0f43` was compared on Windows with
+**Accepted (8.1):** the 0.1.0 release candidate built from the Phase 7.3
+source (tournament parity accepted) was compared on Windows with
 FastChess 1.8.0-alpha and Cute Chess 1.5.1 using the same hashed Rarog binary.
 All three runners agreed on the oracle matrix's shared game count, complete
 pairs, colour reversal, W/D/L, draw ratio, termination and fault fields;
@@ -531,19 +531,20 @@ and hash equal the equivalent all-CLI invocation.
   web/GitHub/package-channel/preliminary-trademark screen;
   smoke-test exact archives (`--version`, `--help`, `self-test`, one
   deterministic JSON workflow, and architecture/dependency inspection).
-  Before merge, push the intended `cli` candidate with `[cli candidate]` in
-  its commit subject (or manually dispatch once the workflow already exists on
-  `main`): `release-cli.yml` retains an unpublished candidate bundle identified
-  by commit SHA and workflow-run ID, but creates no tag or GitHub prerelease.
-  Ordinary `cli` pushes leave the candidate jobs skipped. Steps 9.5–9.7 use
-  those archives; rerun the candidate after any change that affects the CLI or
-  its package. After acceptance, merge `cli` to `main`, tag the resulting
+  Before merge, build a candidate of the intended source (during Phases
+  9.4–9.7 by a push carrying a candidate marker in its commit subject, a
+  trigger since replaced by a manual dispatch of the workflow from `main`):
+  `release-cli.yml` retains an unpublished candidate bundle identified by
+  commit SHA and workflow-run ID, but creates no tag or GitHub prerelease.
+  Ordinary pushes build no candidate. Steps 9.5–9.7 use those archives; rerun
+  the candidate after any change that affects the CLI or its package. After
+  acceptance, merge to `main`, tag the resulting
   stable source with `cli-v<version>`, and let the workflow rebuild, smoke and
   publish the final archives. Normal push/tag CI remains the test gate and is
   not duplicated inside the packaging workflow.
 
-**Accepted (9.4):** unpublished candidate `0.1.0` at commit
-`22aefa8a4374405f7cedbcf2d1baf09066f9ebe7` passed required debug/release CI and
+**Accepted (9.4):** unpublished candidate `0.1.0`, built from the last Phase
+9.4 commit, passed required debug/release CI and
 exact-archive smoke on the four supported build targets. Workflow run
 `31199592962` retained the checksum-verified aggregate without creating a tag
 or GitHub Release. The complete identity, archive hashes and acceptance record
@@ -566,7 +567,8 @@ published guides' fixed match, intentionally capped one-pair SPRT and
 one-iteration SPSA flows.  All game workflows completed with zero faults; the
 SPRT's exit-4 inconclusive result, missing-book warning and SPSA rail warning
 were clear and documented.  The current-source local archive is usability
-evidence only: commit `89d24a0` changed the CLI after the Phase 9.4 candidate,
+evidence only: the Phase 9.5 commit exposing the resignation policy changed
+the CLI after the Phase 9.4 candidate,
 so a fresh four-platform CI candidate is mandatory before Phase 9.7.  Exact
 commands, identities, hashes and triage are in
 [`docs/architecture/phase-9.6-usability.md`](../architecture/phase-9.6-usability.md).
@@ -583,8 +585,8 @@ commands, identities, hashes and triage are in
   intentional project policy. Each engine also runs one real gate through the
   released artifact on at least two operating systems, agreeing with 8(a).
 
-**Accepted (9.7):** corrected final candidate
-`823b398a273ae5631c24e32b4bbfec5b3b35749f` (workflow `31213773139`) passed
+**Accepted (9.7):** the corrected final candidate of workflow run `31213773139`
+passed
 checksums and exact-archive smoke for all four supported packages. Every archive
 contains the CLI-only README, product changelog and identical 24-file offline
 guide, with local links checked from the extracted package. The Linux

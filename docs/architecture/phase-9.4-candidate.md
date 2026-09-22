@@ -12,13 +12,13 @@ release.
 |---|---|
 | Product | `colosseum-cli` |
 | Version | `0.1.0` |
-| Source commit | `22aefa8a4374405f7cedbcf2d1baf09066f9ebe7` |
+| Source | The last Phase 9.4 commit (stabilize macOS clock acceptance) |
 | Candidate workflow run | `31199592962` (run number 6) |
 | Required CI run | Run number 21, green on the same commit |
-| Retained artifact | `colosseum-cli-candidate-22aefa8a4374405f7cedbcf2d1baf09066f9ebe7` |
+| Retained artifact | `colosseum-cli-candidate-` followed by the full source commit hash |
 
-The retained `CANDIDATE.json` contains the product, version, complete source
-commit and workflow-run identity above.
+The retained `CANDIDATE.json` records the product, version, complete source
+commit hash and workflow-run identity.
 
 ## Exact archives
 

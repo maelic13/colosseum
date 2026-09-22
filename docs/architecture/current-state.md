@@ -1,8 +1,9 @@
 # Current-state architecture
 
 This document is the evidence and analysis artifact for GUIDE step 0.2. It
-evaluates the repository at baseline
-`6f6e864599122ef15b5d0942b4037c41c28bd557` against the binding Clean
+evaluates the repository as it stood on 2026-07-31, before any Phase 0 code
+change (its crates and lockfile are those of GUI 1.0.2, `46e9dda`), against the
+binding Clean
 Architecture and independence rules in
 PLAN §S4. The factual package/module inventory is in
 [`dependency-inventory.md`](dependency-inventory.md).

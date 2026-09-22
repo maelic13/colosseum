@@ -2,8 +2,8 @@
 
 Date: 2026-08-07
 
-Colosseum CLI 0.1.0 candidate `823b398` is accepted for merge and stable
-publication. This record does not create a tag or GitHub Release; those remain
+The Colosseum CLI 0.1.0 candidate of workflow run `31213773139` is accepted for
+merge and stable publication. This record does not create a tag or GitHub Release; those remain
 maintainer-owned remote operations after this acceptance commit is pushed and
 merged.
 
@@ -11,7 +11,7 @@ merged.
 
 | Field | Accepted value |
 |---|---|
-| Source commit | `823b398a273ae5631c24e32b4bbfec5b3b35749f` |
+| Source | The Phase 9.7 commit that corrected the release documentation |
 | Candidate workflow | `31213773139` |
 | Downloaded aggregate SHA-256 | `84fb68c207bff63ccd1eb172061b6b079c1b782dc7c5092015a996b7787a908e` |
 | Product / version | `colosseum-cli` / `0.1.0` |
@@ -92,11 +92,12 @@ W/D/L, termination, faults and pentanomial projection.
   changes neither executable nor packaged user files, so it does not invalidate
   the candidate baseline.
 
-Candidate `f0e3185` remains superseded because its archive omitted the CLI
-changelog and used a combined README with broken packaged links. Candidate
-`823b398` closes that defect and is the sole accepted 0.1.0 baseline.
+The earlier candidate, built from the Phase 9.7 commit that prepared the
+release documentation, remains superseded because its archive omitted the CLI
+changelog and used a combined README with broken packaged links. The accepted
+candidate closes that defect and is the sole accepted 0.1.0 baseline.
 
 Phase 9.7 and the implementation plan are complete. The remaining sequence is
-operational: push this acceptance commit, merge `cli` to `main`, create
+operational: push this acceptance commit, merge it to `main`, create
 `cli-v0.1.0` at the merged stable source, push the tag, and confirm the stable
 release workflow succeeds.

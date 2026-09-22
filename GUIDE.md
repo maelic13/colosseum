@@ -14,9 +14,9 @@ internal naming or method argumentation.
 
 | | |
 |---|---|
-| Branch / versions | `cli`; Colosseum GUI **1.0.2** released (legacy `v` tag), **1.1.0** in the manifest. Colosseum CLI **0.1.0**, unreleased. The first release from `cli` ships both: GUI **1.1.0** (`gui-v1.1.0`, "latest") and CLI **0.1.0** (`cli-v0.1.0`, never "latest") |
-| What exists | Phases 0–9 complete; **Phase 10 is complete pending publication** — 10.1–10.10, with the acceptance repeat passed locally at `628449d` (10.9m rejected; 10.9h, 10.9p, 10.9t deferred behind the release). Every correction landed with its tests; qualification and symmetry runs recorded; the acceptance repeat re-recorded the parity matrix on the released source |
-| What is missing | Only the maintainer's remote operations: dispatch the CLI and GUI candidates and check their four-platform archives, open the pull request from `cli`, squash-merge on green CI, tag `gui-v1.1.0` and `cli-v0.1.0`, check both release pages. **Phase 11** (GUI on the harness) starts after publication |
+| Branch / versions | Colosseum GUI **1.0.2** released (legacy `v` tag), **1.1.0** in the manifest. Colosseum CLI **0.1.0**, unreleased. The next release ships both: GUI **1.1.0** (`gui-v1.1.0`, "latest") and CLI **0.1.0** (`cli-v0.1.0`, never "latest") |
+| What exists | Phases 0–9 complete; **Phase 10 is complete pending publication** — 10.1–10.10, with the acceptance repeat passed locally on the step 10.10 source (10.9m rejected; 10.9h, 10.9p, 10.9t deferred behind the release). Every correction landed with its tests; qualification and symmetry runs recorded; the acceptance repeat re-recorded the parity matrix on the released source |
+| What is missing | Only the maintainer's remote operations: squash-merge the release pull request on green CI, dispatch the CLI and GUI candidates on `main` and check their four-platform archives, tag `gui-v1.1.0` and `cli-v0.1.0`, check both release pages. **Phase 11** (GUI on the harness) starts after publication |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 CLI candidate archives ☑ exact-archive smoke · the `gui-v` release lane has never run; its candidate mode is the rehearsal to dispatch before the tag, and the only thing that will have exercised `deb`, `rpm`, `dmg` and `pkg.tar.zst` |
 | Next step | **Publication is the maintainer's** — see "What to do now". Then **11.1** — Sol High (Claude: Opus 5, high) |
@@ -40,7 +40,7 @@ Step identifiers are never reused.
 - ☑ **Phase 6** (6.1–6.9) — `nps` and scaling sweeps, `book` tools, `stats` replay and planning, `suite`.
 - ☑ **Phase 7** (7.1–7.3) — Round-robin and gauntlet tournaments with joint or anchored ML ratings, matching the GUI on a frozen fixture.
 - ☑ **Phase 8** (8.1–8.3) — Parity repeated on the candidate, ponder adopted, remaining gaps decided.
-- ☑ **Phase 9** (9.0–9.7) — Naming retained (ADR-0009), versioned `docs/cli/` with a generated reference (ADR-0010), README, candidate bundle, coverage and usability acceptance, release acceptance of candidate `823b398`.
+- ☑ **Phase 9** (9.0–9.7) — Naming retained (ADR-0009), versioned `docs/cli/` with a generated reference (ADR-0010), README, candidate bundle, coverage and usability acceptance, release acceptance of the step 9.7 candidate.
 - ☑ **Phase 10** (10.1–10.10) — Adjudication off by default, class-aware placement, per-move PGN annotations, final-centre SPSA estimator, graceful stop, fixed rating field, book-range refusal, command-module split, shared game slots, pair identity in PGN, review defects, unscorable tagging, progress reports, commit path off the game loop, writer hardening, latency instrument, one slot per game, fault allowance, SPSA occupancy and scale, persistent engines per slot, real-engine qualification and symmetry, adoption-audit corrections, a game whose engine could not start excluded from scoring, the release versions and tag contract fixed, one build entry point for both products, user documentation reconciled with them, and the acceptance repeat passed. 10.9m rejected (the forfeits were an engine defect); 10.9h, 10.9p, 10.9t deferred behind the release; 10.9g's two maintainer probes still owed and not blocking.
 
 ## Forward tracker
@@ -154,9 +154,9 @@ Not steps — they are never "done".
 ### Cutting a release (maintainer)
 
 - `cargo xtask release-check gui-vX.Y.Z` and `cli-vX.Y.Z` pass on the
-  branch; both changelogs are dated.
-- Open a pull request to `main`; wait for green CI; squash-merge; keep the
-  working branch (its commits carry the step identifiers); tag the squash
+  commit to be tagged; both changelogs are dated.
+- Open a pull request to `main`; wait for green CI; squash-merge; dispatch
+  both candidates on `main` and check their archives; tag the accepted
   commit; push the tags; watch both release workflows; check both release
   pages and open the post-tag links the phase record lists. Wrong release: delete
   release and tag, fix on `main`, tag again.
@@ -168,14 +168,19 @@ Not steps — they are never "done".
 **Phase 10 is complete; the release is the maintainer's to publish.** In
 order, and all of it remote work that no agent performs:
 
-1. Dispatch the CLI candidate and the GUI candidate and check their
-   four-platform archives. The GUI lane has never run end to end, and this is
-   the only thing that will have exercised `deb`, `rpm`, `dmg` and
-   `pkg.tar.zst` before a tag exists.
-2. Open a pull request from `cli` to `main` and wait for green CI.
-3. Squash-merge, keeping `cli`: the step identifiers survive only in its
-   commit subjects.
-4. Tag the squash commit `gui-v1.1.0` and `cli-v0.1.0`, and push the tags.
+1. Squash-merge the release pull request into `main` on green CI. The
+   release workflows can only be dispatched once they are on `main`.
+2. Dispatch the CLI candidate and the GUI candidate on `main` (Actions →
+   *Colosseum CLI/GUI candidate and release* → Run workflow, or
+   `gh workflow run release-cli.yml --ref main` and the same for
+   `release-gui.yml`) and check their four-platform archives. The GUI lane has
+   never run end to end, and this is the only thing that will have exercised
+   `deb`, `rpm`, `dmg` and `pkg.tar.zst` before a tag exists. A failure is
+   fixed on `main` and the candidate dispatched again.
+3. Check out `main` locally and run `cargo xtask release-check gui-v1.1.0`
+   and `cargo xtask release-check cli-v0.1.0`.
+4. Tag the accepted commit `gui-v1.1.0` and `cli-v0.1.0`, and push the tags;
+   each tag's workflow publishes its product's GitHub Release.
 5. Check both release pages and the two post-tag links recorded with the
    Phase 10 entry in
    [`phase-10-record.md`](docs/architecture/phase-10-record.md).

@@ -9,7 +9,7 @@ deferred to `current-state.md` in step 0.2.
 
 | Item | Value |
 |---|---|
-| Source baseline | `c62d99c1b56c04b57902b6e7b892028a22558cda` |
+| Source baseline | Crates and lockfile of GUI 1.0.2 (`46e9dda`), unchanged on 2026-07-31 |
 | Cargo / rustc used | 1.97.1 / 1.97.1 |
 | Workspace resolver | Cargo resolver 2 |
 | Workspace edition / MSRV | Rust 2024 / Rust 1.88 |

@@ -2,10 +2,10 @@ name: Colosseum CLI candidate and release
 run-name: CLI ${{ github.ref_type == 'tag' && github.ref_name || format('candidate {0}', github.sha) }}
 
 on:
+  # A candidate builds, packages and smokes every archive and retains the
+  # bundle, without a tag and without publishing anything.
   workflow_dispatch:
   push:
-    branches:
-      - cli
     tags:
       - 'cli-v*'
 
@@ -19,7 +19,6 @@ env:
 jobs:
   prepare:
     name: Validate source and packaging inputs
-    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[cli candidate]')
     runs-on: ubuntu-latest
     outputs:
       mode: ${{ steps.metadata.outputs.mode }}
