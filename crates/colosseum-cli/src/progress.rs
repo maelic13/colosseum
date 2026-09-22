@@ -197,7 +197,13 @@ impl ProgressSchedule {
     /// resumed run does not print a block for work it did not just do.
     #[must_use]
     pub fn new(every: u64, min_secs: u64, resumed_units: u64) -> Self {
-        let started = Instant::now();
+        Self::started_at(every, min_secs, resumed_units, Instant::now())
+    }
+
+    /// The same schedule, started at `started` rather than now, so the floor
+    /// can be driven by instants a caller chooses.
+    #[must_use]
+    pub fn started_at(every: u64, min_secs: u64, resumed_units: u64, started: Instant) -> Self {
         Self {
             every: every.max(1),
             floor: Duration::from_secs(min_secs),
@@ -218,7 +224,11 @@ impl ProgressSchedule {
     /// True when `done` units mean a block is due now. Records the emission,
     /// so a caller that asks is a caller that prints.
     pub fn due(&mut self, done: u64) -> bool {
-        let now = Instant::now();
+        self.due_at(done, Instant::now())
+    }
+
+    /// [`Self::due`], asked at `now` instead of the current instant.
+    pub fn due_at(&mut self, done: u64, now: Instant) -> bool {
         if done < self.last_units.saturating_add(self.every)
             || now.duration_since(self.last_at) < self.floor
         {
@@ -344,6 +354,33 @@ mod tests {
         schedule.floor = Duration::ZERO;
         // The withheld block is not skipped: the next poll prints it.
         assert!(schedule.due(50));
+    }
+
+    #[test]
+    fn the_floor_coalesces_boundaries_until_it_has_elapsed() {
+        let started = Instant::now();
+        let at = |millis| started + Duration::from_millis(millis);
+        let mut schedule = ProgressSchedule::started_at(2, 1, 0, started);
+        // A boundary inside the floor is withheld, and the next poll after
+        // the floor expires prints it.
+        assert!(!schedule.due_at(2, at(500)));
+        assert!(schedule.due_at(2, at(1_000)));
+        // The floor counts from the block just printed: two more boundaries
+        // inside it are one block once it has elapsed, not two.
+        assert!(!schedule.due_at(4, at(1_500)));
+        assert!(!schedule.due_at(6, at(1_900)));
+        assert!(schedule.due_at(6, at(2_000)));
+        assert!(!schedule.due_at(7, at(60_000)));
+    }
+
+    #[test]
+    fn elapsed_time_alone_never_makes_a_block_due() {
+        let started = Instant::now();
+        let mut schedule = ProgressSchedule::started_at(1_000, 1, 0, started);
+        let much_later = started + Duration::from_secs(10 * 3600);
+        assert!(!schedule.due_at(0, much_later));
+        assert!(!schedule.due_at(999, much_later));
+        assert!(schedule.due_at(1_000, much_later));
     }
 
     #[test]

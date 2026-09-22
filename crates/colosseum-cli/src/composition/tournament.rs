@@ -719,7 +719,8 @@ pub(crate) async fn run_tournament_command(
             _ = poll.tick() => {
                 if schedule.due(progress_observer.units()) {
                     let block = tournament_progress_block(
-                        &progress_observer,
+                        &progress_observer.evidence(),
+                        progress_observer.engine_faults(),
                         &schedule,
                         &rating_inputs,
                         scheduled_games,
@@ -731,7 +732,8 @@ pub(crate) async fn run_tournament_command(
         }
     };
     let final_block = tournament_progress_block(
-        &progress_observer,
+        &progress_observer.evidence(),
+        progress_observer.engine_faults(),
         &schedule,
         &rating_inputs,
         scheduled_games,
@@ -895,15 +897,16 @@ pub(crate) struct TournamentRatingInputs {
 ///
 /// The standings are produced by the same joint recompute the final result
 /// uses, on the games committed so far, so the header never disagrees with the
-/// result that follows it.
+/// result that follows it. `evidence` and `engine_faults` are what
+/// [`DurableTournamentOutput`] has committed so far.
 pub(crate) fn tournament_progress_block(
-    observer: &DurableTournamentOutput,
+    evidence: &[TournamentCompletedGame],
+    engine_faults: u64,
     schedule: &ProgressSchedule,
     inputs: &TournamentRatingInputs,
     scheduled_games: u64,
     max_engine_faults: u32,
 ) -> ProgressBlock {
-    let evidence = observer.evidence();
     let done = evidence.len() as u64;
     let mut block = ProgressBlock::new(
         "tournament",
@@ -914,7 +917,7 @@ pub(crate) fn tournament_progress_block(
     );
     match RateTournament::execute_with_fixed_field(
         &inputs.plan,
-        &evidence,
+        evidence,
         inputs.anchor,
         &inputs.fixed_ratings,
     ) {
@@ -946,10 +949,7 @@ pub(crate) fn tournament_progress_block(
     }
     block.field(
         "faults",
-        format!(
-            "engine {}; {max_engine_faults} allowed",
-            observer.engine_faults()
-        ),
+        format!("engine {engine_faults}; {max_engine_faults} allowed"),
     );
     if let Some(rate) =
         progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
@@ -1108,5 +1108,91 @@ impl tournament_driver::TournamentObserver for DurableTournamentOutput {
             self.writer.checkpoint(state.checkpoint())?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use super::*;
+
+    #[test]
+    fn a_tournament_block_names_the_standings_header() {
+        let participants = (1..=3)
+            .map(|index: u128| TournamentParticipant {
+                participant: RuntimeParticipant {
+                    id: ParticipantId::from_u128(index),
+                    launch: EngineLaunchSpec::path_only(format!("engine-{index}").into()),
+                },
+                initial_rating: 1_500.0,
+            })
+            .collect();
+        let plan = PlanTournament::execute(
+            participants,
+            TournamentDesign {
+                format: colosseum_core::Format::RoundRobin { cycles: 1 },
+                games_per_pair: 2,
+            },
+        )
+        .unwrap();
+        // The first participant wins every game it plays; the others draw.
+        let first = ParticipantId::from_u128(1);
+        let evidence = plan
+            .schedule
+            .iter()
+            .map(|game| TournamentCompletedGame {
+                number: game.number,
+                white: game.white,
+                black: game.black,
+                result: if game.white == first {
+                    GameResult::WhiteWin
+                } else if game.black == first {
+                    GameResult::BlackWin
+                } else {
+                    GameResult::Draw
+                },
+                scorable: true,
+                termination: Termination::Checkmate,
+            })
+            .collect::<Vec<_>>();
+        let scheduled = evidence.len() as u64;
+        let inputs = TournamentRatingInputs {
+            plan,
+            anchor: None,
+            fixed_ratings: Vec::new(),
+        };
+        let block = tournament_progress_block(
+            &evidence,
+            1,
+            &ProgressSchedule::started_at(4, 1, 0, Instant::now()),
+            &inputs,
+            scheduled,
+            999,
+        );
+        let text = block.render();
+        assert!(
+            text.starts_with("progress [tournament]: 6/6 games (100%),"),
+            "{text}"
+        );
+        assert!(text.contains("  scored          6 games\n"), "{text}");
+        // One labelled header, then a ranked row per participant under it,
+        // each with the error bar the rating step produced.
+        let rows = block
+            .fields
+            .iter()
+            .filter(|field| field.label == "standings" || field.label.is_empty())
+            .map(|field| field.value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 3, "{text}");
+        assert_eq!(block.fields[1].label, "standings", "{text}");
+        assert!(rows[0].starts_with("1. engine-1 "), "{text}");
+        assert!(rows[0].ends_with(" 4/4 points"), "{text}");
+        for (rank, row) in rows.iter().enumerate() {
+            assert!(row.starts_with(&format!("{}. ", rank + 1)), "{text}");
+            assert!(row.contains(" +/- "), "no error bar in:\n{text}");
+        }
+        assert!(text.contains("engine 1; 999 allowed"), "{text}");
+        assert!(text.contains("time remaining  0s"), "{text}");
     }
 }

@@ -687,3 +687,96 @@ pub(crate) fn abnormal_games(games: &[match_runner::MatchGame]) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+
+#[cfg(test)]
+mod tests {
+    use colosseum_engine::{ClockAccountingReport, EngineFaultKind, GameFault, GameSide};
+
+    use super::*;
+
+    fn game(
+        number: u32,
+        termination: Termination,
+        fault: Option<GameFault>,
+    ) -> match_runner::MatchGame {
+        match_runner::MatchGame {
+            number,
+            white: match_runner::MatchSide::A,
+            result: GameResult::BlackWin,
+            scorable: true,
+            termination,
+            clock_accounting: ClockAccountingReport {
+                model: "test".into(),
+                version: 1,
+                white_margin_ms: 0,
+                black_margin_ms: 0,
+                monotonic_resolution_ns: 1,
+                white_charged_elapsed: None,
+                black_charged_elapsed: None,
+                white_round_trip: None,
+                black_round_trip: None,
+                phases: None,
+            },
+            opening: match_runner::OpeningAssignment {
+                book_index: None,
+                label: "startpos".into(),
+            },
+            fault,
+            error: None,
+            pgn: String::new(),
+            slot: None,
+        }
+    }
+
+    fn engine_fault(kind: EngineFaultKind) -> Option<GameFault> {
+        Some(GameFault::Engine {
+            side: GameSide::White,
+            kind,
+            message: "injected".into(),
+        })
+    }
+
+    /// A final report counts the games that ended badly; it never lists them.
+    #[test]
+    fn a_match_report_summarises_abnormal_games_instead_of_listing_them() {
+        assert_eq!(abnormal_games(&[]), "none");
+        let clean = game(1, Termination::Checkmate, None);
+        assert_eq!(abnormal_games(std::slice::from_ref(&clean)), "none");
+        let games = [
+            clean,
+            game(
+                2,
+                Termination::IllegalMove,
+                engine_fault(EngineFaultKind::IllegalMove),
+            ),
+            game(
+                3,
+                Termination::TimeForfeit,
+                engine_fault(EngineFaultKind::Timeout),
+            ),
+            game(
+                4,
+                Termination::IllegalMove,
+                engine_fault(EngineFaultKind::IllegalMove),
+            ),
+            game(
+                5,
+                Termination::EngineCrash,
+                engine_fault(EngineFaultKind::Crash),
+            ),
+            game(
+                6,
+                Termination::Aborted,
+                Some(GameFault::Infrastructure {
+                    operation: "spawn".into(),
+                    message: "injected".into(),
+                }),
+            ),
+        ];
+        // One count per kind, in a stable order, and no per-game lines.
+        assert_eq!(
+            abnormal_games(&games),
+            "aborted 1, engine crash 1, illegal move 2, time forfeit 1"
+        );
+    }
+}

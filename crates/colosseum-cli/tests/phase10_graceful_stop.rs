@@ -25,6 +25,12 @@ fn engine() -> &'static Path {
     Path::new(env!("CARGO_BIN_EXE_colosseum-cli"))
 }
 
+/// A small ordinary UCI executable with a `Hash` option, for a tune whose
+/// games are synthetic and whose engine is only probed and hashed.
+fn probed_engine() -> &'static Path {
+    Path::new(env!("CARGO_BIN_EXE_colosseum-uci-fixture"))
+}
+
 fn json(output: std::process::Output) -> Value {
     serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
@@ -82,7 +88,7 @@ fn a_fixed_match_stops_cleanly_and_resumes_to_the_uninterrupted_result() {
     stub_pair(&mut command);
     let expected = json(
         command
-            .args(["--games", "8", "--dir"])
+            .args(["--games", "4", "--dir"])
             .arg(&uninterrupted)
             .output()
             .unwrap(),
@@ -91,13 +97,13 @@ fn a_fixed_match_stops_cleanly_and_resumes_to_the_uninterrupted_result() {
     let run = root.path().join("stopped");
     let mut command = cli();
     command
-        .args(["--__stop-after-units", "3"])
+        .args(["--__stop-after-units", "2"])
         .arg("match")
         .arg(engine())
         .arg(engine());
     stub_pair(&mut command);
     let stopped = command
-        .args(["--games", "8", "--dir"])
+        .args(["--games", "4", "--dir"])
         .arg(&run)
         .output()
         .unwrap();
@@ -106,7 +112,7 @@ fn a_fixed_match_stops_cleanly_and_resumes_to_the_uninterrupted_result() {
     assert_eq!(stopped["report"]["status"], "cancelled");
     let played = stopped["report"]["games"].as_array().unwrap().len();
     assert!(
-        (3..8).contains(&played),
+        (2..4).contains(&played),
         "a clean stop should keep the games already played and launch no more, got {played}"
     );
     assert_eq!(record(&run)["status"], "cancelled");
@@ -120,7 +126,7 @@ fn a_fixed_match_stops_cleanly_and_resumes_to_the_uninterrupted_result() {
     command.arg("match").arg(engine()).arg(engine());
     stub_pair(&mut command);
     let resumed = command
-        .args(["--games", "8", "--dir"])
+        .args(["--games", "4", "--dir"])
         .arg(&run)
         .output()
         .unwrap();
@@ -151,7 +157,7 @@ fn an_sprt_stops_cleanly_without_claiming_a_verdict_and_resumes() {
                 "--preset",
                 "gainer",
                 "--max-pairs",
-                "4",
+                "2",
                 "--max-engine-faults",
                 "1000",
                 "--max-time-losses",
@@ -168,7 +174,7 @@ fn an_sprt_stops_cleanly_without_claiming_a_verdict_and_resumes() {
     let run = root.path().join("stopped");
     let mut command = cli();
     command
-        .args(["--__stop-after-units", "2"])
+        .args(["--__stop-after-units", "1"])
         .arg("sprt")
         .arg(engine())
         .arg(engine());
@@ -178,7 +184,7 @@ fn an_sprt_stops_cleanly_without_claiming_a_verdict_and_resumes() {
             "--preset",
             "gainer",
             "--max-pairs",
-            "4",
+            "2",
             "--max-engine-faults",
             "1000",
             "--max-time-losses",
@@ -207,7 +213,7 @@ fn an_sprt_stops_cleanly_without_claiming_a_verdict_and_resumes() {
                 "--preset",
                 "gainer",
                 "--max-pairs",
-                "4",
+                "2",
                 "--max-engine-faults",
                 "1000",
                 "--max-time-losses",
@@ -233,13 +239,13 @@ fn a_calibration_stops_cleanly_rather_than_classifying_a_short_sample() {
     let run = root.path().join("stopped");
     let mut command = cli();
     command
-        .args(["--__stop-after-units", "2"])
+        .args(["--__stop-after-units", "1"])
         .arg("calibrate")
         .arg(engine())
         .arg(engine());
     stub_pair(&mut command);
     let stopped = command
-        .args(["--games", "8", "--dir"])
+        .args(["--games", "4", "--dir"])
         .arg(&run)
         .output()
         .unwrap();
@@ -256,14 +262,17 @@ fn a_calibration_stops_cleanly_rather_than_classifying_a_short_sample() {
     assert_eq!(record(&run)["status"], "cancelled");
 }
 
-#[test]
-fn a_tournament_stops_cleanly_and_resumes_to_the_uninterrupted_standings() {
+/// Stop a three-engine tournament of `format` after two games, resume it, and
+/// compare it with the same tournament played straight through.
+fn assert_tournament_stops_and_resumes(format: &[&str]) {
     let root = tempfile::tempdir().unwrap();
 
     let arguments = |directory: &Path| {
         let mut command = cli();
         command
-            .args(["tournament", "run", "--engine"])
+            .args(["tournament", "run"])
+            .args(format)
+            .arg("--engine")
             .arg(engine())
             .arg("--engine")
             .arg(engine())
@@ -309,9 +318,35 @@ fn a_tournament_stops_cleanly_and_resumes_to_the_uninterrupted_standings() {
     let resumed = json(arguments(&run).output().unwrap());
     assert_eq!(resumed["report"]["status"], "completed");
     assert_eq!(
+        resumed["report"]["plan"]["schedule"], expected["report"]["plan"]["schedule"],
+        "the resumed run planned a different schedule"
+    );
+    assert_eq!(
         resumed["report"]["results"], expected["report"]["results"],
         "resumed standings differ from the uninterrupted run"
     );
+    let record = record(&run);
+    assert_eq!(record["status"], "completed");
+    assert!(
+        record["anomalies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|anomaly| anomaly["code"] == "run-resumed"),
+        "the resume is not on the record: {record}"
+    );
+}
+
+#[test]
+fn a_tournament_stops_cleanly_and_resumes_to_the_uninterrupted_standings() {
+    assert_tournament_stops_and_resumes(&[]);
+}
+
+/// Two seeds against one opponent: a multi-seed gauntlet resumes onto the
+/// schedule and standings it would have reached uninterrupted.
+#[test]
+fn a_gauntlet_stops_cleanly_and_resumes_to_the_uninterrupted_standings() {
+    assert_tournament_stops_and_resumes(&["--format", "gauntlet", "--seeds", "2"]);
 }
 
 #[test]
@@ -345,6 +380,13 @@ fn a_position_suite_stops_cleanly_and_resumes_without_repeating_a_position() {
         .args(["--__stop-after-units", "2"])
         .output()
         .unwrap();
+    // Every driver that writes `cancelled` exits with the same code, so a
+    // script does not have to know which command it interrupted.
+    assert_eq!(
+        stopped.status.code(),
+        Some(CANCELLED),
+        "a cancelled suite must exit like every other cancelled run"
+    );
     let stopped_value = json(stopped);
     let searched = stopped_value["report"]["results"].as_array().unwrap().len();
     assert!(
@@ -382,15 +424,14 @@ fn an_spsa_tune_stops_cleanly_between_iterations_and_resumes_the_schedule() {
         let mut command = cli();
         command
             .arg("spsa")
-            .arg(engine())
-            .arg("--engine-arg=__uci-stub")
+            .arg(probed_engine())
             .arg("--tune")
             .arg(&tune)
             .args([
                 "--r-end",
                 "0.002",
                 "--iterations",
-                "4",
+                "2",
                 "--games-per-iteration",
                 "2",
                 "--depth",
@@ -399,6 +440,9 @@ fn an_spsa_tune_stops_cleanly_between_iterations_and_resumes_the_schedule() {
                 "2",
                 "--seed",
                 "7",
+                // Instant in-process games: the stop and the resumed schedule
+                // are the driver's, not the engines'.
+                "--__synthetic-games",
                 "--dir",
             ])
             .arg(directory);
@@ -411,7 +455,7 @@ fn an_spsa_tune_stops_cleanly_between_iterations_and_resumes_the_schedule() {
     let run = root.path().join("stopped");
     let mut command = arguments(&run);
     let stopped = command
-        .args(["--__stop-after-units", "2"])
+        .args(["--__stop-after-units", "1"])
         .output()
         .unwrap();
     assert_eq!(stopped.status.code(), Some(CANCELLED));
@@ -422,7 +466,7 @@ fn an_spsa_tune_stops_cleanly_between_iterations_and_resumes_the_schedule() {
             .as_array()
             .unwrap()
             .len(),
-        2
+        1
     );
     assert_eq!(record(&run)["status"], "cancelled");
     assert_eq!(status_of(&run), "cancelled");

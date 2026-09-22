@@ -183,11 +183,11 @@ pub async fn run_pair_schedule(
             }
         }
     }
-    // A stop only cancels a schedule that still had pairs to play. Reaching
-    // the cap is an inconclusive result in its own right, and an interrupt
-    // arriving while the final pair is being joined does not take that away.
-    let stopped = cancelled || request.cancellation.stopping();
-    let cancelled = stopped && (official_pairs.len() as u32) < request.design.max_pairs;
+    let cancelled = stop_cancels(
+        cancelled || request.cancellation.stopping(),
+        official_pairs.len(),
+        request.design.max_pairs,
+    );
     Ok(PairScheduleReport {
         cancelled,
         max_pairs: request.design.max_pairs,
@@ -199,6 +199,14 @@ pub async fn run_pair_schedule(
         invalid_pair: accumulator.invalid_pair,
         faults: accumulator.faults,
     })
+}
+
+/// Whether a stop cancels the schedule. A stop only cancels a schedule that
+/// still had pairs to play. Reaching the cap is an inconclusive result in its
+/// own right, and an interrupt arriving while the final pair is being joined
+/// does not take that away.
+fn stop_cancels(stopped: bool, official_pairs: usize, max_pairs: u32) -> bool {
+    stopped && official_pairs < max_pairs as usize
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -432,6 +440,73 @@ mod tests {
                 None,
             ),
         }
+    }
+
+    fn schedule_report(
+        stopped: bool,
+        official_pairs: usize,
+        max_pairs: u32,
+        statistics: Option<PentanomialSprtResult>,
+    ) -> PairScheduleReport {
+        PairScheduleReport {
+            cancelled: stop_cancels(stopped, official_pairs, max_pairs),
+            max_pairs,
+            official_pairs: Vec::new(),
+            post_terminal_pairs: Vec::new(),
+            pentanomial: [0; 5],
+            statistics,
+            terminal_pair: None,
+            invalid_pair: None,
+            faults: MatchFaultCounts::default(),
+        }
+    }
+
+    /// A schedule that reached its cap without crossing a boundary is
+    /// inconclusive. An interrupt during its final pair does not take that
+    /// away.
+    #[test]
+    fn an_sprt_that_reached_its_cap_keeps_the_inconclusive_verdict() {
+        let report = schedule_report(true, 2, 2, None);
+        assert!(!report.cancelled);
+        assert_eq!(report.status(), SprtStatus::Inconclusive);
+    }
+
+    /// Stopping with pairs still to play is a cancellation, and only a stop
+    /// makes one.
+    #[test]
+    fn an_sprt_with_pairs_left_to_play_is_cancelled_only_by_a_stop() {
+        let stopped = schedule_report(true, 1, 2, None);
+        assert!(stopped.cancelled);
+        assert_eq!(stopped.status(), SprtStatus::Cancelled);
+        let running = schedule_report(false, 1, 2, None);
+        assert!(!running.cancelled);
+        assert_eq!(running.status(), SprtStatus::Inconclusive);
+    }
+
+    /// A boundary already crossed is the verdict, whatever stopped the
+    /// schedule afterwards.
+    #[test]
+    fn a_stopped_sprt_that_crossed_a_boundary_keeps_its_verdict() {
+        let mut vector = PentanomialVector::default();
+        for _ in 0..200 {
+            vector.record_pair(PairGameResult::Win, PairGameResult::Win);
+            vector.record_pair(PairGameResult::Win, PairGameResult::Draw);
+        }
+        let design = SprtDesign::new(SprtBundle::Gainer.defaults(), 1_000, None).unwrap();
+        let parameters = design.parameters;
+        let statistics = pentanomial_sprt(
+            &vector,
+            parameters.model,
+            parameters.elo0,
+            parameters.elo1,
+            parameters.alpha,
+            parameters.beta,
+        )
+        .unwrap();
+        assert_eq!(statistics.decision, SprtDecision::AcceptH1);
+        let report = schedule_report(true, 400, 1_000, Some(statistics));
+        assert!(report.cancelled);
+        assert_eq!(report.status(), SprtStatus::H1);
     }
 
     #[test]

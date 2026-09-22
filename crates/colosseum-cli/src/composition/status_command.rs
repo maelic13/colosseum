@@ -159,3 +159,46 @@ pub(crate) fn first_block_due(record: &RunRecord) -> String {
         record.official_sample.committed_units
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(workflow: Value, committed_units: u64) -> RunRecord {
+        RunRecord {
+            schema_version: 1,
+            stats_version: colosseum_core::STATS_VERSION,
+            product_version: "test".into(),
+            command: "match".into(),
+            config_sha256: String::new(),
+            status: RunStatus::Running,
+            started_unix_ms: 0,
+            updated_unix_ms: 0,
+            official_sample: OfficialSample {
+                committed_units,
+                ..OfficialSample::default()
+            },
+            progress: None,
+            host: crate::HostSummary::current(),
+            workflow,
+            anomalies: Vec::new(),
+        }
+    }
+
+    /// A run that has printed no block yet says when its first is due, from
+    /// the schedule it recorded, rather than only that none was published.
+    #[test]
+    fn status_before_the_first_block_says_when_it_is_due() {
+        let scheduled = record(
+            json!({"progress": {"every": 20, "unit": "games", "min_secs": 5}}),
+            3,
+        );
+        assert_eq!(
+            first_block_due(&scheduled),
+            "none published yet; the first block is due once 20 games have been committed in this invocation (3 committed in total so far), and no sooner than 5 s after it started"
+        );
+        // A run that recorded no schedule claims nothing about one.
+        let unscheduled = record(json!({"applicability": "not-yet-populated"}), 0);
+        assert_eq!(first_block_due(&unscheduled), "none published yet");
+    }
+}
