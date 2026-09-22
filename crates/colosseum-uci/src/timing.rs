@@ -259,6 +259,50 @@ mod tests {
         assert_eq!(timing.last_info_lag_ns(), None);
     }
 
+    fn sample(cpu_ms: u64, kernel_ms: u64, page_faults: u64) -> ProcessSample {
+        ProcessSample {
+            cpu_ns: cpu_ms * 1_000_000,
+            kernel_ns: kernel_ms * 1_000_000,
+            page_faults,
+        }
+    }
+
+    /// Held time is charged time the process spent not running. An engine
+    /// that sleeps through an 80 ms search consumes almost no CPU and is held
+    /// for almost all of it; one that spins consumes it all and is held for
+    /// none; one that searches on two threads consumes more than wall time.
+    #[test]
+    fn a_sleeping_engine_is_held_and_a_spinning_one_is_not() {
+        let go = Instant::now();
+        let searched = |cpu_ms: u64| {
+            let mut timing = SearchTiming::new(go, go, go + ms(1_000));
+            timing.bestmove_arrived = Some(go + ms(80));
+            timing.process_at_go = Some(sample(500, 100, 1_000));
+            timing.process_at_answer = Some(sample(500 + cpu_ms, 116, 1_025));
+            timing
+        };
+        let sleeping = searched(1);
+        assert_eq!(sleeping.held_ns(), Some(79_000_000));
+        assert_eq!(sleeping.kernel_ns(), Some(16_000_000));
+        assert_eq!(sleeping.page_faults(), Some(25));
+        assert_eq!(searched(80).held_ns(), Some(0));
+        assert_eq!(searched(160).held_ns(), Some(-80_000_000));
+
+        // Without both readings, or without an answer, nothing is claimed.
+        let mut unread = searched(1);
+        unread.process_at_answer = None;
+        assert_eq!(unread.held_ns(), None);
+        assert_eq!(unread.kernel_ns(), None);
+        let mut unanswered = searched(1);
+        unanswered.bestmove_arrived = None;
+        assert_eq!(unanswered.held_ns(), None);
+        // A counter that went backwards is no reading.
+        let mut reset = searched(1);
+        reset.process_at_answer = Some(sample(0, 0, 0));
+        assert_eq!(reset.held_ns(), None);
+        assert_eq!(reset.page_faults(), None);
+    }
+
     #[test]
     fn an_engine_reporting_more_than_it_was_charged_has_negative_overhead() {
         let go = Instant::now();
