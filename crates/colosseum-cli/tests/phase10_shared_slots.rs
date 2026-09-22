@@ -4,6 +4,11 @@
 //! other waits on a pipe, so pinning them separately leaves half the pool
 //! idle. These cases pin the contract that made a one-thread gate at
 //! concurrency 14 fit on a 16-core host instead of being refused.
+//!
+//! Only the command-line contract is asserted here, on every host alike: the
+//! core sets a mode hands out, and the pool arithmetic it refuses with, depend
+//! on the host's CPUs and are unit-tested against synthetic topologies in
+//! `match_runner`.
 
 use std::process::Command;
 
@@ -109,68 +114,10 @@ fn ponder_requires_the_disjoint_allocation_on_every_command() {
             "{arguments:?} refusal does not name the disjoint mode: {stderr}"
         );
     }
-
-    // With the disjoint mode named, the same invocation resolves.
-    let value = dry_run(&[
-        "match",
-        "--games",
-        "2",
-        "a",
-        "b",
-        "--ponder",
-        "--cores-per-engine",
-        "1",
-    ]);
-    assert_eq!(value["resolved_configuration"]["ponder"], true);
-    assert_eq!(
-        value["resolved_configuration"]["execution"]["allocation"]["mode"],
-        "per-engine"
-    );
-}
-
-/// The pool arithmetic each mode uses, named in the refusal when it does not
-/// fit. How many physical cores a logical-CPU list covers depends on the host,
-/// so the exact slot division is asserted against recorded topologies in
-/// `colosseum-engine` rather than against whichever machine runs this.
-#[test]
-fn a_pool_too_small_refuses_and_names_the_arithmetic_it_applied() {
-    let shared = refusal(&[
-        "match",
-        "--games",
-        "2",
-        "a",
-        "b",
-        "--placement",
-        "0-1",
-        "--concurrency",
-        "100000",
-    ]);
-    assert!(
-        shared.contains("game-slots × cores-per-game"),
-        "shared refusal must name its arithmetic: {shared}"
-    );
-
-    let disjoint = refusal(&[
-        "match",
-        "--games",
-        "2",
-        "a",
-        "b",
-        "--placement",
-        "0-1",
-        "--concurrency",
-        "100000",
-        "--cores-per-engine",
-        "1",
-    ]);
-    assert!(
-        disjoint.contains("game-slots × 2 × cores-per-engine"),
-        "disjoint refusal must name its arithmetic: {disjoint}"
-    );
 }
 
 #[test]
-fn the_run_record_carries_the_mode_and_every_allocation() {
+fn the_run_record_carries_the_allocation_mode() {
     let root = tempfile::tempdir().unwrap();
     let run = root.path().join("run");
     let binary = std::path::Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
@@ -189,8 +136,6 @@ fn the_run_record_carries_the_mode_and_every_allocation() {
             "5",
             "--max-moves",
             "2",
-            "--placement",
-            "0-1",
             "--max-engine-faults",
             "99",
             "--dir",
@@ -209,10 +154,4 @@ fn the_run_record_carries_the_mode_and_every_allocation() {
     let execution = &record["workflow"]["execution"];
     assert_eq!(execution["allocation"]["mode"], "shared");
     assert_eq!(execution["allocation"]["cores_per_game"], 1);
-    let slot = &execution["slots"][0];
-    assert_eq!(
-        slot["engine_a"]["allocation"],
-        slot["engine_b"]["allocation"]
-    );
-    assert_eq!(slot["engine_a"]["physical_core_count"], 1);
 }

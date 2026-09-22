@@ -333,20 +333,7 @@ pub(crate) fn print_spsa_plan(report: &SpsaPlanReport) {
         report.checkpoint_generations_retained,
         report.schedule_artifacts
     );
-    if let Some(timing) = &report.wall_time {
-        println!(
-            "estimated wall time: {:.1}..{:.1} hours ({:.0}..{:.0} seconds; {} concurrent, {} waves of up to {} games)",
-            timing.lower_seconds / 3_600.0,
-            timing.upper_seconds / 3_600.0,
-            timing.lower_seconds,
-            timing.upper_seconds,
-            timing.concurrency,
-            timing.total_game_waves,
-            timing.concurrency
-        );
-    } else {
-        println!("estimated wall time: unavailable (supply a seconds/game range or pilot samples)");
-    }
+    println!("{}", wall_time_line(report));
     let shape = &report.wave_shape;
     println!(
         "waves: {} games per iteration on {} slots run as {} waves of up to {} games; the last runs {} games with {} slots idle; expected occupancy {:.0}%",
@@ -395,6 +382,25 @@ pub(crate) fn print_spsa_plan(report: &SpsaPlanReport) {
         );
     }
     println!("interpretation: {}", report.interpretation);
+}
+
+/// The plan's wall-time estimate, from the wave model, in hours.
+fn wall_time_line(report: &SpsaPlanReport) -> String {
+    match &report.wall_time {
+        Some(timing) => format!(
+            "estimated wall time: {:.1}..{:.1} hours ({:.0}..{:.0} seconds; {} concurrent, {} waves of up to {} games)",
+            timing.lower_seconds / 3_600.0,
+            timing.upper_seconds / 3_600.0,
+            timing.lower_seconds,
+            timing.upper_seconds,
+            timing.concurrency,
+            timing.total_game_waves,
+            timing.concurrency
+        ),
+        None => {
+            "estimated wall time: unavailable (supply a seconds/game range or pilot samples)".into()
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -468,11 +474,11 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
         }
     };
     let has_invalid = records.iter().any(|record| record.sample == INVALID_SAMPLE);
-    let replay = match spsa_driver::replay_iterations(
+    let replay = match replay_journal(
         verified_schedule,
         workflow.settings,
         workflow.bound_tune.initial_centers(),
-        &iterations_from_journal(&records),
+        records,
     ) {
         Ok(replay) => replay,
         Err(error) => {
@@ -480,7 +486,6 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    drop(records);
     let centers = replay
         .completed_iterations
         .iter()
@@ -1058,11 +1063,14 @@ pub(crate) async fn run_spsa_command(
     }
     // Iteration boundaries and every centre are recomputed from the games,
     // never read back from a stored copy of the state.
-    let replay = match spsa_driver::replay_iterations(
+    // The replay consumes the journal's games: once they have given their
+    // summaries, a long tune does not carry every game it resumed over to its
+    // end.
+    let replay = match replay_journal(
         verified_schedule.clone(),
         settings,
         bound_tune.initial_centers(),
-        &iterations_from_journal(&journal_records),
+        journal_records,
     ) {
         Ok(replay) => replay,
         Err(error) => {
@@ -1070,9 +1078,6 @@ pub(crate) async fn run_spsa_command(
             return ExitCode::from(3);
         }
     };
-    // The replayed games have given their summaries; a long tune would
-    // otherwise carry every game it resumed over to its end.
-    drop(journal_records);
     let writer = match RunWriter::start(Arc::clone(&directory), journal_resume).await {
         Ok(writer) => writer,
         Err(error) => {
@@ -1876,6 +1881,21 @@ impl spsa_driver::SpsaObserver for DurableSpsaOutput {
     }
 }
 
+/// Rebuild a tune's committed iterations from its journal records.
+///
+/// The records are taken by value and nothing of them is returned but the
+/// summaries: a resumed tune cannot keep the games it replayed.
+fn replay_journal(
+    schedule: colosseum_application::VerifiedSpsaSchedule,
+    settings: SpsaRunSettings,
+    initial_centers: Vec<f64>,
+    records: Vec<crate::journal::GameRecord>,
+) -> Result<spsa_driver::SpsaReplay, spsa_driver::SpsaDriverError> {
+    let iterations = iterations_from_journal(&records);
+    drop(records);
+    spsa_driver::replay_iterations(schedule, settings, initial_centers, iterations)
+}
+
 pub(crate) fn spsa_official_sample(iterations: u64, settings: SpsaRunSettings) -> OfficialSample {
     let pairs = iterations * u64::from(settings.pairs_per_iteration());
     OfficialSample {
@@ -2180,5 +2200,133 @@ pub(crate) fn print_spsa_tune_warning(warning: &SpsaTuneWarning) {
         } => eprintln!(
             "SPSA tune warning: {name:?} starts on its upper rail ({initial} = {rail}); its initial gradient is one-sided"
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use colosseum_application::{SpsaIterationTransition, SpsaTuningState, VerifiedSpsaSchedule};
+
+    /// The aggregate of a one-knob tune after `completed` iterations, standing
+    /// on the centres of its first.
+    fn aggregate(completed: u64) -> SpsaAggregate {
+        let artifact = SpsaScheduleArtifact::derive(
+            5_000,
+            0.01,
+            7,
+            &[SpsaEndSpec {
+                name: "Hash".into(),
+                min: 1,
+                max: 1024,
+                c_end: 1.0,
+            }],
+        )
+        .unwrap();
+        let schedule = VerifiedSpsaSchedule::verify_written(&artifact, artifact.clone()).unwrap();
+        let settings = SpsaRunSettings::new(5_000, 2).unwrap();
+        let mut state = SpsaTuningState::resume(schedule, settings, vec![16.0], &[]).unwrap();
+        let prepared = state.prepare_next().unwrap().unwrap();
+        let score = colosseum_application::SpsaMiniMatchScore {
+            plus_wins: 1,
+            plus_losses: 0,
+            draws: 1,
+            difference: 1,
+        };
+        let SpsaIterationTransition::Committed(update) =
+            state.commit_iteration(prepared, 1, Some(score), 0).unwrap()
+        else {
+            panic!("a scored iteration commits");
+        };
+        SpsaAggregate {
+            completed,
+            last: Some(spsa_driver::SpsaCommittedIteration {
+                iteration: update.iteration,
+                centers_before: update.centers_before,
+                prepared: update.prepared,
+                score: update.score,
+                centers_after: update.centers_after,
+                faults: MatchFaultCounts::default(),
+                games: spsa_driver::SpsaJournalGames { first: 1, last: 2 },
+            }),
+            faults: MatchFaultCounts::default(),
+            invalid: None,
+            cadence: CheckpointCadence::new(),
+        }
+    }
+
+    /// A checkpoint is what every commit of a tune writes, so its cost must
+    /// not grow with the tune: it names the iteration it reached and the
+    /// centres it stands on, never the iterations behind it.
+    #[test]
+    fn a_checkpoint_is_as_small_at_the_last_iteration_as_at_the_first() {
+        let first = serde_json::to_string(&aggregate(1).checkpoint()).unwrap();
+        let last = serde_json::to_string(&aggregate(5_000).checkpoint()).unwrap();
+        let keys = |text: &str| {
+            serde_json::from_str::<Value>(text)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(keys(&first), keys(&last));
+        // Only the iteration count's digits differ.
+        assert_eq!(last.len() - first.len(), "5000".len() - "1".len(), "{last}");
+    }
+
+    /// A budget in games derives the iteration count, and one the mini-match
+    /// does not divide is refused with the nearest budgets it does.
+    #[test]
+    fn a_game_budget_sets_the_horizon_and_is_refused_when_it_does_not_divide() {
+        assert_eq!(spsa_iterations(None, Some(168_000), 42), Ok(4_000));
+        assert_eq!(spsa_iterations(None, Some(168_000), 32), Ok(5_250));
+        assert_eq!(spsa_iterations(Some(10), None, 42), Ok(10));
+        assert_eq!(spsa_iterations(None, None, 42), Ok(DEFAULT_SPSA_ITERATIONS));
+
+        let refused = spsa_iterations(None, Some(160_000), 42).unwrap_err();
+        assert!(
+            refused.contains("--total-games 160000 is not a multiple of 42 games per iteration")
+                && refused.contains("159978 (3809 iterations) or 160020 (3810 iterations)"),
+            "{refused}"
+        );
+        let below_one = spsa_iterations(None, Some(10), 42).unwrap_err();
+        assert!(below_one.contains("42 (1 iteration)"), "{below_one}");
+    }
+
+    /// The plan takes the same budget and reports hours from the wave model:
+    /// 4,000 iterations of three full waves of 14 games are 12,000 waves of
+    /// 8..10 seconds.
+    #[test]
+    fn a_plan_reports_its_wall_time_in_hours_from_the_wave_model() {
+        let tune = colosseum_application::SpsaTune {
+            parameters: vec![colosseum_application::SpsaTuneParameter {
+                name: "Hash".into(),
+                initial: 16,
+                min: 1,
+                max: 1024,
+                c_end: 1.0,
+            }],
+        };
+        let iterations = spsa_iterations(None, Some(168_000), 42).unwrap();
+        let report = plan_spsa(
+            &tune,
+            SpsaRunSettings::new(iterations, 42).unwrap(),
+            0.002,
+            14,
+            Some(SpsaTimingInput::Range {
+                lower_seconds_per_game: 8.0,
+                upper_seconds_per_game: 10.0,
+            }),
+            &[],
+        )
+        .unwrap();
+        let line = wall_time_line(&report);
+        assert!(
+            line.starts_with("estimated wall time: 26.7..33.3 hours")
+                && line.contains("12000 waves of up to 14 games"),
+            "{line}"
+        );
     }
 }

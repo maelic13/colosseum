@@ -16,11 +16,12 @@ use colosseum_core::{
     Termination, TimeControl, is_hash_option,
 };
 use colosseum_engine::{
-    ClockAccountingReport, CoreClass, CpuPlacementPolicy, EngineCpuPlacement, EngineFaultKind,
-    EngineGameSpec, GameFault, GamePairIdentity, GameSide, GameSlotCpuAllocation, GameSpec,
-    KeptEngine, LiveGameState, OpeningList, ResolvedOpening, SlotAllocation, allocate_game_slots,
-    detect_allowed_cpu_set, detect_cpu_characteristics, detect_cpu_topology, load_openings_named,
-    plan_cpu_placement, run_game, run_game_keeping,
+    AllowedCpuSet, ClockAccountingReport, CoreClass, CpuCharacteristics, CpuPlacementPolicy,
+    CpuTopology, EngineCpuPlacement, EngineFaultKind, EngineGameSpec, GameFault, GamePairIdentity,
+    GameSide, GameSlotCpuAllocation, GameSpec, KeptEngine, LiveGameState, OpeningList,
+    ResolvedOpening, SlotAllocation, allocate_game_slots, detect_allowed_cpu_set,
+    detect_cpu_characteristics, detect_cpu_topology, load_openings_named, plan_cpu_placement,
+    run_game, run_game_keeping,
 };
 use colosseum_uci::SpawnOptions;
 use serde::{Deserialize, Serialize};
@@ -974,7 +975,57 @@ fn synthetic_game(
     }
 }
 
+/// The host's CPUs as the operating system reports them: what a placement
+/// policy other than `off` divides between game slots.
+#[derive(Debug, Clone)]
+pub struct HostCpus {
+    pub topology: CpuTopology,
+    pub allowed: AllowedCpuSet,
+    pub characteristics: CpuCharacteristics,
+}
+
+impl HostCpus {
+    /// Read the host's topology, the CPUs this process may use and what the
+    /// operating system says about each core.
+    pub fn detect() -> Result<Self, MatchError> {
+        let topology =
+            detect_cpu_topology().map_err(|error| MatchError::Placement(error.to_string()))?;
+        let allowed = detect_allowed_cpu_set(&topology)
+            .map_err(|error| MatchError::Placement(error.to_string()))?;
+        let characteristics = detect_cpu_characteristics(&topology)
+            .map_err(|error| MatchError::Placement(error.to_string()))?;
+        Ok(Self {
+            topology,
+            allowed,
+            characteristics,
+        })
+    }
+}
+
 pub fn plan_execution(
+    engine_a: &EngineLaunchSpec,
+    engine_b: &EngineLaunchSpec,
+    concurrency: usize,
+    allocation: SlotAllocation,
+    placement_policy: CpuPlacementPolicy,
+    trusted_memory_budget_mb: Option<u64>,
+) -> Result<MatchExecutionPlan, MatchError> {
+    plan_execution_on(
+        HostCpus::detect,
+        engine_a,
+        engine_b,
+        concurrency,
+        allocation,
+        placement_policy,
+        trusted_memory_budget_mb,
+    )
+}
+
+/// [`plan_execution`] against the CPUs `host` reports. The host is read only
+/// when the placement policy needs it, so `off` and direct CPU requests plan
+/// the same on every machine.
+pub fn plan_execution_on(
+    host: impl FnOnce() -> Result<HostCpus, MatchError>,
     engine_a: &EngineLaunchSpec,
     engine_b: &EngineLaunchSpec,
     concurrency: usize,
@@ -1013,15 +1064,15 @@ pub fn plan_execution(
             })
             .collect()
     } else {
-        let topology =
-            detect_cpu_topology().map_err(|error| MatchError::Placement(error.to_string()))?;
-        let allowed = detect_allowed_cpu_set(&topology)
-            .map_err(|error| MatchError::Placement(error.to_string()))?;
-        let characteristics = detect_cpu_characteristics(&topology)
-            .map_err(|error| MatchError::Placement(error.to_string()))?;
-        let plan = plan_cpu_placement(&topology, &allowed, &characteristics, &placement_policy)
-            .map_err(|error| MatchError::Placement(error.to_string()))?;
-        allocate_game_slots(&plan, &characteristics, concurrency, allocation)
+        let host = host()?;
+        let plan = plan_cpu_placement(
+            &host.topology,
+            &host.allowed,
+            &host.characteristics,
+            &placement_policy,
+        )
+        .map_err(|error| MatchError::Placement(error.to_string()))?;
+        allocate_game_slots(&plan, &host.characteristics, concurrency, allocation)
             .map_err(|error| MatchError::Placement(error.to_string()))?
     };
     if slots.len() != concurrency {
@@ -1229,21 +1280,39 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         }
         record_fault(&mut report.faults, white_side, game.fault.as_ref());
     }
-    if report
-        .games
+    report.status = match_status(
+        &report.games,
+        report.faults,
+        fault_policy,
+        cancellation.stopping(),
+        games,
+    );
+    Ok(report)
+}
+
+/// How a match that played `played` of `requested` games ended.
+fn match_status(
+    played: &[MatchGame],
+    faults: MatchFaultCounts,
+    fault_policy: FaultPolicy,
+    stopping: bool,
+    requested: u32,
+) -> MatchStatus {
+    if played
         .iter()
         .any(|game| matches!(game.fault, Some(GameFault::Infrastructure { .. })))
     {
-        report.status = MatchStatus::InfrastructureError;
-    } else if fault_policy.exceeded(report.faults, report.games.len() as u64) {
-        report.status = MatchStatus::Invalid;
-    } else if cancellation.stopping() && report.games.len() < games as usize {
+        MatchStatus::InfrastructureError
+    } else if fault_policy.exceeded(faults, played.len() as u64) {
+        MatchStatus::Invalid
+    } else if stopping && played.len() < requested as usize {
         // A stop is only a stop when work was actually left undone. An
         // interrupt that arrives while the last game is being joined still
         // produced every requested game, and that is a completed match.
-        report.status = MatchStatus::Cancelled;
+        MatchStatus::Cancelled
+    } else {
+        MatchStatus::Completed
     }
-    Ok(report)
 }
 
 struct GameRequest {
@@ -1657,5 +1726,261 @@ mod tests {
             None,
         )
         .unwrap()
+    }
+
+    /// A host of `cores` physical cores without SMT, every CPU allowed and
+    /// nothing known about any core's class, node or cache.
+    fn host(cores: u32) -> HostCpus {
+        let topology = CpuTopology {
+            source: colosseum_engine::TopologySource::LinuxThreadSiblingsList,
+            physical_core_count: cores as usize,
+            logical_cpu_count: cores as usize,
+            sibling_mapping: colosseum_engine::SiblingMapping::Known {
+                cores: (0..cores)
+                    .map(|cpu| colosseum_engine::PhysicalCore {
+                        logical_cpus: vec![cpu.into()],
+                    })
+                    .collect(),
+            },
+        };
+        HostCpus {
+            allowed: AllowedCpuSet::Known {
+                source: colosseum_engine::AllowedCpuSource::LinuxSchedulerAffinity,
+                cpus: (0..cores).map(Into::into).collect(),
+            },
+            characteristics: CpuCharacteristics::unknown(&topology).unwrap(),
+            topology,
+        }
+    }
+
+    fn plan_on(
+        cores: u32,
+        concurrency: usize,
+        allocation: SlotAllocation,
+    ) -> Result<MatchExecutionPlan, MatchError> {
+        plan_execution_on(
+            || Ok(host(cores)),
+            &EngineLaunchSpec::path_only("a".into()),
+            &EngineLaunchSpec::path_only("b".into()),
+            concurrency,
+            allocation,
+            CpuPlacementPolicy::Explicit {
+                cpus: (0..cores).map(Into::into).collect(),
+            },
+            None,
+        )
+    }
+
+    /// The pool arithmetic each mode uses, named in the refusal when the
+    /// pool does not fit.
+    #[test]
+    fn a_pool_too_small_refuses_and_names_the_arithmetic_it_applied() {
+        let shared = plan_on(2, 3, SlotAllocation::Shared { cores_per_game: 1 })
+            .unwrap_err()
+            .to_string();
+        assert!(
+            shared.contains("3 game slots need 3 physical cores (game-slots × cores-per-game)")
+                && shared.contains("provides 2"),
+            "{shared}"
+        );
+
+        let disjoint = plan_on(
+            2,
+            2,
+            SlotAllocation::PerEngine {
+                cores_per_engine: 1,
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            disjoint
+                .contains("2 game slots need 4 physical cores (game-slots × 2 × cores-per-engine)")
+                && disjoint.contains("provides 2"),
+            "{disjoint}"
+        );
+    }
+
+    #[test]
+    fn a_shared_slot_pins_both_engines_to_the_same_core_set() {
+        let plan = plan_on(2, 2, SlotAllocation::Shared { cores_per_game: 1 }).unwrap();
+        assert_eq!(plan.slots.len(), 2);
+        for slot in &plan.slots {
+            assert_eq!(slot.engine_a.allocation, slot.engine_b.allocation);
+            assert_eq!(slot.engine_a.physical_core_count, 1);
+            assert!(matches!(
+                slot.engine_a.allocation,
+                CpuAllocation::Enforced(_)
+            ));
+        }
+        assert_ne!(
+            plan.slots[0].engine_a.allocation,
+            plan.slots[1].engine_a.allocation
+        );
+
+        // The disjoint mode gives each engine a core of its own.
+        let plan = plan_on(
+            2,
+            1,
+            SlotAllocation::PerEngine {
+                cores_per_engine: 1,
+            },
+        )
+        .unwrap();
+        assert_ne!(
+            plan.slots[0].engine_a.allocation,
+            plan.slots[0].engine_b.allocation
+        );
+    }
+
+    #[test]
+    fn placement_off_never_reads_the_host() {
+        let plan = plan_execution_on(
+            || panic!("placement off read the host's CPUs"),
+            &EngineLaunchSpec::path_only("a".into()),
+            &EngineLaunchSpec::path_only("b".into()),
+            2,
+            SlotAllocation::Shared { cores_per_game: 1 },
+            CpuPlacementPolicy::Off,
+            None,
+        )
+        .unwrap();
+        assert!(plan.slots.iter().all(|slot| {
+            slot.engine_a.allocation == CpuAllocation::Unrestricted
+                && slot.engine_b.allocation == CpuAllocation::Unrestricted
+        }));
+    }
+
+    #[test]
+    fn a_host_that_cannot_be_read_refuses_placement() {
+        let error = plan_execution_on(
+            || {
+                Err(MatchError::Placement(
+                    "logical CPU identities are unavailable for this topology".into(),
+                ))
+            },
+            &EngineLaunchSpec::path_only("a".into()),
+            &EngineLaunchSpec::path_only("b".into()),
+            1,
+            SlotAllocation::Shared { cores_per_game: 1 },
+            CpuPlacementPolicy::default(),
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("CPU placement could not be resolved"),
+            "{error}"
+        );
+    }
+
+    /// Launch settings are cloned once per launched game or pair. A book
+    /// carried in them by value was copied with every launch, which spread
+    /// one wave's launches over seconds with a large book; the clone must
+    /// share the one parsed book.
+    #[test]
+    fn cloned_launch_settings_share_the_opening_book() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("book.epd");
+        std::fs::write(
+            &path,
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -\n".repeat(4),
+        )
+        .unwrap();
+        let openings = resolve_openings(Some(OpeningBook::new(path)), 0, 2, false, 7).unwrap();
+        assert_eq!(openings.entries.len(), 4);
+        let settings = PairGameSettings {
+            engine_a: EngineLaunchSpec::path_only("a".into()),
+            engine_b: EngineLaunchSpec::path_only("b".into()),
+            engine_a_time_control: ConfiguredTimeControl::default(),
+            engine_b_time_control: ConfiguredTimeControl::default(),
+            adjudication: AdjudicationConfig::default(),
+            ponder: false,
+            openings,
+            synthetic_games: false,
+            engines: None,
+        };
+        let launched = settings.clone();
+        assert!(Arc::ptr_eq(
+            &settings.openings.entries,
+            &launched.openings.entries
+        ));
+    }
+
+    fn played(number: u32, fault: Option<GameFault>) -> MatchGame {
+        MatchGame {
+            number,
+            white: MatchSide::A,
+            result: GameResult::Draw,
+            scorable: true,
+            termination: Termination::MaxMoves,
+            clock_accounting: ClockAccountingReport {
+                model: "test".into(),
+                version: 1,
+                white_margin_ms: 0,
+                black_margin_ms: 0,
+                monotonic_resolution_ns: 1,
+                white_charged_elapsed: None,
+                black_charged_elapsed: None,
+                white_round_trip: None,
+                black_round_trip: None,
+                phases: None,
+            },
+            opening: OpeningAssignment {
+                book_index: None,
+                label: "startpos".into(),
+            },
+            fault,
+            error: None,
+            pgn: String::new(),
+            slot: None,
+        }
+    }
+
+    #[test]
+    fn a_stop_that_left_no_game_undone_is_a_completed_match() {
+        let policy = FaultPolicy::sequential(None, None);
+        let none = MatchFaultCounts::default();
+        let games = [played(1, None), played(2, None)];
+        // The interrupt arrived while the last game was being joined.
+        assert_eq!(
+            match_status(&games, none, policy, true, 2),
+            MatchStatus::Completed
+        );
+        assert_eq!(
+            match_status(&games[..1], none, policy, true, 2),
+            MatchStatus::Cancelled
+        );
+        assert_eq!(
+            match_status(&games[..1], none, policy, false, 2),
+            MatchStatus::Completed
+        );
+
+        // A fault outranks the stop: an infrastructure failure first, then
+        // an exceeded allowance.
+        let failed = [
+            played(1, None),
+            played(
+                2,
+                Some(GameFault::Infrastructure {
+                    operation: "artifact".into(),
+                    message: "disk full".into(),
+                }),
+            ),
+        ];
+        assert_eq!(
+            match_status(&failed, none, policy, true, 4),
+            MatchStatus::InfrastructureError
+        );
+        let strict = FaultPolicy::sequential(Some(0), None);
+        let faulted = MatchFaultCounts {
+            engine_a: 1,
+            ..MatchFaultCounts::default()
+        };
+        assert_eq!(
+            match_status(&games, faulted, strict, true, 4),
+            MatchStatus::Invalid
+        );
     }
 }

@@ -404,19 +404,21 @@ pub async fn run_spsa(request: SpsaDriverRequest) -> Result<SpsaDriverReport, Sp
 /// wrote the games. An iteration whose games are not all present was cut by a
 /// kill: it and anything after it are dropped, to be played again. What is
 /// returned is the summaries and the last iteration in full; the games stay
-/// in the journal.
+/// in the journal. They are taken by value and let go as each iteration is
+/// rebuilt, so a resumed tune does not carry the games it replayed.
 pub fn replay_iterations(
     schedule: VerifiedSpsaSchedule,
     settings: SpsaRunSettings,
     initial_centers: Vec<f64>,
-    iterations: &std::collections::BTreeMap<u32, Vec<CompletePair<MatchGame>>>,
+    mut iterations: std::collections::BTreeMap<u32, Vec<CompletePair<MatchGame>>>,
 ) -> Result<SpsaReplay, SpsaDriverError> {
     let mut state = SpsaTuningState::resume(schedule, settings, initial_centers, &[])?;
     let mut replay = SpsaReplay::default();
     for iteration in 0..settings.iterations {
-        let Some(pairs) = iterations.get(&iteration) else {
+        let Some(pairs) = iterations.remove(&iteration) else {
             break;
         };
+        let pairs = pairs.as_slice();
         if pairs.len() != settings.pairs_per_iteration() as usize {
             break;
         }
@@ -920,5 +922,234 @@ mod tests {
             "{message}"
         );
         assert!(unusable_game(&pairs[..1]).is_none());
+    }
+
+    /// Every committed iteration an observer received, with its games.
+    #[derive(Default)]
+    struct Recorder {
+        committed: std::sync::Mutex<Vec<(SpsaCommittedIteration, Vec<CompletePair<MatchGame>>)>>,
+    }
+
+    impl Recorder {
+        fn take(&self) -> Vec<(SpsaCommittedIteration, Vec<CompletePair<MatchGame>>)> {
+            std::mem::take(&mut *self.committed.lock().unwrap())
+        }
+    }
+
+    impl SpsaObserver for Recorder {
+        fn iteration_committed(
+            &self,
+            iteration: &SpsaCommittedIteration,
+            pairs: &[CompletePair<MatchGame>],
+        ) -> Result<(), String> {
+            self.committed
+                .lock()
+                .unwrap()
+                .push((iteration.clone(), pairs.to_vec()));
+            Ok(())
+        }
+
+        fn iteration_invalid(
+            &self,
+            iteration: &SpsaInvalidIteration,
+            _pairs: &[CompletePair<MatchGame>],
+        ) -> Result<(), String> {
+            Err(format!("iteration {} was invalid", iteration.iteration))
+        }
+    }
+
+    const GAMES_PER_ITERATION: u32 = 4;
+
+    /// A one-knob tune of `iterations` whose games are played in-process as
+    /// instant results, on two slots.
+    fn synthetic_tune(
+        iterations: u32,
+        checkpoint: SpsaCheckpoint,
+        stop_after_iteration: Option<u32>,
+        observer: Arc<Recorder>,
+    ) -> SpsaDriverRequest {
+        use crate::match_runner::{ConfiguredTimeControl, plan_execution, resolve_openings};
+        use colosseum_engine::{CpuPlacementPolicy, SlotAllocation};
+        let artifact = colosseum_core::SpsaScheduleArtifact::derive(
+            iterations,
+            0.01,
+            7,
+            &[colosseum_core::SpsaEndSpec {
+                name: "Tempo".into(),
+                min: -100,
+                max: 100,
+                c_end: 4.0,
+            }],
+        )
+        .unwrap();
+        let engine = colosseum_application::EngineLaunchSpec::path_only("engine".into());
+        SpsaDriverRequest {
+            schedule: VerifiedSpsaSchedule::verify_written(&artifact, artifact.clone()).unwrap(),
+            settings: SpsaRunSettings::new(iterations, GAMES_PER_ITERATION).unwrap(),
+            initial_centers: vec![10.0],
+            base_engine: engine.clone(),
+            game_settings: PairGameSettings {
+                engine_a: engine.clone(),
+                engine_b: engine.clone(),
+                engine_a_time_control: ConfiguredTimeControl::default(),
+                engine_b_time_control: ConfiguredTimeControl::default(),
+                adjudication: colosseum_core::AdjudicationConfig::default(),
+                ponder: false,
+                openings: resolve_openings(None, 0, 0, false, 7).unwrap(),
+                synthetic_games: true,
+                engines: None,
+            },
+            execution: plan_execution(
+                &engine,
+                &engine,
+                2,
+                SlotAllocation::Shared { cores_per_game: 1 },
+                CpuPlacementPolicy::Off,
+                None,
+            )
+            .unwrap(),
+            fault_policy: FaultPolicy::sequential(None, None),
+            checkpoint,
+            progress: SpsaProgress::default(),
+            stop_after_iteration,
+            cancellation: Cancellation::inactive(),
+            observer: Some(observer),
+        }
+    }
+
+    fn game_numbers(pairs: &[CompletePair<MatchGame>]) -> Vec<u32> {
+        pairs
+            .iter()
+            .flat_map(|pair| [pair.first.number, pair.second.number])
+            .collect()
+    }
+
+    /// The games of an iteration go to the observer, which journals them, once;
+    /// the driver keeps a summary of each iteration and no game.
+    #[tokio::test]
+    async fn a_tune_hands_each_iterations_games_to_its_observer_once_and_keeps_only_summaries() {
+        const ITERATIONS: u32 = 16;
+        let recorder = Arc::new(Recorder::default());
+        let report = run_spsa(synthetic_tune(
+            ITERATIONS,
+            SpsaCheckpoint::default(),
+            None,
+            Arc::clone(&recorder),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(report.status, SpsaStatus::Completed);
+        assert_eq!(report.completed_iterations.len(), ITERATIONS as usize);
+
+        let observed = recorder.take();
+        assert_eq!(observed.len(), ITERATIONS as usize);
+        let mut every_game = Vec::new();
+        for (index, ((committed, pairs), summary)) in observed
+            .iter()
+            .zip(&report.completed_iterations)
+            .enumerate()
+        {
+            assert_eq!(committed.iteration as usize, index);
+            assert_eq!(&committed.summary(), summary);
+            let numbers = game_numbers(pairs);
+            assert_eq!(
+                numbers,
+                (summary.games.first..=summary.games.last).collect::<Vec<_>>()
+            );
+            every_game.extend(numbers);
+        }
+        assert_eq!(
+            every_game,
+            (1..=ITERATIONS * GAMES_PER_ITERATION).collect::<Vec<_>>(),
+            "a game was handed over twice or not at all"
+        );
+
+        // The result carries each iteration as a summary of fixed shape.
+        let value = serde_json::to_value(&report).unwrap();
+        for iteration in value["completed_iterations"].as_array().unwrap() {
+            let keys = iteration
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                keys,
+                ["centers_after", "faults", "games", "iteration", "score"],
+                "{iteration}"
+            );
+            assert!(iteration.to_string().len() < 512, "{iteration}");
+        }
+    }
+
+    /// A tune stopped part way and resumed replays the stopped run's games
+    /// to rebuild its iterations, and then finishes the same tune as one
+    /// that never stopped.
+    #[tokio::test]
+    async fn a_resumed_tune_finishes_the_same_tune_as_one_that_never_stopped() {
+        const ITERATIONS: u32 = 10;
+        const STOP_AT: u32 = 6;
+        let whole = run_spsa(synthetic_tune(
+            ITERATIONS,
+            SpsaCheckpoint::default(),
+            None,
+            Arc::new(Recorder::default()),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(whole.status, SpsaStatus::Completed);
+
+        let recorder = Arc::new(Recorder::default());
+        let stopped = run_spsa(synthetic_tune(
+            ITERATIONS,
+            SpsaCheckpoint::default(),
+            Some(STOP_AT),
+            Arc::clone(&recorder),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(stopped.status, SpsaStatus::Cancelled);
+        assert_eq!(stopped.completed_iterations.len(), STOP_AT as usize);
+
+        // The journal holds the stopped run's games, and only those.
+        let journal = recorder
+            .take()
+            .into_iter()
+            .map(|(committed, pairs)| (committed.iteration, pairs))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let request = synthetic_tune(
+            ITERATIONS,
+            SpsaCheckpoint::default(),
+            None,
+            Arc::clone(&recorder),
+        );
+        let replay = replay_iterations(
+            request.schedule.clone(),
+            request.settings,
+            request.initial_centers.clone(),
+            journal,
+        )
+        .unwrap();
+        assert_eq!(replay.completed_iterations, stopped.completed_iterations);
+
+        let resumed = run_spsa(SpsaDriverRequest {
+            checkpoint: SpsaCheckpoint {
+                completed_iterations: replay.completed_iterations,
+                invalid_iteration: None,
+            },
+            ..request
+        })
+        .await
+        .unwrap();
+        assert_eq!(resumed.status, SpsaStatus::Completed);
+        assert_eq!(resumed.completed_iterations, whole.completed_iterations);
+        assert_eq!(resumed.final_centers, whole.final_centers);
+        // The resumed run played only the iterations the stopped one had not.
+        let played = recorder
+            .take()
+            .into_iter()
+            .map(|(committed, _)| committed.iteration)
+            .collect::<Vec<_>>();
+        assert_eq!(played, (STOP_AT..ITERATIONS).collect::<Vec<_>>());
     }
 }
