@@ -211,15 +211,20 @@ pub(crate) async fn run_calibration(
             result = &mut calibration_future => break result,
             _ = poll.tick() => {
                 if schedule.due(observer.units()) {
-                    let block =
-                        calibration_progress_block(&observer, &schedule, &players, pairs_planned, prepared.fault_policy);
+                    let block = calibration_progress_block(
+                        &observer.sample().0,
+                        &schedule,
+                        &players,
+                        pairs_planned,
+                        prepared.fault_policy,
+                    );
                     publish_progress(&block, &writer, &mut recorder);
                 }
             }
         }
     };
     let final_block = calibration_progress_block(
-        &observer,
+        &observer.sample().0,
         &schedule,
         &players,
         pairs_planned,
@@ -483,14 +488,16 @@ pub(crate) fn prepare_calibration(
 /// A calibration is a fixed paired sample, so it reports the same paired
 /// evidence an SPRT does; what it does not have is a sequential boundary, so
 /// there is no LLR and nothing to extrapolate towards one.
+///
+/// `sample` is the paired sample committed so far, as
+/// [`DurableMatchOutput::sample`] reports it.
 pub(crate) fn calibration_progress_block(
-    observer: &DurableMatchOutput,
+    sample: &PairedProgress,
     schedule: &ProgressSchedule,
     players: &Players,
     pairs_planned: u64,
     policy: FaultPolicy,
 ) -> ProgressBlock {
-    let (sample, _) = observer.sample();
     let done = u64::from(sample.pairs);
     let mut block = ProgressBlock::new(
         "calibrate",
@@ -612,4 +619,59 @@ pub(crate) fn print_calibration(report: &CalibrationReport, run_directory: &Path
         )
     );
     println!("artifacts: {}", run_directory.display());
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use super::*;
+
+    #[test]
+    fn a_calibration_block_reports_its_paired_sample() {
+        // Identical engines draw every game: a zero-variance sample.
+        let mut sample = PairedProgress::default();
+        for _ in 0..4 {
+            sample
+                .vector
+                .record_pair(PairGameResult::Draw, PairGameResult::Draw);
+        }
+        sample.pairs = 4;
+        sample.scored_games = 8;
+        sample.draws = 8;
+        let started = Instant::now()
+            .checked_sub(Duration::from_secs(60))
+            .expect("a host that has been up for a minute");
+        let schedule = ProgressSchedule::started_at(2, 1, 0, started);
+        let players = Players {
+            a: "Engine 1".into(),
+            b: "Engine 2".into(),
+        };
+        let block =
+            calibration_progress_block(&sample, &schedule, &players, 4, FaultPolicy::default());
+        let text = block.render();
+        assert!(
+            text.starts_with("progress [calibrate]: 4/4 pairs (100%),"),
+            "{text}"
+        );
+        for field in [
+            "players",
+            "games",
+            "W/D/L",
+            "Ptnml",
+            "faults",
+            "time remaining",
+        ] {
+            assert!(text.contains(field), "{field} missing from:\n{text}");
+        }
+        assert!(text.contains("[0, 0, 4, 0, 0]"), "{text}");
+        assert!(text.contains("time remaining  0s"), "{text}");
+        // Throughput in games, as `match`, `spsa` and `tournament` report it.
+        assert!(text.contains(" games/hour"), "{text}");
+        assert!(!text.contains("pairs/hour"), "{text}");
+        // A degenerate sample has no estimate in either model, and the block
+        // says so for both rather than dropping a line a reader looks for.
+        assert_eq!(text.matches("unavailable:").count(), 2, "{text}");
+        assert!(text.contains("nElo"), "{text}");
+    }
 }

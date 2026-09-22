@@ -573,8 +573,16 @@ pub(crate) async fn run_sprt(
             result = &mut schedule_future => break result,
             _ = poll.tick() => {
                 if progress.due(observer.units()) {
-                    let block =
-                        sprt_progress_block(&observer, &progress, design, &players, false, fault_policy);
+                    let (sample, post_terminal) = observer.sample();
+                    let block = sprt_progress_block(
+                        &sample,
+                        post_terminal,
+                        &progress,
+                        design,
+                        &players,
+                        false,
+                        fault_policy,
+                    );
                     publish_progress(&block, &writer, &mut recorder);
                 }
             }
@@ -583,8 +591,16 @@ pub(crate) async fn run_sprt(
     if let Some(engines) = &kept_engines {
         engines.shutdown().await;
     }
-    let final_block =
-        sprt_progress_block(&observer, &progress, design, &players, true, fault_policy);
+    let (sample, post_terminal) = observer.sample();
+    let final_block = sprt_progress_block(
+        &sample,
+        post_terminal,
+        &progress,
+        design,
+        &players,
+        true,
+        fault_policy,
+    );
     if progress.needs_final(final_block.done) {
         progress.mark(final_block.done);
         publish_progress(&final_block, &writer, &mut recorder);
@@ -699,15 +715,18 @@ pub(crate) fn resolve_sprt_design(command: &SprtCommand) -> Result<SprtDesign, S
 /// What a sequential test tells the operator: the sample, what it is worth in
 /// both Elo models, how far the LLR is from its bounds, and how much longer it
 /// would run if the evidence kept arriving at the rate it has.
+///
+/// `sample` is the official sample committed so far and `post_terminal` the
+/// pairs kept after the boundary, as [`DurableSprtOutput::sample`] reports them.
 pub(crate) fn sprt_progress_block(
-    observer: &DurableSprtOutput,
+    sample: &PairedProgress,
+    post_terminal: usize,
     progress: &ProgressSchedule,
     design: SprtDesign,
     players: &Players,
     terminal: bool,
     policy: FaultPolicy,
 ) -> ProgressBlock {
-    let (sample, post_terminal) = observer.sample();
     let done = u64::from(sample.pairs);
     let mut block = ProgressBlock::new(
         "sprt",
@@ -1068,5 +1087,144 @@ mod remaining_tests {
         assert_eq!(pairs_to_bound(&result), None);
         assert_eq!(remaining_pairs(Some(&result), 7_759, false), 7_759);
         assert_eq!(remaining_pairs(Some(&result), 7_759, true), 0);
+    }
+}
+
+#[cfg(test)]
+mod progress_block_tests {
+    use std::time::Instant;
+
+    use super::*;
+
+    /// Ten drawn pairs and ten won pairs: a sample with variance that stays
+    /// inside the Wald bounds of a [0, 10] normalized test.
+    fn sample() -> PairedProgress {
+        let mut sample = PairedProgress::default();
+        for _ in 0..10 {
+            sample
+                .vector
+                .record_pair(PairGameResult::Draw, PairGameResult::Draw);
+            sample
+                .vector
+                .record_pair(PairGameResult::Win, PairGameResult::Win);
+        }
+        sample.pairs = 20;
+        sample.scored_games = 40;
+        sample.wins = 20;
+        sample.draws = 20;
+        sample
+    }
+
+    fn design(max_pairs: u32) -> SprtDesign {
+        let parameters = SprtParameters {
+            model: EloModel::Normalized,
+            elo0: 0.0,
+            elo1: 10.0,
+            alpha: 0.05,
+            beta: 0.05,
+        };
+        SprtDesign::new(parameters, max_pairs, None).unwrap()
+    }
+
+    fn players() -> Players {
+        Players {
+            a: "Challenger 2".into(),
+            b: "Baseline 1".into(),
+        }
+    }
+
+    /// A schedule that started a minute ago, so a rate has time to divide by.
+    fn schedule() -> ProgressSchedule {
+        let started = Instant::now()
+            .checked_sub(Duration::from_secs(60))
+            .expect("a host that has been up for a minute");
+        ProgressSchedule::started_at(10, 1, 0, started)
+    }
+
+    fn field(block: &ProgressBlock, label: &str) -> String {
+        block
+            .fields
+            .iter()
+            .find(|field| field.label == label)
+            .unwrap_or_else(|| panic!("no {label} in:\n{}", block.render()))
+            .value
+            .clone()
+    }
+
+    #[test]
+    fn an_sprt_block_carries_the_sample_both_models_and_the_llr() {
+        let block = sprt_progress_block(
+            &sample(),
+            0,
+            &schedule(),
+            design(20),
+            &players(),
+            true,
+            FaultPolicy::default(),
+        );
+        let text = block.render();
+        assert!(
+            text.starts_with("progress [sprt]: 20/20 pairs (100%), "),
+            "{text}"
+        );
+        let labels = block
+            .fields
+            .iter()
+            .map(|field| field.label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            labels,
+            [
+                "players",
+                "games",
+                "Elo",
+                "nElo",
+                "W/D/L",
+                "Ptnml",
+                "faults",
+                "LLR",
+                "rate",
+                "time remaining"
+            ],
+            "{text}"
+        );
+        assert_eq!(field(&block, "players"), "Challenger 2 vs. Baseline 1");
+        assert_eq!(field(&block, "games"), "40");
+        assert_eq!(field(&block, "W/D/L"), "20/20/0");
+        // The pentanomial is the committed vector, and the LLR is stated
+        // against its exact Wald bounds.
+        assert_eq!(field(&block, "Ptnml"), "[0, 0, 10, 0, 10]");
+        assert!(
+            field(&block, "LLR").contains("in [-2.94, 2.94] (continue)"),
+            "{text}"
+        );
+        // Both estimates read as a value and a margin.
+        for model in ["Elo", "nElo"] {
+            assert!(field(&block, model).contains(" +/- "), "{text}");
+        }
+        // Throughput is in games, as every command reports it, although this
+        // command's unit of work is the pair.
+        assert!(field(&block, "rate").ends_with(" games/hour"), "{text}");
+        // A terminated test has nothing left to run.
+        assert_eq!(field(&block, "time remaining"), "0s");
+    }
+
+    #[test]
+    fn a_running_sprt_names_its_post_terminal_pairs_and_the_trend_it_extrapolates() {
+        let block = sprt_progress_block(
+            &sample(),
+            2,
+            &schedule(),
+            design(1_000),
+            &players(),
+            false,
+            FaultPolicy::default(),
+        );
+        assert_eq!(
+            field(&block, "post-terminal"),
+            "2 pairs kept as evidence the sample excludes"
+        );
+        let remaining = field(&block, "time remaining");
+        assert!(remaining.ends_with(" if the trend holds"), "{remaining}");
     }
 }
