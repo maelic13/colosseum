@@ -1,15 +1,20 @@
 //! "Check for updates" against GitHub Releases.
 //!
 //! One anonymous GET to the release list, filtered to stable `gui-v` tags and
-//! compared version-wise against `CARGO_PKG_VERSION`. The request runs on a detached thread; the About
-//! dialog polls the receiver each frame. Every failure path degrades
-//! gracefully: a 404 (nothing published yet) counts as up to date, network
-//! errors surface as a gentle "couldn't check" line, and nothing panics.
+//! compared version-wise against `CARGO_PKG_VERSION`. The request runs on a
+//! detached thread; the About dialog polls the receiver each frame. Every
+//! failure path degrades gracefully: a 404 (nothing published yet) counts as
+//! up to date, network errors surface as a gentle "couldn't check" line, and
+//! nothing panics.
 
 use std::sync::mpsc::{Receiver, channel};
 
 /// The human-facing releases page (fallback link target).
 pub const RELEASES_URL: &str = "https://github.com/maelic13/colosseum/releases";
+/// Known limit, deliberately not fixed: one unpaginated page holds the newest
+/// hundred releases of both products. The repository has four and adds a
+/// handful a year, so the newest GUI release cannot fall off the page for many
+/// years; add pagination when the count passes fifty.
 const API_URL: &str = "https://api.github.com/repos/maelic13/colosseum/releases?per_page=100";
 
 /// Outcome of one update check.
@@ -104,12 +109,10 @@ fn fetch_latest() -> Result<Option<(String, String)>, Box<dyn std::error::Error>
 fn select_latest_gui_release(releases: &[serde_json::Value]) -> Option<(String, String)> {
     releases
         .iter()
-        .filter(|release| {
-            !release
-                .get("draft")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-        })
+        // A draft is not published, and a prerelease is not offered to
+        // everyone: the tag shape alone cannot tell, because a release marked
+        // prerelease on GitHub may still carry a clean `gui-v1.2.0` tag.
+        .filter(|release| !flag(release, "draft") && !flag(release, "prerelease"))
         .filter_map(|release| {
             let tag = release.get("tag_name")?.as_str()?;
             let version = gui_release_version(tag)?;
@@ -121,6 +124,16 @@ fn select_latest_gui_release(releases: &[serde_json::Value]) -> Option<(String, 
         })
         .max_by_key(|(version, _, _)| *version)
         .map(|(_, tag, url)| (tag, url))
+}
+
+/// One boolean field of a release object, absent or malformed counting as
+/// false — the API always sends both, and a missing flag must not hide a
+/// release that is really there.
+fn flag(release: &serde_json::Value, name: &str) -> bool {
+    release
+        .get(name)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn gui_release_version(tag: &str) -> Option<(u64, u64, u64)> {
@@ -179,6 +192,35 @@ mod tests {
         assert_eq!(
             select_latest_gui_release(releases.as_array().unwrap()),
             Some(("gui-v1.1.0".into(), "new".into()))
+        );
+    }
+
+    /// The tag shape cannot tell a prerelease from a stable release: a
+    /// release marked prerelease on GitHub may carry a perfectly clean
+    /// `gui-v` tag. Only the flag says so, and someone running the stable
+    /// build must not be sent to it.
+    #[test]
+    fn a_release_marked_prerelease_is_not_offered_however_its_tag_reads() {
+        let releases = serde_json::json!([
+            {"tag_name":"gui-v1.1.0","html_url":"stable","draft":false,"prerelease":false},
+            {"tag_name":"gui-v1.2.0","html_url":"beta","draft":false,"prerelease":true}
+        ]);
+        assert_eq!(
+            select_latest_gui_release(releases.as_array().unwrap()),
+            Some(("gui-v1.1.0".into(), "stable".into()))
+        );
+
+        // Nothing but prereleases is the same as nothing: up to date.
+        let only_beta = serde_json::json!([
+            {"tag_name":"gui-v1.2.0","html_url":"beta","prerelease":true}
+        ]);
+        assert_eq!(select_latest_gui_release(only_beta.as_array().unwrap()), None);
+
+        // A release object that omits the flags is still a release.
+        let bare = serde_json::json!([{"tag_name":"gui-v1.1.0","html_url":"stable"}]);
+        assert_eq!(
+            select_latest_gui_release(bare.as_array().unwrap()),
+            Some(("gui-v1.1.0".into(), "stable".into()))
         );
     }
 }

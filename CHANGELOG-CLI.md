@@ -9,6 +9,12 @@ The CLI follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 First public release.
 
+**What `0.x` means here.** The command surface, run-file schema, run-directory
+layout, JSON report schemas and exit codes may still change in a `0.x` minor
+release; when one does, this changelog says so. Pin an archive by its SHA-256
+if your automation depends on them. Version `1.0.0` is the promise that they
+keep working.
+
 Download an archive from the
 [Colosseum CLI 0.1.0 release](https://github.com/maelic13/colosseum/releases/tag/cli-v0.1.0),
 then follow the

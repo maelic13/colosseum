@@ -71,7 +71,10 @@ fn product_versions_are_owned_by_product_manifests() {
 
     let gui = fs::read_to_string(root.join("crates/colosseum-gui/Cargo.toml")).unwrap();
     let cli = fs::read_to_string(root.join("crates/colosseum-cli/Cargo.toml")).unwrap();
-    assert!(gui.contains("version = \"1.0.2\""));
+    // The released versions of the two products, each owned by its own
+    // manifest: the GUI's first release from this shared code base and the
+    // CLI's first release ever.
+    assert!(gui.contains("version = \"1.1.0\""));
     assert!(cli.contains("version = \"0.1.0\""));
     assert!(
         !gui.lines()
