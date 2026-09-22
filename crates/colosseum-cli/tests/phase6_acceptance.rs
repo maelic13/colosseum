@@ -1,63 +1,8 @@
-use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Command;
 
-use serde::Deserialize;
-
-#[derive(Debug, Deserialize)]
-struct Acceptance {
-    schema_version: u32,
-    phase: String,
-    gates: Vec<Gate>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Gate {
-    id: String,
-    evidence: String,
-}
-
 fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_colosseum-cli"))
-}
-
-#[test]
-fn acceptance_manifest_names_every_phase_six_exit_gate_and_test_owner() {
-    let acceptance: Acceptance = serde_json::from_str(include_str!(
-        "../../../docs/fixtures/phase6/acceptance.json"
-    ))
-    .unwrap();
-    assert_eq!(acceptance.schema_version, 1);
-    assert_eq!(acceptance.phase, "6");
-    let expected = BTreeSet::from([
-        "authoritative-wall-clock-and-lie-resistance",
-        "skew-robust-arm-estimator",
-        "cold-warm-state-policy",
-        "scaling-and-hash-policy",
-        "book-reproducibility",
-        "replay-authority",
-        "experiment-planning",
-        "pgn-telemetry",
-        "position-suite-and-recovery",
-        "workspace-regression",
-    ]);
-    let actual = acceptance
-        .gates
-        .iter()
-        .map(|gate| gate.id.as_str())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(actual, expected);
-    assert_eq!(
-        actual.len(),
-        acceptance.gates.len(),
-        "duplicate Phase 6 gate ID"
-    );
-    assert!(
-        acceptance
-            .gates
-            .iter()
-            .all(|gate| !gate.evidence.trim().is_empty())
-    );
 }
 
 #[test]

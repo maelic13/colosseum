@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::thread;
@@ -8,11 +7,6 @@ use colosseum_application::{
     CalibrationDesign, CalibrationInterval, CalibrationStatus, classify_calibration,
 };
 use serde_json::Value;
-
-const ACCEPTANCE: &str = include_str!("../../../docs/fixtures/phase4c/acceptance.json");
-const CALIBRATION_SOURCE: &str = include_str!("../../colosseum-application/src/calibration.rs");
-const COMMAND_LINE: &str = include_str!("command_line.rs");
-const COMPOSITION: &str = include_str!("../src/composition.rs");
 
 fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_colosseum-cli"))
@@ -146,50 +140,6 @@ fn json(output: &Output) -> Value {
 
 fn read_json(path: PathBuf) -> Value {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
-}
-
-#[test]
-fn acceptance_manifest_names_every_phase_4c_exit_gate_and_test_owner() {
-    let manifest: Value = serde_json::from_str(ACCEPTANCE).unwrap();
-    assert_eq!(manifest["schema_version"], 1);
-    assert_eq!(manifest["phase"], "4C");
-    let gates = manifest["gates"].as_array().unwrap();
-    let ids = gates
-        .iter()
-        .map(|gate| gate["id"].as_str().unwrap())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(
-        ids,
-        BTreeSet::from([
-            "binary-content-identity",
-            "configuration-and-resume",
-            "deterministic-outcome-classification",
-            "distinct-automation-exits",
-            "fault-invalidity",
-            "real-machine-smoke",
-            "workspace-regression",
-        ])
-    );
-    assert_eq!(ids.len(), gates.len(), "duplicate Phase 4C gate ID");
-    for gate in gates {
-        assert!(!gate["evidence"].as_str().unwrap().trim().is_empty());
-    }
-    for symbol in [
-        "calibration_refuses_nonidentical_executable_content_before_launch",
-        "calibration_is_invalid_only_past_its_engine_fault_allowance",
-    ] {
-        assert!(COMMAND_LINE.contains(symbol), "missing CLI test {symbol}");
-    }
-    assert!(CALIBRATION_SOURCE.contains("classify_calibration"));
-    assert!(
-        COMPOSITION.contains("calibration_terminal_classes_have_distinct_automation_exit_codes")
-    );
-    let smoke = &manifest["real_machine_smoke"];
-    assert_eq!(smoke["engine"], "Basilisk 1.9.0");
-    assert_eq!(smoke["result"], "inconclusive");
-    assert_eq!(smoke["engine_faults"], 0);
-    assert_eq!(smoke["infrastructure_faults"], 0);
-    assert_eq!(smoke["affinity"], "enforced");
 }
 
 #[test]

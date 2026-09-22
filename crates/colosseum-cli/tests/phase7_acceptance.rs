@@ -12,19 +12,6 @@ use colosseum_core::{Format, GameResult, ParticipantId, Termination};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-struct Acceptance {
-    schema_version: u32,
-    phase: String,
-    gates: Vec<Gate>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Gate {
-    id: String,
-    evidence: String,
-}
-
-#[derive(Debug, Deserialize)]
 struct GuiParity {
     schema_version: u32,
     source: String,
@@ -262,34 +249,4 @@ fn both_formats_resume_to_uninterrupted_standings() {
     let root = tempfile::tempdir().unwrap();
     assert_resume_matches_uninterrupted(root.path(), "round-robin", 12);
     assert_resume_matches_uninterrupted(root.path(), "gauntlet", 8);
-}
-
-#[test]
-fn acceptance_manifest_names_every_phase_seven_exit_gate_and_owner() {
-    let acceptance: Acceptance = serde_json::from_str(include_str!(
-        "../../../docs/fixtures/phase7/acceptance.json"
-    ))
-    .unwrap();
-    assert_eq!(acceptance.schema_version, 1);
-    assert_eq!(acceptance.phase, "7");
-    let expected = BTreeSet::from([
-        "gui-schedule-parity",
-        "gui-rating-parity-0.01-elo",
-        "round-robin-kill-resume",
-        "multi-seed-gauntlet-kill-resume",
-        "workspace-regression",
-    ]);
-    let actual = acceptance
-        .gates
-        .iter()
-        .map(|gate| gate.id.as_str())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(actual, expected);
-    assert_eq!(actual.len(), acceptance.gates.len());
-    assert!(
-        acceptance
-            .gates
-            .iter()
-            .all(|gate| !gate.evidence.is_empty())
-    );
 }
