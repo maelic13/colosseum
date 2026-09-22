@@ -84,30 +84,6 @@ fn every_option_path_refuses_a_chess960_request_by_name() {
     }
 }
 
-/// Turning the option off is not a request for the variant, so it is ordinary.
-#[test]
-fn switching_chess960_off_is_an_ordinary_forwarded_option() {
-    let output = cli()
-        .args([
-            "match",
-            "--games",
-            "2",
-            "a",
-            "b",
-            "--a-option",
-            "UCI_Chess960=false",
-            "--dry-run",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
 #[test]
 fn a_chess960_castling_encoding_is_rejected_rather_than_reinterpreted() {
     let root = tempfile::tempdir().unwrap();

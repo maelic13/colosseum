@@ -307,4 +307,42 @@ mod tests {
             assert!(parsed.engine.resolve().is_err());
         }
     }
+
+    /// Asking for Chess960 under any of its option names is refused by name;
+    /// turning it off is not a request for the variant, so it is an ordinary
+    /// forwarded option.
+    #[test]
+    fn a_chess960_option_is_refused_only_when_it_switches_the_variant_on() {
+        for (option, refused) in [
+            ("UCI_Chess960=true", true),
+            ("UCI_Chess960=TRUE", true),
+            ("uci960=true", true),
+            ("FRC= True ", true),
+            ("Chess960=true", true),
+            ("UCI_Chess960=false", false),
+            ("UCI_Chess960=FALSE", false),
+            ("uci960=false", false),
+            ("FRC=false", false),
+            // Not a Chess960 option at all.
+            ("UCI_Chess960_Mode=true", false),
+        ] {
+            let parsed = Harness::try_parse_from(["test", "engine", "--option", option]).unwrap();
+            let resolved = parsed.engine.resolve();
+            if refused {
+                let error = resolved.expect_err(option).to_string();
+                assert!(
+                    error.contains("Chess960") && error.contains("standard chess only"),
+                    "{option}: {error}"
+                );
+            } else {
+                let launch = resolved.unwrap_or_else(|error| panic!("{option}: {error}"));
+                let (name, value) = option.split_once('=').unwrap();
+                assert_eq!(
+                    launch.options[name],
+                    UciOptionValue::String(value.into()),
+                    "{option} was not forwarded as written"
+                );
+            }
+        }
+    }
 }
