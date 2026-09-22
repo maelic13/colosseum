@@ -714,6 +714,51 @@ mod tests {
         assert_eq!((a.moves_with_margin, a.over_margin), (0, 0));
     }
 
+    /// The committed specimen of the writer form: a change to the comment
+    /// shape that its reader no longer understands fails here.
+    #[test]
+    fn the_frozen_annotated_fixture_reads_as_documented() {
+        let report = analyze_pgn(include_str!("../../../tests/fixtures/annotated-games.pgn"));
+        assert_eq!(report.status, "available");
+        // Four book plies over two games are excluded from search telemetry.
+        assert_eq!(report.excluded_opening_moves, 4);
+        let engine = |name: &str| {
+            report
+                .engines
+                .iter()
+                .find(|engine| engine.engine == name)
+                .unwrap()
+                .clone()
+        };
+
+        let alpha = engine("Alpha 1.0.0");
+        // Alpha searched three moves as White and two as Black.
+        assert_eq!(alpha.eligible_moves, 5);
+        assert_eq!(alpha.annotation_coverage, 1.0);
+        assert_eq!(alpha.score_cp.coverage, 1.0);
+        // Two of Alpha's five scores are mates, counted as covered but
+        // excluded from the centipawn values.
+        assert_eq!(alpha.score_cp.samples, 3);
+        assert_eq!(alpha.score_cp.mean, Some(14.0));
+        assert_eq!(alpha.mean_absolute_score_cp.mean, Some(22.0));
+        // One Alpha move reported no nodes, so that field is covered for four
+        // of five; depth and time are complete.
+        assert_eq!(alpha.nodes.samples, 4);
+        assert_eq!(alpha.nodes.coverage, 0.8);
+        assert_eq!(alpha.depth.coverage, 1.0);
+        assert_eq!(alpha.elapsed_seconds.coverage, 1.0);
+
+        let beta = engine("Beta 2.3.1");
+        assert_eq!(beta.score_cp.mean, Some(-89.5));
+        assert_eq!(beta.mean_absolute_score_cp.mean, Some(120.5));
+        // One Beta move reported depth 0 and 0 nodes. Those are reports, not
+        // missing fields, so both stay fully covered.
+        assert_eq!(beta.depth.samples, 5);
+        assert_eq!(beta.depth.coverage, 1.0);
+        assert_eq!(beta.nodes.samples, 5);
+        assert_eq!(beta.nodes.coverage, 1.0);
+    }
+
     #[test]
     fn missing_annotations_are_unavailable_and_book_comments_are_excluded() {
         let pgn = "[Event \"x\"]\n[White \"A\"]\n[Black \"B\"]\n[Result \"*\"]\n\n1. e4 {book} e5 {book} 2. Nf3 Nc6 *\n";

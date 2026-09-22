@@ -449,4 +449,89 @@ mod tests {
         assert_eq!(search(Some(-1)), "{s=12 d=9 t=57ms h=-1ms n=1000}");
         assert_eq!(search(None), "{s=12 d=9 t=57ms n=1000}");
     }
+
+    /// The documented comment form, as `tests/fixtures/annotated-games.pgn`
+    /// freezes it: book moves, both score signs, both mate signs, a move with
+    /// no node count so the field is absent, and a reported zero depth and
+    /// node count, which stay distinguishable from absent ones.
+    #[test]
+    fn move_comments_render_the_documented_form() {
+        let search = |score, depth, time_ms, nodes| {
+            MoveAnnotation::Search(SearchAnnotation {
+                score: Some(score),
+                depth: Some(depth),
+                time_ms: Some(time_ms),
+                overhead_ms: None,
+                nodes,
+            })
+            .render()
+            .unwrap()
+        };
+        use AnnotationScore::{Centipawns, MateIn};
+        assert_eq!(MoveAnnotation::Book.render().unwrap(), "{book}");
+        assert_eq!(
+            search(Centipawns(24), 14, 97, Some(1_204_513)),
+            "{s=24 d=14 t=97ms n=1204513}"
+        );
+        assert_eq!(
+            search(Centipawns(-18), 15, 103, Some(1_550_922)),
+            "{s=-18 d=15 t=103ms n=1550922}"
+        );
+        assert_eq!(search(Centipawns(30), 13, 88, None), "{s=30 d=13 t=88ms}");
+        assert_eq!(
+            search(MateIn(1), 6, 12, Some(41_233)),
+            "{s=#1 d=6 t=12ms n=41233}"
+        );
+        assert_eq!(
+            search(MateIn(-1), 9, 31, Some(210_044)),
+            "{s=#-1 d=9 t=31ms n=210044}"
+        );
+        assert_eq!(
+            search(Centipawns(18), 0, 1, Some(0)),
+            "{s=18 d=0 t=1ms n=0}"
+        );
+        // An engine move that reported nothing carries no comment at all.
+        assert_eq!(
+            MoveAnnotation::Search(SearchAnnotation::default()).render(),
+            None
+        );
+
+        // And in movetext, the book moves come first, each after its move.
+        let tags = PgnTags {
+            event: "E".into(),
+            site: "S".into(),
+            date: "2026.01.01".into(),
+            round: 1,
+            white: "W".into(),
+            black: "B".into(),
+            result: GameResult::WhiteWin,
+            time_control: String::new(),
+            termination: None,
+            fen: None,
+            identity: None,
+            opening_plies: 2,
+            time_margins_ms: None,
+            slot: None,
+            forfeited_search: None,
+        };
+        let pgn = build_pgn(
+            &tags,
+            &["e4".into(), "e5".into(), "Bc4".into()],
+            &[
+                MoveAnnotation::Book,
+                MoveAnnotation::Book,
+                MoveAnnotation::Search(SearchAnnotation {
+                    score: Some(Centipawns(24)),
+                    depth: Some(14),
+                    time_ms: Some(97),
+                    overhead_ms: None,
+                    nodes: Some(1_204_513),
+                }),
+            ],
+        );
+        assert!(
+            pgn.contains("1. e4 {book} e5 {book} 2. Bc4 {s=24 d=14 t=97ms n=1204513} 1-0"),
+            "{pgn}"
+        );
+    }
 }

@@ -949,4 +949,156 @@ mod tests {
         assert_eq!(report.unpaired_games, 2);
         assert_eq!(report.pairing, "unpaired");
     }
+
+    /// One rendered game with the identity tags a Colosseum export carries,
+    /// and its sample class when the run wrote one.
+    fn game(
+        number: u32,
+        pair: u32,
+        assignment: u32,
+        white: &str,
+        result: &str,
+        sample: Option<&str>,
+    ) -> String {
+        let black = if white == "Alpha 1.0.0" {
+            "Beta 1.0.0"
+        } else {
+            "Alpha 1.0.0"
+        };
+        let sample = sample
+            .map(|class| format!("[ColosseumSample \"{class}\"]\n"))
+            .unwrap_or_default();
+        format!(
+            "[Event \"Colosseum CLI fixed match\"]\n\
+             [Site \"?\"]\n\
+             [Date \"????.??.??\"]\n\
+             [Round \"{number}\"]\n\
+             [White \"{white}\"]\n\
+             [Black \"{black}\"]\n\
+             [Result \"{result}\"]\n\
+             [GameNumber \"{number}\"]\n\
+             [PairNumber \"{pair}\"]\n\
+             [PairGame \"{assignment}\"]\n\
+             [OpeningIndex \"0\"]\n\
+             [OpeningLabel \"e4 e5\"]\n\
+             {sample}\
+             \n\
+             1. e4 e5 {result}\n\n"
+        )
+    }
+
+    /// Replay `text` as a `.pgn` file, the way `stats FILE.pgn` does.
+    fn replay_pgn(text: &str) -> Result<StatsReplayReport, String> {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("games.pgn");
+        fs::write(&path, text).unwrap();
+        replay(&path, None)
+    }
+
+    /// A PGN alone reproduces the pentanomial vector, because it says which
+    /// pair each game belongs to and which colour assignment it is.
+    #[test]
+    fn the_frozen_annotated_fixture_replays_as_one_complete_pair() {
+        let report =
+            replay_pgn(include_str!("../../../tests/fixtures/annotated-games.pgn")).unwrap();
+        assert_eq!(report.authority, "pgn-export");
+        assert_eq!(report.pairing, "paired");
+        assert_eq!(report.complete_pairs, 1);
+        assert_eq!(report.unpaired_games, 0);
+        // Alpha won its White game and lost the reversed one: one point of two.
+        assert_eq!(report.pentanomial, Some([0, 0, 1, 0, 0]));
+    }
+
+    /// Two encounters of one game each, on the same opening.
+    ///
+    /// Numbering them one and two is enough for game-number arithmetic to
+    /// call them a colour-reversed pair, but they are two different contests
+    /// and their scores must never be added into one pentanomial unit.
+    #[test]
+    fn one_game_per_pair_is_never_joined_across_encounters() {
+        let report = replay_pgn(&format!(
+            "{}{}",
+            game(1, 1, 1, "Alpha 1.0.0", "1-0", None),
+            game(2, 2, 1, "Alpha 1.0.0", "0-1", None),
+        ))
+        .unwrap();
+        assert_eq!(report.complete_pairs, 0);
+        assert_eq!(report.unpaired_games, 2);
+        assert_eq!(report.pentanomial, None);
+    }
+
+    /// Four games of one encounter are two pentanomial units, and the colour
+    /// inversion belongs to every even assignment, not only to assignment two.
+    #[test]
+    fn four_games_per_pair_are_two_units_and_invert_every_even_assignment() {
+        let report = replay_pgn(&format!(
+            "{}{}{}{}",
+            // The first unit is shared: Alpha wins as White, Beta wins as White.
+            game(1, 1, 1, "Alpha 1.0.0", "1-0", None),
+            game(2, 1, 2, "Beta 1.0.0", "1-0", None),
+            // The second unit is Alpha's twice: as White, then as Black.
+            game(3, 1, 3, "Alpha 1.0.0", "1-0", None),
+            game(4, 1, 4, "Beta 1.0.0", "0-1", None),
+        ))
+        .unwrap();
+        assert_eq!(report.complete_pairs, 2);
+        assert_eq!(report.unpaired_games, 0);
+        assert_eq!(report.pentanomial, Some([0, 0, 1, 0, 1]));
+    }
+
+    /// A run's own PGN keeps the pairs an SPRT finished after its boundary.
+    /// Those are evidence, not sample: the replay leaves them out of the
+    /// official vector and says so rather than dropping them silently.
+    #[test]
+    fn post_terminal_pairs_in_a_pgn_are_excluded_from_the_sample_and_named() {
+        let official = Some(OFFICIAL_SAMPLE);
+        let post_terminal = Some(POST_TERMINAL_SAMPLE);
+        let report = replay_pgn(&format!(
+            "{}{}{}{}{}{}",
+            game(1, 1, 1, "Alpha 1.0.0", "1-0", official),
+            game(2, 1, 2, "Beta 1.0.0", "0-1", official),
+            game(3, 2, 1, "Alpha 1.0.0", "1/2-1/2", official),
+            game(4, 2, 2, "Beta 1.0.0", "1-0", official),
+            // Scored like the official pairs, it would move the vector.
+            game(5, 3, 1, "Alpha 1.0.0", "0-1", post_terminal),
+            game(6, 3, 2, "Beta 1.0.0", "1-0", post_terminal),
+        ))
+        .unwrap();
+        assert_eq!(report.games, 4);
+        assert_eq!(report.complete_pairs, 2);
+        assert_eq!(report.unpaired_games, 0);
+        // Alpha scored two of two, then one half of two.
+        assert_eq!(report.pentanomial, Some([0, 1, 0, 0, 1]));
+        assert_eq!(report.excluded_games, 2);
+        assert_eq!(
+            report.excluded_by_sample,
+            BTreeMap::from([(POST_TERMINAL_SAMPLE.to_owned(), 2)])
+        );
+        assert!(
+            report.warnings.iter().any(|warning| warning
+                == "2 post-terminal games were excluded from the official sample; the run recorded them without scoring them"),
+            "{:?}",
+            report.warnings
+        );
+    }
+
+    /// Nothing in the games of an invalidated SPSA iteration belongs to an
+    /// official sample, and the replay says so instead of reporting them as
+    /// statistics.
+    #[test]
+    fn a_pgn_of_only_invalid_games_is_refused_as_holding_no_official_sample() {
+        let invalid = Some(INVALID_SAMPLE);
+        let error = replay_pgn(&format!(
+            "{}{}",
+            game(1, 1, 1, "Alpha 1.0.0", "1-0", invalid),
+            game(2, 1, 2, "Beta 1.0.0", "0-1", invalid),
+        ))
+        .unwrap_err();
+        assert!(
+            error.ends_with(
+                "contains 2 invalid games and nothing that belongs to the official sample"
+            ),
+            "{error}"
+        );
+    }
 }

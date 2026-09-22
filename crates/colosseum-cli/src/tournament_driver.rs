@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use colosseum_application::{
     RateTournament, TournamentCompletedGame, TournamentFixedRating, TournamentPlan,
-    TournamentResults,
+    TournamentResults, TournamentScheduleGame,
 };
 use colosseum_core::{AdjudicationConfig, GameResult, ParticipantId, Termination};
 use colosseum_engine::{ClockAccountingReport, GameFault, GamePairIdentity};
@@ -194,6 +194,24 @@ pub enum TournamentRunError {
     Results(String),
 }
 
+/// The schedule identity a tournament game is written with.
+///
+/// The encounter is the pair, whatever its length, and its opening index is
+/// the one the tournament chose from the whole book, not the single entry the
+/// one-game match that plays it is handed.
+fn encounter_identity(
+    scheduled: &TournamentScheduleGame,
+    opening: &OpeningAssignment,
+) -> GamePairIdentity {
+    GamePairIdentity {
+        game_number: scheduled.number,
+        pair_number: scheduled.encounter,
+        pair_game: scheduled.game_in_encounter,
+        opening_index: opening.book_index,
+        opening_label: opening.label.clone(),
+    }
+}
+
 pub async fn run_tournament(
     request: TournamentRunRequest,
 ) -> Result<TournamentReport, TournamentRunError> {
@@ -300,16 +318,7 @@ pub async fn run_tournament(
                     // The outer schedule owns the stop; a single game either
                     // finishes or is abandoned with the rest.
                     cancellation: Cancellation::inactive(),
-                    // The encounter is the pair, and its opening index is the
-                    // one the tournament chose from the whole book, not the
-                    // single entry this one-game match was handed.
-                    identity_override: Some(GamePairIdentity {
-                        game_number: scheduled.number,
-                        pair_number: scheduled.encounter,
-                        pair_game: scheduled.game_in_encounter,
-                        opening_index: opening.book_index,
-                        opening_label: opening.label.clone(),
-                    }),
+                    identity_override: Some(encounter_identity(&scheduled, &opening)),
                     observer: None,
                 })
                 .await
@@ -424,4 +433,104 @@ pub async fn run_tournament(
         infrastructure_faults,
         games,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use colosseum_application::{
+        EngineLaunchSpec, PlanTournament, RuntimeParticipant, TournamentDesign,
+        TournamentParticipant,
+    };
+    use colosseum_core::Format;
+    use colosseum_engine::pgn::{PgnTags, build_pgn};
+
+    use super::*;
+
+    fn plan(games_per_pair: u32) -> TournamentPlan {
+        let participants = (0..3)
+            .map(|index| TournamentParticipant {
+                participant: RuntimeParticipant {
+                    id: ParticipantId::from_u128(index + 1),
+                    launch: EngineLaunchSpec::path_only(format!("engine-{index}").into()),
+                },
+                initial_rating: 1_500.0,
+            })
+            .collect();
+        PlanTournament::execute(
+            participants,
+            TournamentDesign {
+                format: Format::RoundRobin { cycles: 1 },
+                games_per_pair,
+            },
+        )
+        .unwrap()
+    }
+
+    /// A tournament encounter is the pair, whatever its length: one game per
+    /// encounter is no pentanomial unit at all, two is one unit per encounter
+    /// and four is two. What the tournament writes has to say so, or a replay
+    /// of its PGN would pair games from different encounters.
+    #[test]
+    fn a_tournament_pgn_names_each_encounter_as_its_pair_for_any_games_per_pair() {
+        for (games_per_pair, expected_units) in [(1, 0), (2, 3), (4, 6)] {
+            let plan = plan(games_per_pair);
+            let mut pgn = String::new();
+            let mut encounters = BTreeMap::<u32, Vec<u32>>::new();
+            for scheduled in &plan.schedule {
+                let opening = OpeningAssignment {
+                    book_index: Some(scheduled.encounter as usize - 1),
+                    label: format!("opening {}", scheduled.encounter),
+                };
+                let identity = encounter_identity(scheduled, &opening);
+                assert_eq!(identity.game_number, scheduled.number);
+                assert_eq!(identity.opening_index, opening.book_index);
+                encounters
+                    .entry(identity.pair_number)
+                    .or_default()
+                    .push(identity.pair_game);
+                pgn.push_str(&build_pgn(
+                    &PgnTags {
+                        event: "Colosseum CLI tournament".into(),
+                        site: "?".into(),
+                        date: "2026.09.22".into(),
+                        round: scheduled.round,
+                        white: scheduled.white.to_string(),
+                        black: scheduled.black.to_string(),
+                        result: GameResult::WhiteWin,
+                        time_control: String::new(),
+                        termination: Some(Termination::Checkmate),
+                        fen: None,
+                        opening_plies: 0,
+                        identity: Some(identity),
+                        time_margins_ms: None,
+                        slot: None,
+                        forfeited_search: None,
+                    },
+                    &[],
+                    &[],
+                ));
+                pgn.push('\n');
+            }
+            // Three encounters, each numbering its own games from one.
+            let expected = (1..=games_per_pair).collect::<Vec<_>>();
+            assert_eq!(encounters.len(), 3, "{games_per_pair} games per pair");
+            assert!(encounters.values().all(|games| *games == expected));
+
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("games.pgn");
+            std::fs::write(&path, pgn).unwrap();
+            let report = crate::stats_replay::replay(&path, None).unwrap();
+            assert_eq!(report.games, 3 * games_per_pair);
+            assert_eq!(
+                report.complete_pairs, expected_units,
+                "{games_per_pair} games per pair"
+            );
+            assert_eq!(
+                report.unpaired_games,
+                3 * games_per_pair - 2 * expected_units
+            );
+        }
+    }
 }
