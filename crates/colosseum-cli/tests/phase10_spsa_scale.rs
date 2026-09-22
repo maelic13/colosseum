@@ -4,10 +4,18 @@
 //! the run exercises everything around the games — the driver, the journal,
 //! the checkpoint, the progress blocks and the result — at a length where a
 //! cost that grows with the run shows. Per-iteration commit time must be flat
-//! from the first iterations to the last, the process's resident memory must
-//! not grow with the iterations committed, and the result must stay small:
-//! each iteration is a summary, and the games are in the journal. A resumed
-//! tune must not keep the games it replayed.
+//! from the first iterations to the last, the memory the process has committed
+//! must not grow with the iterations committed, and the result must stay
+//! small: each iteration is a summary, and the games are in the journal. A
+//! resumed tune must not keep the games it replayed.
+//!
+//! Memory is measured as private commit — what this process has asked the
+//! operating system for and nobody else shares — rather than the resident set.
+//! A resident set is what the OS has chosen to keep in RAM right now, which it
+//! trims under pressure and grows when memory is plentiful, so comparing two
+//! processes' resident sets measures the machine's mood as much as the
+//! program's appetite: the comparison below failed intermittently under a
+//! loaded test suite while the tune itself held exactly what it should.
 
 use std::collections::BTreeMap;
 use std::process::{Command, Stdio};
@@ -20,42 +28,50 @@ const GAMES_PER_ITERATION: u64 = 4;
 /// About 0.5 KB of pretty-printed summary per iteration of a one-knob tune;
 /// the old result carried every game, about 100 KB per iteration.
 const RESULT_LIMIT_BYTES: u64 = 8 * 1024 * 1024;
-/// Resident growth tolerated from early in the run to its end.
+/// Committed growth tolerated from early in the run to its end.
 const MEMORY_GROWTH_LIMIT_BYTES: u64 = 16 * 1024 * 1024;
 /// What a resumed tune may hold beyond one that never stopped: measured 2.8 MB
 /// with the replayed games dropped and 13.7 MB with them kept.
 const REPLAY_RESIDUE_LIMIT_BYTES: u64 = 8 * 1024 * 1024;
 
+/// The private memory the process has committed, in bytes.
 #[cfg(windows)]
-fn resident_bytes(pid: u32) -> Option<u64> {
+fn committed_bytes(pid: u32) -> Option<u64> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::ProcessStatus::{
-        K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+        K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
     };
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
     };
-    // SAFETY: the handle is checked and closed; the counters are plain data
-    // sized for the call.
+    // SAFETY: the handle is checked and closed; the counters are plain data,
+    // and the call is told the larger EX size it is given, which is the
+    // documented way to read PrivateUsage.
     unsafe {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, 0, pid);
         if process.is_null() {
             return None;
         }
-        let mut counters: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
-        counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-        let ok = K32GetProcessMemoryInfo(process, &mut counters, counters.cb);
+        let mut counters: PROCESS_MEMORY_COUNTERS_EX = std::mem::zeroed();
+        counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32;
+        let ok = K32GetProcessMemoryInfo(
+            process,
+            std::ptr::from_mut(&mut counters).cast::<PROCESS_MEMORY_COUNTERS>(),
+            counters.cb,
+        );
         CloseHandle(process);
-        (ok != 0).then_some(counters.WorkingSetSize as u64)
+        (ok != 0).then_some(counters.PrivateUsage as u64)
     }
 }
 
+/// The private data segment, which is what this process asked for: `VmRSS`
+/// would be the part of it the kernel currently keeps in RAM.
 #[cfg(target_os = "linux")]
-fn resident_bytes(pid: u32) -> Option<u64> {
+fn committed_bytes(pid: u32) -> Option<u64> {
     let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
     let kilobytes = status
         .lines()
-        .find_map(|line| line.strip_prefix("VmRSS:"))?
+        .find_map(|line| line.strip_prefix("VmData:"))?
         .trim()
         .trim_end_matches("kB")
         .trim()
@@ -65,7 +81,7 @@ fn resident_bytes(pid: u32) -> Option<u64> {
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-fn resident_bytes(_pid: u32) -> Option<u64> {
+fn committed_bytes(_pid: u32) -> Option<u64> {
     None
 }
 
@@ -74,7 +90,7 @@ fn median(mut values: Vec<u64>) -> u64 {
     values[values.len() / 2]
 }
 
-/// One invocation of the synthetic tune: its exit code, the resident memory
+/// One invocation of the synthetic tune: its exit code, the committed memory
 /// sampled while it ran, and its wall time.
 struct Invocation {
     code: Option<i32>,
@@ -83,9 +99,9 @@ struct Invocation {
 }
 
 impl Invocation {
-    /// The median resident memory over the part of the run between two
+    /// The median committed memory over the part of the run between two
     /// fractions of its wall time, when enough samples were taken.
-    fn resident(&self, from: u32, to: u32, of: u32) -> Option<u64> {
+    fn committed(&self, from: u32, to: u32, of: u32) -> Option<u64> {
         if self.samples.len() < 20 {
             return None;
         }
@@ -144,7 +160,7 @@ fn synthetic_tune(root: &std::path::Path, run: &std::path::Path, extra: &[&str])
         if let Some(status) = child.try_wait().unwrap() {
             break status;
         }
-        if let Some(bytes) = resident_bytes(child.id()) {
+        if let Some(bytes) = committed_bytes(child.id()) {
             samples.push((started.elapsed(), bytes));
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -197,10 +213,10 @@ fn a_five_thousand_iteration_tune_commits_its_last_iteration_as_cheaply_as_its_f
     // Early: the second tenth of the run, once the tune is under way. Late:
     // its last fifth.
     let growth = invocation
-        .resident(1, 2, 10)
-        .zip(invocation.resident(4, 5, 5));
+        .committed(1, 2, 10)
+        .zip(invocation.committed(4, 5, 5));
     eprintln!(
-        "{ITERATIONS} iterations in {wall:?}; median cycle {first} us early, {last} us late; result {result_bytes} bytes; resident {growth:?}"
+        "{ITERATIONS} iterations in {wall:?}; median cycle {first} us early, {last} us late; result {result_bytes} bytes; committed {growth:?}"
     );
 
     assert!(
@@ -221,7 +237,7 @@ fn a_five_thousand_iteration_tune_commits_its_last_iteration_as_cheaply_as_its_f
     if let Some((early, late)) = growth {
         assert!(
             late <= early + MEMORY_GROWTH_LIMIT_BYTES,
-            "resident memory grew from {early} to {late} bytes"
+            "committed memory grew from {early} to {late} bytes"
         );
     }
 }
@@ -262,12 +278,12 @@ fn a_resumed_tune_does_not_keep_the_games_it_replayed() {
 
     // The resumed run's whole life against the uninterrupted run's last
     // fifth, which holds as many summaries.
-    let resident = resumed.resident(0, 1, 1).zip(whole.resident(4, 5, 5));
+    let committed = resumed.committed(0, 1, 1).zip(whole.committed(4, 5, 5));
     eprintln!(
-        "resumed at {STOP_AT} of {ITERATIONS}: resident {resident:?} (resumed, uninterrupted) in {:?}",
+        "resumed at {STOP_AT} of {ITERATIONS}: committed {committed:?} (resumed, uninterrupted) in {:?}",
         resumed.wall
     );
-    if let Some((resumed, whole)) = resident {
+    if let Some((resumed, whole)) = committed {
         assert!(
             resumed <= whole + REPLAY_RESIDUE_LIMIT_BYTES,
             "the resumed tune holds {resumed} bytes against {whole} for one that never stopped"

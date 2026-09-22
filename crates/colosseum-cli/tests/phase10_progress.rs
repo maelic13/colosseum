@@ -679,6 +679,14 @@ fn status_before_the_first_block_says_when_it_is_due() {
             "40",
             "--progress-every",
             "20",
+            // One game at a time, so the twenty games the first block waits
+            // for take the better part of a minute however many cores the
+            // host has. `status` is asked a fraction of a second in; without
+            // this the window depends on the machine and on what else the
+            // suite is running, and a loaded host could commit all twenty
+            // before the question was asked.
+            "--concurrency",
+            "1",
             "--dir",
         ])
         .arg(&run)
