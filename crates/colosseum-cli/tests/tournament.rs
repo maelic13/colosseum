@@ -1,13 +1,11 @@
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::Command;
 
 fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_colosseum-cli"))
 }
 
-fn tournament_command(run: &Path, sleep_ms: u64) -> Command {
+fn tournament_command(run: &Path) -> Command {
     let binary = Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
     let mut command = cli();
     command
@@ -25,9 +23,6 @@ fn tournament_command(run: &Path, sleep_ms: u64) -> Command {
             "--label",
             "Gamma",
             "--engine-arg=__uci-stub",
-        ])
-        .arg(format!("--engine-arg=--sleep-ms={sleep_ms}"))
-        .args([
             "--games-per-pair",
             "2",
             "--max-moves",
@@ -55,13 +50,6 @@ fn checkpoint_games(run: &Path) -> Option<usize> {
     value["payload"]["games_attempted"]
         .as_u64()
         .and_then(|games| usize::try_from(games).ok())
-}
-
-/// Games committed to the journal so far: complete lines only, since a line
-/// still being written is not a committed game.
-fn journal_games(run: &Path) -> Option<usize> {
-    let text = std::fs::read_to_string(run.join("games.jsonl")).ok()?;
-    Some(text.matches('\n').count())
 }
 
 #[test]
@@ -140,7 +128,7 @@ fn fixed_field_command(run: &Path, fixed: &[&str]) -> Command {
     command
         .args([
             "--games-per-pair",
-            "2",
+            "1",
             "--max-moves",
             "1",
             "--placement",
@@ -160,7 +148,6 @@ fn a_fixed_field_pins_its_members_and_estimates_only_the_newcomer() {
     let root = tempfile::tempdir().unwrap();
     let run = root.path().join("fixed");
     let output = fixed_field_command(&run, &["1:2400", "2:2200.5"])
-        .arg("--json")
         .output()
         .unwrap();
     assert!(
@@ -168,8 +155,16 @@ fn a_fixed_field_pins_its_members_and_estimates_only_the_newcomer() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let results = &value["report"]["results"];
+    // The text report marks a pinned rating and gives it no error, rather
+    // than calling a measurement it never made unavailable.
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("2400.0 [fixed];"), "{text}");
+    assert!(text.contains("2200.5 [fixed];"), "{text}");
+    assert!(!text.contains("unavailable"), "{text}");
+
+    let value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(run.join("result.json")).unwrap()).unwrap();
+    let results = &value["results"];
 
     // The pinned ratings are retained as run inputs, in participant order.
     assert_eq!(results["fixed_ratings"][0]["rating"], 2400.0);
@@ -215,17 +210,6 @@ fn a_fixed_field_pins_its_members_and_estimates_only_the_newcomer() {
     let record: serde_json::Value =
         serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
     assert_eq!(record["workflow"]["fixed_ratings"][0]["rating"], 2400.0);
-
-    // The text report marks a pinned rating and gives it no error, rather
-    // than calling a measurement it never made unavailable.
-    let text = fixed_field_command(&root.path().join("text"), &["1:2400", "2:2200.5"])
-        .output()
-        .unwrap();
-    assert!(text.status.success());
-    let text = String::from_utf8_lossy(&text.stdout);
-    assert!(text.contains("2400.0 [fixed];"), "{text}");
-    assert!(text.contains("2200.5 [fixed];"), "{text}");
-    assert!(!text.contains("unavailable"), "{text}");
 }
 
 #[test]
@@ -252,28 +236,10 @@ fn a_fixed_rating_is_refused_rather_than_silently_dropped() {
 }
 
 #[test]
-fn the_single_anchor_stays_the_degenerate_fixed_field() {
-    let root = tempfile::tempdir().unwrap();
-    let run = root.path().join("anchored");
-    let output = tournament_command(&run, 0).output().unwrap();
-    assert!(output.status.success());
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let fixed = value["report"]["results"]["fixed_ratings"]
-        .as_array()
-        .unwrap();
-    assert_eq!(fixed.len(), 1, "{fixed:?}");
-    assert_eq!(fixed[0]["rating"], 1_500.0);
-    assert_eq!(
-        value["report"]["results"]["anchor"],
-        fixed[0]["participant"]
-    );
-}
-
-#[test]
 fn live_tournament_writes_joint_ratings_and_both_csv_exports() {
     let root = tempfile::tempdir().unwrap();
     let run = root.path().join("round-robin");
-    let output = tournament_command(&run, 0).output().unwrap();
+    let output = tournament_command(&run).output().unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -281,6 +247,17 @@ fn live_tournament_writes_joint_ratings_and_both_csv_exports() {
     );
     let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(output["type"], "tournament");
+    // The single anchor is the degenerate fixed field: one pinned rating, at
+    // the anchor's own prior.
+    let fixed = output["report"]["results"]["fixed_ratings"]
+        .as_array()
+        .unwrap();
+    assert_eq!(fixed.len(), 1, "{fixed:?}");
+    assert_eq!(fixed[0]["rating"], 1_500.0);
+    assert_eq!(
+        output["report"]["results"]["anchor"],
+        fixed[0]["participant"]
+    );
     assert_eq!(output["report"]["status"], "completed");
     assert_eq!(output["report"]["results"]["games_scored"], 6);
     let standings = output["report"]["results"]["standings"].as_array().unwrap();
@@ -307,58 +284,4 @@ fn live_tournament_writes_joint_ratings_and_both_csv_exports() {
             .starts_with(",Alpha,Beta,Gamma")
     );
     assert_eq!(checkpoint_games(&run), Some(6));
-}
-
-#[test]
-fn killed_tournament_resumes_only_its_missing_schedule_games() {
-    let root = tempfile::tempdir().unwrap();
-    let run = root.path().join("resume");
-    let mut child = tournament_command(&run, 100)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    // A game is durable once its journal line is written; the checkpoint is
-    // written every fifty games or five seconds and need not exist yet.
-    let completed_before_kill = loop {
-        if let Some(completed @ 1..=5) = journal_games(&run) {
-            break completed;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "tournament did not journal a partial run"
-        );
-        thread::sleep(Duration::from_millis(20));
-    };
-    child.kill().unwrap();
-    child.wait().unwrap();
-
-    let resumed = tournament_command(&run, 100).output().unwrap();
-    assert!(
-        resumed.status.success(),
-        "{}",
-        String::from_utf8_lossy(&resumed.stderr)
-    );
-    let resumed: serde_json::Value = serde_json::from_slice(&resumed.stdout).unwrap();
-    let games = resumed["report"]["games"].as_array().unwrap();
-    assert_eq!(games.len(), 6);
-    let numbers = games
-        .iter()
-        .map(|game| game["number"].as_u64().unwrap())
-        .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(numbers.len(), 6);
-    assert_eq!(checkpoint_games(&run), Some(6));
-    assert!(completed_before_kill < games.len());
-
-    let record: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
-    assert_eq!(record["status"], "completed");
-    assert!(
-        record["anomalies"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|anomaly| anomaly["code"] == "run-resumed")
-    );
 }

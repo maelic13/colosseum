@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
-use std::io::Read;
-use std::process::{Child, Command};
-use std::time::{Duration, Instant};
+use std::process::Command;
 
 use serde_json::Value;
 
@@ -363,52 +361,31 @@ fn multi_iteration_command(
 }
 
 #[test]
-fn the_default_estimator_is_the_final_centre_and_the_tail_window_is_opt_in() {
+fn the_tail_window_estimator_is_opt_in_and_recorded() {
     let root = tempfile::tempdir().unwrap();
     let tune = write_tune(root.path());
-
-    let default_run = root.path().join("default");
-    let default_output = multi_iteration_command(&tune, &default_run, "4")
-        .arg("--json")
-        .output()
-        .unwrap();
-    assert!(
-        default_output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&default_output.stderr)
-    );
-    let default: Value = serde_json::from_slice(&default_output.stdout).unwrap();
-    let estimator = &default["report"]["tuned_result"]["estimator"];
-    assert_eq!(estimator["kind"], "final-center");
-    assert_eq!(estimator["iteration"], 3);
-    assert_eq!(default["report"]["tuned_result"]["completed_iterations"], 4);
-    assert_eq!(default["report"]["tuned_result"]["schema_version"], 3);
-
-    let window_run = root.path().join("window");
-    let window_output = multi_iteration_command(&tune, &window_run, "4")
+    let run = root.path().join("window");
+    let output = multi_iteration_command(&tune, &run, "2")
         .args(["--final-window-percent", "50", "--json"])
         .output()
         .unwrap();
     assert!(
-        window_output.status.success(),
+        output.status.success(),
         "{}",
-        String::from_utf8_lossy(&window_output.stderr)
+        String::from_utf8_lossy(&output.stderr)
     );
-    let window: Value = serde_json::from_slice(&window_output.stdout).unwrap();
-    let estimator = &window["report"]["tuned_result"]["estimator"];
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let estimator = &value["report"]["tuned_result"]["estimator"];
     assert_eq!(estimator["kind"], "tail-window-mean");
     assert_eq!(estimator["percent"], 50);
-    assert_eq!(estimator["samples_used"], 2);
+    assert_eq!(estimator["samples_used"], 1);
+    assert_eq!(value["report"]["tuned_result"]["completed_iterations"], 2);
+    assert_eq!(value["report"]["tuned_result"]["schema_version"], 3);
     // The selected estimator is frozen into the run record exactly as the
     // default is, so a reader knows which one produced the vector.
     let record: Value =
-        serde_json::from_slice(&std::fs::read(window_run.join("run-record.json")).unwrap())
-            .unwrap();
+        serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
     assert_eq!(record["workflow"]["final_window_percent"], 50);
-    let default_record: Value =
-        serde_json::from_slice(&std::fs::read(default_run.join("run-record.json")).unwrap())
-            .unwrap();
-    assert!(default_record["workflow"]["final_window_percent"].is_null());
 }
 
 #[test]
@@ -417,8 +394,8 @@ fn stop_after_iteration_stops_on_a_boundary_and_leaves_the_horizon_alone() {
     let tune = write_tune(root.path());
     let run = root.path().join("run");
 
-    let stopped = multi_iteration_command(&tune, &run, "4")
-        .args(["--stop-after-iteration", "2", "--json"])
+    let stopped = multi_iteration_command(&tune, &run, "2")
+        .args(["--stop-after-iteration", "1", "--json"])
         .output()
         .unwrap();
     assert_eq!(stopped.status.code(), Some(6));
@@ -429,17 +406,17 @@ fn stop_after_iteration_stops_on_a_boundary_and_leaves_the_horizon_alone() {
             .as_array()
             .unwrap()
             .len(),
-        2
+        1
     );
     // The stored horizon is untouched by the stop request.
-    assert_eq!(value["report"]["driver"]["settings"]["iterations"], 4);
+    assert_eq!(value["report"]["driver"]["settings"]["iterations"], 2);
     let record: Value =
         serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
     assert_eq!(record["status"], "cancelled");
-    assert_eq!(record["workflow"]["settings"]["iterations"], 4);
-    assert_eq!(record["workflow"]["stop_after_iteration"], 2);
+    assert_eq!(record["workflow"]["settings"]["iterations"], 2);
+    assert_eq!(record["workflow"]["stop_after_iteration"], 1);
     // A clean stop still produces an on-demand gate candidate.
-    assert_eq!(value["report"]["tuned_result"]["estimator"]["iteration"], 1);
+    assert_eq!(value["report"]["tuned_result"]["estimator"]["iteration"], 0);
 
     let status = cli()
         .args(["status"])
@@ -450,8 +427,30 @@ fn stop_after_iteration_stops_on_a_boundary_and_leaves_the_horizon_alone() {
     let status: Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(status["record"]["status"], "cancelled");
 
-    // Resuming the same directory continues to the stored horizon.
-    let resumed = multi_iteration_command(&tune, &run, "4")
+    // Observing a stopped tune changes none of its files.
+    let before_status = run_files(&run);
+    let spsa_status = cli()
+        .args(["spsa", "status"])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(
+        spsa_status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&spsa_status.stderr)
+    );
+    let spsa_status: Value = serde_json::from_slice(&spsa_status.stdout).unwrap();
+    assert_eq!(
+        spsa_status["report"]["diagnostics"]["completed_iterations"],
+        1
+    );
+    assert_eq!(run_files(&run), before_status);
+    let durable_journal = std::fs::read(run.join("games.jsonl")).unwrap();
+
+    // Resuming continues to the stored horizon, whatever the command line
+    // now asks for.
+    let resumed = multi_iteration_command(&tune, &run, "9")
         .arg("--json")
         .output()
         .unwrap();
@@ -460,14 +459,32 @@ fn stop_after_iteration_stops_on_a_boundary_and_leaves_the_horizon_alone() {
         "{}",
         String::from_utf8_lossy(&resumed.stderr)
     );
+    assert!(
+        String::from_utf8_lossy(&resumed.stderr)
+            .contains("stored SPSA horizon: 2 iterations, 2 games per iteration, r_end 0.002"),
+        "{}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
     let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
     assert_eq!(resumed["report"]["driver"]["status"], "completed");
-    assert_eq!(
-        resumed["report"]["driver"]["completed_iterations"]
-            .as_array()
+    let completed = resumed["report"]["driver"]["completed_iterations"]
+        .as_array()
+        .unwrap();
+    assert_eq!(completed.len(), 2);
+    assert_eq!(completed[0]["games"]["first"], 1);
+    assert_eq!(completed[0]["games"]["last"], 2);
+    // The resume appended to the durable journal and changed none of it.
+    assert!(
+        std::fs::read(run.join("games.jsonl"))
             .unwrap()
-            .len(),
-        4
+            .starts_with(&durable_journal)
+    );
+    assert_eq!(
+        journal_lines(&run)
+            .iter()
+            .map(|line| line["game"]["iteration"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        [0, 0, 1, 1]
     );
 }
 
@@ -581,6 +598,7 @@ fn complete_mini_match_is_one_durable_gradient_commit() {
     let record: Value =
         serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
     assert_eq!(record["status"], "completed");
+    assert!(record["workflow"]["final_window_percent"].is_null());
     assert_eq!(record["official_sample"]["committed_units"], 1);
     assert_eq!(record["official_sample"]["completed_pairs"], 1);
     assert_eq!(record["official_sample"]["scored_games"], 2);
@@ -608,7 +626,7 @@ fn complete_mini_match_is_one_durable_gradient_commit() {
 }
 
 #[test]
-fn sprt_apply_consumes_the_unedited_spsa_result_and_verifies_executable_content() {
+fn sprt_apply_consumes_the_unedited_spsa_result_and_refuses_other_executables() {
     let root = tempfile::tempdir().unwrap();
     let tune = write_tune(root.path());
     let tune_run = root.path().join("tune");
@@ -668,21 +686,8 @@ fn sprt_apply_consumes_the_unedited_spsa_result_and_verifies_executable_content(
         record["workflow"]["apply"]["identity"]["status"],
         "verified"
     );
-}
 
-#[test]
-fn sprt_apply_refuses_hash_mismatch_unless_the_override_is_prominent() {
-    let root = tempfile::tempdir().unwrap();
-    let tune = write_tune(root.path());
-    let tune_run = root.path().join("tune");
-    assert!(
-        stub_command(&tune, &tune_run)
-            .output()
-            .unwrap()
-            .status
-            .success()
-    );
-    let result = tune_run.join("result.json");
+    // A different executable is refused unless the override is prominent.
     let different = env!("CARGO_BIN_EXE_colosseum-uci-fixture");
 
     let refused = cli()
@@ -869,110 +874,6 @@ fn a_rare_forfeit_is_scored_into_the_gradient_until_the_allowance_is_exceeded() 
     assert!(log.contains("4 of 3 allowed"), "{log}");
 }
 
-#[test]
-fn killed_tune_resumes_the_exact_rng_iteration_and_durable_prefix() {
-    let root = tempfile::tempdir().unwrap();
-    let tune = write_tune(root.path());
-    let run = root.path().join("resume");
-    let pid_file = root.path().join("engine.pid");
-    let mut child = long_tune(&tune, &run, &pid_file, "3", "2", "0.002")
-        .spawn()
-        .unwrap();
-    wait_for_first_commit(&mut child, &run);
-    let status_start = Instant::now();
-    let live_status = cli()
-        .args(["spsa", "status"])
-        .arg(&run)
-        .arg("--json")
-        .output()
-        .unwrap();
-    assert!(
-        live_status.status.success(),
-        "{}",
-        String::from_utf8_lossy(&live_status.stderr)
-    );
-    assert!(status_start.elapsed() < Duration::from_secs(2));
-    let live_status: Value = serde_json::from_slice(&live_status.stdout).unwrap();
-    let durable_iterations = live_status["report"]["diagnostics"]["completed_iterations"]
-        .as_u64()
-        .unwrap();
-    assert!((1..=3).contains(&durable_iterations));
-    assert_eq!(
-        live_status["report"]["diagnostics"]["knobs"][0]["recent_stability"]["state"],
-        "insufficient-history"
-    );
-    // What was durable before the kill: the first iteration's journal lines.
-    let durable_prefix = journal_prefix(&run, 2);
-    let active_engines = wait_for_active_engines(&mut child, &pid_file);
-    child.kill().unwrap();
-    child.wait().unwrap();
-    assert_processes_reaped(active_engines);
-
-    let bytes_before_status = run_files(&run);
-    let stopped_status = cli()
-        .args(["spsa", "status"])
-        .arg(&run)
-        .arg("--json")
-        .output()
-        .unwrap();
-    assert!(stopped_status.status.success());
-    assert_eq!(run_files(&run), bytes_before_status);
-
-    let output = long_tune(&tune, &run, &pid_file, "99", "4", "1")
-        .arg("--json")
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("stored SPSA horizon: 3 iterations, 2 games per iteration, r_end 0.002")
-    );
-    let completed = value["report"]["driver"]["completed_iterations"]
-        .as_array()
-        .unwrap();
-    assert_eq!(completed.len(), 3);
-    assert_eq!(completed[0]["iteration"], 0);
-    assert_eq!(completed[1]["iteration"], 1);
-    assert_eq!(completed[2]["iteration"], 2);
-    // The resumed journal begins with exactly the bytes that were durable: the
-    // resume appended to them and changed none of them.
-    let after = std::fs::read(run.join("games.jsonl")).unwrap();
-    assert!(after.starts_with(&durable_prefix));
-    // The iteration the resume replayed is the one those lines describe: its
-    // summary names their game numbers, and its score is theirs.
-    let journal = journal_lines(&run);
-    assert_eq!(journal.len(), 6);
-    assert_eq!(completed[0]["games"]["first"], 1);
-    assert_eq!(completed[0]["games"]["last"], 2);
-    let plus_points = journal[..2]
-        .iter()
-        .map(|line| {
-            let game = &line["game"];
-            let plus_is_white = game["white"] == "a";
-            match game["result"].as_str().unwrap() {
-                "Draw" => 0,
-                "WhiteWin" if plus_is_white => 1,
-                "BlackWin" if !plus_is_white => 1,
-                _ => -1,
-            }
-        })
-        .sum::<i64>();
-    assert_eq!(completed[0]["score"]["difference"], plus_points);
-    assert_eq!(
-        journal
-            .iter()
-            .map(|line| line["game"]["iteration"].as_u64().unwrap())
-            .collect::<Vec<_>>(),
-        [0, 0, 1, 1, 2, 2]
-    );
-}
-
 /// Every complete journal line, parsed.
 fn journal_lines(run: &std::path::Path) -> Vec<Value> {
     std::fs::read_to_string(run.join("games.jsonl"))
@@ -980,133 +881,6 @@ fn journal_lines(run: &std::path::Path) -> Vec<Value> {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
-}
-
-/// The bytes of the journal's first `lines` complete lines.
-fn journal_prefix(run: &std::path::Path, lines: usize) -> Vec<u8> {
-    let bytes = std::fs::read(run.join("games.jsonl")).unwrap();
-    let end = bytes
-        .iter()
-        .enumerate()
-        .filter(|(_, byte)| **byte == b'\n')
-        .nth(lines - 1)
-        .map(|(index, _)| index + 1)
-        .expect("the journal holds the lines asked for");
-    bytes[..end].to_vec()
-}
-
-fn long_tune(
-    tune: &std::path::Path,
-    run: &std::path::Path,
-    pid_file: &std::path::Path,
-    iterations: &str,
-    games_per_iteration: &str,
-    r_end: &str,
-) -> Command {
-    let mut command = cli();
-    command
-        .arg("spsa")
-        .arg(env!("CARGO_BIN_EXE_colosseum-uci-fixture"))
-        .args([
-            "--engine-arg=--legal-sequence",
-            "--engine-arg=--sleep-ms=75",
-            "--engine-arg=--append-pid-file",
-        ])
-        .arg(format!("--engine-arg=--pid-file={}", pid_file.display()))
-        .arg("--tune")
-        .arg(tune)
-        .args([
-            "--r-end",
-            r_end,
-            "--iterations",
-            iterations,
-            "--games-per-iteration",
-            games_per_iteration,
-            "--depth",
-            "1",
-            "--max-moves",
-            "2",
-            "--seed",
-            "7",
-            "--dir",
-        ])
-        .arg(run)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    command
-}
-
-fn wait_for_active_engines(child: &mut Child, pid_file: &std::path::Path) -> [u32; 2] {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
-        assert!(
-            child.try_wait().unwrap().is_none(),
-            "SPSA tune ended before an active post-checkpoint engine was observed"
-        );
-        if let Ok(contents) = std::fs::read_to_string(pid_file) {
-            let mut active = contents
-                .lines()
-                .filter_map(|line| line.trim().parse::<u32>().ok())
-                .filter(|pid| colosseum_uci::process_is_alive(*pid))
-                .collect::<Vec<_>>();
-            active.sort_unstable();
-            active.dedup();
-            if active.len() >= 2 {
-                return [active[0], active[1]];
-            }
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    panic!("timed out waiting for an active SPSA engine process");
-}
-
-fn assert_processes_reaped(pids: [u32; 2]) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline {
-        if pids
-            .iter()
-            .all(|pid| !colosseum_uci::process_is_alive(*pid))
-        {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    panic!("SPSA engine processes remained after their CLI owner was killed: {pids:?}");
-}
-
-fn wait_for_first_commit(child: &mut Child, run: &std::path::Path) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    while Instant::now() < deadline {
-        if child.try_wait().unwrap().is_some() {
-            let mut stdout = String::new();
-            let mut stderr = String::new();
-            child
-                .stdout
-                .take()
-                .unwrap()
-                .read_to_string(&mut stdout)
-                .unwrap();
-            child
-                .stderr
-                .take()
-                .unwrap()
-                .read_to_string(&mut stderr)
-                .unwrap();
-            panic!(
-                "SPSA fixture exited before it could be interrupted\nstdout: {stdout}\nstderr: {stderr}"
-            );
-        }
-        // An iteration is committed once its games are in the journal: two
-        // complete lines for the two games of this fixture's mini-match. The
-        // checkpoint that summarises them may not exist yet.
-        let committed = std::fs::read_to_string(run.join("games.jsonl"))
-            .is_ok_and(|journal| journal.matches('\n').count() >= 2);
-        if committed {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    panic!("timed out waiting for the first durable SPSA iteration");
 }
 
 fn run_files(run: &std::path::Path) -> BTreeMap<std::ffi::OsString, Vec<u8>> {

@@ -586,6 +586,128 @@ mod tests {
         assert!(first.crosstable_csv.contains("engine-0"));
     }
 
+    /// Schedules as `number:round:white:black` rows, participants numbered
+    /// from one in field order.
+    fn schedule_rows(plan: &TournamentPlan) -> Vec<String> {
+        plan.schedule
+            .iter()
+            .map(|game| {
+                format!(
+                    "{}:{}:{}:{}",
+                    game.number,
+                    game.round,
+                    game.white.as_uuid().as_u128(),
+                    game.black.as_uuid().as_u128()
+                )
+            })
+            .collect()
+    }
+
+    /// The GUI's shared-core schedules and its stored-result ratings for one
+    /// four-engine field, recorded in `docs/fixtures/phase7/gui-parity.json`.
+    /// The CLI must plan the same games and rate the same results to 0.01 Elo.
+    #[test]
+    fn schedules_and_ratings_match_the_recorded_gui_oracle() {
+        const FIELD: [(&str, f64); 4] = [
+            ("Alpha", 1500.0),
+            ("Beta", 1550.0),
+            ("Gamma", 1450.0),
+            ("Delta", 1600.0),
+        ];
+        const ROUND_ROBIN: [&str; 12] = [
+            "1:1:1:4", "2:1:4:1", "3:1:2:3", "4:1:3:2", "5:2:1:3", "6:2:3:1", "7:2:4:2", "8:2:2:4",
+            "9:3:1:2", "10:3:2:1", "11:3:3:4", "12:3:4:3",
+        ];
+        const RESULTS: [GameResult; 12] = [
+            GameResult::WhiteWin,
+            GameResult::BlackWin,
+            GameResult::WhiteWin,
+            GameResult::Draw,
+            GameResult::BlackWin,
+            GameResult::BlackWin,
+            GameResult::Draw,
+            GameResult::WhiteWin,
+            GameResult::WhiteWin,
+            GameResult::WhiteWin,
+            GameResult::BlackWin,
+            GameResult::Draw,
+        ];
+        const RATINGS: [f64; 4] = [1565.17, 1586.89, 1441.41, 1506.54];
+        const GAUNTLET: [&str; 8] = [
+            "1:1:1:3", "2:1:3:1", "3:1:1:4", "4:1:4:1", "5:1:2:3", "6:1:3:2", "7:1:2:4", "8:1:4:2",
+        ];
+        let field = || {
+            FIELD
+                .iter()
+                .enumerate()
+                .map(|(index, (name, prior))| TournamentParticipant {
+                    participant: RuntimeParticipant {
+                        id: ParticipantId::from_u128(index as u128 + 1),
+                        launch: EngineLaunchSpec {
+                            label: Some((*name).into()),
+                            ..EngineLaunchSpec::path_only((*name).into())
+                        },
+                    },
+                    initial_rating: *prior,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let round_robin = PlanTournament::execute(
+            field(),
+            TournamentDesign {
+                format: Format::RoundRobin { cycles: 1 },
+                games_per_pair: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(schedule_rows(&round_robin), ROUND_ROBIN);
+        let games = round_robin
+            .schedule
+            .iter()
+            .zip(RESULTS)
+            .map(|(game, result)| TournamentCompletedGame {
+                number: game.number,
+                white: game.white,
+                black: game.black,
+                result,
+                scorable: true,
+                termination: Termination::Checkmate,
+            })
+            .collect::<Vec<_>>();
+        let report = RateTournament::execute(&round_robin, &games, None).unwrap();
+        let actual = (1..=FIELD.len())
+            .map(|id| {
+                report
+                    .standings
+                    .iter()
+                    .find(|row| row.participant == ParticipantId::from_u128(id as u128))
+                    .unwrap()
+                    .rating
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            actual
+                .iter()
+                .zip(RATINGS)
+                .all(|(actual, expected)| (actual - expected).abs() <= 0.01),
+            "actual GUI-parity ratings: {actual:?}"
+        );
+
+        let gauntlet = PlanTournament::execute(
+            field(),
+            TournamentDesign {
+                format: Format::Gauntlet {
+                    seeds: 2,
+                    cycles: 1,
+                },
+                games_per_pair: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(schedule_rows(&gauntlet), GAUNTLET);
+    }
+
     #[test]
     fn optional_anchor_stays_fixed_and_checkpoint_identity_is_validated() {
         let plan = PlanTournament::execute(

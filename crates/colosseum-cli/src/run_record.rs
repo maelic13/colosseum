@@ -433,3 +433,77 @@ fn unix_ms() -> u64 {
         .try_into()
         .unwrap_or(u64::MAX)
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::{built_in_defaults, resolve_config};
+
+    fn config(root: &Path) -> crate::ResolvedConfig {
+        resolve_config(
+            built_in_defaults(),
+            None,
+            json!({"command": "match"}),
+            &[],
+            root,
+            &[],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn dropped_owner_records_an_aborted_run_with_zero_official_sample() {
+        let root = tempfile::tempdir().unwrap();
+        let run = RunDirectory::create_unique(root.path(), "match", &config(root.path()))
+            .unwrap()
+            .directory;
+        {
+            let _recorder = RunRecorder::begin(&run, "match").unwrap();
+        }
+        let record = RunRecord::read(&run.paths().root).unwrap();
+        assert_eq!(record.status, RunStatus::Aborted);
+        assert_eq!(record.official_sample, OfficialSample::default());
+        assert_eq!(record.schema_version, RUN_RECORD_SCHEMA_VERSION);
+        assert_eq!(record.stats_version, colosseum_core::STATS_VERSION);
+        // A run that never published a block has no block to report.
+        assert!(record.progress.is_none());
+        assert!(
+            record
+                .host
+                .capabilities
+                .contains_key("process-tree-containment")
+        );
+        assert_eq!(record.anomalies[0].code, "workflow-owner-dropped");
+    }
+
+    #[test]
+    fn terminal_record_keeps_the_official_committed_sample() {
+        let root = tempfile::tempdir().unwrap();
+        let run = RunDirectory::create_unique(root.path(), "sprt", &config(root.path()))
+            .unwrap()
+            .directory;
+        let mut recorder = RunRecorder::begin(&run, "sprt").unwrap();
+        recorder
+            .set_workflow(json!({"kind": "sprt", "model": "normalized"}))
+            .unwrap();
+        let sample = OfficialSample {
+            committed_units: 4,
+            scored_games: 4,
+            completed_pairs: 2,
+            pentanomial: [0, 0, 1, 1, 0],
+            unpaired_games: 0,
+        };
+        recorder.update_sample(sample.clone()).unwrap();
+        recorder
+            .add_anomaly("clock-resolution", "coarse timer")
+            .unwrap();
+        recorder.finish(RunStatus::Completed).unwrap();
+        let record = RunRecord::read(&run.paths().root).unwrap();
+        assert_eq!(record.status, RunStatus::Completed);
+        assert_eq!(record.official_sample, sample);
+        assert_eq!(record.workflow["model"], "normalized");
+        assert_eq!(record.anomalies.len(), 1);
+    }
+}
