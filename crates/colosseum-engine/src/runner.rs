@@ -1885,4 +1885,80 @@ mod tests {
         assert_eq!(summary.median_ns, 4_000_000);
         assert_eq!(summary.max_ns, 9_000_000);
     }
+
+    /// Each stretch of a game's wall time lands in its own phase, exactly.
+    #[test]
+    fn the_phase_clock_puts_each_stretch_of_a_game_in_its_own_phase() {
+        let origin = std::time::Instant::now();
+        let at = |ms: u64| origin + Duration::from_millis(ms);
+        let timing = |begin: u64, go: u64, arrived: Option<u64>| colosseum_uci::SearchTiming {
+            go_stamped: at(go),
+            write_returned: at(go),
+            deadline: at(begin + 10_000),
+            first_info: None,
+            last_info: None,
+            last_info_time_ms: None,
+            engine_time_ms: None,
+            bestmove_arrived: arrived.map(at),
+            consumed: None,
+            late: false,
+            earlier_origin: false,
+            process_at_go: None,
+            process_at_answer: None,
+        };
+
+        let mut clock = PhaseClock::default();
+        // Nothing searched yet: a game that never reached its first search
+        // has no phases.
+        assert_eq!(clock.phases(at(0), at(0), at(0)), None);
+
+        // The game starts at 0 and spends 150 ms starting its engines.
+        // Search one: position written 150–152, charged 152–172, returned
+        // to the runner at 175.
+        clock.search_begins(at(150));
+        clock.search_returned(at(150), at(175), Some(&timing(150, 152, Some(172))));
+        // 4 ms of the runner's own work, then search two: written 179–180,
+        // charged 180–220, returned at 221.
+        clock.search_begins(at(179));
+        clock.search_returned(at(179), at(221), Some(&timing(179, 180, Some(220))));
+        // 2 ms, then a search whose engine recorded no timing: it counts as
+        // play but is neither charged nor divided into parts.
+        clock.search_begins(at(223));
+        clock.search_returned(at(223), at(230), None);
+        // Play ends at 230, and both engines have exited 120 ms later.
+        let phases = clock.phases(at(0), at(230), at(350)).unwrap();
+
+        let ms = |value: u64| value * 1_000_000;
+        assert_eq!(
+            phases,
+            GamePhases {
+                startup_ns: ms(150),
+                play_ns: ms(80),
+                charged_ns: ms(20 + 40),
+                uncharged_play_ns: ms(80 - 60),
+                between_searches_ns: ms(4 + 2),
+                position_write_ns: ms(2 + 1),
+                after_bestmove_ns: ms(3 + 1),
+                teardown_ns: ms(120),
+            }
+        );
+        assert_eq!(phases.play_ns, phases.charged_ns + phases.uncharged_play_ns);
+        // The three parts of uncharged play are parts of it.
+        assert!(
+            phases.between_searches_ns + phases.position_write_ns + phases.after_bestmove_ns
+                <= phases.uncharged_play_ns
+        );
+
+        // A search that never answered is not charged, and a stamp out of
+        // order saturates rather than wrapping.
+        let mut clock = PhaseClock::default();
+        clock.search_begins(at(10));
+        clock.search_returned(at(10), at(5), Some(&timing(10, 12, None)));
+        let phases = clock.phases(at(20), at(8), at(8)).unwrap();
+        assert_eq!(phases.startup_ns, 0);
+        assert_eq!(phases.play_ns, 0);
+        assert_eq!(phases.charged_ns, 0);
+        assert_eq!(phases.position_write_ns, ms(2));
+        assert_eq!(phases.after_bestmove_ns, 0);
+    }
 }
