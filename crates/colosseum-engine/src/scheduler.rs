@@ -1714,4 +1714,61 @@ mod tests {
         assert!(!repair_missing_executable(&mut unrepaired, &[]));
         assert_eq!(unrepaired.path, missing);
     }
+
+    /// Opening assignment is engine-independent: one opening per *encounter*,
+    /// both colours sharing it, cycling when there are more encounters than
+    /// openings, and the assignment is persisted with the schedule.
+    #[test]
+    fn openings_assigned_per_encounter_and_persisted() {
+        use colosseum_core::{Format, OpeningBook};
+
+        let dir = tempfile::tempdir().unwrap();
+        let epd = dir.path().join("book.epd");
+        // Two distinct positions (1.e4 and 1.d4 reached as Black-to-move EPDs).
+        std::fs::write(
+            &epd,
+            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3
+             rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d3
+",
+        )
+        .unwrap();
+
+        let db = dir.path().join("colosseum.sqlite");
+        let store = Store::open(&db).unwrap();
+
+        let mut config = TournamentConfig {
+            format: Format::RoundRobin { cycles: 1 },
+            games_per_pair: 2,
+            ..Default::default()
+        };
+        config.start_position = StartPosition::Book(OpeningBook::new(epd));
+
+        // 3 engines -> 3 encounters; with 2 openings the third encounter cycles back.
+        let engines = (0..3)
+            .map(|_| {
+                EngineConfig::new(
+                    EngineId::from_uuid(uuid::Uuid::new_v4()),
+                    "/nonexistent/engine".into(),
+                )
+            })
+            .collect();
+        let (events_tx, _rx) = crossbeam_channel::unbounded();
+        let (tournament, _driver) =
+            create_tournament("Book", config, engines, store, events_tx).unwrap();
+
+        let reopened = Store::open(&db).unwrap();
+        let games = reopened.list_games(tournament.id).unwrap();
+        assert_eq!(games.len(), 6, "3 pairs * 2 games");
+
+        // Every game has an assigned opening FEN.
+        assert!(games.iter().all(|g| g.start_fen.is_some()));
+        // Both games of an encounter share an opening (colours swap, position is the same).
+        assert_eq!(games[0].start_fen, games[1].start_fen);
+        assert_eq!(games[2].start_fen, games[3].start_fen);
+        assert_eq!(games[4].start_fen, games[5].start_fen);
+        // Distinct encounters draw distinct openings...
+        assert_ne!(games[0].start_fen, games[2].start_fen);
+        // ...and the book cycles: encounter 3 reuses opening 1.
+        assert_eq!(games[4].start_fen, games[0].start_fen);
+    }
 }
