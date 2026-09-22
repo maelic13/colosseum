@@ -152,6 +152,14 @@ pub fn release_notes(root: &Path, tag: &str) -> Result<String, MetadataError> {
             lines.push(line);
         }
     }
+    // A changelog may separate versions with a horizontal rule; it belongs
+    // between sections, not at the end of one release's notes.
+    while lines
+        .last()
+        .is_some_and(|line| line.trim().is_empty() || line.trim() == "---")
+    {
+        lines.pop();
+    }
     Ok(lines.join("\n").trim().to_owned() + "\n")
 }
 
@@ -457,6 +465,20 @@ mod tests {
         assert_eq!(
             release_notes(root.path(), "cli-v1.2.3").unwrap(),
             "CLI notes.\n"
+        );
+    }
+
+    #[test]
+    fn notes_end_before_the_rule_that_separates_versions() {
+        let root = fixture();
+        fs::write(
+            root.path().join("CHANGELOG-GUI.md"),
+            "# GUI\n\n---\n\n## [1.2.3] - 2026-01-01\n\nGUI notes.\n\n---\n\n## [1.2.2]\n\nOld.\n",
+        )
+        .unwrap();
+        assert_eq!(
+            release_notes(root.path(), "gui-v1.2.3").unwrap(),
+            "GUI notes.\n"
         );
     }
 
