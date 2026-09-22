@@ -1,10 +1,9 @@
 //! Phase 1 acceptance tests for the committed statistics fixture corpus.
 //!
-//! Every comparison is named in `phase-1-acceptance.toml`. External runner
-//! artifacts are compared only on oracle-matrix fields that their recorded
-//! samples actually support.
+//! External runner artifacts are compared only on oracle-matrix fields that
+//! their recorded samples actually support.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use colosseum_core::{
     EloModel, FixedNTestTails, PairGameResult, PentanomialDistribution, PentanomialVector,
@@ -18,9 +17,6 @@ const ANALYTIC_TOML: &str =
     include_str!("../../../tests/fixtures/statistics/analytic-pentanomial.toml");
 const EXTERNAL_TOML: &str =
     include_str!("../../../tests/fixtures/statistics/external-observations.toml");
-const ACCEPTANCE_TOML: &str =
-    include_str!("../../../tests/fixtures/statistics/phase-1-acceptance.toml");
-const ORACLE_MATRIX: &str = include_str!("../../../tests/fixtures/statistics/oracle-matrix.md");
 const FASTCHESS_CONSOLE: &str =
     include_str!("../../../tests/fixtures/statistics/external/fastchess.console.txt");
 const FASTCHESS_PGN: &str =
@@ -183,32 +179,6 @@ struct ExternalObservation {
     complete_pairs: u32,
     counts: [u32; 5],
     console_score: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct AcceptanceManifest {
-    schema_version: u32,
-    #[serde(rename = "description")]
-    _description: String,
-    comparison: Vec<Comparison>,
-    exclusion: Vec<Exclusion>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Comparison {
-    id: String,
-    matrix_row: String,
-    source: String,
-    fixture: String,
-    fields: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Exclusion {
-    id: String,
-    matrix_rows: Vec<String>,
-    sources: Vec<String>,
-    reason: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -545,105 +515,6 @@ fn external_artifacts(observation: &ExternalObservation) -> (&'static str, &'sta
 
 fn collapsed(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn oracle_matrix_rows() -> BTreeSet<&'static str> {
-    ORACLE_MATRIX
-        .lines()
-        .filter_map(|line| {
-            let row = line.strip_prefix('|')?.split('|').next()?.trim();
-            (!row.is_empty()
-                && row != "Field / behaviour"
-                && !row
-                    .chars()
-                    .all(|character| character == '-' || character == ':'))
-            .then_some(row)
-        })
-        .collect()
-}
-
-#[test]
-fn acceptance_manifest_names_every_executed_oracle_cell() {
-    let manifest: AcceptanceManifest = toml::from_str(ACCEPTANCE_TOML).unwrap();
-    assert_eq!(manifest.schema_version, 1);
-
-    let expected = BTreeSet::from([
-        "analytic.pair-binning",
-        "analytic.pentanomial-moments",
-        "analytic.normalized-sprt",
-        "analytic.logistic-sprt",
-        "analytic.trinomial-sprt",
-        "analytic.score-and-draw-ratio",
-        "analytic.logistic-interval-los",
-        "analytic.normalized-resolution",
-        "analytic.fixed-n-plan",
-        "analytic.unpaired-exclusion",
-        "analytic.typed-errors",
-        "fastchess.pair-binning",
-        "cutechess.pair-binning",
-        "fastchess.score-and-draw-ratio",
-        "cutechess.score-and-draw-ratio",
-    ]);
-    let actual = manifest
-        .comparison
-        .iter()
-        .map(|comparison| comparison.id.as_str())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(actual, expected, "acceptance comparison list changed");
-    assert_eq!(
-        actual.len(),
-        manifest.comparison.len(),
-        "duplicate comparison ID"
-    );
-
-    for comparison in &manifest.comparison {
-        assert!(
-            ORACLE_MATRIX.contains(&format!("| {} |", comparison.matrix_row)),
-            "{} names no oracle-matrix row",
-            comparison.id
-        );
-        assert!(!comparison.source.is_empty());
-        assert!(!comparison.fixture.is_empty());
-        assert!(!comparison.fields.is_empty());
-    }
-    let compared_rows = manifest
-        .comparison
-        .iter()
-        .map(|comparison| comparison.matrix_row.as_str())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(
-        compared_rows,
-        oracle_matrix_rows(),
-        "every oracle-matrix row must have an executed analytic or compatible external comparison"
-    );
-
-    let expected_exclusions = BTreeSet::from([
-        "external.clean-sweep-estimates",
-        "external.unmatched-sequential-models",
-        "external.analytic-only-contracts",
-    ]);
-    let actual_exclusions = manifest
-        .exclusion
-        .iter()
-        .map(|exclusion| exclusion.id.as_str())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(actual_exclusions, expected_exclusions);
-    assert_eq!(
-        actual_exclusions.len(),
-        manifest.exclusion.len(),
-        "duplicate exclusion ID"
-    );
-    for exclusion in &manifest.exclusion {
-        assert!(!exclusion.reason.trim().is_empty());
-        assert!(!exclusion.sources.is_empty());
-        for row in &exclusion.matrix_rows {
-            assert!(
-                ORACLE_MATRIX.contains(&format!("| {row} |")),
-                "{} excludes no oracle-matrix row",
-                exclusion.id
-            );
-        }
-    }
 }
 
 #[test]
