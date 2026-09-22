@@ -71,7 +71,7 @@ aborts).
   Rybka 3 ~840 ms, vs ~34 s average game time — a 1–3% overhead; reuse would
   keep idle Hash allocations alive and trust `ucinewgame` in exactly the old
   engines known to leak state. **The CLI keeps each slot's engines between
-  games by default** (`--engine-processes per-slot`, PLAN §Phase 10(ae)),
+  games by default** (`--engine-processes per-slot`, the Phase 10 record, item (ae)),
   replacing one after any fault: fresh processes put an engine's one-time
   work inside a game's search (Rarog's KPK bitbase forfeited games that way),
   and fastchess keeps its engines too. Tournaments keep fresh processes.

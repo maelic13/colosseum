@@ -19,8 +19,8 @@ internal naming or method argumentation.
 | What is missing | Only the maintainer's remote operations: dispatch the CLI and GUI candidates and check their four-platform archives, open the pull request from `cli`, squash-merge on green CI, tag `gui-v1.1.0` and `cli-v0.1.0`, check both release pages. **Phase 11** (GUI on the harness) starts after publication |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 CLI candidate archives ☑ exact-archive smoke · the `gui-v` release lane has never run; its candidate mode is the rehearsal to dispatch before the tag, and the only thing that will have exercised `deb`, `rpm`, `dmg` and `pkg.tar.zst` |
-| Next step | **Publication is the maintainer's** (PLAN §Phase 10(j) and the 10.10 entry below). Then **11.1** — Sol High (Claude: Opus 5, high) |
-| Confirmed decisions | The 2026-09-22 set in PLAN §S8 "Phase 10 — open items", confirmed by the maintainer and not reopened: exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, explicit GUI artifact list, versions kept in names, updater prerelease fix now and pagination later, throughput margin not chased, private-commit measure for the flaky test |
+| Next step | **Publication is the maintainer's** — see "What to do now". Then **11.1** — Sol High (Claude: Opus 5, high) |
+| Confirmed decisions | The 2026-09-22 set, confirmed by the maintainer and not reopened, recorded with the release preparation in [`phase-10-record.md`](docs/architecture/phase-10-record.md): exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, the explicit GUI artifact list, versions kept in artifact names, the updater prerelease fix now and pagination later, the throughput margin not chased |
 
 ## Completed phases
 
@@ -41,7 +41,7 @@ Step identifiers are never reused.
 - ☑ **Phase 7** (7.1–7.3) — Round-robin and gauntlet tournaments with joint or anchored ML ratings, matching the GUI on a frozen fixture.
 - ☑ **Phase 8** (8.1–8.3) — Parity repeated on the candidate, ponder adopted, remaining gaps decided.
 - ☑ **Phase 9** (9.0–9.7) — Naming retained (ADR-0009), versioned `docs/cli/` with a generated reference (ADR-0010), README, candidate bundle, coverage and usability acceptance, release acceptance of candidate `823b398`.
-- ☑ **Phase 10, corrections** (10.1–10.10) — Adjudication off by default, class-aware placement, per-move PGN annotations, final-centre SPSA estimator, graceful stop, fixed rating field, book-range refusal, command-module split, shared game slots, pair identity in PGN, review defects, unscorable tagging, progress reports, commit path off the game loop, writer hardening, latency instrument, one slot per game, fault allowance, SPSA occupancy and scale, persistent engines per slot, real-engine qualification and symmetry, adoption-audit corrections, a game whose engine could not start excluded from scoring, the release versions and tag contract fixed, one build entry point for both products, user documentation reconciled with them, and the acceptance repeat passed. 10.9m rejected (the forfeits were an engine defect); 10.9h, 10.9p, 10.9t deferred behind the release; 10.9g's two maintainer probes still owed and not blocking.
+- ☑ **Phase 10** (10.1–10.10) — Adjudication off by default, class-aware placement, per-move PGN annotations, final-centre SPSA estimator, graceful stop, fixed rating field, book-range refusal, command-module split, shared game slots, pair identity in PGN, review defects, unscorable tagging, progress reports, commit path off the game loop, writer hardening, latency instrument, one slot per game, fault allowance, SPSA occupancy and scale, persistent engines per slot, real-engine qualification and symmetry, adoption-audit corrections, a game whose engine could not start excluded from scoring, the release versions and tag contract fixed, one build entry point for both products, user documentation reconciled with them, and the acceptance repeat passed. 10.9m rejected (the forfeits were an engine defect); 10.9h, 10.9p, 10.9t deferred behind the release; 10.9g's two maintainer probes still owed and not blocking.
 
 ## Forward tracker
 
@@ -76,123 +76,6 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
 "done" because it compiles; it is done when its criterion is demonstrated.
 When reporting the next step, always report its model as well.
 
-### Phase 10 — Release preparation (before `cli-v0.1.0` and `gui-v1.1.0`)
-
-- ☑ **10.9w.1 — DONE** — **Model: Sol High.** The GUI honours `scorable`: a game whose
-  engine could not be spawned (`Termination::Aborted`, `scorable: false`) is
-  excluded from standings and from the ML rating, on the live path and on
-  the DB replay at resume; the recent-errors text says "not scored"; the
-  tournament still completes without retrying the game; an aborted game is
-  re-queued as pending on the next Start so it is played once the engine's
-  path is fixed; smoke test `failed_engine_loses_with_error`
-  becomes `failed_engine_is_not_scored` (zero games for both sides, rating
-  unchanged); a store unit test covers the replay; `CHANGELOG-GUI.md` 1.1.0
-  records it under Changed. Blocks the GUI release; the CLI is untouched —
-  PLAN §Phase 10(af.1)
-  - Two additions the implementation needed, both in PLAN §Phase 10(af.1):
-    `resume_tournament` takes the caller's library and repairs one thing —
-    a participant whose recorded executable no longer exists, when the
-    library holds the same engine id at a path that does — because resume
-    otherwise rebuilds every engine from the stored snapshot and would
-    replay the same missing executable for ever; and an unscorable game is
-    left out of the PGN export too
-  - Demonstrated in the app on 2026-09-22, a `--portable` copy with "Ghost
-    1.0" at a path that does not exist: the tournament finished 2/2 with
-    both engines on zero games, zero points and unchanged Elo, terminations
-    `Aborted` 2, and the message "Ghost 1.0 vs Rarog 2.4.0 (round 1) — not
-    scored, the game was not played. Detail: io error: The system cannot
-    find the path specified. (os error 3)". Correcting Ghost's path and
-    reopening showed the tournament back at 0/2 and Stopped; Start then
-    played both games to Checkmate
-- ☑ **10.9x — DONE** — **Model: Sol High.** Versions and the tag contract: GUI
-  manifest, updater and changelog at **1.1.0**; CLI stays 0.1.0 with the
-  1.0.0 conditions recorded; `gui-v`/`cli-v` are the only accepted tag
-  forms; `colosseum-release`, both workflows and both manifests agree and
-  both tags validate; the updater also filters releases marked prerelease,
-  with a test; the `per_page=100` limit recorded, not fixed — PLAN §Phase
-  10(ag)
-  - `colosseum-release` validates `gui-v1.1.0` and `cli-v0.1.0` and refuses
-    the rest: an unscoped `v1.1.0` and a `gui-1.1.0` on the prefix, build
-    metadata, a CLI prerelease, and a tag whose version the manifest does
-    not carry. `colosseum 1.1.0` and `colosseum-cli 0.1.0` from the built
-    binaries; the workflows and the WiX package take every version from the
-    manifest through that tool, so there is nothing else to keep in step
-  - What `0.x` means for a CLI user is now in `CHANGELOG-CLI.md` under
-    0.1.0; the conditions for 1.0.0 are in PLAN §Phase 10(ag)
-- ☑ **10.9y — DONE** — **Model: Sol High.** One build entry point: `tools/xtask`
-  with `build <gui|cli>`, `package <gui|cli>` (archives, smoke) and
-  `release-check <tag>`; `.cargo/config.toml` alias; the three build
-  scripts and the `/dist/` ignore rule deleted; one artifact naming scheme
-  for both products, `<colosseum-gui|colosseum-cli>-<version>-<windows|linux|macos>-<x64|arm64>.<ext>`,
-  applied to `tools/release`, both smoke scripts, both workflows and the
-  README; both workflows call the xtask; no `SHA256SUMS` published;
-  `release-gui.yml` downloads named patterns, asserts the exact ten-file
-  list and count, publishes that list, and gains a `workflow_dispatch`
-  candidate mode; `docs/DEVELOPMENT.md` updated. Exit: on Windows,
-  `cargo xtask package cli` and `package gui` produce archives equal to the
-  candidate's file lists, each passing its `Smoke-*Archive.ps1` — PLAN
-  §Phase 10(ah)
-  - Demonstrated on Windows 2026-09-22: `colosseum-cli-0.1.0-windows-x64.zip`
-    (29 entries) and `colosseum-gui-1.1.0-windows-x64.zip` (3), each with its
-    SHA-256 printed and each passing its smoke script; `release-check` passes
-    for both tags and refuses an unscoped `v1.1.0`
-  - Found and fixed while running it: `Smoke-GuiArchive.ps1` deleted its
-    scratch directory while Windows still held the executable open, failing
-    *after* reporting the archive good. The GUI lane had never run, so
-    nothing had caught it — PLAN §Phase 10(ah)
-- ☑ **10.9z — DONE** — **Model: Terra High.** User-facing documentation finished:
-  `README.md` (front door, both products, downloads per platform under the
-  unified names, first tournament, first `match`/`sprt`/`spsa` with a run
-  file), `README-CLI.md`, both changelogs, `docs/cli/` and
-  `docs/DEVELOPMENT.md` in agreement with the versions and commands 10.9x
-  and 10.9y fixed; every link checked; post-tag links listed for the
-  maintainer. The 2026-09-22 pass drafted README and the changelog section;
-  this step reconciles them — PLAN §Phase 10(ai)
-  - Every relative link and in-page anchor across the 31 user documents
-    resolves; the four repository links that are live now do, and two resolve
-    only once the tags are pushed. **Open these after publication:**
-    `https://github.com/maelic13/colosseum/releases/tag/cli-v0.1.0` and
-    `https://github.com/maelic13/colosseum/blob/cli-v0.1.0/docs/cli/README.md`,
-    both in `CHANGELOG-CLI.md`; the two release-list queries in `README.md`
-    resolve today but stay empty until each product's first tag
-  - Every CLI command the README shows was dry-run as written and resolves
-  - Corrected while checking: the shared-options run file in both `README.md`
-    and `docs/cli/run-files.md` pointed at `books/openings.epd` from a file in
-    `testing/`, which resolves to `testing/books/` and fails — a path in a run
-    file is relative to the file that declares it
-- ☑ **10.10 — EXIT — DONE, pending publication** — **Model: Sol High.** Release acceptance repeat: the
-  two flaky tests made robust first — the working-set comparison moved to
-  private commit, and the progress-status timing race in
-  `phase10_progress.rs` replaced by a bounded wait (PLAN §Phase 10(af.2));
-  command reference regenerated; both changelogs dated; Phase 4B
-  oracle replay and Phase 8.1 parity matrix on the corrected source, run
-  exactly as recorded (locate the Rarog 2.3.1 build the hashes belong to,
-  SHA-256 `2a95390d…`, or re-record); short third-party usability flows; CLI
-  candidate and GUI candidate dispatched and their exact archives smoked on
-  all four platforms; full suite green in debug and `ci-release`. Then the
-  maintainer opens the pull request, waits for green CI, squash-merges,
-  tags the squash commit `gui-v1.1.0` and `cli-v0.1.0`, and checks both
-  release pages (artifact lists, names, "Latest" on the GUI only, notes) —
-  PLAN §Phase 10(j)
-  - Everything local passed at `628449d`: both flakes fixed, reference
-    regenerated, changelogs dated 2026-09-22, oracle replay unchanged, parity
-    matrix re-recorded on the Rarog build that exists (the August one is on no
-    disk here) with both external transcripts coming back byte-identical,
-    usability flows repeated from the unpacked archive, 604 tests in debug and
-    603 in `ci-release` (the difference is one debug-assertion test),
-    `release-check` green for both tags
-  - The Windows installer was built and read back — ProductName Colosseum,
-    ProductVersion 1.1.0, `x64;1033` — which caught `wix` leaving a `.wixpdb`
-    in `target/dist` that the upload pattern and the by-count check would both
-    have taken for a release artifact
-  - **Left for the maintainer, in order:** dispatch the CLI candidate and the
-    GUI candidate and check their four-platform archives (the only thing that
-    will have exercised `deb`, `rpm`, `dmg` and `pkg.tar.zst` before a tag);
-    open the pull request from `cli` and wait for green CI; squash-merge,
-    keeping `cli` because the step identifiers live only in its commit
-    subjects; tag the squash commit `gui-v1.1.0` and `cli-v0.1.0`; check both
-    release pages and the two post-tag links listed under 10.9z
-
 ### Phase 11 — The GUI on the harness (after publication)
 
 - ☐ **11.1** — **Model: Sol High.** Harness library crate
@@ -224,13 +107,13 @@ When reporting the next step, always report its model as well.
 
 - **10.9h** — Placement per platform research note (Linux isolated cores and
   IRQ affinity, macOS advisory contract, WSL excluded). Reopens on a Linux
-  or macOS placement report, or before CLI 1.0.0 — PLAN §Phase 10(r)
+  or macOS placement report, or before CLI 1.0.0 — [record](docs/architecture/phase-10-record.md), item (r)
 - **10.9t** — Overlapped SPSA iterations, `--overlap 1`, off by default.
   Reopens when a real Rarog tune on the released binary shows wall-clock
-  that matters; taken before 10.9p — PLAN §Phase 10(ad)
+  that matters; taken before 10.9p — [record](docs/architecture/phase-10-record.md), item (ad)
 - **10.9p** — Two games per physical core for `spsa` and `match` only, as a
   measured experiment. Reopens only if 10.9t leaves a margin worth it —
-  PLAN §Phase 10(z)
+  [record](docs/architecture/phase-10-record.md), item (z)
 - **10.9g probes** — the 2,000-game 3+0.03 scramble probe and the 100 ms,
   14-slot, 50,000-move outlier probe, maintainer-run, informative, recorded
   in `docs/architecture/phase-10-record.md` when done
@@ -275,20 +158,30 @@ Not steps — they are never "done".
 - Open a pull request to `main`; wait for green CI; squash-merge; keep the
   working branch (its commits carry the step identifiers); tag the squash
   commit; push the tags; watch both release workflows; check both release
-  pages and open the post-tag links listed by 10.9z. Wrong release: delete
+  pages and open the post-tag links the phase record lists. Wrong release: delete
   release and tag, fix on `main`, tag again.
 - A GUI patch found in use goes to `main` as `gui-vX.Y.(Z+1)` on its own;
   the CLI is not re-released for it, and vice versa.
 
 ## What to do now
 
-**Phase 10 is open; the next step is 10.9w.1.** Work the steps in order, one
-commit per step. Steps 10.2 through 10.9w changed game-playing behaviour or
-its record; do not repeat the "after changing anything that runs games"
-procedure per step, run it once at 10.10 on the final state. The merge of
-`cli` to `main`, the two tags and publication remain maintainer-owned
-operations and happen only after 10.10 passes. Phase 11 starts after
-publication and is the main line of development from then on.
+**Phase 10 is complete; the release is the maintainer's to publish.** In
+order, and all of it remote work that no agent performs:
+
+1. Dispatch the CLI candidate and the GUI candidate and check their
+   four-platform archives. The GUI lane has never run end to end, and this is
+   the only thing that will have exercised `deb`, `rpm`, `dmg` and
+   `pkg.tar.zst` before a tag exists.
+2. Open a pull request from `cli` to `main` and wait for green CI.
+3. Squash-merge, keeping `cli`: the step identifiers survive only in its
+   commit subjects.
+4. Tag the squash commit `gui-v1.1.0` and `cli-v0.1.0`, and push the tags.
+5. Check both release pages and the two post-tag links recorded with the
+   Phase 10 entry in
+   [`phase-10-record.md`](docs/architecture/phase-10-record.md).
+
+**Then Phase 11 starts, and is the main line of development from then on.**
+Work its steps in order, one commit per step, as before.
 
 ```
 git diff --check

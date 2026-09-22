@@ -1,6 +1,6 @@
 # fastchess mechanics, and what Colosseum does differently
 
-Research record for Phase 10.9m (PLAN §Phase 10(w)). It sets out how
+Research record for Phase 10.9m ([Phase 10 record](phase-10-record.md), item (w)). It sets out how
 fastchess runs an engine on Windows, which of its mechanisms Colosseum CLI
 lacks, and for each one whether to adopt it, decline it with a reason, or
 test it. It also records what the forfeits measured so far say about where

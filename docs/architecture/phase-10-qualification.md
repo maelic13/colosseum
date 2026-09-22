@@ -1,6 +1,6 @@
 # Phase 10 qualification on a real engine
 
-Release acceptance for Colosseum CLI 0.1.0 (PLAN §Phase 10(ab), GUIDE 10.9r):
+Release acceptance for Colosseum CLI 0.1.0 ([Phase 10 record](phase-10-record.md), item (ab); GUIDE 10.9r):
 the harness measured against a second runner, fastchess 1.8.0-alpha
 (`072859b`), on the reference host, with Rarog as the validation engine. Each
 check was run by the maintainer, one command at a time, and analysed from its

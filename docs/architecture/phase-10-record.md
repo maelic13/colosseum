@@ -1,6 +1,8 @@
-# Phase 10 — first-release corrections, implementation record
+# Phase 10 — implementation record
 
-Moved verbatim from `PLAN.md` §S8 on 2026-09-22 when the plan was trimmed to the open work. Every Phase 10 item is listed here with its rationale and implementation evidence, including the maintainer decisions of 2026-09-18, 2026-09-19, 2026-09-21 and 2026-09-22. The qualification figures are in [`phase-10-qualification.md`](phase-10-qualification.md). Items (ag), (ah), (ai) and (j) were still open when this record was cut; `PLAN.md` §S8 carries their current form.
+Moved verbatim from `PLAN.md` §S8 as Phase 10 completed: the corrections on 2026-09-22 when the plan was first trimmed to the open work, and the release preparation when the phase closed. Every Phase 10 item is here with its rationale and implementation evidence, including the maintainer decisions of 2026-09-18, 2026-09-19, 2026-09-21 and 2026-09-22. The qualification figures are in [`phase-10-qualification.md`](phase-10-qualification.md); the parity matrix is in [`phase-8-parity.md`](phase-8-parity.md) and the repeated usability flows in [`phase-9.6-usability.md`](phase-9.6-usability.md).
+
+Three items are deferred rather than done, and reopen on their own conditions: **(r)** placement per platform, **(z)** two games per physical core, **(ad)** overlapped SPSA iterations. **(w)** is rejected. The two maintainer probes of **(q)** are owed and not blocking. `GUIDE.md` tracks all of them.
 
 ---
 
@@ -1269,55 +1271,9 @@ games" procedure at 10.10, once, on the final state.
   stop-drain-resume, force-stop); the seventh is the regression above. A
   headless four-game run through the same scheduler, runner and store
   confirmed the stored PGN carries the annotations above.
-- **(ag) Versions and the tag contract** (GUIDE 10.9x, Sol High). Decide and
-  record, then make `colosseum-release`, both workflows and the manifests
-  agree:
-  - **The CLI's first version is 0.1.0.** Its command surface, run-file
-    schema, run-directory format and JSON reports have changed within
-    Phase 10 (pre-10.9g directories are refused) and will change again when
-    Phase 11 puts the GUI on the harness and when (z), (r) and (ad) land.
-    1.0.0 is a promise that scripts and run directories keep working; it is
-    made when those formats have survived a release unchanged. Adopters pin
-    an archive by SHA-256 meanwhile.
-  - **The GUI is released with the CLI, and gets its own version for the
-    merged source**, from (af)'s list: a minor release if anything
-    user-visible was added, otherwise a patch. The manifest, `CHANGELOG-GUI.md`
-    and the updater's own version agree, and `colosseum-release` validates
-    the tag.
-  - **The GUI tag scheme is `gui-v<semver>`, as designed**; the legacy
-    `v<semver>` form ends with 1.0.2 (maintainer decision 2026-09-21, see
-    (af)). `colosseum-release` and `release-gui.yml` accept exactly that.
-  - GitHub's repository-wide "latest" belongs to the stable GUI release; a
-    CLI release never claims it (`make_latest: false`, already so). README
-    links reach the newest CLI through the `cli-v` release list.
-- **(ah) One build entry point** (GUIDE 10.9y, Sol High). A `cargo xtask`
-  crate, as Rarog uses, replaces `build_windows.ps1`, `build_linux.sh` and
-  `build_macos.sh`: `build gui|cli`, `package gui|cli` producing the archives
-  and their `SHA256SUMS` exactly as the release workflows stage them, and
-  `release-check <tag>` wrapping `colosseum-release` and the documentation
-  drift gate. The two workflows call the same commands, so a local package
-  and a published one come from one recipe. The products stay separate: no
-  command builds or packages both into one artifact, and the CLI archive
-  never contains the GUI. Exit: on Windows, `cargo xtask package cli` and
-  `package gui` produce archives whose contents equal the candidate's file
-  lists, and each passes its `Smoke-*Archive.ps1`.
-- **(ai) User-facing documentation for the release** (GUIDE 10.9z, Terra
-  High). `README.md` is the front door for both products: what each is for,
-  how to download it (the GUI from the latest release, the CLI from the
-  newest `cli-v` release, per platform, with checksum verification), how to
-  start, a first tournament in the GUI, and a first `match`, `sprt` and `spsa`
-  in the CLI with a run file, then links to `docs/cli/`. `README-CLI.md`, both
-  changelogs, `docs/cli/` and `docs/DEVELOPMENT.md` (the xtask, the tag
-  contract) agree with it. No phase numbers or internal method in user
-  documents. Every link is checked, including the release links that exist
-  only after the tags, which are listed for the maintainer to open after
-  publication.
-- **(j) Release acceptance repeat.** Regenerate the command reference, update
-  `CHANGELOG-CLI.md` under 0.1.0, run the Phase 4B oracle replay and the
-  Phase 8.1 parity matrix on the corrected source, repeat the short third-party
-  usability flows, build a fresh four-platform CI candidate and pass exact
-  archive smoke. The maintainer then merges `cli` to `main` and tags
-  `cli-v0.1.0`.
+*(ag), (ah), (ai) and (j) were still open when this half of the record was
+cut. Their final form, with the decisions and evidence that closed them, is
+the release-preparation section below.*
 
 **Decisions 2026-09-19 (maintainer):** (w) closed as rejected: its study
 traced the forfeits to Rarog's lazily built KPK bitbase, fixed in Rarog, and
@@ -1334,3 +1290,383 @@ oracle replay and parity matrix agree on shared fields; the candidate's four
 archives pass smoke; documentation, changelog and generated reference are
 consistent; the tag contract validates.
 
+---
+
+### Phase 10 — release preparation (10.9w.1 to 10.10)
+
+The corrections are done; what remains is release preparation. The CLI
+version stays 0.1.0 because nothing has been published. The recurring "after
+changing anything that runs games" procedure runs once, at 10.10, on the
+final state.
+
+**Decisions of 2026-09-22, confirmed by the maintainer.** The items below
+implement them and are not reopened; each still names the line that would
+change if one were revisited.
+
+- **(af.1) The GUI must honour `scorable`** (GUIDE 10.9w.1, Sol High). Found
+  by (af): a game whose engine cannot be spawned is classified by the runner
+  as an infrastructure fault and reported as an unscorable draw
+  (`Termination::Aborted`, `scorable: false`). The CLI excludes such a game;
+  the GUI scheduler never reads the flag, so it records the draw into the
+  standings and, through the writeback after every finished game, into the
+  library Elo. In 1.0.2 the engine that failed to start lost both games.
+  Decision: **exclude, as the CLI does** — not 1.0.2's loss and not the
+  current draw. Reasons: a process that cannot be created is the host's
+  condition (path, DLL, permissions), never the engine's play, so no side has
+  earned a result; a loss hands the opponents free points that distort their
+  ratings against each other, and a draw does the same at half the weight
+  while also writing into the library; exclusion is what Phase 11 arrives at
+  anyway, so the desktop changes behaviour once, not twice. An engine that
+  spawns and then fails the handshake, crashes, plays an illegal move or
+  loses on time still loses, so the old, misbehaving engines in the library
+  are unaffected. Scope: `scheduler.rs` skips `standings.record` when
+  `scorable` is false and does the same in the DB replay on resume (an
+  `Aborted` termination is the stored marker; no schema change), the
+  recent-errors text says "not scored", the snapshot's finished count still
+  advances so the tournament completes, the live view shows the game as
+  aborted; `failed_engine_loses_with_error` becomes
+  `failed_engine_is_not_scored` and asserts zero games for both sides and an
+  unchanged rating; a store unit test covers the replay path; the GUI
+  changelog records it under Changed. **What the user sees:** the game is
+  not retried inside the run — a wrong path or missing DLL fails the same
+  way every time, so a retry would only repeat the error — and the
+  tournament continues with its other pairings; the game is stored as
+  aborted with its error, appears in the recent-errors panel and the
+  termination counts, and contributes nothing to points, games played,
+  head-to-head or ratings, so the engine that could not start shows zero
+  games and its opponents' ratings move only on games actually played.
+  **Aborted games are re-queued on the next Start:** the resume replay treats
+  an `Aborted` row as pending rather than finished, so the user fixes the
+  engine's path in the library, selects the tournament and presses Start,
+  and the missed games are played then. That is the whole outcome: no
+  phantom results, nothing lost, one visible message. **This blocks the GUI
+  release** (a known regression that silently alters library ratings must
+  not ship) and does not touch the CLI. If the maintainer prefers 1.0.2's loss instead,
+  the runner must carry the failed side on `GameFault::Infrastructure`, which
+  is a larger change and the reason it is not recommended.
+
+  **Demonstrated in the application 2026-09-22**, a `--portable` copy with an
+  engine "Ghost 1.0" pointed at a path that does not exist: the tournament
+  finished 2/2 with both engines on zero games, zero points and unchanged Elo,
+  terminations `Aborted` 2, and the message `Ghost 1.0 vs Rarog 2.4.0
+  (round 1) — not scored, the game was not played. Detail: io error: The
+  system cannot find the path specified. (os error 3)`. Correcting Ghost's
+  path and reopening showed the tournament back at 0/2 and Stopped; Start
+  then played both games to Checkmate.
+
+  **Two decisions the implementation needed, taken 2026-09-22.** First, the
+  re-queue alone does not deliver the promise above: `resume_tournament`
+  rebuilds every participant from the stored config snapshot, which is what
+  keeps a running tournament's conditions from drifting when the library is
+  edited, so a re-queued game would replay the same missing executable for
+  ever. `resume_tournament` therefore takes the caller's library and repairs
+  exactly one thing — a participant whose recorded executable no longer
+  exists, and only when the library still holds that same engine id at a path
+  that does, in which case the launch inputs (executable, arguments, working
+  directory, environment) come from the library and everything else, options
+  included, stays as recorded. A tournament whose executables are all present
+  is never touched, and an empty library resumes from the snapshots alone.
+  Second, an unscorable game is not appended to the configured PGN export
+  either: a moveless `1/2-1/2` with `[Termination "abandoned"]` is half a
+  point to any reader, and the replay after a repair would append it twice.
+  The enumeration above — points, games played, head-to-head, ratings — is
+  extended by the export for that reason.
+- **(ag) Versions and the tag contract** (GUIDE 10.9x, Sol High).
+  - **The GUI's new version is 1.1.0.** (af)'s list has four user-visible
+    additions — `colosseum --version`, the `gui-v` update check, the `Fixed`
+    CSV column, and per-move search comments plus the `OpeningPlyCount` and
+    time-margin tags in every PGN the GUI writes — and (af.1) is a behaviour
+    change, which under SemVer is a minor release, not a patch. Nothing is
+    removed and the SQLite schema, `engines.json` and the tournament serde
+    formats are unchanged, so it is not a major.
+  - **The CLI's first version is 0.1.0.** It becomes **1.0.0** when all of
+    the following hold: Phase 11 has extracted the harness library, so the
+    CLI is a thin composition root over a stable library boundary; the
+    deferred (r), (z) and (ad) have each landed or been declined, because
+    each changes the run record; and one full CLI minor release after that
+    has been used by an adopting project's CI (Rarog) with no change to the
+    command surface, run-file schema, run-directory layout, JSON report
+    schemas or exit codes. Until then, 0.x minor releases may change those
+    formats and say so in the changelog; adopters pin an archive by SHA-256.
+  - **The tag scheme is `gui-v<semver>` and `cli-v<semver>`**; the legacy
+    `v<semver>` form ends with 1.0.2 (maintainer decision 2026-09-21).
+    `colosseum-release`, both workflows and both manifests accept exactly
+    that and refuse the rest; GitHub's repository-wide "latest" belongs to
+    the stable GUI release and a CLI release never claims it.
+  - **Updater** (`crates/colosseum-gui/src/update.rs`): a release marked
+    prerelease on GitHub with a clean `gui-v` tag is still offered, because
+    only the tag shape is checked. Fix here — filter `prerelease` beside
+    `draft`, one test — since this step owns the tag contract. The
+    `?per_page=100` limit is recorded as a known limit, not fixed: the
+    repository has four releases and adds a handful a year; add pagination
+    when the count passes fifty.
+  - The manifests, `CHANGELOG-GUI.md` (a `[1.1.0]` section, with the one
+    sentence telling a 1.0.2 user to download the new version by hand) and
+    `CHANGELOG-CLI.md` agree; `cargo run -p colosseum-release -- gui-v1.1.0`
+    and `-- cli-v0.1.0` both pass.
+- **(ah) One build entry point** (GUIDE 10.9y, Sol High). A `cargo xtask`
+  package under `tools/xtask`, added to the workspace members, with
+  `.cargo/config.toml` carrying `[alias] xtask = "run --package xtask --"`.
+  It replaces `build_windows.ps1`, `build_linux.sh` and `build_macos.sh`,
+  which are deleted in the same step together with the `/dist/` ignore rule.
+  The final surface:
+
+  ```text
+  cargo xtask build   <gui|cli> [--target <triple>] [--profile release|ci-release]
+  cargo xtask package <gui|cli> [--target <triple>] [--format <list>] [--no-smoke]
+  cargo xtask release-check <gui-vX.Y.Z|cli-vX.Y.Z>
+  ```
+
+  - The product is positional. `--target` defaults to the host triple and is
+    always passed to cargo, so every output is under `target/<triple>/`.
+    `--locked` is unconditional. `build` compiles exactly one product
+    (`-p colosseum-gui --bin colosseum` or `-p colosseum-cli --bin
+    colosseum-cli`) and prints the binary path; it copies nothing — the bare
+    binary is not a deliverable, the archive is.
+  - `package` builds with the `release` profile only (a `ci-release` binary
+    is a different binary and must never be archived), stages the product's
+    allowlisted contents exactly as the workflows do today, writes the
+    archives to `target/dist/` and prints each one's SHA-256, and runs the matching
+    `tools/release/Smoke-*Archive.ps1` on each archive it produced;
+    `--no-smoke` skips that for local iteration. `--format` defaults to the
+    portable archive for the host (`zip` on Windows, `tar.gz` elsewhere);
+    CI passes the full set (`gui`: `zip,msi` / `tar.gz,deb,rpm` /
+    `tar.gz,dmg`, plus `pkg.tar.zst` in the Arch container; `cli`: `zip` or
+    `tar.gz`). A requested format whose tool is missing (WiX, `cargo-deb`,
+    `cargo-generate-rpm`, `makepkg`, `hdiutil`) is an error, never a skip.
+    The macOS `.app` bundle is assembled here with the version from the
+    product manifest, which retires the empty `CFBundleShortVersionString`
+    that `build_macos.sh` writes on `cli`.
+  - Versions come from `cargo metadata` for the product package, never from
+    the workspace manifest. **One naming scheme for both products, readable
+    by a user** (maintainer decision 2026-09-22):
+    `<product>-<version>-<os>-<arch>.<ext>` with product `colosseum-gui` or
+    `colosseum-cli`, os `windows`, `linux` or `macos`, and arch `x64` or
+    `arm64` — so `colosseum-gui-1.1.0-windows-x64.msi`,
+    `colosseum-gui-1.1.0-macos-arm64.dmg`,
+    `colosseum-cli-0.1.0-linux-x64.tar.gz`. This replaces the old
+    `colosseum-<version>-…` GUI stem and the `x86_64`/`aarch64` spellings;
+    the CLI is unreleased and the GUI's names change with the new lane
+    anyway, so nothing published is renamed. The executables inside keep
+    their names (`colosseum`, `colosseum-cli`). The change touches the
+    staging and platform tables in `tools/release`, both smoke scripts,
+    both workflows' expected lists and the README tables, all in this step.
+  - `release-check <tag>` runs `colosseum-release` on the tag, the
+    documentation drift gate (`colosseum-docs --check`), `git diff --check`,
+    and confirms the product manifest version equals the tag's and the
+    product changelog has a section for it.
+  - Deliberately not copied from Rarog's xtask: architecture tiers,
+    `--native`, `--pgo`, `verify-isa`. Rarog's product is its codegen;
+    Colosseum ships one portable binary per platform.
+  - Both workflows call these commands. `release-gui.yml` additionally gains
+    what `release-cli.yml` already has: the publish job downloads named
+    artifact patterns instead of `*`, asserts the exact expected file list
+    and count (ten files for a stable release: `zip`+`msi` for both Windows
+    targets, `tar.gz`+`deb`+`rpm`+`pkg.tar.zst` for Linux, `tar.gz`+`dmg`
+    for macOS; the `msi` pair is absent for a prerelease) and publishes that
+    list. With the unified stems the two products' names can no longer
+    match each other's glob, but the explicit list stays: it is what proves
+    a platform job did not silently drop an artifact. Versions stay in
+    artifact names: a file identifies itself in a download folder and
+    Rarog's `setup_tools.ps1` pins a tagged archive by its SHA-256; the
+    `gui-v`/`cli-v` tag-list links are the stable "latest" pointers.
+    **No `SHA256SUMS` is published** (maintainer decision 2026-09-22):
+    checksums are useless to most users as a download. The workflows keep
+    computing and re-checking them between the build and publish jobs and
+    in the retained candidate bundle, and GitHub shows each asset's SHA-256
+    digest on the release page for anyone who wants to pin.
+  - `release-gui.yml` gains a `workflow_dispatch` candidate mode like the
+    CLI's: it builds, smokes and retains the ten artifacts without a tag or
+    a release. The `gui-v` lane has never run end to end (only legacy `v`
+    tags have). The maintainer's own process is to tag, watch, and fix and
+    re-tag if something is wrong, which works for a first release nobody
+    has downloaded; the candidate mode is the cheap rehearsal that avoids a
+    half-published release, and it is worth having for every later one.
+  - Exit: on Windows, `cargo xtask package cli` and `package gui` produce
+    archives whose contents equal the candidate's file lists and each passes
+    its smoke script; `docs/DEVELOPMENT.md` documents the commands and the
+    three scripts are gone.
+
+  **Implementation evidence (Phase 10.9y).** `tools/xtask` carries the three
+  commands; `.cargo/config.toml` aliases them. `build` runs
+  `cargo build --locked --profile <profile> -p <package> --bin <binary>
+  --target <triple>` and prints the path. `package` builds the release
+  profile, stages, archives into `target/dist/` and smokes, then clears its
+  own scratch directories so `target/dist` holds artifacts and nothing else.
+  The two portable archives are written in-process rather than by a shelled-out
+  tool: a zip and a tarball of the same tree then have the same entries
+  whatever the host is, `package` needs nothing installed to produce the file a
+  user downloads, and the tarball's executable bit is set explicitly, which a
+  Windows host cannot carry. The installer formats shell out to the tooling
+  that owns them, and a missing tool is an error naming it.
+
+  Deviations, both narrowing rather than widening the contract: the product
+  version is read through `colosseum-release`, which parses the product's own
+  `Cargo.toml`, rather than by shelling out to `cargo metadata` — the point of
+  that instruction was that the workspace manifest must never be the source,
+  and this makes the release tool the single source for every caller; and
+  `--format` rejects a format that does not apply to the product and platform
+  rather than silently producing nothing, so `package cli --format msi` is an
+  error.
+
+  **Exit demonstrated on Windows 2026-09-22.** `cargo xtask package cli`
+  produced `colosseum-cli-0.1.0-windows-x64.zip` (29 entries: one root
+  directory, `colosseum-cli.exe`, `LICENSE`, `README.md`, `CHANGELOG-CLI.md`
+  and the 24-file `docs/cli/` tree) and `cargo xtask package gui` produced
+  `colosseum-gui-1.1.0-windows-x64.zip` (root directory, `colosseum.exe`,
+  `LICENSE`) — the candidate's file lists — each printing its SHA-256 and each
+  passing its `Smoke-*Archive.ps1`. `cargo xtask release-check` passes for
+  `gui-v1.1.0` and `cli-v0.1.0` and refuses an unscoped `v1.1.0`.
+
+  **Found and fixed while running it:** `Smoke-GuiArchive.ps1` removed its
+  scratch directory immediately after `Start-Process -Wait`, which Windows can
+  still hold open, so the script failed *after* reporting the archive good.
+  The GUI lane had never run, so nothing had caught it. It now waits for the
+  process and retries the cleanup, and a directory it still cannot remove is a
+  warning rather than a failed archive.
+- **(ai) User-facing documentation for the release** (GUIDE 10.9z, Terra
+  High). `README.md` is the front door for both products: what each is for,
+  which one a reader wants, download per platform with checksum
+  verification, a first tournament in the GUI, a first `match`, `sprt` and
+  `spsa` with a run file in the CLI, then links to `docs/cli/`.
+  `README-CLI.md` (the archive's `README.md`), both changelogs, `docs/cli/`
+  and `docs/DEVELOPMENT.md` agree with it. No phase numbers or internal
+  method in user documents. Every link is checked; the release links that
+  exist only after the tags are listed for the maintainer to open after
+  publication. A first pass of this landed on 2026-09-22 with the plan trim;
+  the step finishes it once (ag) and (ah) have fixed the version and the
+  build commands.
+
+  **Implementation evidence (Phase 10.9z).** Every relative link and in-page
+  anchor across the 31 user documents resolves, and every CLI command the
+  README shows was dry-run as written. The README gained checksum
+  verification against the per-asset digest GitHub records, since the release
+  publishes no checksum file, and a run file as the place a project's shared
+  conditions belong; the GUI changelog records that download names changed.
+  Corrected while checking: the shared-options run file in both `README.md`
+  and `docs/cli/run-files.md` pointed at `books/openings.epd` from a file in
+  `testing/`, which resolves to `testing/books/` and fails — a path in a run
+  file is relative to the file that declares it.
+
+  **Open after publication** — the two links that exist only once the tags
+  are pushed, both in `CHANGELOG-CLI.md`:
+  `https://github.com/maelic13/colosseum/releases/tag/cli-v0.1.0` and
+  `https://github.com/maelic13/colosseum/blob/cli-v0.1.0/docs/cli/README.md`.
+  The two release-list queries in `README.md` resolve today but stay empty
+  until each product's first tag.
+- **(j) Release acceptance repeat** (GUIDE 10.10, Sol High). Regenerate the
+  command reference; date `CHANGELOG-CLI.md` 0.1.0 and `CHANGELOG-GUI.md`
+  1.1.0; run the Phase 4B oracle replay and the Phase 8.1 parity matrix on
+  the corrected source, exactly as recorded in
+  `docs/fixtures/phase8/parity.json` (never drop the draw parameters to make
+  a command parse; the recorded artifact hashes belong to one Rarog 2.3.1
+  build, SHA-256 `2a95390d…`, which is not the copy in `D:\chess\engines\rarog`
+  — locate it or re-record the matrix on the build used); repeat the short
+  third-party usability flows; dispatch the CLI candidate and the new GUI
+  candidate and pass exact archive smoke on all four platforms; run the full
+  suite in debug and `ci-release` as evidence, with (af.2) done first so it
+  cannot flake. Then the maintainer's release process (decided 2026-09-22):
+  open a pull request from `cli` to `main`; `ci.yml` runs on the pull
+  request on all three platforms in both profiles and must be green;
+  **squash-merge** it (the step-by-step history stays on the `cli` branch,
+  which is kept, not deleted, because commit subjects there are the only
+  place the step identifiers survive); tag the squash commit `gui-v1.1.0`
+  and `cli-v0.1.0` and push the tags; both release workflows build, smoke
+  and publish with release notes extracted from the two changelog sections
+  by `colosseum-release notes`; then check the two release pages — the
+  expected artifact list per product, readable names, the GUI release
+  marked "Latest" and the CLI release not, notes matching the changelogs.
+  If anything is wrong: delete the release and the tag, fix on `main`, and
+  tag again — acceptable for a first release nobody has downloaded, and the
+  reason the GUI candidate mode of (ah) is worth having afterwards. The CLI
+  publish job proves the tagged commit is reachable from `main`, which the
+  squash commit is.
+
+  **Implementation evidence (Phase 10.10), 2026-09-22, at `628449d`.**
+  - **(af.2) and a second flake, first.** The scale test now reads private
+    commit — `PrivateUsage` on Windows, `VmData` on Linux — instead of the
+    resident set, at the same limits: a resident set is what the OS chose to
+    keep in RAM at that moment, so comparing two processes' was measuring the
+    machine's mood. `status_before_the_first_block_says_when_it_is_due` had
+    failed twice the same way; it left concurrency to the host, so a
+    many-core machine could commit all twenty games the first block waits for
+    before `status` was asked. It now pins concurrency to one.
+  - **Command reference** regenerated, byte-identical to the committed file.
+  - **Changelogs dated** 2026-09-22; both tags still validate.
+  - **Phase 4B oracle replay**: the ordered fastchess stream and the
+    controlled live parity fixtures pass unchanged.
+  - **Phase 8.1 parity matrix, re-recorded.** The Rarog build the August
+    hashes belong to is on no disk of the reference host, so the matrix was
+    repeated on the build that is there (`033f6633…`) with both external
+    runners at their exact recorded hashes. All three runners agree on every
+    shared field — 8 games, 4 complete colour-reversed pairs, 0/8/0, 100%
+    draws, draw-adjudication termination, zero faults, and pentanomial
+    `[0, 0, 4, 0, 0]` where it is shared. **Both external transcripts came
+    back byte-identical** to August's, so only the Colosseum observation
+    moved, onto the released source. A trap worth recording: a transcript
+    captured on Windows must be stored LF like every other text file here, or
+    its recorded hash only matches on the machine that captured it.
+  - **Usability flows** repeated from an unpacked `cargo xtask package cli`
+    archive against two public Stockfish builds: match completed with two
+    colour-reversed `MaxMoves` draws, SPRT capped inconclusive at exit 4 with
+    pentanomial `[0, 0, 1, 0, 0]`, SPSA completed one iteration with `Threads`
+    bound and reported on its rail. Zero faults throughout, and both
+    game-playing flows warned that no book was supplied.
+  - **Full suite**: 604 passed in debug, 603 in `ci-release` — the one
+    difference is `giving_back_a_free_slot_is_a_bug_caught_in_debug_builds`,
+    which exists only where debug assertions do.
+  - **`release-check`** passes for `gui-v1.1.0` and `cli-v0.1.0`.
+  - **The Windows installer path was exercised**, since (ah) had shipped five
+    installer formats no local run had touched: `cargo xtask package gui
+    --format zip,msi` built `colosseum-gui-1.1.0-windows-x64.msi`, which
+    reads back as ProductName Colosseum, ProductVersion 1.1.0, template
+    `x64;1033`. It found a defect: `wix` writes a `.wixpdb` build database
+    beside the installer, which the workflow's upload pattern and its
+    by-count artifact check would both have taken for a release artifact.
+    The xtask now removes it.
+  - **Not done here, and the maintainer's to run:** the four-platform CLI and
+    GUI candidates. Both are remote CI operations, and they are the only
+    thing that will have exercised `deb`, `rpm`, `dmg` and `pkg.tar.zst`
+    before a tag exists.
+- **(af.2) Test robustness before the acceptance run** (part of 10.10). The
+  test `a_resumed_tune_does_not_keep_the_games_it_replayed` compares two
+  processes' resident working sets and failed once under full-suite load,
+  then passed alone and in two clean full runs. The working set is trimmed
+  under memory pressure, so the uninterrupted run's figure can shrink while
+  the resumed run's does not, and the comparison fails without any leak.
+  Measure private commit instead (`PROCESS_MEMORY_COUNTERS_EX.PrivateUsage`
+  on Windows, `VmData` from `/proc/<pid>/status` on Linux), which trimming
+  does not touch, keep the same limits, and record the change in the test's
+  doc comment. A second instance, found during 10.9w.1:
+  `status_before_the_first_block_says_when_it_is_due` in
+  `crates/colosseum-cli/tests/phase10_progress.rs` waits for
+  `run-record.json`, sleeps 200 ms and expects `status` to answer before 20
+  games commit — a timing race under full-suite load. Replace the sleep with
+  a bounded wait on the condition the test actually needs (the run record
+  present and the first block not yet due), or run the stub at a game count
+  no loaded machine can commit in time. Accepting either flake is rejected:
+  10.10 runs the full suite as release evidence and a rerun would be
+  evidence of nothing.
+
+**Deferred behind the release, with the condition that reopens each:**
+
+- (r) placement per platform (10.9h): when a Linux or macOS user of the CLI
+  reports placement that the Windows-derived policy gets wrong, or before
+  the CLI's 1.0.0.
+- (z) two games per physical core (10.9p) and (ad) overlapped SPSA
+  iterations (10.9t): the 10(x) throughput run measured 83% occupancy and
+  4,517 games per hour against the 85% and 5,000 fixed beforehand — up from
+  2,745 and above weather-factory's 3,720 on the same surface. Neither is
+  chased now. Reopen when the first real Rarog tune on the released binary
+  shows wall-clock that matters to the project; take (ad) first, because it
+  removes the iteration barrier for every mini-match size and its zero-game
+  study is cheap, and (z) only if (ad) leaves a margin worth an experiment.
+- 10.9g's two maintainer probes (the 2,000-game 3+0.03 scramble probe and
+  the 100 ms, 14-slot, 50,000-move fixed-movetime outlier probe): owed,
+  informative, not blocking; run when the machine is free and record them
+  in this record.
+
+**Exit criterion:** (af.1), (ag), (ah), (ai) demonstrated by their tests;
+oracle replay and parity matrix agree on shared fields; both candidates'
+archives pass smoke; documentation, changelogs and generated reference are
+consistent; both tags validate.
