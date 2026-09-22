@@ -130,15 +130,7 @@ SHA-256 with the digest GitHub shows beside that asset on the release page
 (`Get-FileHash` on Windows, `sha256sum` on Linux, `shasum -a 256` on macOS).
 If you pin a version in automation, pin that digest with it.
 
-To build from source instead, install Rust 1.88 or newer and run:
-
-```text
-git clone https://github.com/maelic13/colosseum.git
-cd colosseum
-cargo build --release -p colosseum-cli --bin colosseum-cli
-```
-
-The executable is `target/release/colosseum-cli` (`.exe` on Windows).
+To build it yourself instead, see [Build from source](#build-from-source).
 
 ### First experiments
 
@@ -200,6 +192,46 @@ Continue with the [quickstart](docs/cli/quickstart.md), the
 [how to trust a result](docs/cli/trust-results.md) and
 [what the CLI needs from an engine](docs/cli/compatibility.md). The
 [complete CLI guide](docs/cli/README.md) indexes everything else.
+
+---
+
+## Build from source
+
+Install **Rust 1.88 or newer**, then clone the repository:
+
+```text
+git clone https://github.com/maelic13/colosseum.git
+cd colosseum
+```
+
+Linux also needs the GTK and XCB development packages for the GUI, and
+Windows on Arm needs `clang`; the
+[development guide](docs/DEVELOPMENT.md#prerequisites) lists the exact
+packages for each distribution.
+
+To try either product straight away:
+
+```text
+cargo run --release --bin colosseum        # the GUI
+cargo run -p colosseum-cli -- --help       # the CLI
+```
+
+`cargo xtask` is the one entry point for real builds, and the release
+workflows call the same commands, so what you build locally is what a release
+ships. One command handles one product:
+
+```text
+cargo xtask build   gui          # the executable, path printed
+cargo xtask build   cli
+cargo xtask package gui          # the downloadable archive, into target/dist/
+cargo xtask package cli
+```
+
+`package` also prints each artifact's SHA-256 and unpacks the archive to check
+it. It can build the installers too — `cargo xtask package gui --format
+zip,msi` on Windows, and `deb`, `rpm`, `dmg` or `pkg.tar.zst` on the platform
+each belongs to. The [development guide](docs/DEVELOPMENT.md#one-build-entry-point)
+covers the formats, cross-target builds and the release checks.
 
 ---
 
