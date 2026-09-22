@@ -34,6 +34,8 @@ tournament = [
 ]
 # Explicit local interoperability coverage only. Required CI never enables it.
 real-engine-smoke = ["tournament"]
+# Explicit host affinity/residency coverage only. Required CI never enables it.
+platform-smoke = ["platform"]
 
 [dependencies]
 anyhow = { version = "1.0.102", optional = true }
@@ -78,3 +80,8 @@ required-features = ["real-engine-smoke"]
 name = "scheduler_smoke"
 path = "tests/scheduler.rs"
 required-features = ["real-engine-smoke"]
+
+[[test]]
+name = "affinity_smoke"
+path = "tests/affinity_residency.rs"
+required-features = ["platform-smoke"]

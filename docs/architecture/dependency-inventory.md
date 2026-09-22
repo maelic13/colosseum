@@ -224,6 +224,10 @@ crates/colosseum-engine/tests/common/mod.rs
 crates/colosseum-uci/tests/stockfish.rs
 ```
 
+`bulk_insert_timing.rs` has since been removed: its wall-clock bound was
+replaced by a `store.rs` unit test showing that a schedule batch is inserted
+all-or-nothing in one transaction.
+
 ## Build and release targets
 
 - Root build scripts for Windows, Linux and macOS build only the `colosseum`

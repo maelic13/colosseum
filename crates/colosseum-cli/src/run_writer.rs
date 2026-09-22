@@ -519,12 +519,14 @@ mod tests {
 
     /// A disk that falls behind stalls the committing task, never the runtime.
     ///
-    /// One worker thread: if the full queue blocked it, nothing else on the
-    /// runtime could run, and the ticker below would stop. The writer is held,
-    /// so the queue fills and the committing task has to wait.
+    /// One worker thread, and the writer is held, so the queue fills and the
+    /// committing task has to wait. It reports that it started and then sends
+    /// without yielding, so the worker is its own until it waits: another task
+    /// can run only if the wait handed the worker over.
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn a_full_queue_waits_off_the_runtime_and_the_other_tasks_keep_running() {
-        use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+        // Generous: these bound a hang, they do not measure anything.
+        const HANG: Duration = Duration::from_secs(60);
         let root = tempfile::tempdir().unwrap();
         let directory = directory(root.path());
         let writer = RunWriter::start_with_capacity(directory, JournalResume::fresh(), 2)
@@ -533,46 +535,41 @@ mod tests {
         let (release, held) = mpsc::channel();
         writer.hold(held);
 
-        let ticks = Arc::new(AtomicU32::new(0));
-        let ticker = {
-            let ticks = Arc::clone(&ticks);
-            tokio::spawn(async move {
-                loop {
-                    ticks.fetch_add(1, Ordering::Relaxed);
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                }
-            })
-        };
-        let committed = Arc::new(AtomicBool::new(false));
+        let (started, committer_started) = mpsc::channel();
         let committer = {
             let writer = writer.clone();
-            let committed = Arc::clone(&committed);
             tokio::spawn(async move {
+                started.send(()).unwrap();
                 for line in 0..6 {
-                    writer.log(format!("line {line}\n").into_bytes()).unwrap();
+                    writer
+                        .log(
+                            format!(
+                                "line {line}
+"
+                            )
+                            .into_bytes(),
+                        )
+                        .unwrap();
                 }
-                committed.store(true, Ordering::Relaxed);
             })
         };
+        // The test body is not a worker, so it waits on plain channels: if the
+        // worker were blocked, no runtime timer here would fire.
+        committer_started.recv_timeout(HANG).unwrap();
 
-        // The test body is not a worker, and it must not depend on one: if the
-        // worker were blocked, a runtime timer here would never fire.
-        std::thread::sleep(Duration::from_millis(200));
+        let (answer, answered) = mpsc::channel();
+        tokio::spawn(async move { answer.send(()).unwrap() });
+        answered
+            .recv_timeout(HANG)
+            .expect("the runtime stopped while a task waited for the writer");
         assert!(
-            !committed.load(Ordering::Relaxed),
+            !committer.is_finished(),
             "six commands went into a queue of two while the writer was held"
-        );
-        let before = ticks.load(Ordering::Relaxed);
-        std::thread::sleep(Duration::from_millis(100));
-        assert!(
-            ticks.load(Ordering::Relaxed) > before + 3,
-            "the runtime stopped while a task waited for the writer"
         );
 
         release.send(()).unwrap();
         committer.await.unwrap();
         writer.barrier().await.unwrap();
-        ticker.abort();
         let log = std::fs::read_to_string(root.path().join("run").join("run.log")).unwrap();
         assert_eq!(log.matches("line ").count(), 6, "{log}");
     }

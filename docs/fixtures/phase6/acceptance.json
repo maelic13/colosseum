@@ -16,7 +16,7 @@
     },
     {
       "id": "scaling-and-hash-policy",
-      "evidence": "colosseum_application::nps::tests::scaling_speedup_and_efficiency_match_hand_arithmetic; phase3_acceptance::{recorded_topology_corpus_selects_exact_expected_cpu_lists,busy_children_reside_only_on_their_enforced_cpu}"
+      "evidence": "colosseum_application::nps::tests::scaling_speedup_and_efficiency_match_hand_arithmetic; phase3_acceptance::recorded_topology_corpus_selects_exact_expected_cpu_lists; affinity_smoke::busy_children_reside_only_on_their_enforced_cpu (opt-in platform-smoke)"
     },
     {
       "id": "book-reproducibility",

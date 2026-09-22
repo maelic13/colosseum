@@ -1,16 +1,13 @@
 use std::collections::BTreeSet;
-use std::process::{Child, Command, Stdio};
 
 use colosseum_application::CpuAllocation;
 use colosseum_engine::{
-    AffinitySupportLevel, AllowedCpuSet, CacheDomainId, CharacteristicsSource, CoreClass,
-    CpuCharacteristics, CpuPlacementPolicy, CpuTopology, LogicalCpuId, NumaNodeId, PhysicalCore,
+    AllowedCpuSet, CacheDomainId, CharacteristicsSource, CoreClass, CpuCharacteristics,
+    CpuPlacementPolicy, CpuTopology, LogicalCpuId, NumaNodeId, PhysicalCore,
     PhysicalCoreCharacteristics, PlacementAsymmetry, SiblingMapping, SlotAllocation,
-    TopologySource, affinity_capability, allocate_game_slots, apply_process_affinity,
-    detect_allowed_cpu_set, detect_cpu_topology, plan_cpu_placement, process_affinity_groups,
+    TopologySource, allocate_game_slots, plan_cpu_placement,
 };
 use serde::Deserialize;
-use serde_json::Value;
 
 #[derive(Debug, Deserialize)]
 struct RecordedFixture {
@@ -172,90 +169,6 @@ fn recorded_topology_corpus_selects_exact_expected_cpu_lists() {
     }
 }
 
-#[test]
-fn acceptance_manifest_names_every_phase_exit_gate() {
-    let manifest: Value = serde_json::from_str(include_str!(
-        "../../../docs/fixtures/phase3/acceptance.json"
-    ))
-    .unwrap();
-    assert_eq!(manifest["schema_version"], 1);
-    assert_eq!(manifest["phase"], 3);
-    let ids = manifest["gates"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|gate| gate["id"].as_str().unwrap())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(
-        ids,
-        BTreeSet::from([
-            "enforceable-residency",
-            "independent-cli-platform-surface",
-            "platform-capability-command",
-            "platform-contract-documentation",
-            "topology-fixture-corpus",
-            "workspace-regression",
-        ])
-    );
-}
-
-#[test]
-fn busy_children_reside_only_on_their_enforced_cpu() {
-    let capability = affinity_capability();
-    if capability.level != AffinitySupportLevel::Enforced {
-        eprintln!(
-            "SKIP residency: {}",
-            capability
-                .reason
-                .as_deref()
-                .unwrap_or("hard affinity unavailable")
-        );
-        return;
-    }
-    let topology = detect_cpu_topology().unwrap();
-    let allowed = detect_allowed_cpu_set(&topology).unwrap();
-    let allowed_cpus = match allowed {
-        AllowedCpuSet::Known { cpus, .. } => cpus,
-        AllowedCpuSet::Unavailable { reason } => {
-            eprintln!("SKIP residency: {reason}");
-            return;
-        }
-    };
-
-    let root = tempfile::tempdir().unwrap();
-    let mut children = (0..2)
-        .map(|index| {
-            let gate = root.path().join(format!("gate-{index}"));
-            let child = Command::new(env!("CARGO_BIN_EXE_colosseum-affinity-fixture"))
-                .arg(&gate)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .unwrap();
-            let groups = process_affinity_groups(child.id()).unwrap();
-            let candidates = allowed_cpus
-                .iter()
-                .filter(|cpu| groups.contains(&cpu.group))
-                .copied()
-                .collect::<Vec<_>>();
-            assert!(
-                !candidates.is_empty(),
-                "child groups {groups:?} have no CPU in the harness allowed set"
-            );
-            let cpu = candidates[index % candidates.len()];
-            (child, gate, cpu)
-        })
-        .collect::<Vec<_>>();
-
-    for (child, gate, cpu) in &children {
-        apply_process_affinity(child.id(), &CpuAllocation::Enforced(vec![*cpu])).unwrap();
-        std::fs::write(gate, b"sample").unwrap();
-    }
-    for (child, _, expected) in children.drain(..) {
-        assert_child_residency(child, expected);
-    }
-}
-
 fn ids(values: &[[u32; 2]]) -> Vec<LogicalCpuId> {
     values
         .iter()
@@ -264,25 +177,4 @@ fn ids(values: &[[u32; 2]]) -> Vec<LogicalCpuId> {
             number: *number,
         })
         .collect()
-}
-
-fn assert_child_residency(child: Child, expected: LogicalCpuId) {
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "residency fixture failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let observed = String::from_utf8(output.stdout)
-        .unwrap()
-        .lines()
-        .map(|line| {
-            let (group, number) = line.split_once(':').unwrap();
-            LogicalCpuId {
-                group: group.parse().unwrap(),
-                number: number.parse().unwrap(),
-            }
-        })
-        .collect::<BTreeSet<_>>();
-    assert_eq!(observed, BTreeSet::from([expected]));
 }

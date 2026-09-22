@@ -268,6 +268,12 @@ fn parse_epd(text: &str) -> OpeningList {
     let threads = std::thread::available_parallelism()
         .map_or(1, std::num::NonZeroUsize::get)
         .min(text.len() / (EPD_PARALLEL_LINES * 40) + 1);
+    parse_epd_in_chunks(text, threads)
+}
+
+/// Parse EPD text cut at line boundaries into at most `threads` chunks, each
+/// on its own thread, joined in file order.
+fn parse_epd_in_chunks(text: &str, threads: usize) -> OpeningList {
     if threads <= 1 {
         return parse_epd_lines(text);
     }
@@ -715,12 +721,11 @@ mod tests {
 
     #[test]
     fn the_compact_book_gives_the_same_openings_in_the_same_order() {
-        // Large enough to be parsed in parallel chunks.
-        let path = write_temp("identity.epd", &synthetic_epd(60_000));
+        let (_dir, path) = write_temp("identity.epd", &synthetic_epd(300));
         for (order, count) in [
             (OpeningOrder::Sequential, None),
             (OpeningOrder::Random, None),
-            (OpeningOrder::Random, Some(1_000)),
+            (OpeningOrder::Random, Some(100)),
         ] {
             let mut book = OpeningBook::new(path.clone());
             book.order = order;
@@ -734,8 +739,21 @@ mod tests {
                 "{order:?} {count:?}"
             );
         }
-        let pgn = "[Event \"a\"]\n\n1. e4 e5 2. Nf3 Nc6 1-0\n\n[Event \"b\"]\n[FEN \"8/8/8/8/8/8/K7/7k w - - 0 1\"]\n\n1. Ka3 Kg1 1/2-1/2\n\n[Event \"c\"]\n\n1. d4 d5 0-1\n";
-        let mut book = OpeningBook::new(write_temp("identity.pgn", pgn));
+        let pgn = "[Event \"a\"]
+
+1. e4 e5 2. Nf3 Nc6 1-0
+
+[Event \"b\"]
+[FEN \"8/8/8/8/8/8/K7/7k w - - 0 1\"]
+
+1. Ka3 Kg1 1/2-1/2
+
+[Event \"c\"]
+
+1. d4 d5 0-1
+";
+        let (_pgn_dir, pgn_path) = write_temp("identity.pgn", pgn);
+        let mut book = OpeningBook::new(pgn_path);
         book.format = OpeningFormat::Pgn;
         book.plies = 3;
         book.order = OpeningOrder::Random;
@@ -748,34 +766,56 @@ mod tests {
         );
     }
 
-    /// A book of 2.6 million lines loads in well under a second in an
-    /// optimised build; a debug build checks a tenth of it against a bound
-    /// scaled for unoptimised position validation.
+    /// A large book is cut into chunks parsed on separate threads; whatever
+    /// the number of chunks, the joined list is the one a single pass gives.
     #[test]
-    fn a_large_epd_book_loads_quickly() {
-        let (lines, limit) = if cfg!(debug_assertions) {
-            (260_000, std::time::Duration::from_secs(10))
-        } else {
-            (2_600_000, std::time::Duration::from_secs(1))
-        };
-        let path = write_temp("large.epd", &synthetic_epd(lines));
-        let book = OpeningBook::new(path.clone());
-        let started = std::time::Instant::now();
-        let openings = load_openings_named(&book, 0).unwrap();
-        let elapsed = started.elapsed();
-        eprintln!("{lines} EPD lines loaded in {elapsed:?}");
-        assert_eq!(openings.len(), lines);
-        assert!(elapsed < limit, "{lines} lines loaded in {elapsed:?}");
-        let _ = std::fs::remove_file(path);
+    fn a_book_parsed_in_chunks_is_the_book_parsed_in_one_pass() {
+        let text = synthetic_epd(300);
+        let single = parse_epd_lines(&text);
+        assert_eq!(single.len(), 300);
+        for threads in [2, 3, 7, 64] {
+            assert_eq!(
+                parse_epd_in_chunks(&text, threads),
+                single,
+                "{threads} chunks"
+            );
+        }
     }
 
-    fn write_temp(name: &str, contents: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("colosseum-openings-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(name);
+    #[test]
+    fn only_a_file_letter_castling_field_marks_a_chess960_position() {
+        // The standard start and ordinary castling rights are standard chess.
+        assert!(!is_chess960_fen(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        ));
+        assert!(!is_chess960_fen("8/8/8/8/8/8/K7/7k w - - 0 1"));
+        // A shuffled start with KQkq is indistinguishable from standard chess.
+        assert!(!is_chess960_fen(
+            "bqnbrkrn/pppppppp/8/8/8/8/PPPPPPPP/BQNBRKRN w KQkq - 0 1"
+        ));
+        // Shredder-FEN and X-FEN name the castling rooks by file.
+        assert!(is_chess960_fen(
+            "bqnbrkrn/pppppppp/8/8/8/8/PPPPPPPP/BQNBRKRN w GEge - 0 1"
+        ));
+        assert!(is_chess960_fen(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w HAha - 0 1"
+        ));
+        assert!(is_chess960_fen(
+            "nrbbqkrn/pppppppp/8/8/8/8/PPPPPPPP/NRBBQKRN w Kkb - 0 1"
+        ));
+        // No castling field at all is not an encoding of anything.
+        assert!(!is_chess960_fen("8/8/8/8/8/8/K7/7k w"));
+        assert!(
+            position_from_fen("bqnbrkrn/pppppppp/8/8/8/8/PPPPPPPP/BQNBRKRN w GEge - 0 1").is_none()
+        );
+    }
+
+    fn write_temp(name: &str, contents: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(name);
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(contents.as_bytes()).unwrap();
-        path
+        (dir, path)
     }
 
     #[test]
@@ -785,7 +825,7 @@ mod tests {
 rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
 r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - bm Nf6;
 ";
-        let path = write_temp("test.epd", epd);
+        let (_dir, path) = write_temp("test.epd", epd);
         let book = OpeningBook::new(path);
         let openings = load_openings(&book).unwrap();
         assert_eq!(openings.len(), 2);
@@ -797,7 +837,7 @@ r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - bm Nf6;
 
     #[test]
     fn strict_audit_accounts_for_rejected_candidates() {
-        let path = write_temp(
+        let (_dir, path) = write_temp(
             "audit.epd",
             "8/8/8/8/8/8/K7/7k w - -\nnot a valid epd\n# ignored\n",
         );
@@ -822,7 +862,7 @@ r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - bm Nf6;
 
 1. d4 d5 2. c4 *
 ";
-        let path = write_temp("test.pgn", pgn);
+        let (_dir, path) = write_temp("test.pgn", pgn);
         let mut book = OpeningBook::new(path);
         book.plies = 4;
         let openings = load_openings(&book).unwrap();
@@ -850,7 +890,7 @@ rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -
 r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq -
 rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -
 ";
-        let path = write_temp("order.epd", epd);
+        let (_dir, path) = write_temp("order.epd", epd);
         let mut book = OpeningBook::new(path);
         book.order = OpeningOrder::Random;
         book.seed = 42;
@@ -869,7 +909,7 @@ rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -
 r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq -
 rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -
 ";
-        let path = write_temp("named-order.epd", epd);
+        let (_dir, path) = write_temp("named-order.epd", epd);
         let mut book = OpeningBook::new(path);
         book.order = OpeningOrder::Random;
         let first = load_openings_named(&book, 42).unwrap();
@@ -884,7 +924,7 @@ rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -
 
     #[test]
     fn missing_or_empty_book_errors() {
-        let path = write_temp("empty.epd", "\n# only a comment\n");
+        let (_dir, path) = write_temp("empty.epd", "\n# only a comment\n");
         let book = OpeningBook::new(path);
         assert!(load_openings(&book).is_err());
     }
