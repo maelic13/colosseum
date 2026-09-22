@@ -1856,4 +1856,37 @@ mod tests {
             "{error}"
         );
     }
+
+    /// Launch settings are cloned once per launched game or pair. A book
+    /// carried in them by value was copied with every launch, which spread
+    /// one wave's launches over seconds with a large book; the clone must
+    /// share the one parsed book.
+    #[test]
+    fn cloned_launch_settings_share_the_opening_book() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("book.epd");
+        std::fs::write(
+            &path,
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -\n".repeat(4),
+        )
+        .unwrap();
+        let openings = resolve_openings(Some(OpeningBook::new(path)), 0, 2, false, 7).unwrap();
+        assert_eq!(openings.entries.len(), 4);
+        let settings = PairGameSettings {
+            engine_a: EngineLaunchSpec::path_only("a".into()),
+            engine_b: EngineLaunchSpec::path_only("b".into()),
+            engine_a_time_control: ConfiguredTimeControl::default(),
+            engine_b_time_control: ConfiguredTimeControl::default(),
+            adjudication: AdjudicationConfig::default(),
+            ponder: false,
+            openings,
+            synthetic_games: false,
+            engines: None,
+        };
+        let launched = settings.clone();
+        assert!(Arc::ptr_eq(
+            &settings.openings.entries,
+            &launched.openings.entries
+        ));
+    }
 }
