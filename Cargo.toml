@@ -19,6 +19,13 @@ lto = "thin"
 codegen-units = 1
 strip = true
 
+# ── Debug hashing ─────────────────────────────────────────────────────────────
+# Runs hash their engine executables. Unoptimized SHA-256 spends a third of a
+# second on one debug-sized binary, which every test that launches a run pays;
+# optimizing this one dependency makes it a few milliseconds.
+[profile.dev.package.sha2]
+opt-level = 3
+
 # ── Optimized test profile ────────────────────────────────────────────────────
 # The release test leg exists to run the suite with optimizations on, assertions
 # off and overflow checks off. Whole-program LTO and one codegen unit per crate
