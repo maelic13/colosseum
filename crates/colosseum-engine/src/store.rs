@@ -780,6 +780,41 @@ mod tests {
         assert!(listed.iter().filter(|g| g.status == GAME_PENDING).count() == 499);
     }
 
+    /// A schedule is inserted as one transaction: a row that fails late in
+    /// the batch leaves none of the batch behind.
+    #[test]
+    fn a_schedule_batch_is_inserted_all_or_nothing() {
+        let store = Store::open_in_memory().unwrap();
+        let tid = TournamentId::from_uuid(uuid::Uuid::new_v4());
+        store
+            .create_tournament(tid, "Batch", &TournamentConfig::default())
+            .unwrap();
+        let (a, b) = (
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+            EngineId::from_uuid(uuid::Uuid::new_v4()),
+        );
+        let ids: Vec<GameId> = (0..3)
+            .map(|_| GameId::from_uuid(uuid::Uuid::new_v4()))
+            .collect();
+        let row = |id: GameId| PendingGame {
+            id,
+            round: 1,
+            white: a,
+            black: b,
+            start_fen: None,
+            opening_moves: &[],
+        };
+
+        // The last row repeats the first game's id.
+        let duplicate = [row(ids[0]), row(ids[1]), row(ids[2]), row(ids[0])];
+        assert!(store.insert_pending_games(tid, &duplicate).is_err());
+        assert!(store.list_games(tid).unwrap().is_empty());
+
+        let valid = [row(ids[0]), row(ids[1]), row(ids[2])];
+        store.insert_pending_games(tid, &valid).unwrap();
+        assert_eq!(store.list_games(tid).unwrap().len(), 3);
+    }
+
     #[test]
     fn round_trips_tournaments_and_games() {
         let store = Store::open_in_memory().unwrap();
