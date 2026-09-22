@@ -1,9 +1,9 @@
 {
-  "schema_version": 2,
-  "checked_on": "2026-08-03",
+  "schema_version": 3,
+  "checked_on": "2026-09-22",
   "host": "Microsoft Windows 11 Enterprise x86_64",
   "oracle_matrix": "tests/fixtures/statistics/oracle-matrix.md",
-  "conditions": "same Rarog 2.3.1 executable (SHA-256 2a95390ddff846ffcc132494d1a28dcde8b703d1d9ec57aa7199a3b856ab916b) on both arms; depth 1; startpos/no book; 4 colour-reversed pairs; concurrency 1; draw after move 5 when 2 consecutive scores are within 10000 cp",
+  "conditions": "same Rarog 2.3.1 executable (SHA-256 033f66334385e30ad358293a411e72508fa5edf04d6fc57310bc545b39046898) on both arms; depth 1; startpos/no book; 4 colour-reversed pairs; concurrency 1; draw after move 5 when 2 consecutive scores are within 10000 cp",
   "shared_fields": [
     "game count",
     "complete pair count",
@@ -77,16 +77,16 @@
     },
     {
       "runner": "colosseum-cli",
-      "runner_version": "0.1.0 release candidate at 86fc42b442d0f2a354a1fcc1ec5c09cad47a0f43",
-      "runner_sha256": "652e1c41cb16261c15a07cdcd1f18cfbf855957b0b7e57794006eee80e97a16f",
+      "runner_version": "0.1.0 release source at 628449db2c5223c61464cd178ab527398b132e7a",
+      "runner_sha256": "3206ce79a6aab188c2b2f6b90ac6d6739c0f99f55265d9b88ba5ea6cf45a646f",
       "artifact": "tests/fixtures/statistics/external/phase8-colosseum.json",
-      "artifact_sha256": "45a44b6bd05fb46aa8a9a518d1c57102492b8da9cdbc7f3bad18c12350e41b87",
-      "raw_result_sha256": "572a5cbb38d3c2ded8f767b47f2f4d528a83e458183d45a8f9f7dd9e4af0e7e6",
+      "artifact_sha256": "ac337d4759e389bdd39c505c9155d136f8662f8d9035c5aba0ea8eaf2184aac6",
+      "raw_result_sha256": "f6de16f1dcfc3c7fae1edaadc22af967fc74ad7a095b16ea8060e3266139ed7e",
       "rerun_byte_identical": false,
       "command": "<colosseum-cli> sprt <rarog> <rarog> --max-pairs 4 --preset gainer --a-depth 1 --b-depth 1 --draw-adjudication --draw-move 5 --draw-moves 2 --draw-score-cp 10000 --dir <run-dir> --json --seed 123 --placement off",
       "command_note": "The recorded command is the command that runs, and the command to repeat this comparison with. The 2026-08-03 run used the same arguments without --draw-adjudication, which enabled adjudication implicitly; adjudication is now off unless asked for, so the enabling flag is required and the record carries it. Never drop the draw parameters to make the command parse: the deliberately early draw rule is what makes all eight games draw and gives the three runners one outcome to compare, and without it the games play out and the comparison is against different conditions, which reads as a parity divergence that is not one.",
-      "command_proved_on": "2026-09-21",
-      "command_proof": "colosseum-cli 0.1.0 built from `cli` at 6fd0150, rarog-v2.3.1-windows-pext-pgo.exe (SHA-256 033f66334385e30ad358293a411e72508fa5edf04d6fc57310bc545b39046898) on both arms, Windows 11: exit 4, inconclusive, 8 games, 0/8/0, 4 complete pairs, pentanomial [0, 0, 4, 0, 0], 0 faults — every shared field equal to this observation. The pre-correction form exits 2 with a usage error naming --draw-adjudication. The proof run used a different build of Rarog 2.3.1 from the 2026-08-03 observation, so it demonstrates the command, not the recorded artifact hashes; the release-acceptance repeat re-measures the matrix on the corrected source.",
+      "command_proved_on": "2026-09-22",
+      "command_proof": "Run as recorded for the release acceptance repeat: exit 4, inconclusive, 8 games, 0/8/0, 4 complete pairs, pentanomial [0, 0, 4, 0, 0], 0 faults. The pre-Phase-10(b) form, without --draw-adjudication, exits 2 with a usage error naming the flag.",
       "exit_code": 4,
       "status": "inconclusive",
       "games": 8,
@@ -109,5 +109,6 @@
       "classification": "excluded by oracle matrix",
       "reason": "FastChess/Cute Chess display NaN or infinity while Colosseum retains typed unavailability; no finite statistic exists to compare."
     }
-  ]
+  ],
+  "engine_note": "Re-recorded on 2026-09-22 for the release acceptance repeat. The 2026-08-03 matrix used a different build of Rarog 2.3.1 (SHA-256 2a95390ddff846ffcc132494d1a28dcde8b703d1d9ec57aa7199a3b856ab916b) that could not be located on the reference host, so the matrix was repeated on the build that is there rather than left pointing at a binary nobody can obtain. Both external runners are the exact recorded binaries, and both external transcripts came back byte-identical to the ones recorded in August: the deliberately early draw rule ends all eight games the same way whatever the engine plays, and the transcripts carry no timing. Only the Colosseum observation moved, onto the source being released."
 }

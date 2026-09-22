@@ -1982,6 +1982,53 @@ change if one were revisited.
   reason the GUI candidate mode of (ah) is worth having afterwards. The CLI
   publish job proves the tagged commit is reachable from `main`, which the
   squash commit is.
+
+  **Implementation evidence (Phase 10.10), 2026-09-22, at `628449d`.**
+  - **(af.2) and a second flake, first.** The scale test now reads private
+    commit — `PrivateUsage` on Windows, `VmData` on Linux — instead of the
+    resident set, at the same limits: a resident set is what the OS chose to
+    keep in RAM at that moment, so comparing two processes' was measuring the
+    machine's mood. `status_before_the_first_block_says_when_it_is_due` had
+    failed twice the same way; it left concurrency to the host, so a
+    many-core machine could commit all twenty games the first block waits for
+    before `status` was asked. It now pins concurrency to one.
+  - **Command reference** regenerated, byte-identical to the committed file.
+  - **Changelogs dated** 2026-09-22; both tags still validate.
+  - **Phase 4B oracle replay**: the ordered fastchess stream and the
+    controlled live parity fixtures pass unchanged.
+  - **Phase 8.1 parity matrix, re-recorded.** The Rarog build the August
+    hashes belong to is on no disk of the reference host, so the matrix was
+    repeated on the build that is there (`033f6633…`) with both external
+    runners at their exact recorded hashes. All three runners agree on every
+    shared field — 8 games, 4 complete colour-reversed pairs, 0/8/0, 100%
+    draws, draw-adjudication termination, zero faults, and pentanomial
+    `[0, 0, 4, 0, 0]` where it is shared. **Both external transcripts came
+    back byte-identical** to August's, so only the Colosseum observation
+    moved, onto the released source. A trap worth recording: a transcript
+    captured on Windows must be stored LF like every other text file here, or
+    its recorded hash only matches on the machine that captured it.
+  - **Usability flows** repeated from an unpacked `cargo xtask package cli`
+    archive against two public Stockfish builds: match completed with two
+    colour-reversed `MaxMoves` draws, SPRT capped inconclusive at exit 4 with
+    pentanomial `[0, 0, 1, 0, 0]`, SPSA completed one iteration with `Threads`
+    bound and reported on its rail. Zero faults throughout, and both
+    game-playing flows warned that no book was supplied.
+  - **Full suite**: 604 passed in debug, 603 in `ci-release` — the one
+    difference is `giving_back_a_free_slot_is_a_bug_caught_in_debug_builds`,
+    which exists only where debug assertions do.
+  - **`release-check`** passes for `gui-v1.1.0` and `cli-v0.1.0`.
+  - **The Windows installer path was exercised**, since (ah) had shipped five
+    installer formats no local run had touched: `cargo xtask package gui
+    --format zip,msi` built `colosseum-gui-1.1.0-windows-x64.msi`, which
+    reads back as ProductName Colosseum, ProductVersion 1.1.0, template
+    `x64;1033`. It found a defect: `wix` writes a `.wixpdb` build database
+    beside the installer, which the workflow's upload pattern and its
+    by-count artifact check would both have taken for a release artifact.
+    The xtask now removes it.
+  - **Not done here, and the maintainer's to run:** the four-platform CLI and
+    GUI candidates. Both are remote CI operations, and they are the only
+    thing that will have exercised `deb`, `rpm`, `dmg` and `pkg.tar.zst`
+    before a tag exists.
 - **(af.2) Test robustness before the acceptance run** (part of 10.10). The
   test `a_resumed_tune_does_not_keep_the_games_it_replayed` compares two
   processes' resident working sets and failed once under full-suite load,

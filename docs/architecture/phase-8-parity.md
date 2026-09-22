@@ -1,10 +1,20 @@
 # Phase 8.1 — release-candidate runner parity
 
-The controlled Phase-4B live comparison was repeated on 2026-08-03 against
-current FastChess and Cute Chess releases and the exact Colosseum CLI release
-candidate. Each run used the same Rarog 2.3.1 executable on both arms, depth 1,
-four colour-reversed pairs, no opening book, concurrency 1 and deliberately
-early draw adjudication. Each runner finished in seconds.
+The controlled Phase-4B live comparison was repeated on 2026-09-22 against
+current FastChess and Cute Chess releases and the source the release is cut
+from. Each run used the same Rarog 2.3.1 executable on both arms, depth 1, four
+colour-reversed pairs, no opening book, concurrency 1 and deliberately early
+draw adjudication. Each runner finished in seconds.
+
+The matrix was first recorded on 2026-08-03 against a release candidate. It was
+re-recorded here because that candidate is not the source being released, and
+because the Rarog 2.3.1 build the original hashes belong to (SHA-256
+`2a95390d…`) is no longer on the reference host: a record nobody can reproduce
+is not evidence. Both external runners are the exact binaries recorded before,
+and **both external transcripts came back byte-identical** to the ones recorded
+in August — the deliberately early draw rule ends all eight games the same way
+whatever the engine plays, and the transcripts carry no timing. Only the
+Colosseum observation moved, onto the source being released.
 
 ## Reproducible identities
 
@@ -12,8 +22,8 @@ early draw adjudication. Each runner finished in seconds.
 |---|---|---|
 | FastChess | 1.8.0-alpha, CI commit `072859b` | `8444e73965ae44e716cde1bb546a7d7c8c9fc7a442a44194a0c71a3bffa7dd0d` |
 | Cute Chess CLI | 1.5.1, Qt 6.8.3 | `8889f9582dc688c567704cf083f6025baf77f791cde903698c70b3420caf5d7e` |
-| Colosseum CLI | 0.1.0 candidate at `86fc42b442d0f2a354a1fcc1ec5c09cad47a0f43` | `652e1c41cb16261c15a07cdcd1f18cfbf855957b0b7e57794006eee80e97a16f` |
-| Rarog | 2.3.1 Windows AVX2 | `2a95390ddff846ffcc132494d1a28dcde8b703d1d9ec57aa7199a3b856ab916b` |
+| Colosseum CLI | 0.1.0 release source at `628449db2c5223c61464cd178ab527398b132e7a` | `3206ce79a6aab188c2b2f6b90ac6d6739c0f99f55265d9b88ba5ea6cf45a646f` |
+| Rarog | 2.3.1 Windows PEXT PGO | `033f66334385e30ad358293a411e72508fa5edf04d6fc57310bc545b39046898` |
 
 The versions were checked against the official
 [FastChess 1.8.0-alpha release](https://github.com/Disservin/fastchess/releases/tag/v1.8.0-alpha)
@@ -34,18 +44,13 @@ not part of runner semantics.
 
 ### Repeating this comparison
 
-Run the commands exactly as written; they are the commands that run. The
-Colosseum one carries `--draw-adjudication` because adjudication is off unless
-asked for. The 2026-08-03 run used the same arguments without that flag, which
-then enabled adjudication implicitly; the record was repaired on 2026-09-21 and
-the repaired command proved by running it: colosseum-cli 0.1.0 built from `cli`
-at `6fd0150` against `rarog-v2.3.1-windows-pext-pgo.exe` (SHA-256
-`033f66334385e30ad358293a411e72508fa5edf04d6fc57310bc545b39046898`) on both
-arms returned exit 4, `INCONCLUSIVE`, eight games, 0/8/0, four complete pairs,
-pentanomial `[0, 0, 4, 0, 0]` and zero faults — every shared field equal to the
-recorded observation. That proof run used a different build of Rarog 2.3.1 from
-the recorded one, so it demonstrates the command, not the recorded artifact
-hashes.
+Run the commands exactly as written; they are the commands that run, against
+the binaries the table above names. The Colosseum one carries
+`--draw-adjudication` because adjudication is off unless asked for; the
+2026-08-03 run used the same arguments without that flag, which then enabled
+adjudication implicitly. The record was repaired on 2026-09-21 and re-recorded
+on 2026-09-22 with the whole matrix, so the command, the hashes and the
+observation now describe one run of the released source.
 
 Do not drop the draw parameters to make the command parse. The deliberately
 early draw rule is what makes all eight games draw and gives the three runners

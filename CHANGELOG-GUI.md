@@ -6,7 +6,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [1.1.0] — unreleased
+## [1.1.0] — 2026-09-22
 
 The first release from the shared code base with Colosseum CLI. The GUI
 itself changes little; the engine-playing core underneath it is the one the

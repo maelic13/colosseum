@@ -70,3 +70,33 @@ local archive is only usability evidence.  Before Phase 9.7/final acceptance,
 the maintainer must push the intended `cli` source with `[cli candidate]` in
 the commit subject and retain the resulting fresh four-platform CI candidate.
 That remote operation is deliberately not performed here.
+
+## Repeated for the release, 2026-09-22
+
+The same three documented workflows were repeated for the release acceptance
+(GUIDE 10.10) against the source being released, from an archive produced by
+`cargo xtask package cli` and unpacked into an isolated directory. This section
+is added rather than replacing the exercise above, which records what a
+specific package did on a specific date.
+
+| Field | Value |
+|---|---|
+| Archive | `colosseum-cli-0.1.0-windows-x64.zip` |
+| Archive SHA-256 | `fb82e404f1f71aae4288f7c74cee704d31f6e4223a7f85f4d0fefb7db0f9a1c4` |
+| Source commit | `628449db2c5223c61464cd178ab527398b132e7a` |
+| Engine A | Stockfish 19 Windows x86-64 universal, `45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0` |
+| Engine B | Stockfish 18 Windows x86-64 BMI2, `bf2d8bf60ac6f3ba58df08b1b0c5f4dec759b994d8f4532b07fe62986dc03288` |
+
+Engine A is a newer public Stockfish than the development build used in
+August; engine B is the same binary. Both passed the full `engine check`
+protocol sequence, ending `clean-shutdown`.
+
+| Workflow | Observed result |
+|---|---|
+| Fixed match | Completed, exit 0: two colour-reversed draws at `MaxMoves`, zero engine, time and infrastructure faults. |
+| SPRT | One complete pair, pentanomial `[0, 0, 1, 0, 0]`, zero faults, capped **inconclusive** with exit 4. |
+| SPSA | Completed one iteration of one pair, exit 0, zero faults. `Threads` was discovered and bound, ended at `1`, and the run reported it sitting on a rail. |
+
+Both game-playing workflows again reported `no opening book: every game starts
+from startpos; opening diversity is absent`. No CLI or documentation defect was
+found.

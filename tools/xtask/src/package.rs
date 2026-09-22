@@ -193,7 +193,17 @@ fn msi(root: &Path, version: &str, target: &str, arch: &str, destination: &Path)
             &destination.display().to_string(),
         ],
         root,
-    )
+    )?;
+    // WiX writes a build database beside the installer. It is a debugging
+    // artifact, not something to publish, and leaving it next to the finished
+    // files would put it in the release: the workflow uploads this directory
+    // by pattern and then checks the artifact list by count.
+    let database = destination.with_extension("wixpdb");
+    if database.exists() {
+        std::fs::remove_file(&database)
+            .map_err(|error| format!("could not remove {}: {error}", database.display()))?;
+    }
+    Ok(())
 }
 
 /// Windows canonicalisation returns a `\\?\` path, which WiX does not accept.

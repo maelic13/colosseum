@@ -157,7 +157,7 @@ fn the_recorded_colosseum_parity_command_still_parses() {
 fn release_candidate_matches_the_external_oracles_on_shared_fields() {
     let fixture: ParityFixture =
         serde_json::from_str(include_str!("../../../docs/fixtures/phase8/parity.json")).unwrap();
-    assert_eq!(fixture.schema_version, 2);
+    assert_eq!(fixture.schema_version, 3);
     assert_eq!(
         fixture.oracle_matrix,
         "tests/fixtures/statistics/oracle-matrix.md"
@@ -227,17 +227,19 @@ fn candidate_identity_versions_and_divergences_are_durable() {
         serde_json::from_str(include_str!("../../../docs/fixtures/phase8/parity.json")).unwrap();
     let projection: ColosseumProjection = serde_json::from_slice(COLOSSEUM).unwrap();
 
+    // The source the release is cut from, and the exact binary and result
+    // the acceptance repeat measured with it.
     assert_eq!(
         projection.candidate_commit,
-        "86fc42b442d0f2a354a1fcc1ec5c09cad47a0f43"
+        "628449db2c5223c61464cd178ab527398b132e7a"
     );
     assert_eq!(
         projection.candidate_sha256,
-        "652e1c41cb16261c15a07cdcd1f18cfbf855957b0b7e57794006eee80e97a16f"
+        "3206ce79a6aab188c2b2f6b90ac6d6739c0f99f55265d9b88ba5ea6cf45a646f"
     );
     assert_eq!(
         projection.raw_result_sha256,
-        "572a5cbb38d3c2ded8f767b47f2f4d528a83e458183d45a8f9f7dd9e4af0e7e6"
+        "f6de16f1dcfc3c7fae1edaadc22af967fc74ad7a095b16ea8060e3266139ed7e"
     );
     assert_eq!(projection.status, "inconclusive");
     assert_eq!(projection.exit_code, 4);

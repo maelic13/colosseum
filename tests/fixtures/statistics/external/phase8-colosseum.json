@@ -1,8 +1,8 @@
 {
-  "source": "reviewed projection of exact release-mode candidate result.json",
-  "candidate_commit": "86fc42b442d0f2a354a1fcc1ec5c09cad47a0f43",
-  "candidate_sha256": "652e1c41cb16261c15a07cdcd1f18cfbf855957b0b7e57794006eee80e97a16f",
-  "raw_result_sha256": "572a5cbb38d3c2ded8f767b47f2f4d528a83e458183d45a8f9f7dd9e4af0e7e6",
+  "source": "reviewed projection of the exact release-mode result.json from the 10.10 acceptance repeat",
+  "candidate_commit": "628449db2c5223c61464cd178ab527398b132e7a",
+  "candidate_sha256": "3206ce79a6aab188c2b2f6b90ac6d6739c0f99f55265d9b88ba5ea6cf45a646f",
+  "raw_result_sha256": "f6de16f1dcfc3c7fae1edaadc22af967fc74ad7a095b16ea8060e3266139ed7e",
   "status": "inconclusive",
   "exit_code": 4,
   "games": 8,
