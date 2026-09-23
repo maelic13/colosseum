@@ -1690,6 +1690,7 @@ contract. Raising effort beyond High is an explicit exception, not the default.
 |---|---|
 | 11.1–11.3 | Sol High |
 | 11.4 | Terra High |
+| 12.1 | Terra High |
 
 Completed steps keep the assignment recorded in their phase record.
 
@@ -1790,6 +1791,56 @@ are fixed as patch releases on `main` while Phase 11 proceeds on a branch.
 tournament parity demonstrated on stored data; the CLI's own tests, fixtures
 and generated reference unchanged by the extraction; a GUI candidate passes
 its archive smoke.
+
+### Phase 12 — CLI maintenance from adoption
+
+Corrections reported by projects using the released CLI. This phase runs
+beside Phase 11, not after it: a step here is small, changes no statistic
+and no run-directory format, ships as a CLI patch release (`cli-v0.1.x`)
+from `main`, and never waits for GUI work. Each report becomes one numbered
+step with its regression tests; anything that would change a reported
+statistic, the run-file schema or the run-directory layout is not a patch
+and goes to a minor release with its own step.
+
+- **(a) Rarog's tooling notes from the first adoption** (GUIDE 12.1, Terra
+  High), reported 2026-09-22 with Rarog's B.2.6.1 record; nothing blocks.
+  - **`spsa status` ETA after a resume.** Once a tune has been stopped and
+    resumed, `spsa status` reports "ETA unavailable: no uncontaminated
+    elapsed-to-checkpoint timing" for the rest of the run, because the only
+    timing it trusts spans the stop. The checkpoint already records when the
+    run resumed; the ETA is computed from the iterations completed since the
+    latest resume and the wall time since it, and labelled as such
+    (`eta.basis: "since-resume"` beside the existing whole-run basis) so a
+    reader knows what the figure rests on. Unavailable only while no
+    iteration has completed since the resume, with that reason. A test
+    resumes a synthetic tune, completes iterations, and asserts a finite ETA
+    with the since-resume basis.
+  - **The resume note and the log.** On resume, `match` (and every other
+    durable command with the same note) prints "resuming 0 durable game(s)"
+    because it reads the units replayed from the journal after the last
+    checkpoint, not the units the run has completed. The note names the
+    completed units and the remaining ones: "resuming: 1,240 of 2,000 games
+    complete, 760 to play". `run.log` gains the two events its
+    documentation already promises in `run-directories.md` — one line at a
+    clean stop (units complete, exit code) and one at resume (units
+    complete, units to play) — written through the existing human-events
+    path. A test stops and resumes a stub run and asserts both the note and
+    the two log lines.
+  - **`--json` keeps stdout and stderr clean.** With `--dry-run --json` the
+    resume note reaches stderr before the JSON value is written to stdout.
+    In `--json` mode no human note is printed at all; the fact appears in
+    the JSON value instead (`"resumed": true`, `"completed_units"`,
+    `"remaining_units"`), so a wrapper reads one stream and one value. The
+    same rule is checked for every `--json` command in the existing
+    JSON-contract tests: stdout is exactly one JSON value, stderr is empty
+    on success.
+  - `CHANGELOG-CLI.md` under Unreleased, then `[0.1.1]` when cut; the
+    command reference regenerated if any help text changed; the run-file
+    schema, run-directory layout and every statistic unchanged.
+
+**Exit criterion:** the three regression tests pass; `colosseum-docs --check`
+and the JSON-contract tests pass; a stopped and resumed synthetic tune shows
+a finite since-resume ETA in `spsa status`.
 
 ### Post-release research
 

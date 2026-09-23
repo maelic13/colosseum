@@ -19,7 +19,7 @@ internal naming or method argumentation.
 | What is missing | Only the maintainer's remote operations: squash-merge the release pull request on green CI, dispatch the CLI and GUI candidates on `main` and check their four-platform archives, tag `gui-v1.1.0` and `cli-v0.1.0`, check both release pages. **Phase 11** (GUI on the harness) starts after publication |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 CLI candidate archives ☑ exact-archive smoke · the `gui-v` release lane has never run; its candidate mode is the rehearsal to dispatch before the tag, and the only thing that will have exercised `deb`, `rpm`, `dmg` and `pkg.tar.zst` |
-| Next step | **Publication is the maintainer's** — see "What to do now". Then **11.1** — Sol High (Claude: Opus 5, high) |
+| Next step | **Publication is the maintainer's** — see "What to do now". Then **11.1** — Sol High (Claude: Opus 5, high). **12.1** — Terra High (Claude: Sonnet 5, high) — is independent of Phase 11 and can be taken first, after publication, as the CLI's first patch |
 | Confirmed decisions | The 2026-09-22 set, confirmed by the maintainer and not reopened, recorded with the release preparation in [`phase-10-record.md`](docs/architecture/phase-10-record.md): exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, the explicit GUI artifact list, versions kept in artifact names, the updater prerelease fix now and pagination later, the throughput margin not chased |
 
 ## Completed phases
@@ -102,6 +102,20 @@ When reporting the next step, always report its model as well.
   parity within 0.01 Elo, design guidelines checked, changelog records the
   adjudication default and run directories, version chosen by the maintainer
   (2.0.0 recommended), GUI candidate passes archive smoke — PLAN §Phase 11(d)
+
+### Phase 12 — CLI maintenance from adoption (beside Phase 11, CLI patch releases)
+
+- ☐ **12.1** — **Model: Terra High.** Rarog's tooling notes from the first
+  adoption: `spsa status` computes the ETA from the iterations and wall time
+  since the latest resume, labelled `since-resume`, instead of reporting it
+  unavailable for the rest of a resumed run; the resume note names completed
+  and remaining units ("resuming: N of M games complete, K to play") instead
+  of the post-checkpoint replay count, and `run.log` records the stop and
+  the resume events its documentation promises; `--json` prints no human
+  note and carries the resume facts in the JSON value, with the
+  JSON-contract tests asserting one value on stdout and an empty stderr on
+  success; one regression test per item; `CHANGELOG-CLI.md` Unreleased,
+  released as `cli-v0.1.1` — PLAN §Phase 12(a)
 
 ### Deferred and post-release (not steps until reopened)
 
