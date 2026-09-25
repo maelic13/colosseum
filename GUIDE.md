@@ -106,16 +106,23 @@ When reporting the next step, always report its model as well.
 ### Phase 12 — CLI maintenance from adoption (beside Phase 11, CLI patch releases)
 
 - ☐ **12.1** — **Model: Terra High.** Rarog's tooling notes from the first
-  adoption: `spsa status` computes the ETA from the iterations and wall time
-  since the latest resume, labelled `since-resume`, instead of reporting it
-  unavailable for the rest of a resumed run; the resume note names completed
-  and remaining units ("resuming: N of M games complete, K to play") instead
-  of the post-checkpoint replay count, and `run.log` records the stop and
-  the resume events its documentation promises; `--json` prints no human
-  note and carries the resume facts in the JSON value, with the
-  JSON-contract tests asserting one value on stdout and an empty stderr on
-  success; one regression test per item; `CHANGELOG-CLI.md` Unreleased,
-  released as `cli-v0.1.1` — PLAN §Phase 12(a)
+  adoption: a regression test that a resumed tune's `spsa status` has a
+  finite ETA (the ETA itself was fixed by carrying the run's elapsed time in
+  the checkpoint); the resume note names completed and remaining units
+  ("resuming: N of M games complete, K to play") instead of the
+  post-checkpoint replay count, and `run.log` records the stop and the
+  resume events its documentation promises; under `--json` the note stays
+  on stderr and the JSON value also carries the resume facts; one
+  regression test per item; `CHANGELOG-CLI.md` Unreleased — PLAN §Phase 12(a)
+- ☐ **12.2** — **Model: Terra High.** `spsa history`: the centre vector after
+  every completed iteration, rebuilt from the journal, as a table, `--json`
+  or `--csv` — PLAN §Phase 12(b)
+- ☐ **12.3** — **Model: Terra High.** `spsa --seed-from <run dir>`: a fresh
+  tune starting from a finished tune's rounded final centres, same surface
+  unless `--tune` is given — PLAN §Phase 12(b)
+- ☐ **12.4** — **Model: Terra High.** A warning, kept in the run record,
+  whenever a command-line option list replaces a run file's list and drops
+  values it named — PLAN §Phase 12(b)
 
 ### Deferred and post-release (not steps until reopened)
 

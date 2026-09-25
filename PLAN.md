@@ -1804,17 +1804,14 @@ and goes to a minor release with its own step.
 
 - **(a) Rarog's tooling notes from the first adoption** (GUIDE 12.1, Terra
   High), reported 2026-09-22 with Rarog's B.2.6.1 record; nothing blocks.
-  - **`spsa status` ETA after a resume.** Once a tune has been stopped and
-    resumed, `spsa status` reports "ETA unavailable: no uncontaminated
-    elapsed-to-checkpoint timing" for the rest of the run, because the only
-    timing it trusts spans the stop. The checkpoint already records when the
-    run resumed; the ETA is computed from the iterations completed since the
-    latest resume and the wall time since it, and labelled as such
-    (`eta.basis: "since-resume"` beside the existing whole-run basis) so a
-    reader knows what the figure rests on. Unavailable only while no
-    iteration has completed since the resume, with that reason. A test
-    resumes a synthetic tune, completes iterations, and asserts a finite ETA
-    with the since-resume basis.
+  - **`spsa status` ETA after a resume — resolved 2026-09-25, before this
+    step.** Every checkpoint now records the run's total active time across
+    invocations (`run_elapsed_seconds`), progress blocks and the SPRT total
+    show it, and `spsa status` computes its whole-run ETA from it, so a
+    resumed tune has an ETA without a separate since-resume basis. Rates and
+    `time remaining` in progress blocks still use the current invocation
+    only. What remains for this step is a regression test that a stopped
+    and resumed synthetic tune shows a finite ETA in `spsa status`.
   - **The resume note and the log.** On resume, `match` (and every other
     durable command with the same note) prints "resuming 0 durable game(s)"
     because it reads the units replayed from the journal after the last
@@ -1826,21 +1823,55 @@ and goes to a minor release with its own step.
     complete, units to play) — written through the existing human-events
     path. A test stops and resumes a stub run and asserts both the note and
     the two log lines.
-  - **`--json` keeps stdout and stderr clean.** With `--dry-run --json` the
-    resume note reaches stderr before the JSON value is written to stdout.
-    In `--json` mode no human note is printed at all; the fact appears in
-    the JSON value instead (`"resumed": true`, `"completed_units"`,
-    `"remaining_units"`), so a wrapper reads one stream and one value. The
-    same rule is checked for every `--json` command in the existing
-    JSON-contract tests: stdout is exactly one JSON value, stderr is empty
-    on success.
+  - **`--json` carries the resume facts.** The human resume note stays on
+    stderr in `--json` mode — Rarog asked to keep it (B.2.7 notes,
+    2026-09-25), and the maintainer agreed — and the JSON value also
+    carries the facts (`"resumed": true`, `"completed_units"`,
+    `"remaining_units"`), so a wrapper need not parse stderr. The
+    JSON-contract tests assert that stdout is exactly one JSON value.
   - `CHANGELOG-CLI.md` under Unreleased, then `[0.1.1]` when cut; the
     command reference regenerated if any help text changed; the run-file
     schema, run-directory layout and every statistic unchanged.
 
 **Exit criterion:** the three regression tests pass; `colosseum-docs --check`
 and the JSON-contract tests pass; a stopped and resumed synthetic tune shows
-a finite since-resume ETA in `spsa status`.
+a finite ETA in `spsa status`.
+
+- **(b) Rarog's notes from the B.2.7 tune and gate** (GUIDE 12.2–12.4, Terra
+  High), reported 2026-09-25 against `cli-v0.1.0`; the runner's SPSA and
+  SPRT were validated at Rarog's scale (a 150,000-game tune, +13 Elo, no
+  faults). The resume items of that report are (a) above.
+  - **12.2 `spsa history`.** A read-only command that prints the centre
+    vector after every completed iteration, rebuilt from the journal
+    exactly as a resume replays it, so it works while a tune is running
+    and a trajectory read at a fixed iteration comes from an artifact.
+    Columns are the tune's knob names; text table by default, one JSON
+    value with `--json`, CSV with `--csv`; `--every N` thins the rows,
+    always keeping the last. `result.json` is unchanged. A test tunes a
+    synthetic run and asserts the rows equal the centres the driver
+    committed, in knob order.
+  - **12.3 `spsa --seed-from <run dir>`.** Starts a new tune from a finished
+    tune's final centres, rounded as the engine received them, as the new
+    initial values, keeping the previous tune's surface (names, bounds,
+    steps) unless `--tune` is given, in which case the knob names must
+    match exactly. The schedule, seed and horizon are the new command's,
+    so it is a fresh tune, recorded with the source run's result identity.
+    Only a completed run seeds: a stopped, cancelled or invalid one is
+    refused with the reason. Tests: a seeded tune starts from the source's
+    rounded centres, and each refusal.
+  - **12.4 A command-line option list that replaces a run file's.** The
+    documented rule stays: an explicit command-line option replaces the
+    run file's value, arrays included. When that drops values the run
+    file named — a side's `--option` list losing `Hash` and `Threads` —
+    the resolver warns on stderr naming the option and each dropped value,
+    and the run record keeps the warning, so the replacement is never
+    silent. No warning when nothing was dropped. A test resolves a run
+    file with three options against a one-option command line and asserts
+    the warning and the recorded note.
+
+**Exit criterion (b):** each step's tests pass, the command reference is
+regenerated, `CHANGELOG-CLI.md` Unreleased names each change, and the run
+file schema, run-directory layout and every statistic are unchanged.
 
 ### Post-release research
 
