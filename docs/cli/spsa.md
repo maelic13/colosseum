@@ -41,6 +41,23 @@ terminal gain ratio:
 colosseum-cli spsa ./engine --tune tune.toml --r-end 0.002
 ```
 
+To continue from where a finished tune ended — a second tune with a fresh
+schedule, seed and horizon — seed it from that tune's run directory instead
+of writing a new tune file by hand:
+
+```text
+colosseum-cli spsa ./engine --seed-from ./runs/tune-1 --r-end 0.002 --iterations 2000
+```
+
+The new tune's initial values are the finished tune's tuned values, rounded
+exactly as the engine received them, and it keeps that tune's parameters,
+order, bounds and `c_end`. Give `--tune` as well to change the bounds or
+`c_end`: the file must name the same parameters in the same order, and its
+initial values are replaced by the seeded ones. Only a completed tune can seed
+another; a stopped, cancelled or invalid one is refused with its status. The
+run record keeps the source directory, the SHA-256 of its `result.json` and
+how many iterations it completed.
+
 The defaults are 5,000 iterations and 32 games per iteration. They are useful
 starting values, not minimums. `--iterations 1 --games-per-iteration 2` is a
 valid smoke run; games per iteration must be positive and even so every opening
@@ -98,6 +115,23 @@ games, each game on whichever slot is free; the estimate counts those waves. Thi
 tune will converge; curvature, sensitivity, interactions, noise and distance
 from the optimum remain unknown.
 
+To read a tune's trajectory at a fixed iteration, or plot it, print the
+centre vector after every completed iteration:
+
+```text
+colosseum-cli spsa history path/to/spsa-run
+colosseum-cli spsa history path/to/spsa-run --csv --every 100 > trajectory.csv
+colosseum-cli --json spsa history path/to/spsa-run
+```
+
+The rows are rebuilt from the journal exactly as a resume replays it, without
+changing the run, so they are available while the tune is still running.
+Iteration `0` is the tune's initial values and row `N` holds the floating
+centres after `N` completed iterations, in the tune file's knob order: the
+table rounds them to three decimals, CSV and JSON give them in full. `--every N`
+keeps every Nth iteration and always the initial values and the latest
+iteration. `--csv` and `--json` cannot be combined.
+
 Inspect the last checksum-verified durable snapshot of a running, interrupted
 or completed tune without acquiring ownership or changing any run bytes:
 
@@ -105,8 +139,9 @@ or completed tune without acquiring ownership or changing any run bytes:
 colosseum-cli spsa status path/to/spsa-run
 ```
 
-The report includes completed iteration and percentage, a linear ETA when an
-uninterrupted elapsed-to-checkpoint basis exists, and every knob's current
+The report includes completed iteration and percentage, a linear ETA from the
+tune's elapsed time as its checkpoint records it across every stop and
+resume, and every knob's current
 floating centre and normalized trajectory. With at least six completed
 iterations it compares the mean of each history third and labels these fixed
 heuristics:

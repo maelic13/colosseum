@@ -89,8 +89,10 @@ validates, resume fails rather than inventing state.
 
 **`run.log`** is an append-only JSON-lines stream of what a person wants to
 read: the progress blocks as printed, each fault with the game it ended, and
-the stop, resume and finish of the run. It does not repeat games; the journal
-has them.
+the stop, resume and finish of the run. A clean stop is a `stopped` event with
+the units completed and the exit code; a resume is a `resumed` event with the
+units completed and still to play. It does not repeat games; the journal has
+them.
 
 When the run finishes, `result.json` holds the final structured report, and
 `failed-games/` keeps a forensic of every abnormal game: the round-trip stamps

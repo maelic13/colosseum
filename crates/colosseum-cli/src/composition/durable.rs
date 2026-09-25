@@ -5,7 +5,8 @@ use std::time::Instant;
 
 use super::*;
 use crate::journal::{self, GameRecord, JournalAnchor, JournalResume, LoadMode, LoadedJournal};
-use crate::run_writer::RunWriter;
+use crate::progress::RunClock;
+use crate::run_writer::{RUN_ELAPSED_FIELD, RunWriter};
 
 /// Units committed between two checkpoints at most.
 pub(crate) const CHECKPOINT_EVERY_UNITS: u64 = 50;
@@ -47,6 +48,15 @@ impl CheckpointCadence {
 pub(crate) struct OpenedJournal {
     pub(crate) records: Vec<GameRecord>,
     pub(crate) resume: JournalResume,
+    /// The time earlier invocations spent on the run; zero for a fresh one.
+    pub(crate) prior_elapsed: Duration,
+}
+
+impl OpenedJournal {
+    /// The run's clock for this invocation, continuing the earlier ones.
+    pub(crate) fn clock(&self) -> RunClock {
+        RunClock::resumed_after(self.prior_elapsed)
+    }
 }
 
 /// Read a resumed run's journal, verified against its checkpoint, on a
@@ -64,6 +74,7 @@ pub(crate) async fn open_journal(
         return Ok(OpenedJournal {
             records: Vec::new(),
             resume: JournalResume::fresh(),
+            prior_elapsed: Duration::ZERO,
         });
     }
     let root = directory.paths().root.clone();
@@ -87,10 +98,137 @@ pub(crate) async fn open_journal(
             discarded.games_without_moves
         );
     }
+    let prior_elapsed = run_elapsed(&directory.paths().root, &loaded.records);
     Ok(OpenedJournal {
         records: loaded.records,
         resume: loaded.resume,
+        prior_elapsed,
     })
+}
+
+/// Where a resumed run stood when this invocation started, in the run's own
+/// unit: what the operator reads on resume, what `run.log` records, and what
+/// the `--json` value carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub(crate) struct ResumeFacts {
+    pub(crate) unit: ProgressUnit,
+    pub(crate) completed_units: u64,
+    /// Units still to play, where the run has a fixed horizon or a cap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) remaining_units: Option<u64>,
+}
+
+impl ResumeFacts {
+    /// The facts of a resumed run; `None` for a fresh one.
+    pub(crate) fn of(
+        resumed: bool,
+        unit: ProgressUnit,
+        completed: u64,
+        total: Option<u64>,
+    ) -> Option<Self> {
+        resumed.then(|| Self {
+            unit,
+            completed_units: completed,
+            remaining_units: total.map(|total| total.saturating_sub(completed)),
+        })
+    }
+
+    /// The note an operator reads: "resuming: 1240 of 2000 games complete, 760
+    /// to play".
+    pub(crate) fn note(&self) -> String {
+        let unit = self.unit.plural();
+        match self.remaining_units {
+            Some(remaining) => format!(
+                "resuming: {} of {} {unit} complete, {remaining} to play",
+                self.completed_units,
+                self.completed_units + remaining
+            ),
+            None => format!("resuming: {} {unit} complete", self.completed_units),
+        }
+    }
+}
+
+/// Say that a run resumed: the note on standard error, in every output mode,
+/// and the same facts as one `run.log` event.
+pub(crate) fn announce_resume(writer: &RunWriter, facts: Option<ResumeFacts>) {
+    if let Some(facts) = facts {
+        eprintln!("{}", facts.note());
+        log_event(
+            writer,
+            &json!({
+                "event": "resumed",
+                "unit": facts.unit,
+                "completed_units": facts.completed_units,
+                "remaining_units": facts.remaining_units,
+            }),
+        );
+    }
+}
+
+/// Record a clean stop in `run.log`: how far the run got and the exit code it
+/// stopped with, so the log shows where one invocation ended and the next
+/// began.
+pub(crate) fn log_stop(writer: &RunWriter, unit: ProgressUnit, completed: u64, exit_code: u8) {
+    log_event(
+        writer,
+        &json!({
+            "event": "stopped",
+            "unit": unit,
+            "completed_units": completed,
+            "exit_code": exit_code,
+        }),
+    );
+}
+
+/// The time a run's earlier invocations spent, as its checkpoint recorded it.
+///
+/// A run directory written before the checkpoint carried it has only its
+/// games' own spans to go on. Their union is the time some game was being
+/// played: it leaves out the gaps between invocations, as it should, and
+/// the seconds between games, which are small beside a game.
+pub(crate) fn run_elapsed(root: &Path, records: &[GameRecord]) -> Duration {
+    recorded_run_elapsed(root).unwrap_or_else(|| played_time(records))
+}
+
+/// The run's elapsed time as its newest readable checkpoint recorded it, when
+/// it recorded one.
+pub(crate) fn recorded_run_elapsed(root: &Path) -> Option<Duration> {
+    RunDirectory::read_checkpoint_snapshot::<Value>(root)
+        .ok()
+        .and_then(|payload| payload.get(RUN_ELAPSED_FIELD)?.as_f64())
+        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+        .map(Duration::from_secs_f64)
+}
+
+/// The union of the games' slot spans.
+fn played_time(records: &[GameRecord]) -> Duration {
+    let mut spans = records
+        .iter()
+        .filter_map(|record| record.slot.as_ref())
+        .map(|slot| {
+            (
+                slot.started_unix_us,
+                slot.ended_unix_us.max(slot.started_unix_us),
+            )
+        })
+        .collect::<Vec<_>>();
+    spans.sort_unstable();
+    let mut total = 0_u64;
+    let mut current: Option<(u64, u64)> = None;
+    for (start, end) in spans {
+        current = match current {
+            Some((open, close)) if start <= close => Some((open, close.max(end))),
+            Some((open, close)) => {
+                total += close - open;
+                Some((start, end))
+            }
+            None => Some((start, end)),
+        };
+    }
+    if let Some((open, close)) = current {
+        total += close - open;
+    }
+    Duration::from_micros(total)
 }
 
 /// The journal position the newest valid checkpoint covers. `None` when no
@@ -193,4 +331,61 @@ pub(crate) fn iterations_from_journal(
 /// Wait for every write the run has made, and say so if one failed.
 pub(crate) async fn settle(writer: &RunWriter) -> Result<(), String> {
     writer.barrier().await.map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::match_runner::SlotOccupancy;
+    use crate::run_writer::tests::{directory, record};
+
+    const SECOND: u64 = 1_000_000;
+
+    fn played(number: u32, from: u64, to: u64) -> GameRecord {
+        GameRecord {
+            slot: Some(SlotOccupancy {
+                index: 0,
+                started_unix_us: from * SECOND,
+                ended_unix_us: to * SECOND,
+            }),
+            ..record(number)
+        }
+    }
+
+    #[test]
+    fn played_time_counts_overlapping_games_once_and_the_gaps_between_invocations_not_at_all() {
+        let records = [
+            played(1, 100, 110),
+            played(2, 105, 115),
+            // A stop, then a resumed invocation twenty minutes later.
+            played(3, 1_300, 1_310),
+            record(4),
+        ];
+        assert_eq!(played_time(&records), Duration::from_secs(25));
+        assert_eq!(played_time(&[]), Duration::ZERO);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_checkpoint_carries_the_run_time_into_the_next_invocation() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = directory(root.path());
+        let run = directory.paths().root.clone();
+        let records = [played(1, 100, 110)];
+
+        // Before any checkpoint recorded it, the games are all there is.
+        assert_eq!(run_elapsed(&run, &records), Duration::from_secs(10));
+
+        let earlier = Duration::from_secs(3_600);
+        let writer = RunWriter::start(Arc::clone(&directory), JournalResume::fresh())
+            .await
+            .unwrap()
+            .on_clock(RunClock::resumed_after(earlier));
+        writer.checkpoint(json!({"command": "match"})).unwrap();
+        writer.barrier().await.unwrap();
+
+        let carried = run_elapsed(&run, &records);
+        assert!(carried >= earlier, "{carried:?}");
+        assert!(carried < earlier + Duration::from_secs(60), "{carried:?}");
+        assert_eq!(recorded_run_elapsed(&run), Some(carried));
+    }
 }

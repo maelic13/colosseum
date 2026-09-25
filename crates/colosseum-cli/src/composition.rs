@@ -35,8 +35,8 @@ use colosseum_application::{
     RuntimeParticipant, SPSA_TUNE_RESULT_SCHEMA_VERSION, SprtBundle, SprtDesign,
     SprtLengthPlanReport, SprtLengthPlanRequest, SprtParameters, SpsaBoundTune, SpsaCenterSample,
     SpsaEstimator, SpsaEstimatorPolicy, SpsaGateHashStatus, SpsaPlanReport, SpsaRunSettings,
-    SpsaStatusReport, SpsaTimingInput, SpsaTuneAudit, SpsaTuneResult, SpsaTuneResultError,
-    SpsaTuneWarning, SpsaWaveShape, TournamentCompletedGame, TournamentDesign,
+    SpsaStatusReport, SpsaTimingInput, SpsaTune, SpsaTuneAudit, SpsaTuneParameter, SpsaTuneResult,
+    SpsaTuneResultError, SpsaTuneWarning, SpsaWaveShape, TournamentCompletedGame, TournamentDesign,
     TournamentFixedRating, TournamentParticipant, TournamentPlan, UciOptionSchema, UciOptionValue,
     classify_calibration, diagnose_spsa, plan_fixed, plan_sprt_length, plan_spsa, scaling_hash_mb,
     spsa_wave_shape, summarize_nps_scaling,
@@ -231,6 +231,8 @@ pub async fn run() -> ExitCode {
                 Some(SpsaAction::Status { run_directory }) => {
                     run_spsa_status(&run_directory, cli.json)
                 }
+                Some(SpsaAction::History(_)) if cli.dry_run => unsupported_dry_run("spsa history"),
+                Some(SpsaAction::History(history)) => run_spsa_history(&history, cli.json),
                 None => run_spsa_command(command, cli.json, cli.dry_run, cancellation).await,
             }
         }

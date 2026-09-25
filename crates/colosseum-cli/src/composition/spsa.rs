@@ -14,6 +14,12 @@ pub(crate) struct SpsaCommand {
     /// Ordered TOML parameter vector to tune against the live UCI schema.
     #[arg(long)]
     pub(crate) tune: Option<PathBuf>,
+    /// Start from a completed tune's final rounded values, in its run
+    /// directory: its parameters, bounds and c_end are reused unless --tune
+    /// names the same parameters with new ones. The schedule, seed and horizon
+    /// are this command's.
+    #[arg(long, value_name = "RUN_DIR")]
+    pub(crate) seed_from: Option<PathBuf>,
     /// Terminal SPSA gain ratio shared by every tuned parameter.
     #[arg(long)]
     pub(crate) r_end: Option<f64>,
@@ -92,6 +98,23 @@ pub(crate) enum SpsaAction {
         /// Self-contained SPSA run directory to inspect without mutation.
         run_directory: PathBuf,
     },
+    /// Print the centre vector after every completed iteration, rebuilt from
+    /// the journal without changing the run; works while the tune runs.
+    History(SpsaHistoryCommand),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SpsaHistoryCommand {
+    /// Self-contained SPSA run directory to read without mutation.
+    pub(crate) run_directory: PathBuf,
+    /// Print comma-separated values: a header of knob names, then one row per
+    /// iteration. Not with `--json`.
+    #[arg(long)]
+    pub(crate) csv: bool,
+    /// Keep every Nth iteration, and always the initial centres and the
+    /// latest iteration.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) every: Option<u64>,
 }
 
 #[derive(Debug, Args)]
@@ -425,66 +448,87 @@ pub(crate) struct SpsaStatusOutput {
     pub(crate) snapshot_authority: String,
 }
 
-pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
-    let record = match RunRecord::read(run_directory) {
-        Ok(record) => record,
-        Err(error) => {
-            eprintln!("SPSA status failed: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
+/// A tune read back from its run directory for inspection.
+pub(crate) struct InspectedSpsaRun {
+    pub(crate) record: RunRecord,
+    pub(crate) workflow: StoredSpsaWorkflow,
+    pub(crate) replay: spsa_driver::SpsaReplay,
+    pub(crate) has_invalid: bool,
+}
+
+/// Read a tune's record, workflow and verified schedule, and rebuild its
+/// iterations from the journal as a resume would, without changing a byte of
+/// a run that may still be going. `label` names the command in each message.
+pub(crate) fn inspect_spsa_run(
+    run_directory: &Path,
+    label: &str,
+) -> Result<InspectedSpsaRun, ExitCode> {
+    let record = RunRecord::read(run_directory).map_err(|error| {
+        eprintln!("{label} failed: {error}");
+        ExitCode::FAILURE
+    })?;
     if record.command != "spsa"
         || record.workflow.get("kind").and_then(Value::as_str) != Some("spsa")
     {
         eprintln!(
-            "SPSA status failed: {} is a {:?} run, not an SPSA tune",
+            "{label} failed: {} is a {:?} run, not an SPSA tune",
             run_directory.display(),
             record.command
         );
-        return ExitCode::from(2);
+        return Err(ExitCode::from(2));
     }
-    let workflow = match serde_json::from_value::<StoredSpsaWorkflow>(record.workflow.clone()) {
-        Ok(workflow) => workflow,
-        Err(error) => {
-            eprintln!("SPSA status failed: invalid stored workflow: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let verified_schedule = match read_and_verify_spsa_schedule(run_directory, &workflow.schedule) {
-        Ok(schedule) => schedule,
-        Err(error) => {
-            eprintln!("SPSA status failed: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
-    // The iterations are rebuilt from the journal, as a resume would, without
-    // changing a byte of a run that may still be going.
-    let records = match read_anchor(run_directory).and_then(|anchor| {
-        crate::journal::load_journal(
-            run_directory,
-            anchor.as_ref(),
-            crate::journal::LoadMode::ReadOnly,
-        )
-        .map_err(|error| error.to_string())
-    }) {
-        Ok(loaded) => loaded.records,
-        Err(error) => {
-            eprintln!("SPSA status failed: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let workflow =
+        serde_json::from_value::<StoredSpsaWorkflow>(record.workflow.clone()).map_err(|error| {
+            eprintln!("{label} failed: invalid stored workflow: {error}");
+            ExitCode::FAILURE
+        })?;
+    let verified_schedule = read_and_verify_spsa_schedule(run_directory, &workflow.schedule)
+        .map_err(|error| {
+            eprintln!("{label} failed: {error}");
+            ExitCode::FAILURE
+        })?;
+    let records = read_anchor(run_directory)
+        .and_then(|anchor| {
+            crate::journal::load_journal(
+                run_directory,
+                anchor.as_ref(),
+                crate::journal::LoadMode::ReadOnly,
+            )
+            .map_err(|error| error.to_string())
+        })
+        .map_err(|error| {
+            eprintln!("{label} failed: {error}");
+            ExitCode::FAILURE
+        })?
+        .records;
     let has_invalid = records.iter().any(|record| record.sample == INVALID_SAMPLE);
-    let replay = match replay_journal(
+    let replay = replay_journal(
         verified_schedule,
         workflow.settings,
         workflow.bound_tune.initial_centers(),
         records,
-    ) {
-        Ok(replay) => replay,
-        Err(error) => {
-            eprintln!("SPSA status failed: the journal does not replay: {error}");
-            return ExitCode::FAILURE;
-        }
+    )
+    .map_err(|error| {
+        eprintln!("{label} failed: the journal does not replay: {error}");
+        ExitCode::FAILURE
+    })?;
+    Ok(InspectedSpsaRun {
+        record,
+        workflow,
+        replay,
+        has_invalid,
+    })
+}
+
+pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
+    let InspectedSpsaRun {
+        record,
+        workflow,
+        replay,
+        has_invalid,
+    } = match inspect_spsa_run(run_directory, "SPSA status") {
+        Ok(inspected) => inspected,
+        Err(code) => return code,
     };
     let centers = replay
         .completed_iterations
@@ -494,16 +538,24 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
             centers: iteration.centers_after.clone(),
         })
         .collect::<Vec<_>>();
+    // The run's own elapsed time, which its checkpoint carries across every
+    // invocation. A run directory from before it did has only the record's
+    // start and last update, which are the tune's time only if it never
+    // stopped.
     let resumed = record
         .anomalies
         .iter()
         .any(|anomaly| anomaly.code == "run-resumed");
-    let elapsed = (!resumed).then_some(
-        record
-            .updated_unix_ms
-            .saturating_sub(record.started_unix_ms) as f64
-            / 1_000.0,
-    );
+    let elapsed = recorded_run_elapsed(run_directory)
+        .map(|elapsed| elapsed.as_secs_f64())
+        .or_else(|| {
+            (!resumed).then_some(
+                record
+                    .updated_unix_ms
+                    .saturating_sub(record.started_unix_ms) as f64
+                    / 1_000.0,
+            )
+        });
     let invalid = has_invalid || record.status == RunStatus::Invalid;
     let diagnostics = match diagnose_spsa(
         &workflow.bound_tune,
@@ -561,6 +613,258 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
                 println!("{label}: {value}");
             }
         }
+    }
+    ExitCode::SUCCESS
+}
+
+/// The tune a new one was seeded from: where it is, and which result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct SpsaSeedSource {
+    pub(crate) run_directory: PathBuf,
+    pub(crate) result_sha256: String,
+    pub(crate) completed_iterations: u32,
+}
+
+/// A new tune's parameter vector seeded from a completed one.
+#[derive(Debug)]
+pub(crate) struct SpsaSeed {
+    pub(crate) tune: SpsaTune,
+    pub(crate) source: SpsaSeedSource,
+}
+
+/// Seed a tune from a completed tune's run directory: its final values, as
+/// the engine received them, become the new initial values. The surface —
+/// names, bounds and `c_end` — is the source tune's unless `requested` gives
+/// the same parameter names, in the same order, with new ones.
+///
+/// Only a completed tune seeds another: a stopped one has not reached the
+/// values its schedule was planned to reach, and an invalid one has no values
+/// to trust.
+pub(crate) fn seed_spsa_tune(
+    source: &Path,
+    requested: Option<SpsaTune>,
+) -> Result<SpsaSeed, String> {
+    let run_directory = dunce::canonicalize(source)
+        .map_err(|error| format!("cannot resolve --seed-from {}: {error}", source.display()))?;
+    let refuse = |reason: String| format!("cannot seed from {}: {reason}", run_directory.display());
+    let record = RunRecord::read(&run_directory).map_err(|error| refuse(error.to_string()))?;
+    if record.command != "spsa" {
+        return Err(refuse(format!(
+            "it is a {:?} run, not an SPSA tune",
+            record.command
+        )));
+    }
+    if record.status != RunStatus::Completed {
+        return Err(refuse(format!(
+            "the tune is {:?}; only a completed tune seeds a new one",
+            record.status
+        )));
+    }
+    let workflow = serde_json::from_value::<StoredSpsaWorkflow>(record.workflow)
+        .map_err(|error| refuse(format!("invalid stored workflow: {error}")))?;
+    let result_path = run_directory.join("result.json");
+    let result_sha256 = executable_sha256(&result_path).map_err(refuse)?;
+    let document: Value =
+        serde_json::from_slice(&fs::read(&result_path).map_err(|error| refuse(error.to_string()))?)
+            .map_err(|error| refuse(format!("result.json does not parse: {error}")))?;
+    let tuned = document
+        .pointer("/report/tuned_result")
+        .or_else(|| document.get("tuned_result"))
+        .ok_or_else(|| refuse("result.json names no tuned result".into()))?;
+    require_schema_version(tuned, SPSA_TUNE_RESULT_SCHEMA_VERSION).map_err(|version| {
+        refuse(SpsaTuneResultError::UnsupportedResultSchema { version }.to_string())
+    })?;
+    let tuned: SpsaTuneResult = serde_json::from_value(tuned.clone())
+        .map_err(|error| refuse(format!("the tuned result does not parse: {error}")))?;
+    tuned
+        .validate()
+        .map_err(|error| refuse(format!("invalid tuned result: {error}")))?;
+
+    let surface = match requested {
+        None => workflow
+            .bound_tune
+            .parameters
+            .into_iter()
+            .map(|bound| bound.parameter)
+            .collect::<Vec<_>>(),
+        Some(requested) => {
+            let names = |parameters: &mut dyn Iterator<Item = &str>| {
+                parameters.map(str::to_owned).collect::<Vec<_>>()
+            };
+            let wanted = names(&mut requested.parameters.iter().map(|p| p.name.as_str()));
+            let seeded = names(&mut tuned.parameters.iter().map(|p| p.name.as_str()));
+            if wanted != seeded {
+                return Err(refuse(format!(
+                    "--tune names {wanted:?}, but the tune it seeds from has {seeded:?}; the names and their order must match"
+                )));
+            }
+            requested.parameters
+        }
+    };
+    let parameters = surface
+        .into_iter()
+        .zip(&tuned.parameters)
+        .map(|(parameter, result)| SpsaTuneParameter {
+            initial: result.tuned,
+            ..parameter
+        })
+        .collect();
+    Ok(SpsaSeed {
+        tune: SpsaTune { parameters },
+        source: SpsaSeedSource {
+            run_directory,
+            result_sha256,
+            completed_iterations: tuned.completed_iterations,
+        },
+    })
+}
+
+/// A tune's centre vector after each completed iteration.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct SpsaHistoryReport {
+    pub(crate) run_status: RunStatus,
+    pub(crate) completed_iterations: u64,
+    pub(crate) planned_iterations: u32,
+    /// The tune's knob names, in the order of every row's centres.
+    pub(crate) knobs: Vec<String>,
+    pub(crate) rows: Vec<SpsaHistoryRow>,
+}
+
+/// The floating centres after `iteration` completed iterations; iteration 0
+/// is the tune's initial values.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct SpsaHistoryRow {
+    pub(crate) iteration: u64,
+    pub(crate) centers: Vec<f64>,
+}
+
+/// The rows of a tune's history: its initial centres, then the centres after
+/// each completed iteration, thinned to every `every`th iteration while always
+/// keeping the initial centres and the latest iteration.
+pub(crate) fn spsa_history_rows(
+    initial: &[f64],
+    completed: &[spsa_driver::SpsaIterationSummary],
+    every: u64,
+) -> Vec<SpsaHistoryRow> {
+    let every = every.max(1);
+    let last = completed.len() as u64;
+    std::iter::once(SpsaHistoryRow {
+        iteration: 0,
+        centers: initial.to_vec(),
+    })
+    .chain(completed.iter().enumerate().filter_map(|(index, summary)| {
+        let iteration = index as u64 + 1;
+        (iteration.is_multiple_of(every) || iteration == last).then(|| SpsaHistoryRow {
+            iteration,
+            centers: summary.centers_after.clone(),
+        })
+    }))
+    .collect()
+}
+
+/// The history as comma-separated values: `iteration` and the knob names,
+/// then one row per iteration.
+pub(crate) fn spsa_history_csv(report: &SpsaHistoryReport) -> String {
+    let mut text = std::iter::once("iteration".to_owned())
+        .chain(report.knobs.iter().map(|name| csv_field(name)))
+        .collect::<Vec<_>>()
+        .join(",");
+    text.push('\n');
+    for row in &report.rows {
+        text.push_str(&row.iteration.to_string());
+        for center in &row.centers {
+            text.push(',');
+            text.push_str(&center.to_string());
+        }
+        text.push('\n');
+    }
+    text
+}
+
+/// A knob name as one CSV field, quoted when it holds a separator or a quote.
+fn csv_field(name: &str) -> String {
+    if name.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", name.replace('"', "\"\""))
+    } else {
+        name.to_owned()
+    }
+}
+
+/// The history as a table an operator reads, centres to three decimals.
+pub(crate) fn spsa_history_table(report: &SpsaHistoryReport) -> String {
+    let headers = std::iter::once("iteration".to_owned())
+        .chain(report.knobs.iter().cloned())
+        .collect::<Vec<_>>();
+    let rows = report
+        .rows
+        .iter()
+        .map(|row| {
+            std::iter::once(row.iteration.to_string())
+                .chain(row.centers.iter().map(|center| format!("{center:.3}")))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let widths = (0..headers.len())
+        .map(|column| {
+            rows.iter()
+                .map(|row| row[column].chars().count())
+                .chain(std::iter::once(headers[column].chars().count()))
+                .max()
+                .unwrap_or(0)
+        })
+        .collect::<Vec<_>>();
+    let line = |cells: &[String]| {
+        cells
+            .iter()
+            .zip(&widths)
+            .map(|(cell, width)| format!("{cell:>width$}"))
+            .collect::<Vec<_>>()
+            .join("  ")
+            + "\n"
+    };
+    let mut text = line(&headers);
+    for row in &rows {
+        text.push_str(&line(row));
+    }
+    text
+}
+
+pub(crate) fn run_spsa_history(command: &SpsaHistoryCommand, machine: bool) -> ExitCode {
+    if machine && command.csv {
+        eprintln!("SPSA history failed: choose one of --json and --csv");
+        return ExitCode::from(2);
+    }
+    let inspected = match inspect_spsa_run(&command.run_directory, "SPSA history") {
+        Ok(inspected) => inspected,
+        Err(code) => return code,
+    };
+    let completed = &inspected.replay.completed_iterations;
+    let report = SpsaHistoryReport {
+        run_status: inspected.record.status,
+        completed_iterations: completed.len() as u64,
+        planned_iterations: inspected.workflow.settings.iterations,
+        knobs: inspected
+            .workflow
+            .schedule
+            .knobs
+            .iter()
+            .map(|knob| knob.name.clone())
+            .collect(),
+        rows: spsa_history_rows(
+            &inspected.workflow.bound_tune.initial_centers(),
+            completed,
+            command.every.unwrap_or(1),
+        ),
+    };
+    if machine {
+        print_json(&MachineOutput::SpsaHistory {
+            run_directory: &command.run_directory,
+            report,
+        });
+    } else if command.csv {
+        print!("{}", spsa_history_csv(&report));
+    } else {
+        print!("{}", spsa_history_table(&report));
     }
     ExitCode::SUCCESS
 }
@@ -687,14 +991,24 @@ pub(crate) async fn run_spsa_command(
         eprintln!("configuration error: book order/start/plies require --book");
         return ExitCode::from(2);
     }
-    let Some(tune_path) = command.tune.as_ref() else {
-        eprintln!("configuration error: --tune is required for a live SPSA run");
-        return ExitCode::from(2);
-    };
-    let tune = match load_spsa_tune(tune_path) {
+    let requested_tune = match command.tune.as_deref().map(load_spsa_tune).transpose() {
         Ok(tune) => tune,
         Err(error) => {
             eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let (tune, seeded_from) = match (&command.seed_from, requested_tune) {
+        (Some(source), requested) => match seed_spsa_tune(source, requested) {
+            Ok(seed) => (seed.tune, Some(seed.source)),
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        },
+        (None, Some(tune)) => (tune, None),
+        (None, None) => {
+            eprintln!("configuration error: --tune or --seed-from is required for a live SPSA run");
             return ExitCode::from(2);
         }
     };
@@ -861,7 +1175,10 @@ pub(crate) async fn run_spsa_command(
             return ExitCode::from(2);
         }
     };
-    let mut path_pointers = vec!["/engine/executable".into(), "/tune/path".into()];
+    let mut path_pointers = vec!["/engine/executable".into()];
+    if command.tune.is_some() {
+        path_pointers.push("/tune/path".into());
+    }
     if engine.working_directory.is_some() {
         path_pointers.push("/engine/working_directory".into());
     }
@@ -880,7 +1197,6 @@ pub(crate) async fn run_spsa_command(
         "engine": &engine,
         "engine_sha256": "computed-and-checked-before-live-launch",
         "tune": {
-            "path": tune_path,
             "parameters": &tune.parameters,
             "live_schema": "verified-before-game-launch"
         },
@@ -902,6 +1218,13 @@ pub(crate) async fn run_spsa_command(
     // iteration count directly keeps the configuration it always had.
     if let Some(total_games) = command.total_games {
         requested["total_games"] = json!(total_games);
+    }
+    // Where the vector came from: a tune file, a completed tune, or both.
+    if let Some(path) = &command.tune {
+        requested["tune"]["path"] = json!(path);
+    }
+    if let Some(source) = &seeded_from {
+        requested["tune"]["seeded_from"] = json!(source);
     }
     let resolved = match resolve_config(
         built_in_defaults(),
@@ -1047,6 +1370,7 @@ pub(crate) async fn run_spsa_command(
     let OpenedJournal {
         records: journal_records,
         resume: journal_resume,
+        prior_elapsed,
     } = match open_journal(&directory, resumed).await {
         Ok(journal) => journal,
         Err(error) => {
@@ -1078,8 +1402,9 @@ pub(crate) async fn run_spsa_command(
             return ExitCode::from(3);
         }
     };
+    let clock = progress::RunClock::resumed_after(prior_elapsed);
     let writer = match RunWriter::start(Arc::clone(&directory), journal_resume).await {
-        Ok(writer) => writer,
+        Ok(writer) => writer.on_clock(clock),
         Err(error) => {
             eprintln!("SPSA output failed: {error}");
             return ExitCode::from(3);
@@ -1098,6 +1423,7 @@ pub(crate) async fn run_spsa_command(
         "tune_audit": &tune_audit,
         "engine_sha256": &engine_sha256,
         "schedule": verified_schedule.artifact(),
+        "seeded_from": &seeded_from,
         "engine_time_control": engine_time_control,
         "adjudication": adjudication,
         "ponder": conditions.ponder,
@@ -1127,13 +1453,14 @@ pub(crate) async fn run_spsa_command(
     colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
     if !machine {
         eprintln!("SPSA run directory: {}", directory.paths().root.display());
-        if resumed {
-            eprintln!(
-                "resuming {} complete durable iteration(s); the stored schedule remains authoritative",
-                replay.completed_iterations.len()
-            );
-        }
     }
+    let resume = ResumeFacts::of(
+        resumed,
+        ProgressUnit::Iterations,
+        replay.completed_iterations.len() as u64,
+        Some(u64::from(settings.iterations)),
+    );
+    announce_resume(&writer, resume);
     let progress = spsa_driver::SpsaProgress::default();
     let knobs = verified_schedule.artifact().knobs.clone();
     let initial_centers = bound_tune.initial_centers();
@@ -1173,7 +1500,8 @@ pub(crate) async fn run_spsa_command(
         conditions.progress_every,
         conditions.progress_min_secs,
         resumed_iterations,
-    );
+    )
+    .on_clock(clock);
     let mut centres = SpsaCentreTracker::new(&knobs, &initial_centers);
     let mut poll =
         tokio::time::interval_at(tokio::time::Instant::now() + PROGRESS_POLL, PROGRESS_POLL);
@@ -1272,6 +1600,7 @@ pub(crate) async fn run_spsa_command(
         print_json(&MachineOutput::Spsa {
             run_directory: directory.paths().root.clone(),
             report: Box::new(report),
+            resume,
         });
     } else {
         print_spsa(&report, &directory.paths().root);
@@ -1538,11 +1867,11 @@ pub(crate) fn spsa_progress_block(
         ProgressUnit::Iterations,
         done,
         Some(total),
-        schedule.elapsed(),
+        schedule.run_elapsed(),
     );
     let games_per_iteration = u64::from(settings.games_per_iteration);
     let since_start = schedule.units_since_start(done);
-    let elapsed = schedule.elapsed().as_secs_f64();
+    let elapsed = schedule.session_elapsed().as_secs_f64();
     block.field(
         "games",
         (observer.iterations_played() * games_per_iteration).to_string(),
@@ -1593,8 +1922,11 @@ pub(crate) fn spsa_progress_block(
     // Last, so the eye finds it in the same place on every block.
     block.field(
         "time remaining",
-        match progress::time_for_units(since_start, schedule.elapsed(), total.saturating_sub(done))
-        {
+        match progress::time_for_units(
+            since_start,
+            schedule.session_elapsed(),
+            total.saturating_sub(done),
+        ) {
             Some(left) => progress::format_duration(left.as_secs_f64()),
             None => "unknown".to_owned(),
         },
@@ -1827,6 +2159,14 @@ impl DurableSpsaOutput {
             spsa_driver::SpsaStatus::Cancelled => RunStatus::Cancelled,
             spsa_driver::SpsaStatus::Invalid => RunStatus::Invalid,
         };
+        if status == RunStatus::Cancelled {
+            log_stop(
+                &self.writer,
+                ProgressUnit::Iterations,
+                report.driver.completed_iterations.len() as u64,
+                CANCELLED_EXIT_CODE,
+            );
+        }
         let recorder = self
             .recorder
             .lock()
@@ -2207,6 +2547,70 @@ pub(crate) fn print_spsa_tune_warning(warning: &SpsaTuneWarning) {
 mod tests {
     use super::*;
     use colosseum_application::{SpsaIterationTransition, SpsaTuningState, VerifiedSpsaSchedule};
+
+    fn summary(iteration: u32, centers: &[f64]) -> spsa_driver::SpsaIterationSummary {
+        spsa_driver::SpsaIterationSummary {
+            iteration,
+            centers_after: centers.to_vec(),
+            score: colosseum_application::SpsaMiniMatchScore {
+                plus_wins: 1,
+                plus_losses: 1,
+                draws: 0,
+                difference: 0,
+            },
+            faults: MatchFaultCounts::default(),
+            games: spsa_driver::SpsaJournalGames {
+                first: iteration * 2 + 1,
+                last: iteration * 2 + 2,
+            },
+        }
+    }
+
+    #[test]
+    fn history_rows_start_at_the_initial_centres_and_always_keep_the_latest_iteration() {
+        let completed = (0..5)
+            .map(|index| summary(index, &[16.0 + f64::from(index), 1.5]))
+            .collect::<Vec<_>>();
+        let every = |n| {
+            spsa_history_rows(&[16.0, 1.0], &completed, n)
+                .iter()
+                .map(|row| row.iteration)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(every(1), [0, 1, 2, 3, 4, 5]);
+        assert_eq!(every(2), [0, 2, 4, 5]);
+        assert_eq!(every(10), [0, 5]);
+        let rows = spsa_history_rows(&[16.0, 1.0], &completed, 2);
+        assert_eq!(rows[0].centers, [16.0, 1.0]);
+        // Row N is the centres after N iterations: the summary of iteration N-1.
+        assert_eq!(rows[1].centers, completed[1].centers_after);
+        assert_eq!(rows[3].centers, completed[4].centers_after);
+        assert_eq!(spsa_history_rows(&[16.0], &[], 3).len(), 1);
+    }
+
+    #[test]
+    fn history_csv_names_the_knobs_and_quotes_only_what_needs_it() {
+        let report = SpsaHistoryReport {
+            run_status: RunStatus::Running,
+            completed_iterations: 1,
+            planned_iterations: 10,
+            knobs: vec!["Hash".into(), "Eval, king".into()],
+            rows: spsa_history_rows(&[16.0, -3.0], &[summary(0, &[17.25, -2.5])], 1),
+        };
+        assert_eq!(
+            spsa_history_csv(&report),
+            "iteration,Hash,\"Eval, king\"\n0,16,-3\n1,17.25,-2.5\n"
+        );
+        let table = spsa_history_table(&report);
+        assert_eq!(
+            table.lines().collect::<Vec<_>>(),
+            [
+                "iteration    Hash  Eval, king",
+                "        0  16.000      -3.000",
+                "        1  17.250      -2.500",
+            ]
+        );
+    }
 
     /// The aggregate of a one-knob tune after `completed` iterations, standing
     /// on the centres of its first.

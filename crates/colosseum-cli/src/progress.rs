@@ -167,6 +167,51 @@ pub fn format_duration(seconds: f64) -> String {
     }
 }
 
+/// How long a run has been running, across every invocation that worked on it.
+///
+/// A resumed run carries the time its earlier invocations spent, recorded in
+/// its checkpoint, and adds this invocation's. The total is what the operator
+/// reads as the run's elapsed time; only this invocation's share may be used
+/// for a rate, because only its units were played in it.
+#[derive(Debug, Clone, Copy)]
+pub struct RunClock {
+    prior: Duration,
+    started: Instant,
+}
+
+impl RunClock {
+    /// A clock for an invocation starting now, after `prior` spent by earlier
+    /// ones; zero for a fresh run.
+    #[must_use]
+    pub fn resumed_after(prior: Duration) -> Self {
+        Self::resumed_at(prior, Instant::now())
+    }
+
+    /// The same clock, started at `started` rather than now.
+    #[must_use]
+    pub fn resumed_at(prior: Duration, started: Instant) -> Self {
+        Self { prior, started }
+    }
+
+    /// The run's time so far: earlier invocations plus this one.
+    #[must_use]
+    pub fn total(&self) -> Duration {
+        self.total_at(Instant::now())
+    }
+
+    /// [`Self::total`], asked at `now`.
+    #[must_use]
+    pub fn total_at(&self, now: Instant) -> Duration {
+        self.prior + now.saturating_duration_since(self.started)
+    }
+
+    /// This invocation's time so far.
+    #[must_use]
+    pub fn session(&self) -> Duration {
+        self.started.elapsed()
+    }
+}
+
 /// Decides when the next block is due.
 ///
 /// Due means "at least `every` units since the last block, and at least
@@ -177,7 +222,7 @@ pub fn format_duration(seconds: f64) -> String {
 pub struct ProgressSchedule {
     every: u64,
     floor: Duration,
-    started: Instant,
+    clock: RunClock,
     last_at: Instant,
     last_units: u64,
     /// Units of the last block actually published, so a final block that would
@@ -207,12 +252,21 @@ impl ProgressSchedule {
         Self {
             every: every.max(1),
             floor: Duration::from_secs(min_secs),
-            started,
+            clock: RunClock::resumed_at(Duration::ZERO, started),
             last_at: started,
             last_units: resumed_units,
             published: None,
             resumed: resumed_units,
         }
+    }
+
+    /// The same schedule on the run's own clock, so its blocks report the
+    /// time every invocation of the run spent, not only this one's.
+    #[must_use]
+    pub fn on_clock(mut self, clock: RunClock) -> Self {
+        self.clock = clock;
+        self.last_at = clock.started;
+        self
     }
 
     /// Units completed since this invocation started.
@@ -255,15 +309,23 @@ impl ProgressSchedule {
         self.published = Some(done);
     }
 
+    /// The run's elapsed time across every invocation: what a block shows.
     #[must_use]
-    pub fn elapsed(&self) -> Duration {
-        self.started.elapsed()
+    pub fn run_elapsed(&self) -> Duration {
+        self.clock.total()
     }
 
-    /// How long this invocation has been running, in hours, for a rate.
+    /// How long this invocation has been running: the time its own units took,
+    /// and so the only time a rate or an estimate may divide by.
     #[must_use]
-    pub fn elapsed_hours(&self) -> f64 {
-        self.started.elapsed().as_secs_f64() / 3600.0
+    pub fn session_elapsed(&self) -> Duration {
+        self.clock.session()
+    }
+
+    /// [`Self::session_elapsed`] in hours, for a rate.
+    #[must_use]
+    pub fn session_hours(&self) -> f64 {
+        self.session_elapsed().as_secs_f64() / 3600.0
     }
 }
 
@@ -327,6 +389,23 @@ pub fn time_for_units(done: u64, elapsed: Duration, remaining: u64) -> Option<Du
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_resumed_run_reports_its_whole_time_but_rates_only_this_invocation() {
+        let started = Instant::now()
+            .checked_sub(Duration::from_secs(60))
+            .expect("a host that has been up for a minute");
+        let clock = RunClock::resumed_at(Duration::from_secs(3_600), started);
+        let now = started + Duration::from_secs(60);
+        assert_eq!(clock.total_at(now), Duration::from_secs(3_660));
+
+        let schedule = ProgressSchedule::new(10, 1, 40).on_clock(clock);
+        // The block shows the run's time; a rate divides by this invocation's.
+        assert!(schedule.run_elapsed() >= Duration::from_secs(3_660));
+        assert!(schedule.session_elapsed() >= Duration::from_secs(60));
+        assert!(schedule.session_elapsed() < Duration::from_secs(3_600));
+        assert_eq!(schedule.units_since_start(52), 12);
+    }
 
     #[test]
     fn a_block_is_due_on_the_unit_boundary_and_not_before() {

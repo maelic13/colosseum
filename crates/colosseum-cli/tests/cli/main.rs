@@ -20,6 +20,7 @@ mod nps;
 mod pgn_annotations;
 mod pgn_replay;
 mod progress;
+mod run_files;
 mod search_timing;
 mod slot_pool;
 mod spsa;

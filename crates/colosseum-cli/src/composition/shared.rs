@@ -344,14 +344,26 @@ pub(crate) enum MachineOutput<'a> {
     FixedMatch {
         run_directory: PathBuf,
         report: match_runner::FixedMatchReport,
+        /// Where the run stood when this invocation resumed it; absent for a
+        /// fresh run.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resume: Option<ResumeFacts>,
     },
     Sprt {
         run_directory: PathBuf,
         report: sprt_runner::SprtReport,
+        /// Where the run stood when this invocation resumed it; absent for a
+        /// fresh run.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resume: Option<ResumeFacts>,
     },
     Spsa {
         run_directory: PathBuf,
         report: Box<SpsaReport>,
+        /// Where the run stood when this invocation resumed it; absent for a
+        /// fresh run.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resume: Option<ResumeFacts>,
     },
     SpsaPlan {
         report: SpsaPlanReport,
@@ -360,9 +372,17 @@ pub(crate) enum MachineOutput<'a> {
         run_directory: &'a Path,
         report: SpsaStatusOutput,
     },
+    SpsaHistory {
+        run_directory: &'a Path,
+        report: SpsaHistoryReport,
+    },
     Calibration {
         run_directory: PathBuf,
         report: CalibrationReport,
+        /// Where the run stood when this invocation resumed it; absent for a
+        /// fresh run.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resume: Option<ResumeFacts>,
     },
     DryRun {
         command: &'a str,
@@ -415,6 +435,10 @@ pub(crate) enum MachineOutput<'a> {
     Tournament {
         run_directory: PathBuf,
         report: tournament_driver::TournamentReport,
+        /// Where the run stood when this invocation resumed it; absent for a
+        /// fresh run.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resume: Option<ResumeFacts>,
     },
     SelfTest {
         report: self_test::SelfTestReport,

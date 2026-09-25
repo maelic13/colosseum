@@ -7,6 +7,12 @@ report leaves standard output empty. A statistically invalid completed run is
 still a report and therefore emits JSON with a nonzero exit status. The
 top-level `type` field identifies the document schema.
 
+A run that resumed a run directory says so on standard error, in every output
+mode — for example `resuming: 1240 of 2000 games complete, 760 to play` — and
+the JSON value of `match`, `sprt`, `calibrate`, `tournament run` and `spsa`
+carries the same facts as `resume`: the `unit`, `completed_units` and
+`remaining_units`. A fresh run has no `resume` field.
+
 `--dry-run` is a global option. It resolves configuration paths and prints the
 configuration hash, the complete resolved configuration and every exact process
 invocation without starting an engine or playing a game. An invocation is
@@ -64,11 +70,14 @@ unit, and neither flag is part of the hashed configuration, so changing either
 one does not stop a run directory resuming.
 
 Each block names the command, the units done against the cap and the elapsed
-time, then the figures a decision needs, and a rule closes it:
+time, then the figures a decision needs, and a rule closes it. The elapsed
+time is the run's own: a stopped and resumed run carries on from the time its
+earlier invocations spent, and the pause between them is not counted.
 
 ```text
 progress [sprt]: 105/200 pairs (52%), 8m41s elapsed
   players         candidate vs. baseline
+  test            nElo [0.00, 5.00], alpha 0.05, beta 0.05 (preset gainer)
   games           210
   Elo             +193.1 +/- 45.0
   nElo            +248.0 +/- 47.0
@@ -82,8 +91,9 @@ progress [sprt]: 105/200 pairs (52%), 8m41s elapsed
 ```
 
 An Elo estimate is a value and the half-width of its 95% interval; `Ptnml` is
-the pentanomial vector; `time remaining` extrapolates the rate observed so far
-and is `0s` once the run has stopped. A sequential test caps that estimate at
+the pentanomial vector; `time remaining` extrapolates the rate this invocation
+has observed — a resumed run's rate is its own, not one diluted by the
+earlier invocations' conditions — and is `0s` once the run has stopped. A sequential test caps that estimate at
 the pairs its `--max-pairs` still allows, and takes the nearer of that and the
 pairs its LLR would need at the drift it has. The `faults` line counts
 engine faults with losses on time among them, each as engine A's count and

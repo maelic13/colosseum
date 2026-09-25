@@ -495,8 +495,9 @@ pub(crate) async fn run_sprt(
     // schedule admits them in pair order and refuses a prefix that crossed a
     // boundary it did not record, so nothing about it is taken on trust.
     let official_pairs = pairs_from_journal(&journal.records, OFFICIAL_SAMPLE);
+    let clock = journal.clock();
     let writer = match RunWriter::start(Arc::clone(&directory), journal.resume).await {
-        Ok(writer) => writer,
+        Ok(writer) => writer.on_clock(clock),
         Err(error) => {
             eprintln!("SPRT output failed: {error}");
             return ExitCode::from(3);
@@ -538,9 +539,17 @@ pub(crate) async fn run_sprt(
     }
     if !machine {
         eprintln!("SPRT run directory: {}", directory.paths().root.display());
+        eprintln!("SPRT test: {}", sprt_test_line(design));
     }
     let openings_report = openings.report().clone();
     let resumed_pairs = official_pairs.len() as u64;
+    let resume = ResumeFacts::of(
+        opened.resumed,
+        ProgressUnit::Pairs,
+        resumed_pairs,
+        Some(u64::from(design.max_pairs)),
+    );
+    announce_resume(&writer, resume);
     let players = Players::new(&engine_a, &engine_b);
     let kept_engines =
         match_runner::SlotEngines::for_mode(command.engine_processes, execution.slots.len());
@@ -565,7 +574,8 @@ pub(crate) async fn run_sprt(
     };
     let schedule_future = sprt_runner::run_pair_schedule(request);
     tokio::pin!(schedule_future);
-    let mut progress = ProgressSchedule::new(progress_every, progress_min_secs, resumed_pairs);
+    let mut progress =
+        ProgressSchedule::new(progress_every, progress_min_secs, resumed_pairs).on_clock(clock);
     let mut poll =
         tokio::time::interval_at(tokio::time::Instant::now() + PROGRESS_POLL, PROGRESS_POLL);
     let outcome = loop {
@@ -644,6 +654,14 @@ pub(crate) async fn run_sprt(
                 sprt_runner::SprtStatus::Cancelled => RunStatus::Cancelled,
                 sprt_runner::SprtStatus::Invalid => RunStatus::Invalid,
             };
+            if run_status == RunStatus::Cancelled {
+                log_stop(
+                    &writer,
+                    ProgressUnit::Pairs,
+                    report.schedule.official_pairs.len() as u64,
+                    sprt_exit_code(status),
+                );
+            }
             if let Err(error) = recorder.finish(run_status) {
                 eprintln!("run record failed: {error}");
                 return ExitCode::from(3);
@@ -656,9 +674,10 @@ pub(crate) async fn run_sprt(
                 print_json(&MachineOutput::Sprt {
                     run_directory: directory.paths().root.clone(),
                     report,
+                    resume,
                 });
             } else {
-                print_sprt(&report, &directory.paths().root, progress.elapsed());
+                print_sprt(&report, &directory.paths().root, progress.run_elapsed());
             }
             ExitCode::from(sprt_exit_code(status))
         }
@@ -733,9 +752,10 @@ pub(crate) fn sprt_progress_block(
         ProgressUnit::Pairs,
         done,
         Some(u64::from(design.max_pairs)),
-        progress.elapsed(),
+        progress.run_elapsed(),
     );
     block.field("players", players.to_string());
+    block.field("test", sprt_test_line(design));
     sample.add_fields(&mut block, policy);
     if post_terminal > 0 {
         block.field(
@@ -781,7 +801,7 @@ pub(crate) fn sprt_progress_block(
     // directly. A committed pair is exactly two games.
     if let Some(rate) = progress::rate_per_hour(
         progress.units_since_start(done).saturating_mul(2),
-        progress.elapsed_hours(),
+        progress.session_hours(),
     ) {
         block.field("rate", format!("{rate:.0} games/hour"));
     }
@@ -800,7 +820,7 @@ pub(crate) fn sprt_progress_block(
         "time remaining",
         match progress::time_for_units(
             progress.units_since_start(done),
-            progress.elapsed(),
+            progress.session_elapsed(),
             remaining,
         ) {
             // The estimate assumes the LLR keeps moving as it has so far.
@@ -964,6 +984,34 @@ impl sprt_runner::PairObserver for DurableSprtOutput {
 }
 
 /// The Elo model as a reader names it rather than as the enum spells it.
+/// What an SPRT tests, in one line: the Elo bounds of its two hypotheses in
+/// the model they are measured in, and the error rates. A named preset is
+/// named, and said to be overridden when any value differs from it, so the
+/// line never passes off an edited design as the preset.
+pub(crate) fn sprt_test_line(design: SprtDesign) -> String {
+    let parameters = design.parameters;
+    let scale = match parameters.model {
+        EloModel::Normalized => "nElo",
+        EloModel::Logistic => "Elo",
+    };
+    let mut line = format!(
+        "{scale} [{:.2}, {:.2}], alpha {}, beta {}",
+        parameters.elo0, parameters.elo1, parameters.alpha, parameters.beta
+    );
+    if let Some(bundle) = design.bundle {
+        let name = match bundle {
+            SprtBundle::Gainer => "gainer",
+            SprtBundle::Simplify => "simplify",
+        };
+        if parameters == bundle.defaults() {
+            line.push_str(&format!(" (preset {name})"));
+        } else {
+            line.push_str(&format!(" (preset {name}, overridden)"));
+        }
+    }
+    line
+}
+
 fn elo_model_name(model: EloModel) -> &'static str {
     match model {
         EloModel::Normalized => "normalized",
@@ -1141,6 +1189,39 @@ mod progress_block_tests {
         ProgressSchedule::started_at(10, 1, 0, started)
     }
 
+    #[test]
+    fn the_test_line_names_the_bounds_in_their_model_and_an_edited_preset_as_such() {
+        let gainer = SprtBundle::Gainer.defaults();
+        let preset = SprtDesign::new(gainer, 100, Some(SprtBundle::Gainer)).unwrap();
+        assert_eq!(
+            sprt_test_line(preset),
+            "nElo [0.00, 5.00], alpha 0.05, beta 0.05 (preset gainer)"
+        );
+
+        let narrowed = SprtParameters {
+            elo1: 3.0,
+            ..gainer
+        };
+        let edited = SprtDesign::new(narrowed, 100, Some(SprtBundle::Gainer)).unwrap();
+        assert_eq!(
+            sprt_test_line(edited),
+            "nElo [0.00, 3.00], alpha 0.05, beta 0.05 (preset gainer, overridden)"
+        );
+
+        let logistic = SprtParameters {
+            model: EloModel::Logistic,
+            elo0: -3.0,
+            elo1: 1.0,
+            alpha: 0.1,
+            beta: 0.05,
+        };
+        let custom = SprtDesign::new(logistic, 100, None).unwrap();
+        assert_eq!(
+            sprt_test_line(custom),
+            "Elo [-3.00, 1.00], alpha 0.1, beta 0.05"
+        );
+    }
+
     fn field(block: &ProgressBlock, label: &str) -> String {
         block
             .fields
@@ -1176,6 +1257,7 @@ mod progress_block_tests {
             labels,
             [
                 "players",
+                "test",
                 "games",
                 "Elo",
                 "nElo",
@@ -1189,6 +1271,10 @@ mod progress_block_tests {
             "{text}"
         );
         assert_eq!(field(&block, "players"), "Challenger 2 vs. Baseline 1");
+        assert_eq!(
+            field(&block, "test"),
+            "nElo [0.00, 10.00], alpha 0.05, beta 0.05"
+        );
         assert_eq!(field(&block, "games"), "40");
         assert_eq!(field(&block, "W/D/L"), "20/20/0");
         // The pentanomial is the committed vector, and the LLR is stated

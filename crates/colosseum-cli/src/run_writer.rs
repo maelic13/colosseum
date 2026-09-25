@@ -33,11 +33,14 @@ use crate::RunDirectory;
 use crate::journal::{
     GameRecord, JOURNAL_FILE, JournalAnchor, JournalResume, PGN_FILE, PgnSpan, encode_line, hex,
 };
+use crate::progress::RunClock;
 
 /// Games appended between two syncs at most.
 pub const SYNC_EVERY_GAMES: u32 = 50;
 /// Time between two syncs at most, while anything is unsynced.
 pub const SYNC_INTERVAL: Duration = Duration::from_secs(1);
+/// The checkpoint field holding the run's elapsed seconds across invocations.
+pub const RUN_ELAPSED_FIELD: &str = "run_elapsed_seconds";
 /// Commands the writer may be behind by before a committing task waits.
 pub const WRITER_QUEUE_CAPACITY: usize = 256;
 
@@ -71,6 +74,9 @@ pub struct RunWriter {
     sender: mpsc::SyncSender<Command>,
     failure: Arc<Mutex<Option<String>>>,
     root: PathBuf,
+    /// The run's clock, whose total every checkpoint records, so a resumed
+    /// run continues its elapsed time rather than starting it again.
+    clock: RunClock,
 }
 
 impl RunWriter {
@@ -121,7 +127,22 @@ impl RunWriter {
             sender,
             failure,
             root: run_root,
+            clock: RunClock::resumed_after(Duration::ZERO),
         })
+    }
+
+    /// The same writer on the run's own clock, which a resumed run starts
+    /// from the time its checkpoint recorded.
+    #[must_use]
+    pub fn on_clock(mut self, clock: RunClock) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// The run's clock.
+    #[must_use]
+    pub fn clock(&self) -> RunClock {
+        self.clock
     }
 
     /// The run directory this writer writes.
@@ -178,7 +199,16 @@ impl RunWriter {
 
     /// Sync, then write a checkpoint holding `aggregates` and the journal
     /// position they cover.
-    pub fn checkpoint(&self, aggregates: Value) -> Result<(), String> {
+    ///
+    /// The checkpoint also records the run's elapsed time across every
+    /// invocation, as [`RUN_ELAPSED_FIELD`], for the next one to continue.
+    pub fn checkpoint(&self, mut aggregates: Value) -> Result<(), String> {
+        if let Some(object) = aggregates.as_object_mut() {
+            object.insert(
+                RUN_ELAPSED_FIELD.into(),
+                Value::from(self.clock.total().as_secs_f64()),
+            );
+        }
         self.send(Command::Checkpoint(aggregates))
     }
 
@@ -384,7 +414,7 @@ fn off_the_runtime<T>(wait: impl FnOnce() -> T) -> T {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::journal::{LoadMode, load_journal};
     use crate::{built_in_defaults, resolve_config};
@@ -392,7 +422,7 @@ mod tests {
     use colosseum_engine::ClockAccountingReport;
     use serde_json::json;
 
-    fn directory(root: &std::path::Path) -> Arc<RunDirectory> {
+    pub(crate) fn directory(root: &std::path::Path) -> Arc<RunDirectory> {
         let config = resolve_config(
             built_in_defaults(),
             None,
@@ -409,7 +439,7 @@ mod tests {
         )
     }
 
-    fn record(number: u32) -> GameRecord {
+    pub(crate) fn record(number: u32) -> GameRecord {
         GameRecord {
             number,
             pair_number: number.div_ceil(2),

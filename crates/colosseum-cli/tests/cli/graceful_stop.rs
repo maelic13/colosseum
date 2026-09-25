@@ -482,3 +482,118 @@ fn an_spsa_tune_stops_cleanly_between_iterations_and_resumes_the_schedule() {
         expected["report"]["tuned_result"]["parameters"]
     );
 }
+
+fn log_events(run: &Path, event: &str) -> Vec<Value> {
+    std::fs::read_to_string(run.join("run.log"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|line| line["event"] == event)
+        .collect()
+}
+
+/// A resumed run says where it stood — on stderr, in `--json` mode too, and in
+/// the JSON value — and `run.log` records where one invocation stopped and the
+/// next resumed.
+#[test]
+fn a_resumed_match_names_its_completed_and_remaining_games_and_logs_the_stop_and_the_resume() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("run");
+    let invoke = |stop: Option<&str>| {
+        let mut command = cli();
+        if let Some(units) = stop {
+            command.args(["--__stop-after-units", units]);
+        }
+        command.arg("match").arg(engine()).arg(engine());
+        stub_pair(&mut command);
+        command
+            .args(["--games", "4", "--dir"])
+            .arg(&run)
+            .output()
+            .unwrap()
+    };
+
+    let stopped = invoke(Some("2"));
+    assert_eq!(stopped.status.code(), Some(CANCELLED));
+    let stopped = json(stopped);
+    // A fresh run carries no resume facts at all.
+    assert!(stopped.get("resume").is_none(), "{stopped}");
+    let played = stopped["report"]["games"].as_array().unwrap().len() as u64;
+    let stops = log_events(&run, "stopped");
+    assert_eq!(stops.len(), 1, "{stops:?}");
+    assert_eq!(stops[0]["unit"], "games");
+    assert_eq!(stops[0]["completed_units"], played);
+    assert_eq!(stops[0]["exit_code"], CANCELLED);
+    assert!(log_events(&run, "resumed").is_empty());
+
+    let resumed = invoke(None);
+    assert!(resumed.status.success());
+    let note = String::from_utf8_lossy(&resumed.stderr).into_owned();
+    let expected = format!(
+        "resuming: {played} of 4 games complete, {} to play",
+        4 - played
+    );
+    assert!(note.contains(&expected), "{note}");
+    let value = json(resumed);
+    assert_eq!(value["resume"]["unit"], "games");
+    assert_eq!(value["resume"]["completed_units"], played);
+    assert_eq!(value["resume"]["remaining_units"], 4 - played);
+    let resumes = log_events(&run, "resumed");
+    assert_eq!(resumes.len(), 1, "{resumes:?}");
+    assert_eq!(resumes[0]["completed_units"], played);
+    assert_eq!(resumes[0]["remaining_units"], 4 - played);
+}
+
+/// Once a tune has been stopped and resumed, `spsa status` still has the
+/// tune's whole elapsed time to estimate from.
+#[test]
+fn a_resumed_tune_keeps_a_finite_eta_in_spsa_status() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = root.path().join("tune.toml");
+    std::fs::write(
+        &tune,
+        "[[parameters]]\nname = \"Hash\"\ninitial = 16\nmin = 1\nmax = 1024\nc_end = 1.0\n",
+    )
+    .unwrap();
+    let run = root.path().join("run");
+    let stopped_after = |units: &str| {
+        cli()
+            .args(["--__stop-after-units", units])
+            .arg("spsa")
+            .arg(probed_engine())
+            .arg("--tune")
+            .arg(&tune)
+            .args([
+                "--r-end",
+                "0.002",
+                "--iterations",
+                "4",
+                "--games-per-iteration",
+                "2",
+                "--depth",
+                "1",
+                "--max-moves",
+                "2",
+                "--seed",
+                "7",
+                "--__synthetic-games",
+                "--dir",
+            ])
+            .arg(&run)
+            .output()
+            .unwrap()
+    };
+    assert_eq!(stopped_after("1").status.code(), Some(CANCELLED));
+    assert_eq!(stopped_after("1").status.code(), Some(CANCELLED));
+    assert_eq!(log_events(&run, "resumed").len(), 1);
+
+    let status = cli().args(["spsa", "status"]).arg(&run).output().unwrap();
+    let status = json(status);
+    let eta = &status["report"]["diagnostics"]["eta"];
+    assert!(
+        eta["remaining_seconds"]
+            .as_f64()
+            .is_some_and(f64::is_finite),
+        "{eta}"
+    );
+}

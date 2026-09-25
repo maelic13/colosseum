@@ -121,8 +121,9 @@ pub(crate) async fn run_calibration(
         .iter()
         .filter_map(match_runner::MatchGame::from_journal)
         .collect::<Vec<_>>();
+    let clock = journal.clock();
     let writer = match RunWriter::start(Arc::clone(&directory), journal.resume).await {
-        Ok(writer) => writer,
+        Ok(writer) => writer.on_clock(clock),
         Err(error) => {
             eprintln!("calibration output failed: {error}");
             return ExitCode::from(3);
@@ -168,7 +169,13 @@ pub(crate) async fn run_calibration(
         return ExitCode::from(3);
     }
     let progress = match_runner::MatchProgress::default();
-    let resumed_pairs = PairedProgress::from_games(&completed_games).pairs.into();
+    let resumed_pairs: u64 = PairedProgress::from_games(&completed_games).pairs.into();
+    let resume = ResumeFacts::of(
+        opened.resumed,
+        ProgressUnit::Pairs,
+        resumed_pairs,
+        Some(u64::from(prepared.design.games / 2)),
+    );
     let players = Players::new(&prepared.engine_a, &prepared.engine_b);
     let request = match_runner::FixedMatchRequest {
         engine_a: prepared.engine_a,
@@ -196,6 +203,7 @@ pub(crate) async fn run_calibration(
             directory.paths().root.display()
         );
     }
+    announce_resume(&writer, resume);
     let calibration_future = match_runner::run_fixed_match(request);
     tokio::pin!(calibration_future);
     let pairs_planned = u64::from(prepared.design.games / 2);
@@ -203,7 +211,8 @@ pub(crate) async fn run_calibration(
         command.progress_every,
         command.progress_min_secs,
         resumed_pairs,
-    );
+    )
+    .on_clock(clock);
     let mut poll =
         tokio::time::interval_at(tokio::time::Instant::now() + PROGRESS_POLL, PROGRESS_POLL);
     let outcome = loop {
@@ -309,6 +318,14 @@ pub(crate) async fn run_calibration(
     } else {
         RunStatus::Completed
     };
+    if run_status == RunStatus::Cancelled {
+        log_stop(
+            &writer,
+            ProgressUnit::Pairs,
+            u64::from(report.fixed_match.games_completed / 2),
+            exit_code,
+        );
+    }
     if let Err(error) = recorder.finish(run_status) {
         eprintln!("run record failed: {error}");
         return ExitCode::from(3);
@@ -321,6 +338,7 @@ pub(crate) async fn run_calibration(
         print_json(&MachineOutput::Calibration {
             run_directory: directory.paths().root.clone(),
             report,
+            resume,
         });
     } else {
         print_calibration(&report, &directory.paths().root);
@@ -504,7 +522,7 @@ pub(crate) fn calibration_progress_block(
         ProgressUnit::Pairs,
         done,
         Some(pairs_planned),
-        schedule.elapsed(),
+        schedule.run_elapsed(),
     );
     block.field("players", players.to_string());
     sample.add_fields(&mut block, policy);
@@ -513,7 +531,7 @@ pub(crate) fn calibration_progress_block(
     // directly. A committed pair is exactly two games.
     if let Some(rate) = progress::rate_per_hour(
         schedule.units_since_start(done).saturating_mul(2),
-        schedule.elapsed_hours(),
+        schedule.session_hours(),
     ) {
         block.field("rate", format!("{rate:.0} games/hour"));
     }
@@ -521,7 +539,7 @@ pub(crate) fn calibration_progress_block(
         "time remaining",
         match progress::time_for_units(
             schedule.units_since_start(done),
-            schedule.elapsed(),
+            schedule.session_elapsed(),
             pairs_planned.saturating_sub(done),
         ) {
             Some(left) => progress::format_duration(left.as_secs_f64()),

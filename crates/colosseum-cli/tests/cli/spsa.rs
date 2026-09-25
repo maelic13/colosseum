@@ -938,3 +938,260 @@ fn a_game_budget_sets_the_horizon_and_is_refused_when_it_does_not_divide() {
     let both = spsa(&["--total-games", "168000", "--iterations", "10"]);
     assert_eq!(both.status.code(), Some(2));
 }
+
+/// `spsa history` rebuilds the centre vector after every iteration from the
+/// journal: its rows are the centres the tune committed, in knob order, as
+/// JSON, CSV or a table, thinned with `--every`.
+#[test]
+fn spsa_history_prints_the_centres_the_tune_committed_after_every_iteration() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = write_tune(root.path());
+    let run = root.path().join("run");
+    let tuned = cli()
+        .arg("--json")
+        .arg("spsa")
+        .arg(env!("CARGO_BIN_EXE_colosseum-uci-fixture"))
+        .arg("--tune")
+        .arg(&tune)
+        .args([
+            "--r-end",
+            "0.002",
+            "--iterations",
+            "3",
+            "--games-per-iteration",
+            "2",
+            "--depth",
+            "1",
+            "--seed",
+            "7",
+            "--__synthetic-games",
+            "--dir",
+        ])
+        .arg(&run)
+        .output()
+        .unwrap();
+    assert!(
+        tuned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tuned.stderr)
+    );
+    let committed: Value = serde_json::from_slice(&tuned.stdout).unwrap();
+    let committed = committed["report"]["driver"]["completed_iterations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|iteration| iteration["centers_after"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(committed.len(), 3);
+
+    let history = cli()
+        .args(["--json", "spsa", "history"])
+        .arg(&run)
+        .output()
+        .unwrap();
+    assert!(
+        history.status.success(),
+        "{}",
+        String::from_utf8_lossy(&history.stderr)
+    );
+    let history: Value = serde_json::from_slice(&history.stdout).unwrap();
+    let report = &history["report"];
+    assert_eq!(report["knobs"], serde_json::json!(["Hash"]));
+    assert_eq!(report["completed_iterations"], 3);
+    let rows = report["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[0]["iteration"], 0);
+    assert_eq!(rows[0]["centers"], serde_json::json!([16.0]));
+    for (row, centers) in rows[1..].iter().zip(&committed) {
+        assert_eq!(&row["centers"], centers, "{row}");
+    }
+
+    let csv = cli()
+        .args(["spsa", "history", "--csv", "--every", "2"])
+        .arg(&run)
+        .output()
+        .unwrap();
+    assert!(csv.status.success());
+    let csv = String::from_utf8(csv.stdout).unwrap();
+    let lines = csv.lines().collect::<Vec<_>>();
+    assert_eq!(lines[0], "iteration,Hash");
+    let iterations = lines[1..]
+        .iter()
+        .map(|line| line.split(',').next().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(iterations, ["0", "2", "3"]);
+
+    let both = cli()
+        .args(["--json", "spsa", "history", "--csv"])
+        .arg(&run)
+        .output()
+        .unwrap();
+    assert_eq!(both.status.code(), Some(2));
+}
+
+/// A synthetic two-knob tune in `run`, run to its end or stopped after one
+/// iteration. The stub engine advertises both knobs.
+fn synthetic_two_knob_tune(root: &std::path::Path, run: &std::path::Path, stop: bool) {
+    let tune = write_tune_contents(
+        root,
+        r#"
+[[parameters]]
+name = "Hash"
+initial = 16
+min = 1
+max = 1024
+c_end = 1.0
+
+[[parameters]]
+name = "Threads"
+initial = 1
+min = 1
+max = 8
+c_end = 1.0
+"#,
+    );
+    let mut command = cli();
+    if stop {
+        command.args(["--__stop-after-units", "1"]);
+    }
+    let output = command
+        .arg("--json")
+        .arg("spsa")
+        .arg(env!("CARGO_BIN_EXE_colosseum-cli"))
+        .arg("--engine-arg=__uci-stub")
+        .arg("--tune")
+        .arg(&tune)
+        .args([
+            "--r-end",
+            "0.002",
+            "--iterations",
+            "3",
+            "--games-per-iteration",
+            "2",
+            "--depth",
+            "1",
+            "--seed",
+            "7",
+            "--__synthetic-games",
+            "--dir",
+        ])
+        .arg(run)
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(if stop { 6 } else { 0 }),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn seeded_dry_run(
+    source: &std::path::Path,
+    tune: Option<&std::path::Path>,
+) -> std::process::Output {
+    let mut command = cli();
+    command
+        .args(["--json", "--dry-run", "spsa"])
+        .arg(env!("CARGO_BIN_EXE_colosseum-cli"))
+        .arg("--engine-arg=__uci-stub")
+        .arg("--seed-from")
+        .arg(source);
+    if let Some(tune) = tune {
+        command.arg("--tune").arg(tune);
+    }
+    command
+        .args(["--r-end", "0.002", "--iterations", "10", "--depth", "1"])
+        .output()
+        .unwrap()
+}
+
+/// A seeded tune starts from the completed tune's rounded final values on its
+/// surface, and records where they came from.
+#[test]
+fn a_seeded_tune_starts_from_a_completed_tunes_rounded_final_values() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    synthetic_two_knob_tune(root.path(), &source, false);
+    let result: Value =
+        serde_json::from_slice(&std::fs::read(source.join("result.json")).unwrap()).unwrap();
+    let tuned = result["tuned_result"]["parameters"]
+        .as_array()
+        .unwrap()
+        .clone();
+
+    let seeded = seeded_dry_run(&source, None);
+    assert!(
+        seeded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
+    let value: Value = serde_json::from_slice(&seeded.stdout).unwrap();
+    let tune = &value["resolved_configuration"]["tune"];
+    let parameters = tune["parameters"].as_array().unwrap();
+    assert_eq!(parameters.len(), 2);
+    for (parameter, result) in parameters.iter().zip(&tuned) {
+        assert_eq!(parameter["name"], result["name"]);
+        assert_eq!(parameter["initial"], result["tuned"], "{parameter}");
+        assert_eq!(parameter["min"], result["min"]);
+        assert_eq!(parameter["max"], result["max"]);
+    }
+    assert_eq!(tune["seeded_from"]["completed_iterations"], 3);
+    assert_eq!(
+        tune["seeded_from"]["result_sha256"].as_str().unwrap().len(),
+        64
+    );
+
+    // A tune file with the same names replaces the surface and keeps the seed.
+    let narrowed = root.path().join("narrowed.toml");
+    std::fs::write(
+        &narrowed,
+        "[[parameters]]\nname = \"Hash\"\ninitial = 1\nmin = 1\nmax = 2048\nc_end = 2.0\n\n\
+         [[parameters]]\nname = \"Threads\"\ninitial = 1\nmin = 1\nmax = 8\nc_end = 0.5\n",
+    )
+    .unwrap();
+    let reseeded = seeded_dry_run(&source, Some(&narrowed));
+    assert!(
+        reseeded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reseeded.stderr)
+    );
+    let value: Value = serde_json::from_slice(&reseeded.stdout).unwrap();
+    let parameters = &value["resolved_configuration"]["tune"]["parameters"];
+    assert_eq!(parameters[0]["initial"], tuned[0]["tuned"]);
+    assert_eq!(parameters[0]["max"], 2048);
+    assert_eq!(parameters[1]["c_end"], 0.5);
+}
+
+/// Only a completed tune seeds another, and a tune file must name the seeded
+/// parameters in the same order.
+#[test]
+fn seed_from_refuses_an_unfinished_tune_and_a_tune_file_with_other_names() {
+    let root = tempfile::tempdir().unwrap();
+    let stopped = root.path().join("stopped");
+    synthetic_two_knob_tune(root.path(), &stopped, true);
+    let refused = seeded_dry_run(&stopped, None);
+    assert_eq!(refused.status.code(), Some(2));
+    let message = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        message.contains("only a completed tune seeds a new one"),
+        "{message}"
+    );
+
+    let source = root.path().join("source");
+    synthetic_two_knob_tune(root.path(), &source, false);
+    let reordered = root.path().join("reordered.toml");
+    std::fs::write(
+        &reordered,
+        "[[parameters]]\nname = \"Threads\"\ninitial = 1\nmin = 1\nmax = 8\nc_end = 1.0\n\n\
+         [[parameters]]\nname = \"Hash\"\ninitial = 16\nmin = 1\nmax = 1024\nc_end = 1.0\n",
+    )
+    .unwrap();
+    let refused = seeded_dry_run(&source, Some(&reordered));
+    assert_eq!(refused.status.code(), Some(2));
+    let message = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        message.contains("the names and their order must match"),
+        "{message}"
+    );
+}

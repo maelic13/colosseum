@@ -6,6 +6,40 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-25
+
+What the first weeks of use asked for: resumed runs that keep their time and
+say where they stand, a readable SPSA trajectory, and tunes that continue
+from a finished one.
+
+### Added
+- `spsa history` prints a tune's centre vector after every completed
+  iteration — as a table, CSV or JSON, optionally every Nth iteration — and
+  works while the tune is still running
+- `spsa --seed-from <run dir>` starts a new tune from a completed tune's final
+  rounded values, keeping its parameters and bounds unless `--tune` gives new
+  ones for the same parameters
+- A warning, kept in the run record, when an option list on the command line
+  replaces a run file's list and drops entries it named — such as a side's
+  `Hash` and `Threads` options
+
+### Changed
+- A resumed run's progress blocks and final report show the run's total
+  elapsed time, carried across every stop and resume, instead of restarting
+  from zero. The pause between invocations is not counted, and the remaining
+  time is still estimated from the current invocation's rate
+- `spsa status` gives an ETA for a tune that has been stopped and resumed
+- Every SPRT progress block, and the start of the run, shows what is being
+  tested: the Elo bounds in their model, alpha and beta, and the preset they
+  came from
+- A resumed run says where it stood — "resuming: 1240 of 2000 games
+  complete, 760 to play" — and with `--json` the JSON value carries the same
+  facts as `resume`
+
+### Fixed
+- The resume note no longer reads "resuming 0 durable game(s)"
+- `run.log` records a clean stop and a resume, as its documentation promised
+
 ## [0.1.0] — 2026-09-22
 
 The first release of **Colosseum CLI**, a command-line harness for testing
