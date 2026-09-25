@@ -684,6 +684,13 @@ pub(crate) async fn run_tournament_command(
         return ExitCode::from(3);
     }
     let scheduled_games = plan.schedule.len() as u64;
+    let resume = ResumeFacts::of(
+        opened.resumed,
+        ProgressUnit::Games,
+        resumed_games,
+        Some(scheduled_games),
+    );
+    announce_resume(&writer, resume);
     let rating_inputs = TournamentRatingInputs {
         plan: plan.clone(),
         anchor,
@@ -771,6 +778,14 @@ pub(crate) async fn run_tournament_command(
                     (RunStatus::Aborted, 3)
                 }
             };
+            if run_status == RunStatus::Cancelled {
+                log_stop(
+                    &writer,
+                    ProgressUnit::Games,
+                    report.games.len() as u64,
+                    exit_code,
+                );
+            }
             if let Err(error) = recorder.finish(run_status) {
                 eprintln!("run record failed: {error}");
                 return ExitCode::from(3);
@@ -783,6 +798,7 @@ pub(crate) async fn run_tournament_command(
                 print_json(&MachineOutput::Tournament {
                     run_directory: directory.paths().root.clone(),
                     report,
+                    resume,
                 });
             } else {
                 print_tournament(&report);

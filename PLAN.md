@@ -1826,8 +1826,8 @@ and goes to a minor release with its own step.
   - **`--json` carries the resume facts.** The human resume note stays on
     stderr in `--json` mode — Rarog asked to keep it (B.2.7 notes,
     2026-09-25), and the maintainer agreed — and the JSON value also
-    carries the facts (`"resumed": true`, `"completed_units"`,
-    `"remaining_units"`), so a wrapper need not parse stderr. The
+    carries the facts as a `resume` object (`unit`, `completed_units`,
+    `remaining_units`), so a wrapper need not parse stderr. The
     JSON-contract tests assert that stdout is exactly one JSON value.
   - `CHANGELOG-CLI.md` under Unreleased, then `[0.1.1]` when cut; the
     command reference regenerated if any help text changed; the run-file

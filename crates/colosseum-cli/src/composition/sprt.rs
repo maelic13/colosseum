@@ -543,6 +543,13 @@ pub(crate) async fn run_sprt(
     }
     let openings_report = openings.report().clone();
     let resumed_pairs = official_pairs.len() as u64;
+    let resume = ResumeFacts::of(
+        opened.resumed,
+        ProgressUnit::Pairs,
+        resumed_pairs,
+        Some(u64::from(design.max_pairs)),
+    );
+    announce_resume(&writer, resume);
     let players = Players::new(&engine_a, &engine_b);
     let kept_engines =
         match_runner::SlotEngines::for_mode(command.engine_processes, execution.slots.len());
@@ -647,6 +654,14 @@ pub(crate) async fn run_sprt(
                 sprt_runner::SprtStatus::Cancelled => RunStatus::Cancelled,
                 sprt_runner::SprtStatus::Invalid => RunStatus::Invalid,
             };
+            if run_status == RunStatus::Cancelled {
+                log_stop(
+                    &writer,
+                    ProgressUnit::Pairs,
+                    report.schedule.official_pairs.len() as u64,
+                    sprt_exit_code(status),
+                );
+            }
             if let Err(error) = recorder.finish(run_status) {
                 eprintln!("run record failed: {error}");
                 return ExitCode::from(3);
@@ -659,6 +674,7 @@ pub(crate) async fn run_sprt(
                 print_json(&MachineOutput::Sprt {
                     run_directory: directory.paths().root.clone(),
                     report,
+                    resume,
                 });
             } else {
                 print_sprt(&report, &directory.paths().root, progress.run_elapsed());

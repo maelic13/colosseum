@@ -105,7 +105,7 @@ When reporting the next step, always report its model as well.
 
 ### Phase 12 — CLI maintenance from adoption (beside Phase 11, CLI patch releases)
 
-- ☐ **12.1** — **Model: Terra High.** Rarog's tooling notes from the first
+- ☑ **12.1** — **Model: Terra High.** Rarog's tooling notes from the first
   adoption: a regression test that a resumed tune's `spsa status` has a
   finite ETA (the ETA itself was fixed by carrying the run's elapsed time in
   the checkpoint); the resume note names completed and remaining units

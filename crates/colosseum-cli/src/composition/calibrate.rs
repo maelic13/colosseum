@@ -169,7 +169,13 @@ pub(crate) async fn run_calibration(
         return ExitCode::from(3);
     }
     let progress = match_runner::MatchProgress::default();
-    let resumed_pairs = PairedProgress::from_games(&completed_games).pairs.into();
+    let resumed_pairs: u64 = PairedProgress::from_games(&completed_games).pairs.into();
+    let resume = ResumeFacts::of(
+        opened.resumed,
+        ProgressUnit::Pairs,
+        resumed_pairs,
+        Some(u64::from(prepared.design.games / 2)),
+    );
     let players = Players::new(&prepared.engine_a, &prepared.engine_b);
     let request = match_runner::FixedMatchRequest {
         engine_a: prepared.engine_a,
@@ -197,6 +203,7 @@ pub(crate) async fn run_calibration(
             directory.paths().root.display()
         );
     }
+    announce_resume(&writer, resume);
     let calibration_future = match_runner::run_fixed_match(request);
     tokio::pin!(calibration_future);
     let pairs_planned = u64::from(prepared.design.games / 2);
@@ -311,6 +318,14 @@ pub(crate) async fn run_calibration(
     } else {
         RunStatus::Completed
     };
+    if run_status == RunStatus::Cancelled {
+        log_stop(
+            &writer,
+            ProgressUnit::Pairs,
+            u64::from(report.fixed_match.games_completed / 2),
+            exit_code,
+        );
+    }
     if let Err(error) = recorder.finish(run_status) {
         eprintln!("run record failed: {error}");
         return ExitCode::from(3);
@@ -323,6 +338,7 @@ pub(crate) async fn run_calibration(
         print_json(&MachineOutput::Calibration {
             run_directory: directory.paths().root.clone(),
             report,
+            resume,
         });
     } else {
         print_calibration(&report, &directory.paths().root);

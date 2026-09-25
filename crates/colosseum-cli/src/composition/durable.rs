@@ -106,6 +106,80 @@ pub(crate) async fn open_journal(
     })
 }
 
+/// Where a resumed run stood when this invocation started, in the run's own
+/// unit: what the operator reads on resume, what `run.log` records, and what
+/// the `--json` value carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub(crate) struct ResumeFacts {
+    pub(crate) unit: ProgressUnit,
+    pub(crate) completed_units: u64,
+    /// Units still to play, where the run has a fixed horizon or a cap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) remaining_units: Option<u64>,
+}
+
+impl ResumeFacts {
+    /// The facts of a resumed run; `None` for a fresh one.
+    pub(crate) fn of(
+        resumed: bool,
+        unit: ProgressUnit,
+        completed: u64,
+        total: Option<u64>,
+    ) -> Option<Self> {
+        resumed.then(|| Self {
+            unit,
+            completed_units: completed,
+            remaining_units: total.map(|total| total.saturating_sub(completed)),
+        })
+    }
+
+    /// The note an operator reads: "resuming: 1240 of 2000 games complete, 760
+    /// to play".
+    pub(crate) fn note(&self) -> String {
+        let unit = self.unit.plural();
+        match self.remaining_units {
+            Some(remaining) => format!(
+                "resuming: {} of {} {unit} complete, {remaining} to play",
+                self.completed_units,
+                self.completed_units + remaining
+            ),
+            None => format!("resuming: {} {unit} complete", self.completed_units),
+        }
+    }
+}
+
+/// Say that a run resumed: the note on standard error, in every output mode,
+/// and the same facts as one `run.log` event.
+pub(crate) fn announce_resume(writer: &RunWriter, facts: Option<ResumeFacts>) {
+    if let Some(facts) = facts {
+        eprintln!("{}", facts.note());
+        log_event(
+            writer,
+            &json!({
+                "event": "resumed",
+                "unit": facts.unit,
+                "completed_units": facts.completed_units,
+                "remaining_units": facts.remaining_units,
+            }),
+        );
+    }
+}
+
+/// Record a clean stop in `run.log`: how far the run got and the exit code it
+/// stopped with, so the log shows where one invocation ended and the next
+/// began.
+pub(crate) fn log_stop(writer: &RunWriter, unit: ProgressUnit, completed: u64, exit_code: u8) {
+    log_event(
+        writer,
+        &json!({
+            "event": "stopped",
+            "unit": unit,
+            "completed_units": completed,
+            "exit_code": exit_code,
+        }),
+    );
+}
+
 /// The time a run's earlier invocations spent, as its checkpoint recorded it.
 ///
 /// A run directory written before the checkpoint carried it has only its

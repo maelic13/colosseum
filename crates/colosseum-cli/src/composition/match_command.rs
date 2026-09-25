@@ -310,6 +310,12 @@ pub(crate) async fn run_match(
     }
     let progress = match_runner::MatchProgress::default();
     let resumed_games = completed_games.len();
+    let resume = ResumeFacts::of(
+        opened.resumed,
+        ProgressUnit::Games,
+        resumed_games as u64,
+        Some(u64::from(games)),
+    );
     let players = Players::new(&engine_a, &engine_b);
     let request = match_runner::FixedMatchRequest {
         engine_a,
@@ -334,12 +340,7 @@ pub(crate) async fn run_match(
     if !machine {
         eprintln!("match run directory: {}", directory.paths().root.display());
     }
-    if opened.resumed && !machine {
-        eprintln!(
-            "resuming {} durable game(s) from the stored schedule",
-            progress.snapshot().attempted
-        );
-    }
+    announce_resume(&writer, resume);
     let match_future = match_runner::run_fixed_match(request);
     tokio::pin!(match_future);
     let mut schedule =
@@ -386,6 +387,14 @@ pub(crate) async fn run_match(
                 match_runner::MatchStatus::Invalid => (RunStatus::Invalid, 1),
                 match_runner::MatchStatus::InfrastructureError => (RunStatus::Aborted, 3),
             };
+            if run_status == RunStatus::Cancelled {
+                log_stop(
+                    &writer,
+                    ProgressUnit::Games,
+                    u64::from(report.games_completed),
+                    exit_code,
+                );
+            }
             if let Err(error) = recorder.finish(run_status) {
                 eprintln!("run record failed: {error}");
                 return ExitCode::from(3);
@@ -398,6 +407,7 @@ pub(crate) async fn run_match(
                 print_json(&MachineOutput::FixedMatch {
                     run_directory: directory.paths().root.clone(),
                     report,
+                    resume,
                 });
             } else {
                 print_fixed_match(&report);

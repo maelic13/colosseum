@@ -7,6 +7,12 @@ report leaves standard output empty. A statistically invalid completed run is
 still a report and therefore emits JSON with a nonzero exit status. The
 top-level `type` field identifies the document schema.
 
+A run that resumed a run directory says so on standard error, in every output
+mode — for example `resuming: 1240 of 2000 games complete, 760 to play` — and
+the JSON value of `match`, `sprt`, `calibrate`, `tournament run` and `spsa`
+carries the same facts as `resume`: the `unit`, `completed_units` and
+`remaining_units`. A fresh run has no `resume` field.
+
 `--dry-run` is a global option. It resolves configuration paths and prints the
 configuration hash, the complete resolved configuration and every exact process
 invocation without starting an engine or playing a game. An invocation is

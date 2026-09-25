@@ -15,6 +15,13 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Every SPRT progress block, and the start of the run, shows what is being
   tested: the Elo bounds in their model, alpha and beta, and the preset they
   came from
+- A resumed run says where it stood — "resuming: 1240 of 2000 games
+  complete, 760 to play" — and with `--json` the JSON value carries the same
+  facts as `resume`
+
+### Fixed
+- The resume note no longer reads "resuming 0 durable game(s)"
+- `run.log` records a clean stop and a resume, as its documentation promised
 
 ## [0.1.0] — 2026-09-22
 

@@ -1137,13 +1137,14 @@ pub(crate) async fn run_spsa_command(
     colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
     if !machine {
         eprintln!("SPSA run directory: {}", directory.paths().root.display());
-        if resumed {
-            eprintln!(
-                "resuming {} complete durable iteration(s); the stored schedule remains authoritative",
-                replay.completed_iterations.len()
-            );
-        }
     }
+    let resume = ResumeFacts::of(
+        resumed,
+        ProgressUnit::Iterations,
+        replay.completed_iterations.len() as u64,
+        Some(u64::from(settings.iterations)),
+    );
+    announce_resume(&writer, resume);
     let progress = spsa_driver::SpsaProgress::default();
     let knobs = verified_schedule.artifact().knobs.clone();
     let initial_centers = bound_tune.initial_centers();
@@ -1283,6 +1284,7 @@ pub(crate) async fn run_spsa_command(
         print_json(&MachineOutput::Spsa {
             run_directory: directory.paths().root.clone(),
             report: Box::new(report),
+            resume,
         });
     } else {
         print_spsa(&report, &directory.paths().root);
@@ -1841,6 +1843,14 @@ impl DurableSpsaOutput {
             spsa_driver::SpsaStatus::Cancelled => RunStatus::Cancelled,
             spsa_driver::SpsaStatus::Invalid => RunStatus::Invalid,
         };
+        if status == RunStatus::Cancelled {
+            log_stop(
+                &self.writer,
+                ProgressUnit::Iterations,
+                report.driver.completed_iterations.len() as u64,
+                CANCELLED_EXIT_CODE,
+            );
+        }
         let recorder = self
             .recorder
             .lock()
