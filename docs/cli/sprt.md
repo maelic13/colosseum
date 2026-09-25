@@ -64,7 +64,10 @@ inventing a finite statistic.
 
 Progress is written to stderr every `--progress-every N` official pairs
 (default 10) and once more at termination. An SPRT block carries the whole
-decision: the two engines, games and pairs committed, logistic and normalized
+decision: the two engines, the test itself (the Elo bounds of its two
+hypotheses in the model they are measured in, alpha and beta, and the preset
+it came from, marked overridden when any of its values was changed — the same
+line is printed once when the run starts), games and pairs committed, logistic and normalized
 Elo each with the half-width of its 95% interval, W/D/L, the pentanomial
 vector, engine faults and time losses, the LLR against its exact Wald bounds,
 games per hour — the unit every command reports throughput in, so two runs

@@ -105,8 +105,9 @@ or completed tune without acquiring ownership or changing any run bytes:
 colosseum-cli spsa status path/to/spsa-run
 ```
 
-The report includes completed iteration and percentage, a linear ETA when an
-uninterrupted elapsed-to-checkpoint basis exists, and every knob's current
+The report includes completed iteration and percentage, a linear ETA from the
+tune's elapsed time as its checkpoint records it across every stop and
+resume, and every knob's current
 floating centre and normalized trajectory. With at least six completed
 iterations it compares the mean of each history third and labels these fixed
 heuristics:

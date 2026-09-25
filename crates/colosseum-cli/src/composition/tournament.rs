@@ -638,8 +638,9 @@ pub(crate) async fn run_tournament_command(
             }
         }
     }
+    let clock = journal.clock();
     let writer = match RunWriter::start(Arc::clone(&directory), journal.resume).await {
-        Ok(writer) => writer,
+        Ok(writer) => writer.on_clock(clock),
         Err(error) => {
             eprintln!("tournament output failed: {error}");
             return ExitCode::from(3);
@@ -710,7 +711,8 @@ pub(crate) async fn run_tournament_command(
         command.progress_every,
         command.progress_min_secs,
         resumed_games,
-    );
+    )
+    .on_clock(clock);
     let mut poll =
         tokio::time::interval_at(tokio::time::Instant::now() + PROGRESS_POLL, PROGRESS_POLL);
     let outcome = loop {
@@ -913,7 +915,7 @@ pub(crate) fn tournament_progress_block(
         ProgressUnit::Games,
         done,
         Some(scheduled_games),
-        schedule.elapsed(),
+        schedule.run_elapsed(),
     );
     match RateTournament::execute_with_fixed_field(
         &inputs.plan,
@@ -952,7 +954,7 @@ pub(crate) fn tournament_progress_block(
         format!("engine {engine_faults}; {max_engine_faults} allowed"),
     );
     if let Some(rate) =
-        progress::rate_per_hour(schedule.units_since_start(done), schedule.elapsed_hours())
+        progress::rate_per_hour(schedule.units_since_start(done), schedule.session_hours())
     {
         block.field("rate", format!("{rate:.0} games/hour"));
     }
@@ -960,7 +962,7 @@ pub(crate) fn tournament_progress_block(
         "time remaining",
         match progress::time_for_units(
             schedule.units_since_start(done),
-            schedule.elapsed(),
+            schedule.session_elapsed(),
             scheduled_games.saturating_sub(done),
         ) {
             Some(left) => progress::format_duration(left.as_secs_f64()),

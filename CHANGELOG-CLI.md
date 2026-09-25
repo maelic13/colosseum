@@ -6,6 +6,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- A resumed run's progress blocks and final report show the run's total
+  elapsed time, carried across every stop and resume, instead of restarting
+  from zero. The pause between invocations is not counted, and the remaining
+  time is still estimated from the current invocation's rate
+- `spsa status` gives an ETA for a tune that has been stopped and resumed
+- Every SPRT progress block, and the start of the run, shows what is being
+  tested: the Elo bounds in their model, alpha and beta, and the preset they
+  came from
+
 ## [0.1.0] — 2026-09-22
 
 The first release of **Colosseum CLI**, a command-line harness for testing

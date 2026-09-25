@@ -494,16 +494,24 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
             centers: iteration.centers_after.clone(),
         })
         .collect::<Vec<_>>();
+    // The run's own elapsed time, which its checkpoint carries across every
+    // invocation. A run directory from before it did has only the record's
+    // start and last update, which are the tune's time only if it never
+    // stopped.
     let resumed = record
         .anomalies
         .iter()
         .any(|anomaly| anomaly.code == "run-resumed");
-    let elapsed = (!resumed).then_some(
-        record
-            .updated_unix_ms
-            .saturating_sub(record.started_unix_ms) as f64
-            / 1_000.0,
-    );
+    let elapsed = recorded_run_elapsed(run_directory)
+        .map(|elapsed| elapsed.as_secs_f64())
+        .or_else(|| {
+            (!resumed).then_some(
+                record
+                    .updated_unix_ms
+                    .saturating_sub(record.started_unix_ms) as f64
+                    / 1_000.0,
+            )
+        });
     let invalid = has_invalid || record.status == RunStatus::Invalid;
     let diagnostics = match diagnose_spsa(
         &workflow.bound_tune,
@@ -1047,6 +1055,7 @@ pub(crate) async fn run_spsa_command(
     let OpenedJournal {
         records: journal_records,
         resume: journal_resume,
+        prior_elapsed,
     } = match open_journal(&directory, resumed).await {
         Ok(journal) => journal,
         Err(error) => {
@@ -1078,8 +1087,9 @@ pub(crate) async fn run_spsa_command(
             return ExitCode::from(3);
         }
     };
+    let clock = progress::RunClock::resumed_after(prior_elapsed);
     let writer = match RunWriter::start(Arc::clone(&directory), journal_resume).await {
-        Ok(writer) => writer,
+        Ok(writer) => writer.on_clock(clock),
         Err(error) => {
             eprintln!("SPSA output failed: {error}");
             return ExitCode::from(3);
@@ -1173,7 +1183,8 @@ pub(crate) async fn run_spsa_command(
         conditions.progress_every,
         conditions.progress_min_secs,
         resumed_iterations,
-    );
+    )
+    .on_clock(clock);
     let mut centres = SpsaCentreTracker::new(&knobs, &initial_centers);
     let mut poll =
         tokio::time::interval_at(tokio::time::Instant::now() + PROGRESS_POLL, PROGRESS_POLL);
@@ -1538,11 +1549,11 @@ pub(crate) fn spsa_progress_block(
         ProgressUnit::Iterations,
         done,
         Some(total),
-        schedule.elapsed(),
+        schedule.run_elapsed(),
     );
     let games_per_iteration = u64::from(settings.games_per_iteration);
     let since_start = schedule.units_since_start(done);
-    let elapsed = schedule.elapsed().as_secs_f64();
+    let elapsed = schedule.session_elapsed().as_secs_f64();
     block.field(
         "games",
         (observer.iterations_played() * games_per_iteration).to_string(),
@@ -1593,8 +1604,11 @@ pub(crate) fn spsa_progress_block(
     // Last, so the eye finds it in the same place on every block.
     block.field(
         "time remaining",
-        match progress::time_for_units(since_start, schedule.elapsed(), total.saturating_sub(done))
-        {
+        match progress::time_for_units(
+            since_start,
+            schedule.session_elapsed(),
+            total.saturating_sub(done),
+        ) {
             Some(left) => progress::format_duration(left.as_secs_f64()),
             None => "unknown".to_owned(),
         },
