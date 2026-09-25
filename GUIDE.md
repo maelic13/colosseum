@@ -14,12 +14,12 @@ internal naming or method argumentation.
 
 | | |
 |---|---|
-| Branch / versions | Colosseum GUI **1.0.2** released (legacy `v` tag), **1.1.0** in the manifest. Colosseum CLI **0.1.0**, unreleased. The next release ships both: GUI **1.1.0** (`gui-v1.1.0`, "latest") and CLI **0.1.0** (`cli-v0.1.0`, never "latest") |
-| What exists | Phases 0–9 complete; **Phase 10 is complete pending publication** — 10.1–10.10, with the acceptance repeat passed locally on the step 10.10 source (10.9m rejected; 10.9h, 10.9p, 10.9t deferred behind the release). Every correction landed with its tests; qualification and symmetry runs recorded; the acceptance repeat re-recorded the parity matrix on the released source |
-| What is missing | Only the maintainer's remote operations: squash-merge the release pull request on green CI, dispatch the CLI and GUI candidates on `main` and check their four-platform archives, tag `gui-v1.1.0` and `cli-v0.1.0`, check both release pages. **Phase 11** (GUI on the harness) starts after publication |
+| Branch / versions | `main` holds the published **GUI 1.1.0** (`gui-v1.1.0`, "latest") and **CLI 0.1.0** (`cli-v0.1.0`), both released 2026-09-22. `dev` carries Phase 12.1–12.4, unreleased CLI additions; the GUI is unchanged since 1.1.0 |
+| What exists | Phases 0–10 complete and published (10.9m rejected; 10.9h, 10.9p, 10.9t deferred). Phase 12.1–12.4 complete on `dev`: elapsed time carried across resumes, the resume note and `run.log` events, the SPRT test line, `spsa history`, `spsa --seed-from`, the run-file list-replacement warning, reviewed 2026-09-25 with one correction (run-file path resolution for the new option and command) |
+| What is missing | A CLI release carrying Phase 12.1–12.4 (`cli-v0.2.0`: two of the steps add a command and an option, which is a minor release, not a patch), then **Phase 11** (GUI on the harness), the main line of development |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 CLI candidate archives ☑ exact-archive smoke · the `gui-v` release lane has never run; its candidate mode is the rehearsal to dispatch before the tag, and the only thing that will have exercised `deb`, `rpm`, `dmg` and `pkg.tar.zst` |
-| Next step | **Publication is the maintainer's** — see "What to do now". Then **11.1** — Sol High (Claude: Opus 5, high). **12.1** — Terra High (Claude: Sonnet 5, high) — is independent of Phase 11 and can be taken first, after publication, as the CLI's first patch |
+| Next step | **Release the CLI as 0.2.0** (maintainer: version bump, dated changelog, `cargo xtask release-check cli-v0.2.0`, pull request `dev` → `main`, candidate dispatch, tag). Then **11.1** — Sol High (Claude: Opus 5, high). Further Phase 12 steps are taken as Rarog reports them, beside Phase 11 |
 | Confirmed decisions | The 2026-09-22 set, confirmed by the maintainer and not reopened, recorded with the release preparation in [`phase-10-record.md`](docs/architecture/phase-10-record.md): exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, the explicit GUI artifact list, versions kept in artifact names, the updater prerelease fix now and pagination later, the throughput margin not chased |
 
 ## Completed phases
@@ -186,28 +186,23 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 10 is complete; the release is the maintainer's to publish.** In
-order, and all of it remote work that no agent performs:
+**Phase 12.1–12.4 are complete on `dev`; the CLI release 0.2.0 is the
+maintainer's to publish.** In order:
 
-1. Squash-merge the release pull request into `main` on green CI. The
-   release workflows can only be dispatched once they are on `main`.
-2. Dispatch the CLI candidate and the GUI candidate on `main` (Actions →
-   *Colosseum CLI/GUI candidate and release* → Run workflow, or
-   `gh workflow run release-cli.yml --ref main` and the same for
-   `release-gui.yml`) and check their four-platform archives. The GUI lane has
-   never run end to end, and this is the only thing that will have exercised
-   `deb`, `rpm`, `dmg` and `pkg.tar.zst` before a tag exists. A failure is
-   fixed on `main` and the candidate dispatched again.
-3. Check out `main` locally and run `cargo xtask release-check gui-v1.1.0`
-   and `cargo xtask release-check cli-v0.1.0`.
-4. Tag the accepted commit `gui-v1.1.0` and `cli-v0.1.0`, and push the tags;
-   each tag's workflow publishes its product's GitHub Release.
-5. Check both release pages and the two post-tag links recorded with the
-   Phase 10 entry in
-   [`phase-10-record.md`](docs/architecture/phase-10-record.md).
+1. On `dev`: set `crates/colosseum-cli/Cargo.toml` to 0.2.0, turn the
+   changelog's Unreleased section into `[0.2.0] — <date>`, run
+   `cargo xtask release-check cli-v0.2.0` and commit. An agent may do this
+   step; everything after it is remote work that no agent performs.
+2. Open the pull request `dev` → `main`, squash-merge on green CI.
+3. Dispatch the CLI candidate on `main` and check its four archives.
+4. Tag the accepted commit `cli-v0.2.0` and push the tag; its workflow
+   publishes the release. The GUI is unchanged and is not re-released.
+5. Check the release page: four archives, the notes from the changelog,
+   not marked "Latest".
 
 **Then Phase 11 starts, and is the main line of development from then on.**
-Work its steps in order, one commit per step, as before.
+Work its steps in order, one commit per step, as before; Phase 12 steps
+are taken beside it as reports arrive.
 
 ```
 git diff --check

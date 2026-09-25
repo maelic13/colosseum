@@ -1690,7 +1690,7 @@ contract. Raising effort beyond High is an explicit exception, not the default.
 |---|---|
 | 11.1–11.3 | Sol High |
 | 11.4 | Terra High |
-| 12.1 | Terra High |
+| 12.1–12.4 | Terra High |
 
 Completed steps keep the assignment recorded in their phase record.
 
@@ -1794,13 +1794,20 @@ its archive smoke.
 
 ### Phase 12 — CLI maintenance from adoption
 
-Corrections reported by projects using the released CLI. This phase runs
-beside Phase 11, not after it: a step here is small, changes no statistic
-and no run-directory format, ships as a CLI patch release (`cli-v0.1.x`)
-from `main`, and never waits for GUI work. Each report becomes one numbered
-step with its regression tests; anything that would change a reported
-statistic, the run-file schema or the run-directory layout is not a patch
-and goes to a minor release with its own step.
+Corrections and small additions reported by projects using the released CLI.
+This phase runs beside Phase 11, not after it: a step here is small, changes
+no statistic and breaks no run-directory or run-file format, ships as its own
+CLI release from `main`, and never waits for GUI work. Each report becomes
+one numbered step with its regression tests. The version follows the
+changelog section the step lands in: fixes only are a patch (`cli-v0.1.x`);
+a new command or option is a minor release (`cli-v0.2.0` carries 12.1–12.4,
+because 12.2 and 12.3 add `spsa history` and `--seed-from`); anything that
+would change a reported statistic or break the run-file schema or the
+run-directory layout is a minor release with its own step, said in the
+changelog, and never lands as a patch. Added fields — a checkpoint's
+`run_elapsed_seconds`, a JSON value's `resume`, a run record's
+`seeded_from` — are compatible in both directions and do not count as
+format changes.
 
 - **(a) Rarog's tooling notes from the first adoption** (GUIDE 12.1, Terra
   High), reported 2026-09-22 with Rarog's B.2.6.1 record; nothing blocks.
