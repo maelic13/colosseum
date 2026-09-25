@@ -554,6 +554,7 @@ fn path_option_names() -> BTreeSet<&'static str> {
         "dir",
         "engine",
         "executable",
+        "seed-from",
         "tune",
     ]
     .into_iter()
@@ -570,7 +571,7 @@ fn positional_path_indices(command: &[String]) -> Vec<usize> {
         ["capabilities"] | ["self-test"] => vec![],
         ["match"] | ["calibrate"] | ["sprt"] => vec![0, 1],
         ["spsa"] | ["nps"] | ["engine", "inspect" | "check"] => vec![0],
-        ["spsa", "status"] | ["status"] | ["stats"] => vec![0],
+        ["spsa", "status" | "history"] | ["status"] | ["stats"] => vec![0],
         ["book", "slice"] => vec![0, 1],
         ["book", "hash" | "stats" | "verify"] => vec![0],
         ["suite"] => vec![0, 1],
@@ -666,6 +667,28 @@ mod tests {
             expand_arguments_reporting([OsString::from("colosseum-cli"), OsString::from("match")])
                 .unwrap();
         assert!(replaced.is_empty());
+    }
+
+    /// Every option and positional that names a path resolves relative to the
+    /// run file that declares it; a new path option or read-only command that
+    /// is left out of the tables would silently resolve against the working
+    /// directory instead.
+    #[test]
+    fn a_seed_source_and_a_history_run_directory_are_run_file_paths() {
+        let seeded = serde_json::json!({
+            "command": ["spsa"],
+            "positionals": ["engine"],
+            "options": {"seed-from": "../tunes/v1", "tune": "tune.toml"}
+        });
+        assert_eq!(
+            path_pointers(&seeded).unwrap(),
+            ["/positionals/0", "/options/seed-from", "/options/tune"]
+        );
+        let history = serde_json::json!({
+            "command": ["spsa", "history"],
+            "positionals": ["../tunes/v1"]
+        });
+        assert_eq!(path_pointers(&history).unwrap(), ["/positionals/0"]);
     }
 
     #[test]
