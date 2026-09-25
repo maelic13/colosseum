@@ -98,6 +98,23 @@ games, each game on whichever slot is free; the estimate counts those waves. Thi
 tune will converge; curvature, sensitivity, interactions, noise and distance
 from the optimum remain unknown.
 
+To read a tune's trajectory at a fixed iteration, or plot it, print the
+centre vector after every completed iteration:
+
+```text
+colosseum-cli spsa history path/to/spsa-run
+colosseum-cli spsa history path/to/spsa-run --csv --every 100 > trajectory.csv
+colosseum-cli --json spsa history path/to/spsa-run
+```
+
+The rows are rebuilt from the journal exactly as a resume replays it, without
+changing the run, so they are available while the tune is still running.
+Iteration `0` is the tune's initial values and row `N` holds the floating
+centres after `N` completed iterations, in the tune file's knob order: the
+table rounds them to three decimals, CSV and JSON give them in full. `--every N`
+keeps every Nth iteration and always the initial values and the latest
+iteration. `--csv` and `--json` cannot be combined.
+
 Inspect the last checksum-verified durable snapshot of a running, interrupted
 or completed tune without acquiring ownership or changing any run bytes:
 

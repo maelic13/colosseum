@@ -372,6 +372,10 @@ pub(crate) enum MachineOutput<'a> {
         run_directory: &'a Path,
         report: SpsaStatusOutput,
     },
+    SpsaHistory {
+        run_directory: &'a Path,
+        report: SpsaHistoryReport,
+    },
     Calibration {
         run_directory: PathBuf,
         report: CalibrationReport,

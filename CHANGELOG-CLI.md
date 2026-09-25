@@ -6,6 +6,11 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `spsa history` prints a tune's centre vector after every completed
+  iteration — as a table, CSV or JSON, optionally every Nth iteration — and
+  works while the tune is still running
+
 ### Changed
 - A resumed run's progress blocks and final report show the run's total
   elapsed time, carried across every stop and resume, instead of restarting

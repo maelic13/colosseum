@@ -938,3 +938,93 @@ fn a_game_budget_sets_the_horizon_and_is_refused_when_it_does_not_divide() {
     let both = spsa(&["--total-games", "168000", "--iterations", "10"]);
     assert_eq!(both.status.code(), Some(2));
 }
+
+/// `spsa history` rebuilds the centre vector after every iteration from the
+/// journal: its rows are the centres the tune committed, in knob order, as
+/// JSON, CSV or a table, thinned with `--every`.
+#[test]
+fn spsa_history_prints_the_centres_the_tune_committed_after_every_iteration() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = write_tune(root.path());
+    let run = root.path().join("run");
+    let tuned = cli()
+        .arg("--json")
+        .arg("spsa")
+        .arg(env!("CARGO_BIN_EXE_colosseum-uci-fixture"))
+        .arg("--tune")
+        .arg(&tune)
+        .args([
+            "--r-end",
+            "0.002",
+            "--iterations",
+            "3",
+            "--games-per-iteration",
+            "2",
+            "--depth",
+            "1",
+            "--seed",
+            "7",
+            "--__synthetic-games",
+            "--dir",
+        ])
+        .arg(&run)
+        .output()
+        .unwrap();
+    assert!(
+        tuned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tuned.stderr)
+    );
+    let committed: Value = serde_json::from_slice(&tuned.stdout).unwrap();
+    let committed = committed["report"]["driver"]["completed_iterations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|iteration| iteration["centers_after"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(committed.len(), 3);
+
+    let history = cli()
+        .args(["--json", "spsa", "history"])
+        .arg(&run)
+        .output()
+        .unwrap();
+    assert!(
+        history.status.success(),
+        "{}",
+        String::from_utf8_lossy(&history.stderr)
+    );
+    let history: Value = serde_json::from_slice(&history.stdout).unwrap();
+    let report = &history["report"];
+    assert_eq!(report["knobs"], serde_json::json!(["Hash"]));
+    assert_eq!(report["completed_iterations"], 3);
+    let rows = report["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[0]["iteration"], 0);
+    assert_eq!(rows[0]["centers"], serde_json::json!([16.0]));
+    for (row, centers) in rows[1..].iter().zip(&committed) {
+        assert_eq!(&row["centers"], centers, "{row}");
+    }
+
+    let csv = cli()
+        .args(["spsa", "history", "--csv", "--every", "2"])
+        .arg(&run)
+        .output()
+        .unwrap();
+    assert!(csv.status.success());
+    let csv = String::from_utf8(csv.stdout).unwrap();
+    let lines = csv.lines().collect::<Vec<_>>();
+    assert_eq!(lines[0], "iteration,Hash");
+    let iterations = lines[1..]
+        .iter()
+        .map(|line| line.split(',').next().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(iterations, ["0", "2", "3"]);
+
+    let both = cli()
+        .args(["--json", "spsa", "history", "--csv"])
+        .arg(&run)
+        .output()
+        .unwrap();
+    assert_eq!(both.status.code(), Some(2));
+}

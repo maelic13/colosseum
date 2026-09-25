@@ -15,6 +15,7 @@ use `--dry-run --json` before a costly live workflow.
 | `spsa` | `colosseum-cli spsa ./engine --tune ./tune.toml --r-end 0.002 --iterations 100 --games-per-iteration 8` |
 | `spsa plan` | `colosseum-cli spsa plan --tune ./tune.toml --r-end 0.002 --pilot-game-seconds 3.2 --pilot-game-seconds 3.6` |
 | `spsa status` | `colosseum-cli spsa status ./runs/tune --json` |
+| `spsa history` | `colosseum-cli spsa history ./runs/tune --csv --every 100` |
 | `nps` | `colosseum-cli nps ./engine --nodes 10000000` |
 | `book verify` | `colosseum-cli book verify ./openings.epd` |
 | `book hash` | `colosseum-cli book hash ./openings.epd` |

@@ -114,7 +114,7 @@ When reporting the next step, always report its model as well.
   resume events its documentation promises; under `--json` the note stays
   on stderr and the JSON value also carries the resume facts; one
   regression test per item; `CHANGELOG-CLI.md` Unreleased — PLAN §Phase 12(a)
-- ☐ **12.2** — **Model: Terra High.** `spsa history`: the centre vector after
+- ☑ **12.2** — **Model: Terra High.** `spsa history`: the centre vector after
   every completed iteration, rebuilt from the journal, as a table, `--json`
   or `--csv` — PLAN §Phase 12(b)
 - ☐ **12.3** — **Model: Terra High.** `spsa --seed-from <run dir>`: a fresh

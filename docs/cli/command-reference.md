@@ -574,9 +574,10 @@ Usage: colosseum-cli spsa [OPTIONS] [EXECUTABLE]
        colosseum-cli spsa [OPTIONS] [EXECUTABLE] <COMMAND>
 
 Commands:
-  plan    Report the exact gain schedule and factual workload without launching an engine
-  status  Read the last durable tune snapshot and report labelled trajectory heuristics
-  help    Print this message or the help of the given subcommand(s)
+  plan     Report the exact gain schedule and factual workload without launching an engine
+  status   Read the last durable tune snapshot and report labelled trajectory heuristics
+  history  Print the centre vector after every completed iteration, rebuilt from the journal without changing the run; works while the tune runs
+  help     Print this message or the help of the given subcommand(s)
 
 Arguments:
   [EXECUTABLE]
@@ -589,25 +590,25 @@ Options:
       --dry-run
           Resolve and print configuration/invocations without launching an engine
 
-      --label <LABEL>
-
-
       --run-file <PATH>
           Load reusable command options from an inheritable TOML run file
 
-      --engine-arg <ARGUMENTS>
+      --label <LABEL>
 
 
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
 
-      --cwd <CWD>
+      --engine-arg <ARGUMENTS>
 
 
       --stop-grace-secs <SECONDS>
           Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
 
           [default: 30]
+
+      --cwd <CWD>
+
 
       --env <KEY=VALUE>
 
@@ -846,6 +847,45 @@ Options:
 
       --dry-run
           Resolve and print configuration/invocations without launching an engine
+
+      --run-file <PATH>
+          Load reusable command options from an inheritable TOML run file
+
+      --unset-run-option <LONG_NAME>
+          Remove one inherited run-file option before applying CLI arguments
+
+      --stop-grace-secs <SECONDS>
+          Seconds a game in flight may take to finish after an interrupt asks a durable run to stop; a second interrupt abandons it at once
+
+          [default: 30]
+
+  -h, --help
+          Print help
+```
+
+## `colosseum-cli spsa history`
+
+```text
+Print the centre vector after every completed iteration, rebuilt from the journal without changing the run; works while the tune runs
+
+Usage: colosseum-cli spsa history [OPTIONS] <RUN_DIRECTORY>
+
+Arguments:
+  <RUN_DIRECTORY>
+          Self-contained SPSA run directory to read without mutation
+
+Options:
+      --csv
+          Print comma-separated values: a header of knob names, then one row per iteration. Not with `--json`
+
+      --json
+          Emit exactly one JSON value on stdout
+
+      --dry-run
+          Resolve and print configuration/invocations without launching an engine
+
+      --every <EVERY>
+          Keep every Nth iteration, and always the initial centres and the latest iteration
 
       --run-file <PATH>
           Load reusable command options from an inheritable TOML run file
