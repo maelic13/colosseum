@@ -14,6 +14,12 @@ pub(crate) struct SpsaCommand {
     /// Ordered TOML parameter vector to tune against the live UCI schema.
     #[arg(long)]
     pub(crate) tune: Option<PathBuf>,
+    /// Start from a completed tune's final rounded values, in its run
+    /// directory: its parameters, bounds and c_end are reused unless --tune
+    /// names the same parameters with new ones. The schedule, seed and horizon
+    /// are this command's.
+    #[arg(long, value_name = "RUN_DIR")]
+    pub(crate) seed_from: Option<PathBuf>,
     /// Terminal SPSA gain ratio shared by every tuned parameter.
     #[arg(long)]
     pub(crate) r_end: Option<f64>,
@@ -611,6 +617,108 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The tune a new one was seeded from: where it is, and which result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct SpsaSeedSource {
+    pub(crate) run_directory: PathBuf,
+    pub(crate) result_sha256: String,
+    pub(crate) completed_iterations: u32,
+}
+
+/// A new tune's parameter vector seeded from a completed one.
+#[derive(Debug)]
+pub(crate) struct SpsaSeed {
+    pub(crate) tune: SpsaTune,
+    pub(crate) source: SpsaSeedSource,
+}
+
+/// Seed a tune from a completed tune's run directory: its final values, as
+/// the engine received them, become the new initial values. The surface —
+/// names, bounds and `c_end` — is the source tune's unless `requested` gives
+/// the same parameter names, in the same order, with new ones.
+///
+/// Only a completed tune seeds another: a stopped one has not reached the
+/// values its schedule was planned to reach, and an invalid one has no values
+/// to trust.
+pub(crate) fn seed_spsa_tune(
+    source: &Path,
+    requested: Option<SpsaTune>,
+) -> Result<SpsaSeed, String> {
+    let run_directory = dunce::canonicalize(source)
+        .map_err(|error| format!("cannot resolve --seed-from {}: {error}", source.display()))?;
+    let refuse = |reason: String| format!("cannot seed from {}: {reason}", run_directory.display());
+    let record = RunRecord::read(&run_directory).map_err(|error| refuse(error.to_string()))?;
+    if record.command != "spsa" {
+        return Err(refuse(format!(
+            "it is a {:?} run, not an SPSA tune",
+            record.command
+        )));
+    }
+    if record.status != RunStatus::Completed {
+        return Err(refuse(format!(
+            "the tune is {:?}; only a completed tune seeds a new one",
+            record.status
+        )));
+    }
+    let workflow = serde_json::from_value::<StoredSpsaWorkflow>(record.workflow)
+        .map_err(|error| refuse(format!("invalid stored workflow: {error}")))?;
+    let result_path = run_directory.join("result.json");
+    let result_sha256 = executable_sha256(&result_path).map_err(refuse)?;
+    let document: Value =
+        serde_json::from_slice(&fs::read(&result_path).map_err(|error| refuse(error.to_string()))?)
+            .map_err(|error| refuse(format!("result.json does not parse: {error}")))?;
+    let tuned = document
+        .pointer("/report/tuned_result")
+        .or_else(|| document.get("tuned_result"))
+        .ok_or_else(|| refuse("result.json names no tuned result".into()))?;
+    require_schema_version(tuned, SPSA_TUNE_RESULT_SCHEMA_VERSION).map_err(|version| {
+        refuse(SpsaTuneResultError::UnsupportedResultSchema { version }.to_string())
+    })?;
+    let tuned: SpsaTuneResult = serde_json::from_value(tuned.clone())
+        .map_err(|error| refuse(format!("the tuned result does not parse: {error}")))?;
+    tuned
+        .validate()
+        .map_err(|error| refuse(format!("invalid tuned result: {error}")))?;
+
+    let surface = match requested {
+        None => workflow
+            .bound_tune
+            .parameters
+            .into_iter()
+            .map(|bound| bound.parameter)
+            .collect::<Vec<_>>(),
+        Some(requested) => {
+            let names = |parameters: &mut dyn Iterator<Item = &str>| {
+                parameters.map(str::to_owned).collect::<Vec<_>>()
+            };
+            let wanted = names(&mut requested.parameters.iter().map(|p| p.name.as_str()));
+            let seeded = names(&mut tuned.parameters.iter().map(|p| p.name.as_str()));
+            if wanted != seeded {
+                return Err(refuse(format!(
+                    "--tune names {wanted:?}, but the tune it seeds from has {seeded:?}; the names and their order must match"
+                )));
+            }
+            requested.parameters
+        }
+    };
+    let parameters = surface
+        .into_iter()
+        .zip(&tuned.parameters)
+        .map(|(parameter, result)| SpsaTuneParameter {
+            initial: result.tuned,
+            ..parameter
+        })
+        .collect();
+    Ok(SpsaSeed {
+        tune: SpsaTune { parameters },
+        source: SpsaSeedSource {
+            run_directory,
+            result_sha256,
+            completed_iterations: tuned.completed_iterations,
+        },
+    })
+}
+
 /// A tune's centre vector after each completed iteration.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct SpsaHistoryReport {
@@ -883,14 +991,24 @@ pub(crate) async fn run_spsa_command(
         eprintln!("configuration error: book order/start/plies require --book");
         return ExitCode::from(2);
     }
-    let Some(tune_path) = command.tune.as_ref() else {
-        eprintln!("configuration error: --tune is required for a live SPSA run");
-        return ExitCode::from(2);
-    };
-    let tune = match load_spsa_tune(tune_path) {
+    let requested_tune = match command.tune.as_deref().map(load_spsa_tune).transpose() {
         Ok(tune) => tune,
         Err(error) => {
             eprintln!("configuration error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let (tune, seeded_from) = match (&command.seed_from, requested_tune) {
+        (Some(source), requested) => match seed_spsa_tune(source, requested) {
+            Ok(seed) => (seed.tune, Some(seed.source)),
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        },
+        (None, Some(tune)) => (tune, None),
+        (None, None) => {
+            eprintln!("configuration error: --tune or --seed-from is required for a live SPSA run");
             return ExitCode::from(2);
         }
     };
@@ -1057,7 +1175,10 @@ pub(crate) async fn run_spsa_command(
             return ExitCode::from(2);
         }
     };
-    let mut path_pointers = vec!["/engine/executable".into(), "/tune/path".into()];
+    let mut path_pointers = vec!["/engine/executable".into()];
+    if command.tune.is_some() {
+        path_pointers.push("/tune/path".into());
+    }
     if engine.working_directory.is_some() {
         path_pointers.push("/engine/working_directory".into());
     }
@@ -1076,7 +1197,6 @@ pub(crate) async fn run_spsa_command(
         "engine": &engine,
         "engine_sha256": "computed-and-checked-before-live-launch",
         "tune": {
-            "path": tune_path,
             "parameters": &tune.parameters,
             "live_schema": "verified-before-game-launch"
         },
@@ -1098,6 +1218,13 @@ pub(crate) async fn run_spsa_command(
     // iteration count directly keeps the configuration it always had.
     if let Some(total_games) = command.total_games {
         requested["total_games"] = json!(total_games);
+    }
+    // Where the vector came from: a tune file, a completed tune, or both.
+    if let Some(path) = &command.tune {
+        requested["tune"]["path"] = json!(path);
+    }
+    if let Some(source) = &seeded_from {
+        requested["tune"]["seeded_from"] = json!(source);
     }
     let resolved = match resolve_config(
         built_in_defaults(),
@@ -1296,6 +1423,7 @@ pub(crate) async fn run_spsa_command(
         "tune_audit": &tune_audit,
         "engine_sha256": &engine_sha256,
         "schedule": verified_schedule.artifact(),
+        "seeded_from": &seeded_from,
         "engine_time_control": engine_time_control,
         "adjudication": adjudication,
         "ponder": conditions.ponder,

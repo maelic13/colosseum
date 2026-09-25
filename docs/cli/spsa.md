@@ -41,6 +41,23 @@ terminal gain ratio:
 colosseum-cli spsa ./engine --tune tune.toml --r-end 0.002
 ```
 
+To continue from where a finished tune ended — a second tune with a fresh
+schedule, seed and horizon — seed it from that tune's run directory instead
+of writing a new tune file by hand:
+
+```text
+colosseum-cli spsa ./engine --seed-from ./runs/tune-1 --r-end 0.002 --iterations 2000
+```
+
+The new tune's initial values are the finished tune's tuned values, rounded
+exactly as the engine received them, and it keeps that tune's parameters,
+order, bounds and `c_end`. Give `--tune` as well to change the bounds or
+`c_end`: the file must name the same parameters in the same order, and its
+initial values are replaced by the seeded ones. Only a completed tune can seed
+another; a stopped, cancelled or invalid one is refused with its status. The
+run record keeps the source directory, the SHA-256 of its `result.json` and
+how many iterations it completed.
+
 The defaults are 5,000 iterations and 32 games per iteration. They are useful
 starting values, not minimums. `--iterations 1 --games-per-iteration 2` is a
 valid smoke run; games per iteration must be positive and even so every opening

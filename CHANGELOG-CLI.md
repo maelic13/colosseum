@@ -10,6 +10,9 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `spsa history` prints a tune's centre vector after every completed
   iteration — as a table, CSV or JSON, optionally every Nth iteration — and
   works while the tune is still running
+- `spsa --seed-from <run dir>` starts a new tune from a completed tune's final
+  rounded values, keeping its parameters and bounds unless `--tune` gives new
+  ones for the same parameters
 
 ### Changed
 - A resumed run's progress blocks and final report show the run's total

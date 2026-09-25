@@ -625,6 +625,9 @@ Options:
       --tune <TUNE>
           Ordered TOML parameter vector to tune against the live UCI schema
 
+      --seed-from <RUN_DIR>
+          Start from a completed tune's final rounded values, in its run directory: its parameters, bounds and c_end are reused unless --tune names the same parameters with new ones. The schedule, seed and horizon are this command's
+
       --r-end <R_END>
           Terminal SPSA gain ratio shared by every tuned parameter
 

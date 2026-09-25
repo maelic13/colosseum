@@ -117,7 +117,7 @@ When reporting the next step, always report its model as well.
 - ☑ **12.2** — **Model: Terra High.** `spsa history`: the centre vector after
   every completed iteration, rebuilt from the journal, as a table, `--json`
   or `--csv` — PLAN §Phase 12(b)
-- ☐ **12.3** — **Model: Terra High.** `spsa --seed-from <run dir>`: a fresh
+- ☑ **12.3** — **Model: Terra High.** `spsa --seed-from <run dir>`: a fresh
   tune starting from a finished tune's rounded final centres, same surface
   unless `--tune` is given — PLAN §Phase 12(b)
 - ☐ **12.4** — **Model: Terra High.** A warning, kept in the run record,
