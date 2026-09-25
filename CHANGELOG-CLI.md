@@ -6,6 +6,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-25
+
+What the first weeks of use asked for: resumed runs that keep their time and
+say where they stand, a readable SPSA trajectory, and tunes that continue
+from a finished one.
+
 ### Added
 - `spsa history` prints a tune's centre vector after every completed
   iteration — as a table, CSV or JSON, optionally every Nth iteration — and
