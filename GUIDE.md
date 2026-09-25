@@ -120,7 +120,7 @@ When reporting the next step, always report its model as well.
 - ☑ **12.3** — **Model: Terra High.** `spsa --seed-from <run dir>`: a fresh
   tune starting from a finished tune's rounded final centres, same surface
   unless `--tune` is given — PLAN §Phase 12(b)
-- ☐ **12.4** — **Model: Terra High.** A warning, kept in the run record,
+- ☑ **12.4** — **Model: Terra High.** A warning, kept in the run record,
   whenever a command-line option list replaces a run file's list and drops
   values it named — PLAN §Phase 12(b)
 

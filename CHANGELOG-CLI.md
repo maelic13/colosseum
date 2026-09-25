@@ -13,6 +13,9 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `spsa --seed-from <run dir>` starts a new tune from a completed tune's final
   rounded values, keeping its parameters and bounds unless `--tune` gives new
   ones for the same parameters
+- A warning, kept in the run record, when an option list on the command line
+  replaces a run file's list and drops entries it named — such as a side's
+  `Hash` and `Threads` options
 
 ### Changed
 - A resumed run's progress blocks and final report show the run's total

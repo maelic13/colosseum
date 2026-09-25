@@ -93,6 +93,14 @@ array-valued repeated option. Use `--unset-run-option book` to remove an
 inherited option without supplying a replacement. Invalid or absent unset
 targets are errors rather than silent typos.
 
+Replacing a list drops the run file's entries the command line does not
+name. When it does, the run says so: a warning on standard error names the
+option and every dropped entry, and the run record keeps it as a
+`run-file-list-replaced` anomaly. An entry of the form `NAME=VALUE` counts as
+named when the command line gives the same `NAME`, so `--a-option Hash=128`
+over a run file's `["Hash=64", "Threads=2"]` changes `Hash` and drops
+`Threads=2` — repeat `--a-option Threads=2` to keep it.
+
 When both the file and command line contain a command, the explicit command and
 its positionals are used; the file contributes only options. This makes a
 shared `[options]` file safe and lets engine paths remain ordinary CLI inputs.

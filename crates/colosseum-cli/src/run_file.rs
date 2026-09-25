@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -58,17 +59,66 @@ pub enum RunFileInvocationError {
     InvalidIndexedPath { value: String },
 }
 
-/// Expand `--run-file` into normal arguments before the real Clap parse.
+/// A run file's list option that the command line replaced, losing entries
+/// the run file named.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplacedRunFileList {
+    /// The option's long name, without the leading dashes.
+    pub option: String,
+    /// The run file's entries the command line no longer names, in run-file
+    /// order.
+    pub dropped: Vec<String>,
+}
+
+impl ReplacedRunFileList {
+    /// The warning an operator reads, and the run record keeps.
+    #[must_use]
+    pub fn message(&self) -> String {
+        format!(
+            "--{} on the command line replaces the run file's list and drops {}; repeat them on the command line to keep them",
+            self.option,
+            self.dropped.join(", ")
+        )
+    }
+}
+
+/// What this invocation's command line replaced in its run file, set once
+/// when the arguments are expanded.
+static REPLACED_LISTS: OnceLock<Vec<ReplacedRunFileList>> = OnceLock::new();
+
+/// The run-file lists this invocation's command line replaced; empty without
+/// a run file or before the arguments were expanded.
+pub fn replaced_run_file_lists() -> &'static [ReplacedRunFileList] {
+    REPLACED_LISTS.get().map_or(&[], Vec::as_slice)
+}
+
+/// Expand `--run-file` into normal arguments before the real Clap parse, and
+/// warn on standard error about each run-file list the command line replaced
+/// at the cost of entries it named. The warnings are also kept for the run
+/// record.
 pub fn expand_arguments(
     arguments: impl IntoIterator<Item = OsString>,
 ) -> Result<Vec<OsString>, RunFileInvocationError> {
+    let (expanded, replaced) = expand_arguments_reporting(arguments)?;
+    for list in &replaced {
+        eprintln!("warning: {}", list.message());
+    }
+    let _ = REPLACED_LISTS.set(replaced);
+    Ok(expanded)
+}
+
+/// [`expand_arguments`] without the side effects: the expanded arguments and
+/// the run-file lists the command line replaced.
+pub fn expand_arguments_reporting(
+    arguments: impl IntoIterator<Item = OsString>,
+) -> Result<(Vec<OsString>, Vec<ReplacedRunFileList>), RunFileInvocationError> {
     let original = arguments.into_iter().collect::<Vec<_>>();
     let Some(executable) = original.first().cloned() else {
-        return Ok(original);
+        return Ok((original, Vec::new()));
     };
     let scan = scan_controls(&original[1..])?;
     let Some(run_file) = scan.run_file else {
-        return Ok(original);
+        return Ok((original, Vec::new()));
     };
 
     let current_directory =
@@ -82,14 +132,28 @@ pub fn expand_arguments(
         .iter()
         .map(|name| option_pointer(name))
         .collect::<Vec<_>>();
+    let mut replaced = Vec::new();
     if let Some(options) = first.value().get("options").and_then(Value::as_object) {
-        for name in options.keys() {
+        for (name, value) in options {
             let replaced_by_alternative =
                 ALTERNATIVE_OPTIONS.iter().any(|(option, alternative)| {
                     option == name && explicit_flags.contains(*alternative)
                 });
             if explicit_flags.contains(name) || replaced_by_alternative {
                 unsets.push(option_pointer(name));
+            }
+            if explicit_flags.contains(name)
+                && let Value::Array(entries) = value
+            {
+                let run_file = entries.iter().filter_map(scalar_text).collect::<Vec<_>>();
+                let command_line = explicit_values(&original[1..], name);
+                let dropped = dropped_entries(&run_file, &command_line);
+                if !dropped.is_empty() {
+                    replaced.push(ReplacedRunFileList {
+                        option: name.clone(),
+                        dropped,
+                    });
+                }
             }
         }
     }
@@ -120,7 +184,48 @@ pub fn expand_arguments(
         emit_options(&resolved, &mut expanded)?;
         expanded.extend(original.into_iter().skip(1));
     }
-    Ok(expanded)
+    Ok((expanded, replaced))
+}
+
+/// The run file's entries a command-line list no longer names. An entry of
+/// the form `NAME=VALUE` is named by its `NAME`, so giving `Hash=128` where
+/// the run file had `Hash=64` changes a value rather than dropping it.
+fn dropped_entries(run_file: &[String], command_line: &[String]) -> Vec<String> {
+    let key = |entry: &str| {
+        entry
+            .split_once('=')
+            .map_or(entry, |(name, _)| name)
+            .trim()
+            .to_owned()
+    };
+    let named = command_line
+        .iter()
+        .map(|entry| key(entry))
+        .collect::<BTreeSet<_>>();
+    run_file
+        .iter()
+        .filter(|entry| !named.contains(&key(entry)))
+        .cloned()
+        .collect()
+}
+
+/// Every value the command line gives the long option `name`, in either the
+/// `--name value` or the `--name=value` form.
+fn explicit_values(arguments: &[OsString], name: &str) -> Vec<String> {
+    let flag = format!("--{name}");
+    let prefix = format!("{flag}=");
+    let mut values = Vec::new();
+    let mut arguments = arguments.iter().filter_map(|argument| argument.to_str());
+    while let Some(argument) = arguments.next() {
+        if let Some(value) = argument.strip_prefix(&prefix) {
+            values.push(value.to_owned());
+        } else if argument == flag
+            && let Some(value) = arguments.next()
+        {
+            values.push(value.to_owned());
+        }
+    }
+    values
 }
 
 fn resolve_run_file(
@@ -501,6 +606,68 @@ mod tests {
 
     use super::*;
 
+    /// A run file's `a-option` list, expanded against a command line.
+    fn replaced_lists(root: &Path, command_line: &[&str]) -> Vec<ReplacedRunFileList> {
+        let run = root.join("run.toml");
+        fs::write(
+            &run,
+            "command = [\"match\"]\npositionals = [\"a\", \"b\"]\n[options]\ngames = 4\n\
+             a-option = [\"Hash=64\", \"Threads=2\", \"Ponder=false\"]\n",
+        )
+        .unwrap();
+        let mut arguments = vec![
+            OsString::from("colosseum-cli"),
+            OsString::from("--run-file"),
+            run.into_os_string(),
+        ];
+        arguments.extend(command_line.iter().map(OsString::from));
+        expand_arguments_reporting(arguments).unwrap().1
+    }
+
+    #[test]
+    fn a_command_line_list_that_drops_run_file_entries_is_reported_by_name() {
+        let root = tempfile::tempdir().unwrap();
+        let replaced = replaced_lists(root.path(), &["--a-option", "Hash=128"]);
+        assert_eq!(
+            replaced,
+            [ReplacedRunFileList {
+                option: "a-option".into(),
+                dropped: vec!["Threads=2".into(), "Ponder=false".into()],
+            }]
+        );
+        assert_eq!(
+            replaced[0].message(),
+            "--a-option on the command line replaces the run file's list and drops Threads=2, Ponder=false; repeat them on the command line to keep them"
+        );
+        // The `--name=value` form is the same list.
+        assert_eq!(
+            replaced_lists(root.path(), &["--a-option=Threads=4"])[0].dropped,
+            ["Hash=64", "Ponder=false"]
+        );
+    }
+
+    #[test]
+    fn a_command_line_list_that_names_every_entry_or_a_scalar_is_not_reported() {
+        let root = tempfile::tempdir().unwrap();
+        // New values for every entry the run file named drop nothing.
+        let every = [
+            "--a-option",
+            "Hash=128",
+            "--a-option",
+            "Threads=4",
+            "--a-option",
+            "Ponder=true",
+        ];
+        assert!(replaced_lists(root.path(), &every).is_empty());
+        // A scalar the command line replaces is an ordinary override.
+        assert!(replaced_lists(root.path(), &["--games", "8"]).is_empty());
+        // Without a run file there is nothing to replace.
+        let (_, replaced) =
+            expand_arguments_reporting([OsString::from("colosseum-cli"), OsString::from("match")])
+                .unwrap();
+        assert!(replaced.is_empty());
+    }
+
     #[test]
     fn expands_inherited_options_and_cli_replaces_repeated_values() {
         let root = tempfile::tempdir().unwrap();
@@ -517,14 +684,15 @@ mod tests {
         )
         .unwrap();
 
-        let expanded = expand_arguments([
+        let expanded = expand_arguments_reporting([
             OsString::from("colosseum-cli"),
             OsString::from("--run-file"),
             run.into_os_string(),
             OsString::from("--option"),
             OsString::from("Hash=128"),
         ])
-        .unwrap();
+        .unwrap()
+        .0;
         let text = expanded
             .iter()
             .map(|value| value.to_string_lossy().into_owned())
@@ -544,7 +712,7 @@ mod tests {
         let expand = |file: &str, extra: [&str; 2]| {
             let run = root.path().join("tune.toml");
             fs::write(&run, file).unwrap();
-            expand_arguments(
+            expand_arguments_reporting(
                 [
                     OsString::from("colosseum-cli"),
                     OsString::from("--run-file"),
@@ -554,6 +722,7 @@ mod tests {
                 .chain(extra.map(OsString::from)),
             )
             .unwrap()
+            .0
             .iter()
             .map(|value| value.to_string_lossy().into_owned())
             .collect::<Vec<_>>()
@@ -591,7 +760,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let run = root.path().join("common.toml");
         fs::write(&run, "[options]\nmovetime-ms = 100\n").unwrap();
-        let expanded = expand_arguments([
+        let expanded = expand_arguments_reporting([
             OsString::from("colosseum-cli"),
             OsString::from("--run-file"),
             run.into_os_string(),
@@ -601,7 +770,8 @@ mod tests {
             OsString::from("--games"),
             OsString::from("20"),
         ])
-        .unwrap();
+        .unwrap()
+        .0;
         let text = expanded
             .iter()
             .map(|value| value.to_string_lossy().into_owned())

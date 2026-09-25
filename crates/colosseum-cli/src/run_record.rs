@@ -181,6 +181,7 @@ impl RunRecorder {
             record: RunRecord::new(directory, command),
             writer: None,
         };
+        recorder.note_replaced_run_file_lists();
         recorder.persist()?;
         Ok(recorder)
     }
@@ -209,9 +210,21 @@ impl RunRecorder {
             record,
             writer: None,
         };
+        recorder.note_replaced_run_file_lists();
         recorder.touch();
         recorder.persist()?;
         Ok(recorder)
+    }
+
+    /// Keep each run-file list this invocation's command line replaced, so
+    /// the record says which entries the run did not get.
+    fn note_replaced_run_file_lists(&mut self) {
+        for list in crate::run_file::replaced_run_file_lists() {
+            self.record.anomalies.push(Anomaly {
+                code: "run-file-list-replaced".into(),
+                message: list.message(),
+            });
+        }
     }
 
     #[must_use]
