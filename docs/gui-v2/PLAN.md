@@ -37,8 +37,9 @@ Every step in §G9 is bound by them.
   the component catalogue is validated in a gallery on the real stack (2.2)
   before screens are specified against it.
 - **Mature technology agents work in reliably.** Any language is
-  acceptable. Provisionally TypeScript + React in a Tauri 2 shell (§G4),
-  confirmed or replaced by measurement at 2.3.
+  acceptable. The front end is TypeScript + React; the shell is a measured
+  choice at 2.3 between Electron and Tauri 2, Electron the default
+  expectation (§G4).
 - **Responsiveness and performance come first.** No freeze and no long
   loading, including for large tournaments: loading, creating and starting
   them. The numbers are set at 1.2 and are exit criteria at 2.3 and 4.8.
@@ -82,7 +83,7 @@ Three parts, one process boundary:
 | Part | Runs | Owns |
 |---|---|---|
 | **Front end** | the WebView (provisionally React) | rendering, navigation, view state; nothing that can take longer than a frame |
-| **Shell** | the host process (provisionally Tauri's Rust side) | CLI child processes, windows, file dialogs, the updater, the GUI-owned store, the app data directory |
+| **Shell** | the host process (Electron's main process by default expectation, or Tauri's Rust side; decided at 2.3) | CLI child processes, windows, file dialogs, the updater, the GUI-owned store, the app data directory |
 | **CLI** | one child process per running tournament, plus short-lived query invocations | scheduling, clocks, adjudication, faults, persistence and resume, PGN, ratings and statistics — everything in the run directory |
 
 **Ownership.** This application owns the engine library (names, versions,
@@ -136,19 +137,37 @@ coordinate. The live view shows all of them.
 
 ## G4. Technology
 
-**Provisional stack**, confirmed or replaced at 2.3: Tauri 2 shell (Rust
-side limited to §G3's shell duties), TypeScript, React, Vite; one component
-system (Mantine or shadcn/ui on Tailwind — chosen at 2.1 by how well the 1.4
-catalogue maps onto it); TanStack Table with virtualisation for every long
-table; uPlot for the live evaluation graph; a small SVG board of our own or
-chessground for the board; Inter and JetBrains Mono embedded; CSS variables
-for the tokens. The dependency list is the record; this paragraph is the
-starting point.
+**Front end** (settled unless it fails the budgets): TypeScript, React,
+Vite; **shadcn/ui on Radix primitives with Tailwind** as the component
+system, because the components live in this repository — which is what one
+reviewed catalogue in two themes needs — and Radix supplies keyboard and
+accessibility behaviour; CSS variables for the tokens; TanStack Table with
+TanStack Virtual for every long table; uPlot for the live evaluation graph,
+built for streaming; chessground (lichess's board) or a small SVG board of
+our own, since positions arrive as FEN and the board only renders; Inter and
+JetBrains Mono embedded. The front end is written shell-agnostic: it talks
+to the shell through one small typed interface (start, stop, events,
+queries, dialogs, settings), so the same code runs in either shell below.
+`docs/dependencies.md` is the record; this paragraph is the starting point.
 
-**Fallbacks, in order,** if 2.3 fails on any required platform: Electron
-(same front end, a different shell — the likely answer to a WebKitGTK
-failure), Tauri's Chromium runtime once stable, then Qt/QML, then Flutter.
-The process boundary means none of them touches the CLI.
+**Shell — a measured choice at 2.3.** The same front end is built into
+**Electron** and into **Tauri 2** and both are measured against the 1.2
+budgets on the three required platforms. Electron is the default
+expectation: this application links no Rust, so Tauri's Rust side would only
+spawn a child process that Node spawns as well; one language and one
+toolchain in the repository; one Chromium on every platform, which removes
+the WebKitGTK rendering and performance differences on Linux; mature
+packaging, signing and updater tooling; the cost is roughly 100 MB more on
+disk and 100–300 MB of idle memory, which does not matter next to a
+tournament running engines. Tauri is chosen only if it meets the budgets
+everywhere and its smaller bundle is judged worth its Rust side and the
+Linux testing overhead; its bundled Chromium runtime is alpha and is not
+planned on.
+
+**If the web front end itself fails the budgets** on a required platform in
+both shells, the fallbacks are Qt/QML and then Flutter, each measured the
+same way before anything is built. The process boundary means none of this
+touches the CLI.
 
 **Why not the Rust-native toolkits** is recorded in Colosseum's
 `docs/architecture/gui-v2-research.md` §4 and §5.
@@ -330,8 +349,9 @@ reason; the recommendation never changes the active model by itself.
 
 ### Phase 2 — Repository and technology proof (beside Phase 1 from M1)
 
-- **2.1 Skeleton** (`I2`). The provisional stack; formatter, linter,
-  type check, unit, component and end-to-end test runners; CI on the three
+- **2.1 Skeleton** (`I2`). The front end stack of §G4 behind the
+  shell-agnostic interface, in the Electron shell; formatter, linter, type
+  check, unit, component and end-to-end test runners; CI on the three
   required platforms; a packaged empty application for each required
   target; `docs/dependencies.md`; the user-facing `README.md`; the
   verification baseline written into `AGENTS.md`.
@@ -347,11 +367,14 @@ reason; the recommendation never changes the active model by itself.
   largest tournament's history, the maximum concurrent live games of the
   maximum running tournaments at the CLI's update rate, the virtualised
   games list, the 64-participant standings and crosstable, cold start,
-  memory — on macOS arm64, Windows x64 and Linux x64 (WebKitGTK is the
+  memory — the same front end built into Electron and into Tauri 2, both
+  measured on macOS arm64, Windows x64 and Linux x64 (WebKitGTK is Tauri's
   expected weak point).
-  **Exit:** budgets met on all three and the technology confirmed by ADR
-  (Colosseum ADR-0011's status updated there), or the failures recorded and
-  the §G4 fallbacks measured the same way before anything is built. (M4)
+  **Exit:** the shell chosen by ADR from the measurements, Electron unless
+  Tauri meets every budget and its smaller bundle is judged worth it
+  (Colosseum ADR-0011's status updated there); the other shell's build
+  removed; or, if the front end fails in both shells, the failures recorded
+  and the §G4 fallbacks measured the same way before anything is built. (M4)
 
 ### Phase 3 — Screen specifications (after 1.4, 2.2 and Colosseum 11.4)
 
@@ -421,7 +444,8 @@ over the protocol, with one game-playing implementation, in the CLI.
 |---|---|
 | A 1.x capability users rely on is lost | 1.1 inventory with every item classified; 3.3 and 4.8 check every *keep* item |
 | The CLI cannot serve a requirement, discovered late | 1.2 is handed to Colosseum 11.3 before any screen is specified; *not feasible* items are resolved with the maintainer first |
-| The web front end is not fast enough, notably WebKitGTK | Budgets as numbers at 1.2, measured at 2.3 on synthetic streams before anything is built; Electron and Tauri's Chromium runtime keep the front end as first fallbacks |
+| The web front end is not fast enough, notably WebKitGTK | Budgets as numbers at 1.2, measured at 2.3 on synthetic streams in both shells before anything is built; Electron's single Chromium is the default expectation; Qt/QML and Flutter only if the front end itself fails |
+| The shell choice leaks into the front end | one small typed shell interface from 2.1 on; the front end never imports a shell API directly |
 | The design system is fiction | 2.2 builds the whole catalogue on the real stack before Phase 3 specifies screens against it |
 | Protocol drift between the repositories | the handshake version, the published schema and fixtures, the contract test against the pinned CLI in CI, one CLI bundled per release |
 | A stalled front end stalls an engine | the CLI's bounded emission (S5.15); here, one render per frame and a snapshot resync after a `gap` |

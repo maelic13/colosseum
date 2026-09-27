@@ -1916,10 +1916,15 @@ review), binding for every step in both repositories:**
   the component catalogue is validated in a gallery on the real stack (GUI
   2.2) before screens are specified against it.
 - **Mature technology agents work in reliably.** Any language is acceptable.
-  Provisionally TypeScript + React in a Tauri 2 shell over the CLI; confirmed
-  or replaced by measurement at GUI 2.3. If it fails, the fallbacks keep the
-  front end and change the shell first — Electron, then Tauri's Chromium
-  runtime once stable — before Qt/QML or Flutter are considered.
+  The front end is TypeScript + React with shadcn/ui on Radix and Tailwind
+  as the provisional component system. The **shell is a measured choice at
+  GUI 2.3**: the same front end is built into Electron and into Tauri 2 and
+  both are measured on the three required platforms; Electron is the default
+  expectation, because the GUI links no Rust and one Chromium on every
+  platform removes the WebKitGTK risk on Linux, and Tauri is chosen only if
+  it meets the budgets everywhere and its smaller bundle is judged worth it.
+  Qt/QML and Flutter are considered only if the web front end itself fails
+  the budgets.
 - **Responsiveness and performance come first.** No freeze and no long
   loading, including for large tournaments: loading them, creating them and
   starting them. The numbers are set at GUI 1.2 and are exit criteria at GUI
@@ -2222,7 +2227,7 @@ Not scheduled steps; each needs its own evidence before it becomes one.
 | A default change silently alters fixtures | Each change is a numbered step with its own fixture update, and the recurring procedure repeats the oracle replay and the parity matrix on the final state |
 | GUI v2 loses a 1.x capability users rely on | GUI 1.1 inventory with every item classified; GUI 4.8 exit checks every *keep* item |
 | The CLI cannot serve a GUI requirement, discovered late | 11.3 evaluates the CLI against every requirement before screens are specified; *not feasible* items resolved with the maintainer first |
-| The web front end is not fast enough, notably WebKitGTK on Linux | Budgets set as numbers at GUI 1.2 and measured at GUI 2.3 on all three platforms against the CLI's synthetic streams before anything is built; Electron and Tauri's Chromium runtime keep the front end and are the first fallbacks; the process boundary makes the whole front end replaceable |
+| The web front end is not fast enough, notably WebKitGTK on Linux | Budgets set as numbers at GUI 1.2 and measured at GUI 2.3 on all three platforms against the CLI's synthetic streams before anything is built, in both Electron and Tauri with Electron the default expectation; the process boundary makes the whole front end replaceable |
 | Protocol drift between two repositories | A versioned handshake, the generated JSON Schema and fixtures published with the CLI, the GUI repository running the pinned CLI against those fixtures in its CI, the desktop application bundling one CLI release |
 | The protocol alters what a run measures | S5.15: emission never on the game path; protocol-driven and plain runs produce identical durable artifacts with stub engines; a 13.3 exit criterion |
 | A stalled front end stalls an engine's clock | S5.15: bounded queue on its own task, state dropped first, `gap` facts instead of blocking |

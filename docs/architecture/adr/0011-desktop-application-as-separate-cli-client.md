@@ -76,13 +76,17 @@ re-implemented from scratch. The requirements, recorded in PLAN §Phase 11:
    run file the CLI is started on, and its tournament list is a rebuildable
    index over run directories. CPU placement stays a CLI feature; the desktop
    application starts tournaments with placement off.
-5. **Technology, provisionally:** a TypeScript + React front end in a Tauri 2
-   shell whose Rust side only manages the CLI process, windows, file dialogs
-   and updates. It is confirmed or replaced by the performance proof at GUI step
-   2.3, measured against the budgets set at GUI step 1.2 with the CLI's
-   synthetic streams. The fallbacks keep the front end and change the shell
-   first: Electron, then Tauri's Chromium runtime once it is stable; Qt/QML
-   and Flutter only after those. Because the boundary is a
+5. **Technology, provisionally:** a TypeScript + React front end (shadcn/ui
+   on Radix and Tailwind) in a desktop shell that only manages the CLI
+   process, windows, file dialogs and updates. The shell is a measured
+   choice at GUI step 2.3 between Electron and Tauri 2, the same front end
+   built into both and measured against the budgets set at GUI step 1.2 with
+   the CLI's synthetic streams on the three required platforms. Electron is
+   the default expectation: the desktop application links no Rust, so
+   Tauri's Rust side buys nothing here, and one Chromium on every platform
+   removes the WebKitGTK risk on Linux at a size and memory cost that does
+   not matter next to running engines. Qt/QML and Flutter are considered
+   only if the web front end itself fails the budgets. Because the boundary is a
    process protocol, replacing the front-end technology does not touch this
    repository.
 
