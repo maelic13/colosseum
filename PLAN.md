@@ -36,25 +36,25 @@ argumentation.
 
 ## S1. Implemented state
 
-**The CLI 0.1.0 is implemented, corrected, qualified and ready to publish.**
-Phases 0–9 built and accepted it; Phase 10 applied the first-release
+**Published: GUI 1.1.0 and CLI 0.1.0 (2026-09-22), CLI 0.2.0 (2026-09-25).**
+Phases 0–9 built and accepted the CLI; Phase 10 applied the first-release
 corrections a maintainer review found cheaper before anyone depends on
 published defaults (adjudication off by default, class-aware placement,
 per-move annotations, the final-centre SPSA estimator, graceful stop, the
 slot pool and the arrival-stamped clock model, persistent engines per slot,
 and the rest), qualified the result on a real engine, and finished the
-release preparation: the product versions and the tag contract, one build
-entry point, the user documentation and the acceptance repeat. It is all
-recorded in
+release preparation. It is all recorded in
 [`docs/architecture/phase-10-record.md`](docs/architecture/phase-10-record.md).
-Only the maintainer's remote operations remain — the candidates, the pull
-request, the squash-merge and the two tags. The release ships both products:
-the CLI as **0.1.0** and the GUI as **1.1.0** from the same merged source.
-Phase 11 then moves the GUI onto the same game-playing mechanism, and is the
-main line of development afterwards. This document remains the binding design
-record and maintenance specification.
+Phase 12.1–12.4, the first adoption reports, shipped as CLI 0.2.0.
+**Phase 11 is the main line of development:** the desktop application is
+re-designed and re-built as a separate client of the CLI in its own
+repository, and this repository becomes the CLI alone
+([ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md)).
+This document remains the binding design record and maintenance
+specification.
 
-**Colosseum is the implementation identity for the whole product.** The desktop
+**Colosseum is the implementation identity for the whole product** until step
+11A.6 names the two products again. The desktop
 product and executable are **Colosseum** / `colosseum`; its Cargo package is
 `colosseum-gui`. The independent CLI product, Cargo package and executable are
 **Colosseum CLI** / `colosseum-cli`. Shared packages keep their coherent
@@ -73,8 +73,8 @@ affinity adapters), `colosseum-gui` (desktop composition root, owning its
 library, config and paths) and `colosseum-cli` (headless composition root
 with its own match, SPRT, SPSA and tournament drivers). The GUI and CLI never
 depend on each other. The one duplication left is the game-playing driver:
-the GUI's scheduler and the CLI's drivers both sit on the same runner, and
-Phase 11 removes the GUI's copy. The required suite is hermetic and runs on
+the GUI's scheduler and the CLI's drivers both sit on the same runner; Phase
+11 removes the GUI's copy together with the egui application (11E.1). The required suite is hermetic and runs on
 Windows, Linux and macOS in debug and optimized profiles.
 
 Validation engines: **Rarog** (Rust) and **Basilisk** (C++), chosen because they
@@ -376,6 +376,14 @@ what keeps a possible Phase 9.0 rename bounded.
 - CLI and GUI have separate versions, tags, artifacts and release notes even if
   they stay in one repository.
 - Changes to shared layers run both CLI and GUI test suites.
+
+**After Phase 11** ([ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md)):
+`colosseum-gui`, the scheduler and the SQLite store leave the workspace; the
+desktop application is a separate repository that starts the CLI as a child
+process and speaks the protocol of S5.15. The independence contract above then
+holds across repositories: the CLI still reads no desktop library,
+configuration or data path — the desktop application passes everything as
+arguments or protocol messages, exactly as a user would.
 
 ### Required end state
 
@@ -1581,6 +1589,43 @@ every replaced generic implementation and retain only declarative/thin policy
 glue and the residual list, with no workflow lost. Any exception is recorded
 here as either a named generic gap or an intentional project-specific policy.
 
+### 5.15 Front-end protocol — the desktop application's contract
+
+**Status:** principles binding now; the message catalogue is written at
+Phase 11C.1 from the gap analysis (11A.3) and the screen specifications
+(11A.7).
+
+A front end — the desktop application first, any other client later — drives
+the CLI as a child process, as a chess GUI drives a UCI engine.
+
+- **Framing.** One JSON object per line on standard output for events and
+  responses; one JSON object per line on standard input for commands. Human
+  output stays on standard error. It is an explicit mode, never inferred.
+- **Versioning.** Every message carries `protocol`, the protocol's major and
+  minor version. Added fields and message types are a minor change a client
+  must ignore when unknown; anything else is a major change. The JSON Schema
+  is generated from the Rust types, versioned with the CLI and published as a
+  release asset; conformance fixtures live in `tests/fixtures/`.
+- **Transport independence.** Messages are defined apart from stdio, so the
+  same catalogue can later travel over a local socket (re-attaching to a
+  running tournament) or a WebSocket (broadcast, remote control) without a
+  second protocol. Neither transport is scheduled.
+- **The protocol observes and requests; it never changes the result.** A run
+  driven through the protocol writes the same run directory, PGN, statistics
+  and run record as the same run without it, apart from timing. Live events
+  are best-effort and rate-limited; durable state is the run directory's.
+- **Control.** *Stop* finishes the games in progress, starts no new one and
+  ends the run cancelled and resumable, with no grace timeout; *stop now*
+  abandons the games in progress, which replay on resume. End of input is
+  *stop*, so a front end that dies leaves a resumable run, not an orphan.
+  Both work identically on every platform, including Windows, where a console
+  interrupt cannot be sent to one child process (S5.11).
+- **Scale.** Queries over large run directories answer within the 11A.2
+  budgets without reading every game (summary and paged game queries), so a
+  front end never waits on a full PGN parse to show a tournament.
+
+---
+
 ## S6. Testing requirements — binding
 
 A harness bug is worse than an engine bug, because it is invisible in exactly
@@ -1669,7 +1714,7 @@ and [`docs/architecture/phase-10-record.md`](docs/architecture/phase-10-record.m
 the phase exit documents and ADRs beside them hold the acceptance evidence.
 This section keeps only what is needed to continue: the model routing, a
 one-line summary per completed phase with the facts that still govern new
-work, Phase 11 and the post-release list.
+work, Phase 11, Phase 12 and the post-release list.
 
 ### Model routing for numbered steps
 
@@ -1688,8 +1733,14 @@ contract. Raising effort beyond High is an explicit exception, not the default.
 
 | Step | Model |
 |---|---|
-| 11.1–11.3 | Sol High |
-| 11.4 | Terra High |
+| 11A.1 | Terra High |
+| 11A.2–11A.7 | Sol High |
+| 11B.1–11B.2 (GUI repository) | Sol High |
+| 11C.1–11C.3 | Sol High |
+| 11C.4 onwards | assigned when 11A.3 numbers them; the 11C exit step Terra High |
+| 11D (GUI repository) | assigned in the GUI repository's plan at 11B.1 |
+| 11E.1 | Sol High |
+| 11E.2 | Terra High |
 | 12.1–12.4 | Terra High |
 
 Completed steps keep the assignment recorded in their phase record.
@@ -1731,66 +1782,219 @@ Facts from those phases that still govern new work:
 - 10(w) was closed as rejected: the forfeits it studied were an engine
   defect, not the harness.
 
-### Phase 11 — The GUI on the harness
+### Phase 11 — GUI v2: a separate desktop client of the CLI
 
-The GUI still plays games through `colosseum-engine::scheduler` and the SQLite
-store, while the CLI plays through its own drivers with placement, pentanomial
-statistics, fault policy and durable run directories. Two implementations of
-one mechanism in one repository is the "one real cost" of S2 doubled. Phase 11
-makes the CLI's drivers the single game-playing mechanism and keeps SQLite as
-the GUI's history index. It starts only after `cli-v0.1.0` and `gui-v1.1.0`
-are published, so the CLI release is never held by GUI work, and it is the
-main line of development afterwards: the maintainer's own use is the CLI for
-Rarog development and the GUI for tournaments, so GUI defects found in use
-are fixed as patch releases on `main` while Phase 11 proceeds on a branch.
+The desktop application is re-designed and re-implemented from scratch as a
+separate product in its own repository, and this repository becomes the CLI
+alone. The decision, the ownership split and the provisional technology are
+[ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md);
+the research behind it is
+[`gui-v2-research.md`](docs/architecture/gui-v2-research.md). This replaces
+the earlier Phase 11 (a `colosseum-harness` library crate with the egui
+application moved onto it), which was never started: the duplicate
+game-playing mechanism is now removed by retiring the egui application, not
+by extracting a library for it.
 
-- **(a) Harness library.** Move the run directory, run record, placement
-  resolution and the match, SPRT and tournament drivers from `colosseum-cli`
-  into a library crate (`colosseum-harness`) with no argument parser and no
-  `main`. Add an observer port that publishes per-game live state (board,
-  latest search line per side, clocks) and run-level snapshots. The CLI becomes
-  a thin composition root over the library; the architecture tests keep GUI
-  and windowing packages out of the harness dependency graph. The CLI's
-  tests, fixtures and generated reference are unchanged by the extraction,
-  and the CLI's version does not change for it (a library boundary is not a
-  user-visible change).
-- **(b) The GUI plays through the harness.** Tournament execution in the GUI
-  uses the harness tournament driver: placement, the adjudication default,
-  fault classification, `games.pgn` with annotations per tournament and run
-  directories under the application data directory. SQLite remains the
-  GUI-owned history index (tournament list, names, status, participant
-  correlation and the mapping to run directories for resume); it is no longer
-  the game store. The live view reads the observer port. **Everything Phase
-  10 established reaches the desktop tournaments through this step, with no
-  second implementation:** the free-slot pool (u), the arrival-stamped clock
-  model and group-committed journal (q), class-aware whole-core placement
-  with CPU 0 left free (c), shared or disjoint game slots (k), per-move
-  annotations with harness overhead (d, t), pair identity and sample classes
-  in the PGN (l, n, o), the fault allowance (q, v) and the unscorable
-  exclusion (af.1), the fixed rating field (g), progress blocks (p) and
-  persistent engines per slot (ae) as a per-tournament choice with the GUI's
-  fresh-process default kept for the old engines in real libraries. The
-  desktop keeps its own presentation of them; it does not keep its own
-  mechanics. The `runtime_adapter.rs` seam (library entry to
-  `RuntimeParticipant`/`EngineLaunchSpec`, computed since 10.9w and not yet
-  consumed) is what this step consumes.
-- **(c) Retire the duplicate scheduler.** Remove `engine::scheduler` and the
-  `tournament` feature's game-store execution path. Pre-existing SQLite game
-  history stays readable through a read-only migration so the Arena list
-  still opens old tournaments. Update `CLAUDE.md` (the "GUI spawns engines
-  per game" paragraph becomes a per-tournament setting), the architecture
-  documents and a new ADR recording the single-mechanism decision.
-- **(d) GUI release.** Ratings on stored data agree with the previous
-  implementation within 0.01 Elo; the design guidelines are checked; the GUI
-  changelog records the adjudication default change and the new run
-  directories prominently. The version is the maintainer's call at this step;
-  a major bump (2.0.0) is recommended because a shipped default changes and
-  the game store moves.
+**Maintainer requirements (2026-09-27), binding for every step below:**
 
-**Exit criterion:** one game-playing implementation in the workspace; GUI
-tournament parity demonstrated on stored data; the CLI's own tests, fixtures
-and generated reference unchanged by the extraction; a GUI candidate passes
-its archive smoke.
+- **Design first.** Inventory, requirements, layout, design system and screen
+  specifications are finished and signed off before a screen is implemented.
+  The design is written without depending on the technology.
+- **Mature technology agents work in reliably.** Any language is acceptable.
+  Provisionally TypeScript + React in a Tauri 2 shell over the CLI; confirmed
+  or replaced by measurement at 11B.2.
+- **Responsiveness and performance come first.** No freeze and no long
+  loading, including for large tournaments: loading them, creating them and
+  starting them. The numbers are set at 11A.2 and are exit criteria at 11B.2
+  and 11D.8, not aspirations. The rules that make them hold: the UI thread
+  only renders; anything that can take longer than a frame runs elsewhere
+  (in the CLI process or off the UI thread); every long list is virtualised;
+  live updates are coalesced to at most one render per frame; the window is
+  usable before data has arrived and fills in as it does.
+- **One set of standard components.** Every screen is composed from the
+  design system's component catalogue (11A.5). A screen that needs something
+  new extends the catalogue first, where it is reviewed in both themes, and
+  only then uses it. 1.x has no such catalogue and it shows.
+- **Dependencies where they pay.** A dependency is accepted when it is
+  mature, widely used, maintained, GPL-3.0-compatible and saves real work —
+  the industry-standard choice, not a reinvented wheel — and is rejected when
+  it overlaps one already taken or adds weight for little. The GUI repository
+  keeps a dependency list with one line of reason per entry.
+- **Platforms.** Required: macOS arm64, Linux x64, Windows x64. Wanted where
+  cheap: macOS x64, Linux arm64, Windows arm64.
+- **Theme.** Follows the device by default; light and dark can be chosen
+  explicitly; both are designed and tested equally.
+- **Scope.** Tournaments (round-robin, gauntlet), the engine library, live
+  viewing, results, history and export. CLI runs (match, SPRT, SPSA, tunes,
+  suites) are not shown in the desktop application. The 1.x tournaments are
+  not migrated. No served dashboard; broadcasting tournaments on the web, and
+  possibly controlling them remotely, is kept possible by the protocol design
+  (S5.15) and is not scheduled.
+- **Stopping** is two user actions: *finish the games in progress and stop*,
+  and *stop now*. Both leave a tournament that resumes.
+
+**Where the work happens.** 11A, 11C and 11E are in this repository. 11B and
+11D are in the new GUI repository, which gets its own `AGENTS.md`, `PLAN.md`
+and `GUIDE.md` at 11B.1; from then on its steps are specified and tracked
+there, and this section keeps only their outline and exit criteria so the
+whole programme can be read in one place. 11B can run beside 11A.4–11A.7,
+because it needs only 11A.2's budgets. The egui application stays in
+maintenance on `main` until 11E.1: a defect found in use is still a
+`gui-v1.1.x` patch.
+
+#### 11A — Inventory, requirements and design (this repository)
+
+Documents under `docs/gui-v2/`, moved to the GUI repository at 11B.1.
+
+- **11A.1 Inventory of GUI 1.x** (Terra High). Everything the application
+  does, read from the code, the changelogs, the guidelines and the release
+  history rather than from memory: every screen, control, setting, stored
+  item, workflow, keyboard path, error and warning surface, background
+  behaviour (updater, rating writeback, resume, incident reports, logs) and
+  the defects and lessons recorded along the way. Each item is classified
+  *keep*, *change* (with what is wrong), *drop* (with why) or *maintainer
+  decides*. `docs/design/GUIDELINES.md` is split into product rules, which
+  carry over, and egui workarounds, which do not.
+  **Exit:** `docs/gui-v2/inventory.md`, every item classified, the
+  *maintainer decides* items answered.
+- **11A.2 Requirements** (Sol High). Who uses the application and for what;
+  the workflows with their frequency (set up, start, watch, stop and resume,
+  manage engines, review results, export); scale targets (engines in the
+  library, participants per tournament, games per tournament, concurrent
+  games, tournaments in history); the **performance budgets** as measurable
+  numbers (start-up to usable window, response to any input, frame time
+  under live load, opening the largest tournament, creating and starting the
+  largest tournament, memory); keyboard and accessibility expectations;
+  whether the 1.x engine library is imported.
+  **Exit:** `docs/gui-v2/requirements.md` signed off by the maintainer.
+- **11A.3 The CLI against the requirements** (Sol High). A head-to-head
+  evaluation of what `colosseum-cli` does today against every *keep* and
+  *change* item of 11A.1 and every requirement of 11A.2, including the ones
+  planned for later (broadcast, remote control). Each item is classified:
+  *supported as-is* (naming the command and output), *CLI extension needed*
+  (small or large, with a sketch), *owned by the GUI* (per ADR-0011's
+  ownership split), or *not feasible as specified* (with the reason and the
+  alternatives). Known candidates from the 2026-09-27 review: a live event
+  stream (`--json` today prints one value at the end); a control channel for
+  the two stop actions (a console interrupt cannot be delivered to one child
+  process on Windows, S5.11); fast summary and paged game queries on large
+  run directories; engine inspection output the library editor can use.
+  **Exit:** `docs/gui-v2/cli-gap-analysis.md`; every requirement classified;
+  anything *not feasible* resolved with the maintainer before design
+  continues; the 11C step list derived from it.
+- **11A.4 Layout concepts** (Sol High). Two or three different information
+  architectures, each walked through the 11A.2 workflows — at least the
+  sidebar/list/detail model of ChessBase for Mac, a workspace with docked
+  panels, and the strongest alternative the analysis suggests — shown as
+  static, dependency-free HTML wireframes in light and dark. Evaluated on
+  steps per workflow, what is visible while a tournament runs, and how the
+  layout scales from a laptop screen to a large monitor.
+  **Exit:** the maintainer chooses one; the reasons are recorded in
+  `docs/gui-v2/concepts.md`.
+- **11A.5 Design system** (Sol High). Tokens (colour for both themes,
+  typography, spacing, radius, elevation, motion), and the component
+  catalogue: every standard element — buttons, fields, selects, toggles,
+  tables with sort and virtualisation, lists, list/detail, tabs, sheets and
+  dialogs, menus, toasts, empty, loading and error states, progress, the
+  board, clocks, evaluation graph, engine identity (logo, name version,
+  rating), result and score chips — with their states, sizes and keyboard
+  behaviour. The product rules kept by 11A.1 are carried into it.
+  **Exit:** `docs/gui-v2/design-system.md` signed off.
+- **11A.6 Naming** (Sol High). The names of both products, their
+  executables and the two repositories. The CLI may take the plain
+  `colosseum` command once the egui application no longer installs it
+  (11E.2); the GUI needs a name of its own. A dated collision screen as in
+  Phase 0.6, then the maintainer's choice.
+  **Exit:** an ADR recording the names (superseding ADR-0009 if anything
+  changes).
+- **11A.7 — EXIT: Screen specifications** (Sol High). Every screen and flow
+  of the chosen concept: its purpose, the data it shows and where that data
+  comes from (CLI message or GUI-owned store), the catalogue components it
+  uses, every state (empty, loading, live, stopped, error), keyboard paths,
+  and behaviour at the 11A.2 scale targets. A clickable prototype is built
+  in 11B/11D, not here.
+  **Exit:** `docs/gui-v2/screens.md` signed off; every *keep* item of 11A.1
+  appears on a screen or is recorded as dropped by the maintainer.
+
+#### 11B — GUI repository and technology proof (GUI repository)
+
+- **11B.1 Repository** (Sol High). The maintainer creates the remote
+  repository under the 11A.6 name. The skeleton: the provisional stack, a
+  formatter, linter, unit and end-to-end test runners, CI on the three
+  required platforms, a packaged empty application for each required
+  target, `AGENTS.md`/`PLAN.md`/`GUIDE.md` carrying 11B–11D with the
+  requirements above, the dependency list, and the `docs/gui-v2/` documents.
+  **Exit:** CI green on the three platforms and the three packages start.
+- **11B.2 — EXIT: Performance proof** (Sol High). Against the 11A.2 budgets
+  at the scale targets: a synthetic protocol stream (the largest tournament's
+  history, the maximum concurrent live games at the CLI's update rate), a
+  virtualised table of the largest games list, the largest standings and
+  crosstable, cold start, memory — measured on macOS arm64, Windows x64 and
+  Linux x64 (WebKitGTK is the expected weak point).
+  **Exit:** the budgets met on all three and the technology confirmed in an
+  ADR in the GUI repository (ADR-0011's status updated here), or the
+  failures recorded and the fallback candidates (Qt/QML, then Flutter)
+  measured the same way before anything is built.
+
+#### 11C — The CLI protocol (this repository, a CLI minor release)
+
+- **11C.1 Protocol specification** (Sol High). S5.15 filled in from 11A.3 and
+  11A.7: message catalogue, versioning, framing, errors, the JSON Schema and
+  conformance fixtures.
+- **11C.2 Live events** (Sol High). `tournament run` publishes run state,
+  game start, every move with clocks and the latest search information per
+  side, game end with termination, and standings and rating snapshots.
+- **11C.3 Control** (Sol High). *Stop* finishes the games in progress,
+  starts no new game and exits cancelled with no grace timeout; *stop now*
+  abandons the games in progress, which are replayed on resume. Both arrive
+  as protocol commands, so they work identically on Windows; end of input
+  means *stop*. Resume reports what it resumed.
+- **11C.4 onwards** — one step per group of the remaining 11A.3 gaps
+  (queries over large run directories, engine inspection, whatever else the
+  analysis finds), numbered when 11A.3 completes.
+- **11C — EXIT** (Terra High, the last 11C step). The conformance suite
+  green; a protocol-driven run's durable artifacts and statistics identical
+  to the same run without the protocol; the CLI-side scale budgets of 11A.2
+  met; a CLI minor release publishing the schema as a release asset.
+
+#### 11D — GUI v2 implementation (GUI repository)
+
+Refined into the GUI repository's own steps at 11B.1; the outline:
+
+- **11D.1** Design system in code and the component gallery, both themes,
+  screenshot tests.
+- **11D.2** Application shell: navigation of the chosen concept, settings
+  (theme, paths), the bundled and pinned CLI process manager with version
+  check and crash handling, error surfaces.
+- **11D.3** Engine library: add, inspect through the CLI, options, logos,
+  ratings; the 1.x import if 11A.2 keeps it.
+- **11D.4** Tournament creation and presets.
+- **11D.5** Live tournament view.
+- **11D.6** Results and history: standings, crosstable, games, export, stop
+  and resume, rating writeback.
+- **11D.7** Packaging, signing, updater and release lane for the required
+  targets and the cheap wanted ones.
+- **11D.8 — EXIT.** Every *keep* item of 11A.1 present or dropped by the
+  maintainer; the 11A.2 budgets met on a real tournament from the
+  maintainer's engine library on the three required platforms; a usability
+  walkthrough with the maintainer; the first release.
+
+#### 11E — Retirement (this repository)
+
+- **11E.1 Retire the egui application** (Sol High). After the 11D.8 release:
+  remove `colosseum-gui`, `engine::scheduler`, the SQLite store and the
+  runtime adapter, the `gui-v` release lane and its packaging; archive
+  `docs/design/`; S4, `CLAUDE.md`, `AGENTS.md`, `README.md` and
+  `docs/DEVELOPMENT.md` describe a CLI-only repository and point to the new
+  application; ADR-0006 superseded. Published 1.x releases stay
+  downloadable.
+- **11E.2 — EXIT: The CLI as the repository's product** (Terra High). The
+  executable name from 11A.6 (a rename keeps `colosseum-cli` working for one
+  minor release with a notice); a CLI release.
+
+**Phase exit:** one game-playing implementation, in the CLI; the desktop
+application released from its own repository over the protocol; this
+repository building and releasing the CLI alone.
 
 ### Phase 12 — CLI maintenance from adoption
 
@@ -1910,7 +2114,12 @@ Not scheduled steps; each needs its own evidence before it becomes one.
 | Statistics change meaning silently over time | `stats_version` + changelog (5.8) |
 | A derived constant is wrong and invisible | A5: assert written artifacts before play |
 | A default change silently alters fixtures | Each change is a numbered step with its own fixture update, and the recurring procedure repeats the oracle replay and the parity matrix on the final state |
-| GUI unification regresses the released GUI | Phase 11 starts after publication; stored-data rating parity and read-only history migration are exit criteria |
+| GUI v2 loses a 1.x capability users rely on | 11A.1 inventory with every item classified; 11D.8 exit checks every *keep* item |
+| The CLI cannot serve a GUI requirement, discovered late | 11A.3 evaluates the CLI against every requirement before design continues; *not feasible* items resolved with the maintainer first |
+| The web front end is not fast enough, notably WebKitGTK on Linux | Budgets set as numbers at 11A.2 and measured at 11B.2 on all three platforms before anything is built; Qt/QML and Flutter are the measured fallbacks; the process boundary makes the front end replaceable |
+| Protocol drift between two repositories | Versioned messages, generated JSON Schema published with the CLI, conformance fixtures, the desktop application pinning one CLI release |
+| The protocol alters what a run measures | S5.15: protocol-driven and plain runs must produce identical durable artifacts and statistics; an 11C exit criterion |
+| Design work never converges | Each 11A step ends in a maintainer sign-off; 11A.4 limits the concepts to two or three |
 | Class-aware placement guesses a processor | S5.2 refuses on insufficient OS evidence and asks for an explicit list; fixtures cover hybrid and multi-domain hosts |
 
 ### Rejected, with reasoning
@@ -1933,11 +2142,12 @@ Not scheduled steps; each needs its own evidence before it becomes one.
 |---|---|
 | `crates/colosseum-core/src/stats.rs` | SPRT, Elo, LOS, pentanomial and normalized Elo |
 | `crates/colosseum-core/src/{ml_ratings,rating_error}.rs` | joint ML ratings and Fisher-information error bars shared by both products |
-| `crates/colosseum-engine/src/{runner,scheduler,openings,store}.rs` | one-game runner (both products), the GUI's tournament driver and SQLite store (retired in Phase 11) |
+| `crates/colosseum-engine/src/{runner,scheduler,openings,store}.rs` | one-game runner (both products), the GUI's tournament driver and SQLite store (retired at 11E.1) |
 | `crates/colosseum-engine/src/{topology,affinity}*` | OS topology and affinity adapters behind the application ports |
 | `crates/colosseum-cli/src/composition.rs`, `composition/` | parser, dispatch, shared resolvers; one module per command |
-| `crates/colosseum-cli/src/{match_runner,sprt_runner,spsa_driver,tournament_driver}.rs` | the harness drivers Phase 11 extracts into `colosseum-harness` |
-| `crates/colosseum-gui/src/{backend,runtime_adapter,update}.rs` | GUI composition root, the Phase 11 seam, the `gui-v` updater |
+| `crates/colosseum-cli/src/{match_runner,sprt_runner,spsa_driver,tournament_driver}.rs` | the harness drivers; the tournament driver gains the S5.15 protocol in 11C |
+| `crates/colosseum-gui/src/{backend,runtime_adapter,update}.rs` | GUI 1.x composition root, its unused runtime seam, the `gui-v` updater — all retired at 11E.1 |
+| `docs/gui-v2/` | GUI v2 inventory, requirements, CLI gap analysis, concepts, design system, screens (Phase 11A); moved to the GUI repository at 11B.1 |
 | `docs/architecture/` | current/target architecture, ADRs, phase exit documents, the Phase 0–9 and Phase 10 records, the qualification |
 | `docs/cli/` | user documentation; `command-reference.md` is generated by `colosseum-docs` |
 | `docs/fixtures/` | per-phase acceptance manifests and the recorded parity commands |

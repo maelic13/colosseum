@@ -14,13 +14,13 @@ internal naming or method argumentation.
 
 | | |
 |---|---|
-| Branch / versions | `main` holds the published **GUI 1.1.0** (`gui-v1.1.0`, "latest") and **CLI 0.1.0** (`cli-v0.1.0`), both released 2026-09-22. `dev` carries Phase 12.1–12.4, unreleased CLI additions; the GUI is unchanged since 1.1.0 |
-| What exists | Phases 0–10 complete and published (10.9m rejected; 10.9h, 10.9p, 10.9t deferred). Phase 12.1–12.4 complete on `dev`: elapsed time carried across resumes, the resume note and `run.log` events, the SPRT test line, `spsa history`, `spsa --seed-from`, the run-file list-replacement warning, reviewed 2026-09-25 with one correction (run-file path resolution for the new option and command) |
-| What is missing | A CLI release carrying Phase 12.1–12.4 (`cli-v0.2.0`: two of the steps add a command and an option, which is a minor release, not a patch), then **Phase 11** (GUI on the harness), the main line of development |
+| Branch / versions | `main` holds the published **GUI 1.1.0** (`gui-v1.1.0`, "latest", 2026-09-22) and **CLI 0.2.0** (`cli-v0.2.0`, 2026-09-25). `dev` carries the GUI v2 research and the Phase 11 plan (documents only) |
+| What exists | Phases 0–10 complete and published (10.9m rejected; 10.9h, 10.9p, 10.9t deferred). Phase 12.1–12.4 complete and published as CLI 0.2.0. Phase 11 re-planned 2026-09-27: the desktop application becomes a separate client of the CLI in its own repository ([ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md)) |
+| What is missing | **Phase 11**: inventory, requirements, CLI gap analysis and design (11A), the GUI repository and technology proof (11B), the CLI protocol (11C), GUI v2 (11D), retiring the egui application (11E) |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 CLI candidate archives ☑ exact-archive smoke · the `gui-v` release lane has never run; its candidate mode is the rehearsal to dispatch before the tag, and the only thing that will have exercised `deb`, `rpm`, `dmg` and `pkg.tar.zst` |
-| Next step | **Release the CLI as 0.2.0** (maintainer: version bump, dated changelog, `cargo xtask release-check cli-v0.2.0`, pull request `dev` → `main`, candidate dispatch, tag). Then **11.1** — Sol High (Claude: Opus 5, high). Further Phase 12 steps are taken as Rarog reports them, beside Phase 11 |
-| Confirmed decisions | The 2026-09-22 set, confirmed by the maintainer and not reopened, recorded with the release preparation in [`phase-10-record.md`](docs/architecture/phase-10-record.md): exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, the explicit GUI artifact list, versions kept in artifact names, the updater prerelease fix now and pagination later, the throughput margin not chased |
+| Next step | **11A.1** — inventory of GUI 1.x — Terra High (Claude: Sonnet 5, high). Phase 12 steps are taken beside Phase 11 as Rarog reports them |
+| Confirmed decisions | The 2026-09-22 set, confirmed by the maintainer and not reopened, recorded with the release preparation in [`phase-10-record.md`](docs/architecture/phase-10-record.md): exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, the explicit GUI artifact list, versions kept in artifact names, the updater prerelease fix now and pagination later, the throughput margin not chased. The 2026-09-27 set for GUI v2, in [ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md) and PLAN §Phase 11: design first; the desktop application a separate repository over a CLI protocol; this repository the CLI alone; 1.x tournaments not migrated; no CLI runs in the GUI; device theme with light and dark; no served dashboard, broadcast and remote control kept possible; front-end technology provisional (TypeScript + React on Tauri 2) until measured |
 
 ## Completed phases
 
@@ -76,32 +76,64 @@ Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
 "done" because it compiles; it is done when its criterion is demonstrated.
 When reporting the next step, always report its model as well.
 
-### Phase 11 — The GUI on the harness (after publication)
+### Phase 11 — GUI v2: a separate desktop client of the CLI
 
-- ☐ **11.1** — **Model: Sol High.** Harness library crate
-  (`colosseum-harness`): run directory, run record, placement resolution and
-  the match/SPRT/tournament drivers moved out of `colosseum-cli`; observer
-  port for per-game live state and run snapshots; CLI becomes a thin
-  composition root; architecture tests keep GUI/windowing packages out of the
-  harness graph; CLI tests, fixtures and generated reference unchanged; no
-  CLI version change — PLAN §Phase 11(a)
-- ☐ **11.2** — **Model: Sol High.** GUI tournaments run through the harness
-  driver, consuming the `runtime_adapter.rs` seam: placement, adjudication
-  default, fault classification and unscorable exclusion, annotated
-  `games.pgn` and run directories under the app data directory; SQLite stays
-  the GUI-owned history index and resume mapping, not the game store; live
-  view reads the observer port; every Phase 10 mechanism reaches desktop
-  tournaments here with no second implementation; engine-process policy a
-  per-tournament choice with fresh processes the GUI default — PLAN §Phase
-  11(b)
-- ☐ **11.3** — **Model: Sol High.** Retire `engine::scheduler` and the
-  `tournament` feature's game-store execution path; read-only migration keeps
-  old SQLite history openable; `CLAUDE.md`, architecture docs and a new ADR
-  record the single-mechanism decision — PLAN §Phase 11(c)
-- ☐ **11.4 — EXIT** — **Model: Terra High.** GUI release: stored-data rating
-  parity within 0.01 Elo, design guidelines checked, changelog records the
-  adjudication default and run directories, version chosen by the maintainer
-  (2.0.0 recommended), GUI candidate passes archive smoke — PLAN §Phase 11(d)
+- ☐ **11A.1** — **Model: Terra High.** Inventory of GUI 1.x from code,
+  changelogs, guidelines and release history: every screen, control,
+  setting, stored item, workflow, background behaviour, defect and lesson,
+  each classified keep / change / drop / maintainer decides; GUIDELINES
+  split into product rules and egui workarounds; `docs/gui-v2/inventory.md`
+  — PLAN §Phase 11A
+- ☐ **11A.2** — **Model: Sol High.** Requirements: users, workflows and their
+  frequency, scale targets, performance budgets as numbers, keyboard and
+  accessibility, whether the 1.x engine library is imported;
+  `docs/gui-v2/requirements.md` signed off — PLAN §Phase 11A
+- ☐ **11A.3** — **Model: Sol High.** The CLI against the requirements:
+  every keep/change item and requirement (later ones included) classified
+  supported / CLI extension needed / GUI-owned / not feasible;
+  `docs/gui-v2/cli-gap-analysis.md`; not-feasible items resolved with the
+  maintainer; the 11C step list derived — PLAN §Phase 11A
+- ☐ **11A.4** — **Model: Sol High.** Two or three layout concepts as static
+  HTML wireframes in both themes, walked through the workflows; maintainer
+  chooses; `docs/gui-v2/concepts.md` — PLAN §Phase 11A
+- ☐ **11A.5** — **Model: Sol High.** Design system: tokens for both themes
+  and the component catalogue of standard elements with states and keyboard
+  behaviour; `docs/gui-v2/design-system.md` signed off — PLAN §Phase 11A
+- ☐ **11A.6** — **Model: Sol High.** Naming of both products, executables
+  and repositories after a dated collision screen; an ADR — PLAN §Phase 11A
+- ☐ **11A.7 — EXIT** — **Model: Sol High.** Screen specifications for every
+  screen and flow of the chosen concept; every keep item placed or dropped;
+  `docs/gui-v2/screens.md` signed off — PLAN §Phase 11A
+- ☐ **11B.1** — **Model: Sol High.** (GUI repository) Skeleton on the
+  provisional stack, CI on the three required platforms, packaged empty
+  application per required target, its own AGENTS/PLAN/GUIDE, dependency
+  list, design documents moved — PLAN §Phase 11B
+- ☐ **11B.2 — EXIT** — **Model: Sol High.** (GUI repository) Performance
+  proof against the 11A.2 budgets at scale with a synthetic protocol stream
+  on macOS arm64, Windows x64 and Linux x64; technology confirmed by ADR, or
+  the fallbacks measured — PLAN §Phase 11B
+- ☐ **11C.1** — **Model: Sol High.** Protocol specification: PLAN §S5.15
+  message catalogue, versioning, framing, errors, JSON Schema, conformance
+  fixtures — PLAN §Phase 11C
+- ☐ **11C.2** — **Model: Sol High.** Live events from `tournament run` —
+  PLAN §Phase 11C
+- ☐ **11C.3** — **Model: Sol High.** Control: stop (finish games in
+  progress) and stop now, as protocol commands on every platform; end of
+  input is stop — PLAN §Phase 11C
+- ☐ **11C.4 onwards** — numbered from the 11A.3 gap analysis; the last is
+  the 11C exit (Terra High): conformance green, protocol-driven runs
+  identical to plain runs, CLI-side budgets met, CLI minor release with the
+  schema — PLAN §Phase 11C
+- ☐ **11D** — (GUI repository) implementation, tracked in the GUI
+  repository's own GUIDE from 11B.1; exit 11D.8: every keep item, budgets
+  on a real tournament on all three platforms, usability walkthrough, first
+  release — PLAN §Phase 11D
+- ☐ **11E.1** — **Model: Sol High.** Retire the egui application, scheduler,
+  SQLite store and `gui-v` lane; documents describe a CLI-only repository;
+  ADR-0006 superseded — PLAN §Phase 11E
+- ☐ **11E.2 — EXIT** — **Model: Terra High.** The CLI executable name from
+  11A.6 with a one-release transition if renamed; a CLI release — PLAN
+  §Phase 11E
 
 ### Phase 12 — CLI maintenance from adoption (beside Phase 11, CLI patch releases)
 
@@ -186,23 +218,13 @@ Not steps — they are never "done".
 
 ## What to do now
 
-**Phase 12.1–12.4 are complete on `dev`; the CLI release 0.2.0 is the
-maintainer's to publish.** In order:
-
-1. On `dev`: set `crates/colosseum-cli/Cargo.toml` to 0.2.0, turn the
-   changelog's Unreleased section into `[0.2.0] — <date>`, run
-   `cargo xtask release-check cli-v0.2.0` and commit. An agent may do this
-   step; everything after it is remote work that no agent performs.
-2. Open the pull request `dev` → `main`, squash-merge on green CI.
-3. Dispatch the CLI candidate on `main` and check its four archives.
-4. Tag the accepted commit `cli-v0.2.0` and push the tag; its workflow
-   publishes the release. The GUI is unchanged and is not re-released.
-5. Check the release page: four archives, the notes from the changelog,
-   not marked "Latest".
-
-**Then Phase 11 starts, and is the main line of development from then on.**
-Work its steps in order, one commit per step, as before; Phase 12 steps
-are taken beside it as reports arrive.
+**Phase 11 is the main line of development, starting with 11A.1.** 11A is
+documents only, in this repository; each of its steps ends in a maintainer
+sign-off before the next begins, because the design is settled before
+anything is built. 11B may start once 11A.2 has set the performance budgets
+and can run beside 11A.4–11A.7; 11C starts after the 11A exit (11C.2 and
+11C.3 may start after 11A.3 if the maintainer wants the CLI side early).
+Phase 12 steps are taken beside Phase 11 as reports arrive.
 
 ```
 git diff --check
@@ -238,3 +260,5 @@ repository workflow.
 | Engine project keeps a run file or thin CI command | Expected project policy, not a CLI gap |
 | Diagnostic heuristic looks stable | Report the observation; do not call it convergence or causation |
 | A GUI behaviour differs from the CLI's for the same mechanism | The CLI's is the specification (PLAN §S5); Phase 11 removes the second implementation, so do not add a third |
+| GUI v2 needs something the CLI does not provide | It is a CLI extension through the S5.15 protocol, recorded in the 11A.3 gap analysis — never game-playing or rating logic in the desktop application |
+| Tempted to implement a GUI v2 screen before its specification is signed off | Not allowed: design first (PLAN §Phase 11) |

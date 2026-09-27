@@ -15,7 +15,7 @@ phase met its exit criterion.
 | [`release-architecture.md`](release-architecture.md) | Independent product versions, tags, artifacts and workflows in one repository |
 | [`naming-decision.md`](naming-decision.md) | Naming research behind ADR-0007 to ADR-0009 |
 | [`fastchess-mechanics.md`](fastchess-mechanics.md) | Source study of fastchess's process, clock and pipe mechanics, with adopt/decline verdicts |
-| [`gui-v2-research.md`](gui-v2-research.md) | 2026-09-25 research for the desktop application v2: design direction, technology candidates, recommendation |
+| [`gui-v2-research.md`](gui-v2-research.md) | 2026-09-25 research for the desktop application v2: design direction, technology candidates, recommendation; decided by ADR-0011 |
 | [`adr/`](adr/README.md) | Architecture decision records |
 
 ## Records and acceptance evidence
