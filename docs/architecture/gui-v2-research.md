@@ -11,12 +11,15 @@ This note records the evidence and a recommendation; it decides nothing.
 > §Phase 11: the desktop application becomes a separate repository that
 > drives the CLI through a process protocol instead of linking a harness
 > library, and the design is settled before a technology is committed to.
-> §3's option B is one of the layout concepts 11A.4 evaluates, not the
-> chosen design; §4's evaluation stands, with Qt/QML and Flutter added as
-> fallbacks now that the front end need not be Rust; §5's recommendation
-> holds provisionally until measured at 11B.2; §6 and §7 (a Tauri crate in
-> this workspace on `colosseum-harness`) are superseded; §8's questions are
-> answered or moved into the 11A steps.
+> §3's option B is one of the layout concepts GUI step 1.3 evaluates, not
+> the chosen design; §4's evaluation stands, with Electron, Tauri's Chromium
+> runtime, Qt/QML and Flutter as the fallbacks in that order now that the
+> front end need not be Rust; §5's recommendation holds provisionally until
+> measured at GUI step 2.3; §6 and §7 (a Tauri crate in this workspace on
+> `colosseum-harness`) are superseded; §8's questions are answered in PLAN
+> §S8 or moved into the GUI design steps. The programme was re-cut after a
+> review the same day; the step numbers are those of PLAN §S8 and of the GUI
+> repository's plan seeded from `docs/gui-v2/`.
 
 ## 1. What the application is today
 

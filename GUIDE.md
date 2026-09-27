@@ -14,13 +14,29 @@ internal naming or method argumentation.
 
 | | |
 |---|---|
-| Branch / versions | `main` holds the published **GUI 1.1.0** (`gui-v1.1.0`, "latest", 2026-09-22) and **CLI 0.2.0** (`cli-v0.2.0`, 2026-09-25). `dev` carries the GUI v2 research and the Phase 11 plan (documents only) |
-| What exists | Phases 0–10 complete and published (10.9m rejected; 10.9h, 10.9p, 10.9t deferred). Phase 12.1–12.4 complete and published as CLI 0.2.0. Phase 11 re-planned 2026-09-27: the desktop application becomes a separate client of the CLI in its own repository ([ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md)) |
-| What is missing | **Phase 11**: inventory, requirements, CLI gap analysis and design (11A), the GUI repository and technology proof (11B), the CLI protocol (11C), GUI v2 (11D), retiring the egui application (11E) |
+| Branch / versions | `main` holds the published **GUI 1.1.0** (`gui-v1.1.0`, "latest", 2026-09-22) and **CLI 0.2.0** (`cli-v0.2.0`, 2026-09-25). `dev` carries the GUI v2 research, ADR-0011, the reworked programme plan and the GUI repository seed (documents only) |
+| What exists | Phases 0–10 complete and published (10.9m rejected; 10.9h, 10.9p, 10.9t deferred). Phase 12.1–12.4 complete and published as CLI 0.2.0. GUI v2 decided 2026-09-27: the desktop application becomes a separate client of the CLI in its own repository ([ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md)); the programme was reviewed and re-cut the same day into Phases 11, 13 and 14 here and GUI Phases 1–5 in the GUI repository, with the seed in [`docs/gui-v2/`](docs/gui-v2/README.md) |
+| What is missing | Here: **Phase 11** (naming, the GUI repository seed, the CLI gap analysis, the protocol specification), **Phase 13** (the protocol in the CLI, one minor release), **Phase 14** (retiring the egui application). In the GUI repository: GUI Phases 1–5 (design, repository and technology proof, screen specifications, implementation, release) |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 CLI candidate archives ☑ exact-archive smoke · the `gui-v` release lane has never run; its candidate mode is the rehearsal to dispatch before the tag, and the only thing that will have exercised `deb`, `rpm`, `dmg` and `pkg.tar.zst` |
-| Next step | **11A.1** — inventory of GUI 1.x — Terra High (Claude: Sonnet 5, high). Phase 12 steps are taken beside Phase 11 as Rarog reports them |
-| Confirmed decisions | The 2026-09-22 set, confirmed by the maintainer and not reopened, recorded with the release preparation in [`phase-10-record.md`](docs/architecture/phase-10-record.md): exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, the explicit GUI artifact list, versions kept in artifact names, the updater prerelease fix now and pagination later, the throughput margin not chased. The 2026-09-27 set for GUI v2, in [ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md) and PLAN §Phase 11: design first; the desktop application a separate repository over a CLI protocol; this repository the CLI alone; 1.x tournaments not migrated; no CLI runs in the GUI; device theme with light and dark; no served dashboard, broadcast and remote control kept possible; front-end technology provisional (TypeScript + React on Tauri 2) until measured |
+| Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 CLI candidate archives ☑ exact-archive smoke · the `gui-v` release lane has run once, for 1.1.0, and is retired at 14.1; its candidate mode is the rehearsal before any `gui-v1.1.x` patch |
+| Next step | **11.1** — naming of both products and repositories — `R2` (Claude Opus 5 — High). Phase 12 steps are taken beside the programme as Rarog reports them |
+| Confirmed decisions | The 2026-09-22 set, confirmed by the maintainer and not reopened, recorded with the release preparation in [`phase-10-record.md`](docs/architecture/phase-10-record.md): exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, the explicit GUI artifact list, versions kept in artifact names, the updater prerelease fix now and pagination later, the throughput margin not chased. The 2026-09-27 set for GUI v2, in [ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md) and PLAN §Phase 11: design first; the desktop application a separate repository over a CLI protocol; this repository the CLI alone; 1.x tournaments not migrated; no CLI runs in the GUI; device theme with light and dark; no served dashboard, broadcast and remote control kept possible; front-end technology provisional (TypeScript + React on Tauri 2) until measured. The same day's review set, in PLAN §S8 maintainer requirements and §S5.15: placement stays a CLI feature and desktop tournaments run with it off, several at a time; 64 participants the design point; lifecycle and close behaviour analysed at implementation (13.4 / GUI 4.2) with *stop now on close* the starting preference; changed engines and amendments (add, remove, length) are CLI mechanisms decided at 11.3; configuration by run file, a rebuildable index, positions as FEN, two event classes, emission off the game path, a handshake version, short-lived queries, synthetic streams; Electron before Qt as the fallback; the 1.x engine library imported |
+
+## Current model mapping
+
+PLAN §S8 records each step's stable capability class; this table maps the
+classes to the current Claude model and thinking mode and is the only place
+model names appear. Edit it when model generations change; do not rewrite
+the roadmap. These are maintainer judgements, not measured rankings.
+
+| Class | Capability | Claude |
+|---|---|---|
+| `R3` | Frontier causal/architecture research | Claude Fable 5.1 — High |
+| `R2` | Bounded correctness-sensitive reasoning | Claude Opus 5 — High |
+| `I2` | Difficult implementation | Claude Opus 5 — High |
+| `I1` | Well-specified implementation | Claude Sonnet 5 — Medium |
+| `M` | Mechanical/docs/provenance | Claude Sonnet 5 — Medium |
+| `V` | Verification/measurement | Claude Sonnet 5 — High |
 
 ## Completed phases
 
@@ -47,8 +63,8 @@ Step identifiers are never reused.
 
 <!-- TRACKER FORMATTING RULES — follow them, they get broken often:
      1. ONE step per bullet. Never join two steps on one line.
-     2. Use renderer-independent Unicode markers; Codex does not reliably
-        implement GitHub task-list `[ ]` / `[x]` syntax:
+     2. Use renderer-independent Unicode markers; not every Markdown
+        renderer implements GitHub task-list `[ ]` / `[x]` syntax:
             - ☐ **1.2** — todo
             - ◐ **1.2 — IN PROGRESS** — genuinely in flight
             - ☑ **1.2 — DONE** — resolved
@@ -74,70 +90,83 @@ Step identifiers are never reused.
 
 Each phase ends with a verifiable exit criterion — see PLAN §S8. Nothing is
 "done" because it compiles; it is done when its criterion is demonstrated.
-When reporting the next step, always report its model as well.
+When reporting the next step, always report its class and the model the
+mapping above gives it.
 
-### Phase 11 — GUI v2: a separate desktop client of the CLI
+### The GUI v2 programme — Phases 11, 13 and 14 here; GUI Phases 1–5 in the GUI repository
 
-- ☐ **11A.1** — **Model: Terra High.** Inventory of GUI 1.x from code,
-  changelogs, guidelines and release history: every screen, control,
-  setting, stored item, workflow, background behaviour, defect and lesson,
-  each classified keep / change / drop / maintainer decides; GUIDELINES
-  split into product rules and egui workarounds; `docs/gui-v2/inventory.md`
-  — PLAN §Phase 11A
-- ☐ **11A.2** — **Model: Sol High.** Requirements: users, workflows and their
-  frequency, scale targets, performance budgets as numbers, keyboard and
-  accessibility, whether the 1.x engine library is imported;
-  `docs/gui-v2/requirements.md` signed off — PLAN §Phase 11A
-- ☐ **11A.3** — **Model: Sol High.** The CLI against the requirements:
-  every keep/change item and requirement (later ones included) classified
-  supported / CLI extension needed / GUI-owned / not feasible;
-  `docs/gui-v2/cli-gap-analysis.md`; not-feasible items resolved with the
-  maintainer; the 11C step list derived — PLAN §Phase 11A
-- ☐ **11A.4** — **Model: Sol High.** Two or three layout concepts as static
-  HTML wireframes in both themes, walked through the workflows; maintainer
-  chooses; `docs/gui-v2/concepts.md` — PLAN §Phase 11A
-- ☐ **11A.5** — **Model: Sol High.** Design system: tokens for both themes
-  and the component catalogue of standard elements with states and keyboard
-  behaviour; `docs/gui-v2/design-system.md` signed off — PLAN §Phase 11A
-- ☐ **11A.6** — **Model: Sol High.** Naming of both products, executables
-  and repositories after a dated collision screen; an ADR — PLAN §Phase 11A
-- ☐ **11A.7 — EXIT** — **Model: Sol High.** Screen specifications for every
-  screen and flow of the chosen concept; every keep item placed or dropped;
-  `docs/gui-v2/screens.md` signed off — PLAN §Phase 11A
-- ☐ **11B.1** — **Model: Sol High.** (GUI repository) Skeleton on the
-  provisional stack, CI on the three required platforms, packaged empty
-  application per required target, its own AGENTS/PLAN/GUIDE, dependency
-  list, design documents moved — PLAN §Phase 11B
-- ☐ **11B.2 — EXIT** — **Model: Sol High.** (GUI repository) Performance
-  proof against the 11A.2 budgets at scale with a synthetic protocol stream
-  on macOS arm64, Windows x64 and Linux x64; technology confirmed by ADR, or
-  the fallbacks measured — PLAN §Phase 11B
-- ☐ **11C.1** — **Model: Sol High.** Protocol specification: PLAN §S5.15
-  message catalogue, versioning, framing, errors, JSON Schema, conformance
-  fixtures — PLAN §Phase 11C
-- ☐ **11C.2** — **Model: Sol High.** Live events from `tournament run` —
-  PLAN §Phase 11C
-- ☐ **11C.3** — **Model: Sol High.** Control: stop (finish games in
-  progress) and stop now, as protocol commands on every platform; end of
-  input is stop — PLAN §Phase 11C
-- ☐ **11C.4 onwards** — numbered from the 11A.3 gap analysis; the last is
-  the 11C exit (Terra High): conformance green, protocol-driven runs
-  identical to plain runs, CLI-side budgets met, CLI minor release with the
-  schema — PLAN §Phase 11C
-- ☐ **11D** — (GUI repository) implementation, tracked in the GUI
-  repository's own GUIDE from 11B.1; exit 11D.8: every keep item, budgets
-  on a real tournament on all three platforms, usability walkthrough, first
-  release — PLAN §Phase 11D
-- ☐ **11E.1** — **Model: Sol High.** Retire the egui application, scheduler,
-  SQLite store and `gui-v` lane; documents describe a CLI-only repository;
-  ADR-0006 superseded — PLAN §Phase 11E
-- ☐ **11E.2 — EXIT** — **Model: Terra High.** The CLI executable name from
-  11A.6 with a one-release transition if renamed; a CLI release — PLAN
-  §Phase 11E
+Both repositories advance together and release together; the joint
+milestones M0–M9 are in PLAN §S8. A step here that names a GUI step waits
+for it, and the GUI tracker says the same the other way.
 
-### Phase 12 — CLI maintenance from adoption (beside Phase 11, CLI patch releases)
+#### Phase 11 — Separation
 
-- ☑ **12.1** — **Model: Terra High.** Rarog's tooling notes from the first
+- ☐ **11.1** — `R2` — Naming of both products, executables and
+  repositories after a dated collision screen; recommendation going in: the
+  CLI keeps `colosseum-cli`, the desktop application takes the new name or
+  keeps the Colosseum brand; the maintainer decides; an ADR — PLAN §Phase 11
+  (M0)
+- ☐ **11.2** — `M` — The GUI repository seed in
+  [`docs/gui-v2/`](docs/gui-v2/README.md) finalised under the 11.1 names and
+  handed to the maintainer, who creates the repository with it as the first
+  commit; `docs/gui-v2/` reduced to a pointer here; `README.md` names the
+  new application — PLAN §Phase 11 (M1)
+- ☐ **11.3** — `R2` — After GUI 1.2: the CLI against every
+  inventory and requirement item — supported / CLI extension / GUI-owned /
+  not feasible; the changed-engine behaviour and the amendment semantics
+  decided with the maintainer; `docs/architecture/gui-gap-analysis.md`;
+  13.5–13.7 confirmed or re-cut — PLAN §Phase 11 (M2)
+- ☐ **11.4 — EXIT** — `R2` — Protocol specification: PLAN
+  §S5.15 message catalogue, run-file hand-off, amendment and changed-engine
+  semantics, versioning, JSON Schema from Rust types, conformance fixture
+  format, synthetic-stream surface; `docs/cli/protocol.md` — PLAN §Phase 11
+  (M3)
+
+#### Phase 13 — The front-end protocol (one CLI minor release)
+
+- ☐ **13.1** — `I2` — Session: flag, framing, handshake,
+  bounded event pipeline with state coalescing, fact sequence numbers and
+  `gap`, snapshot request, error responses, schema validation in tests; run
+  state only — PLAN §Phase 13
+- ☐ **13.2** — `I1` — Synthetic streams: a synthetic tournament
+  at chosen scale and rate, and a replay of a finished run directory; both
+  schema-valid without engines; recorded as fixtures — PLAN §Phase 13 (M4)
+- ☐ **13.3** — `I2` — Live events from `tournament run`: game
+  start, every move with clocks and FEN, search state per side, game end,
+  standings and rating snapshot per scored game; artifacts identical with
+  and without the protocol (stub engines) — PLAN §Phase 13
+- ☐ **13.4** — `R2`, then `I2` — Control and lifecycle: *stop* and *stop
+  now* as protocol commands on every platform; the end-of-input, detach,
+  re-attach and close-behaviour analysis done with GUI 4.2 and decided by
+  ADR; clean-stop suite extended — PLAN §Phase 13 (M5)
+- ☐ **13.5** — `I2` — Amendments: remove a participant, add a
+  participant, change the length of a tournament in progress; append-only
+  journal, stable game identity, amendment facts and record entries; kill /
+  amend / resume tests; `stats` replays an amended run — PLAN §Phase 13
+- ☐ **13.6** — `I1` — Changed engines: the 11.3 policy for
+  an executable that changed since the run started, never silent, always
+  recorded; a test per branch — PLAN §Phase 13
+- ☐ **13.7** — `I1` — Queries: run summary, paged games with
+  FEN per ply, standings and crosstable as read-only `--json` invocations
+  within the CLI-side budgets on the largest target — PLAN §Phase 13 (M6)
+- ☐ **13.8 — EXIT** — `V` — Conformance suite green; schema
+  and fixtures one release asset; `docs/cli/protocol.md` final; CLI release
+  candidate for GUI 4.8 (M7); the CLI minor release, then the GUI release
+  (M8) — PLAN §Phase 13
+
+#### Phase 14 — Retirement
+
+- ☐ **14.1** — `I1` — After the GUI's first release: remove
+  `colosseum-gui`, `engine::scheduler`, the SQLite store, the runtime
+  adapter, the `gui-v` lane and packaging; archive `docs/design/`; documents
+  describe a CLI-only repository; ADR-0006 superseded — PLAN §Phase 14
+- ☐ **14.2 — EXIT** — `V` — The 11.1 executable and
+  repository names applied with a one-release transition if anything
+  changed; a CLI release — PLAN §Phase 14 (M9)
+
+### Phase 12 — CLI maintenance from adoption (beside Phases 11, 13 and 14, CLI patch releases)
+
+- ☑ **12.1** — `I1` — Rarog's tooling notes from the first
   adoption: a regression test that a resumed tune's `spsa status` has a
   finite ETA (the ETA itself was fixed by carrying the run's elapsed time in
   the checkpoint); the resume note names completed and remaining units
@@ -146,13 +175,13 @@ When reporting the next step, always report its model as well.
   resume events its documentation promises; under `--json` the note stays
   on stderr and the JSON value also carries the resume facts; one
   regression test per item; `CHANGELOG-CLI.md` Unreleased — PLAN §Phase 12(a)
-- ☑ **12.2** — **Model: Terra High.** `spsa history`: the centre vector after
+- ☑ **12.2** — `I1` — `spsa history`: the centre vector after
   every completed iteration, rebuilt from the journal, as a table, `--json`
   or `--csv` — PLAN §Phase 12(b)
-- ☑ **12.3** — **Model: Terra High.** `spsa --seed-from <run dir>`: a fresh
+- ☑ **12.3** — `I1` — `spsa --seed-from <run dir>`: a fresh
   tune starting from a finished tune's rounded final centres, same surface
   unless `--tune` is given — PLAN §Phase 12(b)
-- ☑ **12.4** — **Model: Terra High.** A warning, kept in the run record,
+- ☑ **12.4** — `I1` — A warning, kept in the run record,
   whenever a command-line option list replaces a run file's list and drops
   values it named — PLAN §Phase 12(b)
 
@@ -215,16 +244,32 @@ Not steps — they are never "done".
   release and tag, fix on `main`, tag again.
 - A GUI patch found in use goes to `main` as `gui-vX.Y.(Z+1)` on its own;
   the CLI is not re-released for it, and vice versa.
+- The CLI release that carries a protocol change is tagged first; the GUI
+  release that needs it follows, bundling and pinning that CLI version. A
+  protocol minor version never ships in a CLI patch release.
 
 ## What to do now
 
-**Phase 11 is the main line of development, starting with 11A.1.** 11A is
-documents only, in this repository; each of its steps ends in a maintainer
-sign-off before the next begins, because the design is settled before
-anything is built. 11B may start once 11A.2 has set the performance budgets
-and can run beside 11A.4–11A.7; 11C starts after the 11A exit (11C.2 and
-11C.3 may start after 11A.3 if the maintainer wants the CLI side early).
-Phase 12 steps are taken beside Phase 11 as reports arrive.
+**The GUI v2 programme is the main line of development, starting with
+11.1.** Two repositories move together:
+
+1. Here: 11.1 naming, then 11.2 hands the seed in `docs/gui-v2/` to the new
+   GUI repository. From then on the GUI repository's own `GUIDE.md` tracks
+   GUI 1.1 (inventory of 1.x, read from this repository at `gui-v1.1.0`)
+   and 2.1 (skeleton), which start at once.
+2. Here: 11.3 waits for GUI 1.2 (requirements signed off); 11.4 follows and
+   unblocks the GUI screen specifications (GUI 3.x).
+3. Here: Phase 13 in order. 13.2 unblocks the GUI performance proof (GUI
+   2.3); 13.3 and 13.4 unblock the GUI live view (4.5); 13.4's lifecycle
+   decision is taken together with GUI 4.2; 13.5–13.7 unblock GUI 4.6.
+4. 13.8 produces the CLI release candidate the GUI accepts against (GUI
+   4.8); the CLI minor release is tagged first and the GUI's first release
+   follows, pinned to it.
+5. Then 14.1 and 14.2 here.
+
+Each design step (GUI 1.1–1.4, 3.1–3.3) ends in a maintainer sign-off,
+reviewed in pairs; no GUI screen is implemented before its specification is
+signed off. Phase 12 steps are taken beside all of it as reports arrive.
 
 ```
 git diff --check
@@ -260,5 +305,8 @@ repository workflow.
 | Engine project keeps a run file or thin CI command | Expected project policy, not a CLI gap |
 | Diagnostic heuristic looks stable | Report the observation; do not call it convergence or causation |
 | A GUI behaviour differs from the CLI's for the same mechanism | The CLI's is the specification (PLAN §S5); Phase 11 removes the second implementation, so do not add a third |
-| GUI v2 needs something the CLI does not provide | It is a CLI extension through the S5.15 protocol, recorded in the 11A.3 gap analysis — never game-playing or rating logic in the desktop application |
+| GUI v2 needs something the CLI does not provide | It is a CLI extension through the S5.15 protocol, recorded in the 11.3 gap analysis — never game-playing, rating or chess logic in the desktop application |
+| Tempted to coordinate CPU placement across desktop tournaments | Placement is a CLI feature for gates and tunes; desktop tournaments run with it off |
+| A protocol event could block on a slow reader | Not allowed: bounded queue, state dropped first, a `gap` fact instead of blocking (S5.15) |
+| Tempted to decide the close / detach / re-attach behaviour early | Analysed and decided at 13.4 with GUI 4.2; until then every option must leave a resumable run |
 | Tempted to implement a GUI v2 screen before its specification is signed off | Not allowed: design first (PLAN §Phase 11) |

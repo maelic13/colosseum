@@ -1,10 +1,13 @@
 # ADR-0011: Make the desktop application a separate client of the CLI
 
-- **Status:** Accepted (technology provisional until PLAN step 11B.2)
+- **Status:** Accepted (technology provisional until GUI step 2.3). Revised
+  2026-09-27 after the plan review, before any step started: step references,
+  the fallback order in decision 5, the reason in decision 2 and the placement,
+  run-file and FEN sentences in decision 4. The decision itself is unchanged
 - **Date:** 2026-09-27
 - **Relates to:** PLAN §S4 and Phase 11; [GUI v2 research](../gui-v2-research.md);
   partially supersedes [ADR-0006](0006-one-repository-independent-product-releases.md)
-  when step 11E.1 completes
+  when step 14.1 completes
 
 ## Context
 
@@ -32,23 +35,32 @@ re-implemented from scratch. The requirements, recorded in PLAN §Phase 11:
 - CLI runs (match, SPRT, SPSA, tunes) are not shown in the desktop
   application;
 - no served dashboard now, but the architecture must not close off
-  broadcasting tournaments on the web, or controlling them remotely, later.
+  broadcasting tournaments on the web, or controlling them remotely, later;
+- CPU placement matters for gates and tunes, which stay CLI work; the
+  desktop application does not need it and must be able to turn it off;
+- tournaments of 64 participants are the design point; several tournaments
+  may run at once; a running tournament can be amended (a participant
+  removed or added, the length changed) and an engine may change between
+  sessions.
 
 ## Decision
 
 1. **This repository's product is the CLI**, released for every supported
    platform. The egui application, `engine::scheduler` and the SQLite game
    store are retired from it once the new desktop application ships (step
-   11E.1). No 1.x tournament data is migrated.
+   14.1). No 1.x tournament data is migrated.
 2. **The desktop application lives in its own repository** and is a client of
    the CLI. It starts the CLI as a child process and talks to it through a
    versioned, line-delimited JSON protocol on standard input and output: the
    relationship a chess GUI has with a UCI engine. It links no Colosseum
-   crate.
+   crate: the boundary is the protocol, and a shared crate would let a second
+   game-playing or rating implementation grow in the desktop application by
+   accident.
 3. **The protocol is the contract.** Its specification, JSON Schema and
    conformance tests live in this repository with the CLI (PLAN §S5.15, filled
-   in at step 11C.1). Every message carries a protocol version; the desktop
-   application pins and bundles one CLI release. Messages are defined apart
+   in at step 11.4). The session handshake carries the protocol version; the
+   desktop application pins and bundles one CLI release and runs it against
+   the published fixtures in its own CI. Messages are defined apart
    from their transport, so the same messages can later be carried over a
    local socket or a WebSocket for re-attaching to a running tournament,
    broadcasting or remote control, without a second protocol.
@@ -59,12 +71,18 @@ re-implemented from scratch. The requirements, recorded in PLAN §Phase 11:
    (names, versions, logos, saved options, library ratings and their
    writeback), tournament presets, the list of the user's tournaments and
    where their run directories are, and the application settings. The desktop
-   application never re-implements a rating or statistic.
+   application never re-implements a rating or statistic, and holds no chess
+   logic: positions reach it as FEN. It configures a tournament by writing a
+   run file the CLI is started on, and its tournament list is a rebuildable
+   index over run directories. CPU placement stays a CLI feature; the desktop
+   application starts tournaments with placement off.
 5. **Technology, provisionally:** a TypeScript + React front end in a Tauri 2
    shell whose Rust side only manages the CLI process, windows, file dialogs
-   and updates. It is confirmed or replaced by the performance proof at step
-   11B.2, measured against the budgets set at step 11A.2. The fallback
-   candidates, in order, are Qt/QML and Flutter. Because the boundary is a
+   and updates. It is confirmed or replaced by the performance proof at GUI step
+   2.3, measured against the budgets set at GUI step 1.2 with the CLI's
+   synthetic streams. The fallbacks keep the front end and change the shell
+   first: Electron, then Tauri's Chromium runtime once it is stable; Qt/QML
+   and Flutter only after those. Because the boundary is a
    process protocol, replacing the front-end technology does not touch this
    repository.
 
@@ -82,9 +100,12 @@ re-implemented from scratch. The requirements, recorded in PLAN §Phase 11:
   the version field and the conformance suite are the mitigation.
 - The desktop application ships a CLI binary per platform, so its release
   depends on a CLI release for every platform it supports.
-- ADR-0006's one-repository model stays in force until step 11E.1; from then
+- ADR-0006's one-repository model stays in force until step 14.1; from then
   on this repository releases only the CLI and the `gui-v` lane is retired.
   ADR-0004 (engine library policy stays with the desktop application) is
   unchanged in substance.
-- Naming of both products and repositories is decided at step 11A.6, which
+- Naming of both products and repositories is decided at step 11.1, which
   may supersede ADR-0009.
+- The two repositories advance together and release in quick succession:
+  the CLI release that carries the protocol first, the desktop application
+  pinned to it immediately after (PLAN §S8 joint milestones).

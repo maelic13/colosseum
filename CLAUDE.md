@@ -23,6 +23,9 @@ Before implementation work, read `AGENTS.md`, `PLAN.md` and `GUIDE.md`.
 `README.md` and the product changelogs are **user-facing** (keep them simple, no
 phase/internal-method detail); `docs/DEVELOPMENT.md` holds implemented build,
 test, workspace and release facts.
+`docs/gui-v2/` is the seed of the separate GUI v2 repository (its `AGENTS.md`,
+`PLAN.md`, `GUIDE.md`), handed over at step 11.2; it is not part of this
+product.
 App data lives in `%APPDATA%\colosseum\` (`config/engines.json`,
 `data/colosseum.db`, `data/logs/` incl. per-game incident reports);
 `--portable` keeps everything next to the exe. The user's real engine
