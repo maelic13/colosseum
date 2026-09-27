@@ -18,6 +18,7 @@ decision.
 | [0008](0008-use-colosseum-through-implementation.md) | Accepted | Use Colosseum consistently through implementation and defer an optional final rebrand |
 | [0009](0009-retain-colosseum-for-1-0.md) | Accepted | Retain Colosseum and Colosseum CLI for the 1.0 product family |
 | [0010](0010-version-cli-documentation-with-the-binary.md) | Accepted | Keep canonical CLI Markdown with the binary and generate parser-derived command reference |
+| [0011](0011-desktop-application-as-separate-cli-client.md) | Accepted (technology provisional) | Make the desktop application a separate repository that drives the CLI through a versioned process protocol; this repository becomes the CLI alone |
 
 Phase 0.5's detailed release and CI design is in
 [`release-architecture.md`](../release-architecture.md).

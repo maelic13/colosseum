@@ -6,6 +6,18 @@ application looks and works like a modern tool, and whether egui is the
 right technology for a re-implementation on the harness (PLAN §Phase 11).
 This note records the evidence and a recommendation; it decides nothing.
 
+> **Decided 2026-09-27.** The maintainer's decisions on this note are
+> [ADR-0011](adr/0011-desktop-application-as-separate-cli-client.md) and PLAN
+> §Phase 11: the desktop application becomes a separate repository that
+> drives the CLI through a process protocol instead of linking a harness
+> library, and the design is settled before a technology is committed to.
+> §3's option B is one of the layout concepts 11A.4 evaluates, not the
+> chosen design; §4's evaluation stands, with Qt/QML and Flutter added as
+> fallbacks now that the front end need not be Rust; §5's recommendation
+> holds provisionally until measured at 11B.2; §6 and §7 (a Tauri crate in
+> this workspace on `colosseum-harness`) are superseded; §8's questions are
+> answered or moved into the 11A steps.
+
 ## 1. What the application is today
 
 Three tabs in one window — **Tournament** (setup), **Arena** (standings and
