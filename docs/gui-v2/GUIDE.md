@@ -18,7 +18,7 @@ argumentation.
 | What is missing | Everything: Phase 1 (design foundations), Phase 2 (repository and technology proof), Phase 3 (screen specifications), Phase 4 (implementation), Phase 5 (release) |
 | Depends on Colosseum | 11.4 protocol specification (before Phase 3), 13.2 synthetic streams (before 2.3), 13.3–13.4 (before 4.5; the lifecycle decision with 4.2), 13.5–13.7 (before 4.6), 13.8 release candidate (4.8) — PLAN §G9 joint milestones |
 | Next step | **1.1** — inventory of 1.x — `R2` (Claude Opus 5 — High). **2.1** — skeleton — `I2` (Claude Opus 5 — High) may start at the same time |
-| Confirmed decisions | PLAN §G2 (2026-09-27): design first; a client of the CLI over its protocol; provisional TypeScript + React on Tauri 2 until measured at 2.3, Electron the first fallback; placement off, several tournaments at once; 64 participants the design point; lifecycle and close behaviour decided at 4.2 with *stop now on close* the starting preference; amendments and changed engines are CLI mechanisms; run file per tournament, rebuildable index, positions as FEN, no chess logic here; the 1.x library imported, 1.x tournaments not migrated; both themes equal |
+| Confirmed decisions | PLAN §G2 (2026-09-27): design first; a client of the CLI over its protocol; TypeScript + React with shadcn/ui on Radix and Tailwind; the shell a measured choice at 2.3 between Electron and Tauri 2 with Electron the default expectation; placement off, several tournaments at once; 64 participants the design point; lifecycle and close behaviour decided at 4.2 with *stop now on close* the starting preference; amendments and changed engines are CLI mechanisms; run file per tournament, rebuildable index, positions as FEN, no chess logic here; the 1.x library imported, 1.x tournaments not migrated; both themes equal |
 
 ## Current model mapping
 
@@ -68,8 +68,8 @@ are never reused.
 
 ### Phase 2 — Repository and technology proof (beside Phase 1)
 
-- ☐ **2.1** — `I2` — Skeleton on the provisional stack:
-  formatter, linter, type check, unit / component / end-to-end runners, CI
+- ☐ **2.1** — `I2` — Skeleton: the §G4 front end behind a
+  shell-agnostic interface in the Electron shell; formatter, linter, type check, unit / component / end-to-end runners, CI
   on the three required platforms, a packaged empty application per
   required target, `docs/dependencies.md`, user-facing `README.md`, the
   verification baseline written into `AGENTS.md` — PLAN §G9
@@ -77,9 +77,12 @@ are never reused.
   the real stack in both themes with screenshot tests; gaps fed back into
   1.4 before Phase 3 — PLAN §G9
 - ☐ **2.3 — EXIT** — `V` — Performance proof against the 1.2
-  budgets at scale on the CLI's synthetic streams (Colosseum 13.2), on macOS
-  arm64, Windows x64 and Linux x64; technology confirmed by ADR or the
-  fallbacks measured the same way — PLAN §G9 (M4)
+  budgets at scale on the CLI's synthetic streams (Colosseum 13.2), the
+  same front end in Electron and in Tauri 2, on macOS arm64, Windows x64
+  and Linux x64; the shell chosen by ADR (Electron unless Tauri meets every
+  budget and its smaller bundle is judged worth it), the other build
+  removed; the §G4 fallbacks measured the same way only if the front end
+  itself fails — PLAN §G9 (M4)
 
 ### Phase 3 — Screen specifications (after 1.4, 2.2 and Colosseum 11.4)
 
@@ -178,4 +181,5 @@ binding repository workflow.
 | Tempted to keep a derived statistic | Ask the CLI's query again; the run directory is the record |
 | A dependency would save work | Accept only if mature, widely used, maintained, GPL-3.0-compatible and not overlapping one already taken; one line of reason in `docs/dependencies.md` |
 | A GUI behaviour would differ from the CLI's for the same mechanism | The CLI's is the specification |
+| Front-end code wants a shell API (Electron or Tauri) directly | Not allowed: go through the shell interface, so the 2.3 choice stays a build-level decision |
 | Tempted to coordinate CPU placement across tournaments | Placement is a CLI feature; tournaments here run with it off |
