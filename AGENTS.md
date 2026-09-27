@@ -30,11 +30,17 @@ Agents work locally only: create the required commits, but never push, fetch,
 create tags, releases or pull requests, or perform other remote operations.
 The maintainer owns every remote operation.
 
-Use the per-step model assignment in `PLAN.md` §S8, mirrored on the numbered
-`GUIDE.md` item. When asked what comes next, state both the step and its
-recommended model/effort. If a Terra step exposes a material design choice not
-settled by the plan, stop and continue it with Sol High rather than inventing
-the contract. Keep model-label changes synchronized between PLAN and GUIDE.
+`PLAN.md` §S8 records each open step's capability class (`R3`, `R2`, `I2`,
+`I1`, `M`, `V`), mirrored on the numbered `GUIDE.md` item; `GUIDE.md`'s
+"Current model mapping" table is the single maintainer-edited source that
+maps a class to the current Claude model and thinking mode. Whenever
+reporting the next step, name it with its class and recommend the mapped
+model and mode as `Claude: <model> — <mode>` with a brief task-specific
+reason; do not substitute newer models, and never change the active model
+automatically. If an `I1`, `M` or `V` step exposes a material design choice
+not settled by the plan, stop and continue it as `R2` rather than inventing
+the contract; never silently downgrade a recorded class. Keep classes
+synchronized between PLAN and GUIDE.
 
 1. Start from a clean worktree, or identify and preserve pre-existing user
    changes. Never stage unrelated files.
@@ -49,7 +55,7 @@ the contract. Keep model-label changes synchronized between PLAN and GUIDE.
    when it improves the durable specification or records a consequential
    result; do not duplicate routine detail there. Use `☐` for todo and `◐`
    only while genuinely in progress; do not use GitHub `[ ]` task syntax
-   because the Codex renderer does not display it reliably.
+   because not every Markdown renderer displays it reliably.
 6. Commit the completed step before starting another numbered step.
 
 Use a short imperative commit subject that names the outcome, preferably with
