@@ -66,7 +66,7 @@ ADR-0009's descriptive qualifiers ("Colosseum chess-engine testing",
 | | Until the swap | After the swap |
 |---|---|---|
 | Desktop repository | `maelic13/colosseum-gui` (created at 11.2) | `maelic13/colosseum` |
-| This repository | `maelic13/colosseum` | `maelic13/colosseum-cli`, with its full history and every published release |
+| This repository | `maelic13/colosseum` | `maelic13/colosseum-cli`, with its full history and the CLI releases |
 
 The maintainer performs the swap as soon as the desktop application's first
 release is published (M8), before 14.1, so that 1.x users are told about it at
@@ -95,7 +95,7 @@ which already rewrites those documents for a CLI-only repository.
 | Repository | Until the swap | After the swap |
 |---|---|---|
 | Desktop | `v<semver>` from its first release, plus one bridge release (below) | `v<semver>` |
-| CLI | `cli-v<semver>` | `v<semver>`, from the 14.2 release on |
+| CLI | `cli-v<semver>` | `v<semver>` from the 14.2 release on; the published `cli-v0.x` releases stay |
 
 - **The bridge release.** GUI 1.1.0's update check reads
   `maelic13/colosseum`'s releases but accepts only `gui-v` tags, and plain `v`
@@ -107,12 +107,18 @@ which already rewrites those documents for a CLI-only repository.
   prerelease, and not marked Latest. 1.1.0 then offers the update and opens
   the bridge release's page. One bridge is enough: the new application's own
   updater reads `v` tags. The first version is 2.0.0, following the GUI
-  plan's own rule for a continuing brand.
-- **Legacy tags.** This repository already holds the GUI's `v1.0.0-rc.1`
-  through `v1.0.2`. Before the first plain-`v` CLI tag, the maintainer renames
-  them to `gui-v1.0.0-rc.1` through `gui-v1.0.2`, and points their releases
-  at the renamed tags, so that `v` names only CLI releases. After the swap no
-  updater reads this repository's release list.
+  plan's own rule for a continuing brand. The desktop repository starts with
+  no tags, so nothing there can clash.
+- **The 1.x releases and tags are deleted.** After the swap no updater reads
+  this repository's release list: 1.x and the new application both read
+  `maelic13/colosseum`. In 14.1 the maintainer deletes every desktop release
+  from `maelic13/colosseum-cli` together with its tag (`v1.0.0-rc.1` through
+  `v1.0.2`, `gui-v1.1.0` and any later `gui-v1.1.x`). That frees `v` for the
+  CLI and leaves the repository with CLI releases only. The 1.x installers
+  stop being downloadable, and the maintainer accepts that. The 1.x source
+  stays in this repository's history. Anything that must still reach it
+  names the commit, not the tag: `gui-v1.1.0` is
+  `ba308297f8866dc7aa8fd3172730d941e05b3d68`.
 - **No 1.x patch after the swap.** A `gui-v1.1.x` release published from
   `maelic13/colosseum-cli` would be invisible to 1.x updaters. The 1.x answer
   to a defect found after the swap is the new application.
@@ -138,7 +144,12 @@ constraint is carried into the GUI repository's `PLAN.md` at step 11.2.
 | Existing CLI | The wireless platform's [Colosseum CLI documentation](https://colosseumwireless.readthedocs.io/en/latest/radio_api_traffic/colosseum_cli.html) still documents `colosseumcli`; [colosseum-wiot/colosseumcli-public](https://github.com/colosseum-wiot/colosseumcli-public) is the only repository matching `colosseumcli`. | Unchanged. The executable spelling differs. |
 | GitHub repository names | No repository is named exactly `colosseum-cli` (two near matches, both unrelated API clients). [tps01/colosseum-gui](https://github.com/tps01/colosseum-gui) is an unrelated GUI-testing plugin. `maelic13/colosseum-cli` and `maelic13/colosseum-gui` are free. | Both chosen names are available in the maintainer's namespace. |
 | crates.io | `colosseum-cli` and `colosseum-gui` are unregistered; `colosseum` and `coliseum` remain taken. The CLI stays `publish = false`. | Unchanged. |
-| Preliminary trademark screen | TMview is a browser-only application and was not re-run in this step. The 2026-08-03 counts (177 COLOSSEUM, 128 COLISEUM) stand. | Not legal clearance; unchanged obligation below. |
+| Preliminary trademark screen | TMview is a browser-only application and was not re-run in this step. The 2026-08-03 counts (177 COLOSSEUM, 128 COLISEUM) stand. | Not legal clearance. |
+
+The maintainer does not consider the same-domain name or the trademark
+position a concern. The wireless `colosseumcli` belongs to Northeastern
+University's Colosseum wireless-network emulator, a research testbed in an
+unrelated domain, and overlaps only in web searches.
 
 ## Consequences
 
@@ -152,9 +163,10 @@ constraint is carried into the GUI repository's `PLAN.md` at step 11.2.
   the desktop repository afterwards; that cost is accepted.
 - Step 14.2 no longer renames an executable. It applies the `v` tag lane and
   publishes the first CLI release from `maelic13/colosseum-cli`.
-- ADR-0009's trademark caveat stands: obtain professional, jurisdiction- and
-  class-specific clearance before commercial use, registration or substantial
-  promotion.
+- If a naming conflict ever arises, both products are renamed together, as
+  one complete migration (ADR-0009). No clearance is sought in advance.
+- The 1.x installers are no longer published once 14.1 deletes their
+  releases.
 
 ## Alternatives considered
 
