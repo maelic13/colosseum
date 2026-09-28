@@ -1,4 +1,4 @@
-# <GUI> agent instructions
+# Colosseum desktop application — agent instructions
 
 Read this file, [`PLAN.md`](PLAN.md) and [`GUIDE.md`](GUIDE.md) before any
 work. `PLAN.md` is the binding specification of the desktop application and
@@ -9,22 +9,34 @@ its relationship to the Colosseum CLI; `GUIDE.md` is the ordered tracker.
 The desktop application is a **client of the Colosseum CLI**. It starts the
 CLI as a child process and speaks its front-end protocol; the CLI owns
 everything that plays or scores games, this repository owns presentation and
-the user's own data (PLAN §G3). The CLI repository is
-`https://github.com/maelic13/colosseum`; its `PLAN.md` §S5.15 is the
+the user's own data (PLAN §G3). The CLI repository's `PLAN.md` §S5.15 is the
 protocol's principles and its `docs/cli/protocol.md` the contract. The two
 repositories advance together on the joint milestones in PLAN §G9.
+
+Both products are called Colosseum: the desktop application **Colosseum**,
+the command-line tool **Colosseum CLI** (`colosseum-cli`). A step number
+prefixed `CLI` (`CLI 11.4`) is the CLI repository's; a bare number is a step
+here.
+
+| Repository | Until the swap | After the swap (right after 5.1) |
+|---|---|---|
+| This one | `maelic13/colosseum-gui` | `maelic13/colosseum` |
+| The CLI's | `maelic13/colosseum` | `maelic13/colosseum-cli` |
+
+The swap and its same-day checklist are in PLAN §G8
+([CLI ADR-0012](https://github.com/maelic13/colosseum/blob/main/docs/architecture/adr/0012-names-and-repositories-after-the-split.md)).
 
 ## Scope and architecture
 
 - Implement numbered `GUIDE.md` steps in order. Do not skip a phase exit.
 - **Design first.** No screen is implemented before its specification (Phase
   3) is signed off, and no specification is written before the design system
-  (1.4) and the protocol (Colosseum 11.4) exist. A step tempted to build a
+  (1.4) and the protocol (CLI 11.4) exist. A step tempted to build a
   screen early stops instead.
 - **Never re-implement the CLI.** No rating, statistic, pairing, clock,
   adjudication, PGN writing or move generation lives here. Positions arrive
   as FEN; results arrive as facts; anything missing is a CLI extension
-  requested through the Colosseum gap analysis, not code here.
+  requested through the CLI repository's gap analysis, not code here.
 - **One component catalogue.** Every screen is composed from the design
   system's components. A new need extends the catalogue and its gallery in
   both themes first.
@@ -35,9 +47,11 @@ repositories advance together on the joint milestones in PLAN §G9.
 - **Dependencies where they pay.** Every dependency has a line in
   `docs/dependencies.md` saying why; a dependency that overlaps one already
   taken, or adds weight for little, is refused.
-- The 1.x application source is read for the inventory only, at the
-  Colosseum `gui-v1.1.0` tag in a checkout beside this one; nothing is
-  copied from it except assets and product rules the inventory keeps.
+- The 1.x application source is read for the inventory only, in a checkout
+  of the CLI repository beside this one at `gui-v1.1.0`, commit
+  `ba308297f8866dc7aa8fd3172730d941e05b3d68` (the tag is deleted at CLI
+  14.1; the commit stays); nothing is copied from it except assets and
+  product rules the inventory keeps.
 - Treat engine crashes and protocol quirks as real, supported conditions:
   every error the CLI reports has a place on a screen.
 
