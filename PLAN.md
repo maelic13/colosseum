@@ -2012,7 +2012,8 @@ all of it as reports arrive.
   maintainer renames this repository to `maelic13/colosseum-cli` and the
   desktop repository to `maelic13/colosseum`. Both use plain `v` tags; the
   desktop application's first release also carries one `gui-v2.0.0` bridge
-  release for the 1.1.0 updater. The new application must not share 1.x's
+  release for the 1.1.0 updater. The 1.x releases and their tags are deleted
+  from this repository in 14.1. The new application must not share 1.x's
   data directories.
 - **11.2 The GUI repository seed** (`M`). [`docs/gui-v2/`](docs/gui-v2/README.md)
   finalised under the 11.1 names — `AGENTS.md`, `PLAN.md`, `GUIDE.md` — and
@@ -2023,7 +2024,8 @@ all of it as reports arrive.
   from `maelic13/colosseum-cli` after the swap, and data directories apart
   from 1.x's with the installer relationship to 1.x decided at GUI 4.7. `docs/gui-v2/` is then reduced here to a
   pointer, and `README.md` names the new application. The inventory of 1.x
-  (GUI 1.1) reads this repository's code at the `gui-v1.1.0` tag.
+  (GUI 1.1) reads this repository's code at the `gui-v1.1.0` tag; the seed
+  names its commit (`ba30829`) as well, because 14.1 deletes the tag.
   **Exit:** the GUI repository exists with the seed as its root; this
   repository points to it. (M1)
 - **11.3 The CLI against the requirements** (`R2`). After GUI 1.2 is
@@ -2118,12 +2120,13 @@ all of it as reports arrive.
   `AGENTS.md`, `README.md` and `docs/DEVELOPMENT.md` describe a CLI-only
   repository at `maelic13/colosseum-cli` and point to the new application,
   and every link to this repository's old address is updated; ADR-0006
-  superseded. Published 1.x releases stay downloadable.
+  superseded. The maintainer deletes every 1.x release and its tag
+  (`v1.0.0-rc.1`…`v1.0.2`, `gui-v1.1.x`) from this repository; the 1.x
+  source stays in history (ADR-0012).
 - **14.2 — EXIT: The CLI as the repository's product** (`V`). The CLI
   release lane moves to plain `v<semver>` tags (the release workflow and
-  `cargo xtask release-check`). The maintainer first renames the legacy GUI
-  tags `v1.0.0-rc.1`…`v1.0.2` to `gui-v…`, so `v` names only CLI releases.
-  Then a CLI release from `maelic13/colosseum-cli`. No executable is renamed
+  `cargo xtask release-check`); a CLI release from
+  `maelic13/colosseum-cli`. No executable is renamed
   (ADR-0012). (M9)
 
 **Programme exit:** one game-playing implementation, in the CLI; the desktop
