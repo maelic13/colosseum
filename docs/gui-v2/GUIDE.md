@@ -1,4 +1,4 @@
-# <GUI> — development guide
+# Colosseum — desktop application development guide
 
 The short operational view: where the work stands and what to do next.
 Rationale, specifications and exit criteria live in [`PLAN.md`](PLAN.md)
@@ -13,8 +13,8 @@ argumentation.
 
 | | |
 |---|---|
-| Repository | Seeded from the Colosseum repository at its step 11.2 (`docs/gui-v2/`). No code yet |
-| Predecessor | Colosseum GUI 1.1.0 (egui), released 2026-09-22, in maintenance in the Colosseum repository until this application's first release |
+| Repository | `maelic13/colosseum-gui`, seeded from the CLI repository at its step 11.2 (`docs/gui-v2/`); takes `maelic13/colosseum` in the swap right after 5.1 (PLAN §G8). No code yet |
+| Predecessor | Colosseum GUI 1.1.0 (egui), released 2026-09-22, in maintenance in the CLI repository until this application's first release |
 | What is missing | Everything: Phase 1 (design foundations), Phase 2 (repository and technology proof), Phase 3 (screen specifications), Phase 4 (implementation), Phase 5 (release) |
 | Depends on Colosseum | 11.4 protocol specification (before Phase 3), 13.2 synthetic streams (before 2.3), 13.3–13.4 (before 4.5; the lifecycle decision with 4.2), 13.5–13.7 (before 4.6), 13.8 release candidate (4.8) — PLAN §G9 joint milestones |
 | Next step | **1.1** — inventory of 1.x — `R2` (Claude Opus 5 — High). **2.1** — skeleton — `I2` (Claude Opus 5 — High) may start at the same time |
@@ -77,14 +77,14 @@ are never reused.
   the real stack in both themes with screenshot tests; gaps fed back into
   1.4 before Phase 3 — PLAN §G9
 - ☐ **2.3 — EXIT** — `V` — Performance proof against the 1.2
-  budgets at scale on the CLI's synthetic streams (Colosseum 13.2), the
+  budgets at scale on the CLI's synthetic streams (CLI 13.2), the
   same front end in Electron and in Tauri 2, on macOS arm64, Windows x64
   and Linux x64; the shell chosen by ADR (Electron unless Tauri meets every
   budget and its smaller bundle is judged worth it), the other build
   removed; the §G4 fallbacks measured the same way only if the front end
   itself fails — PLAN §G9 (M4)
 
-### Phase 3 — Screen specifications (after 1.4, 2.2 and Colosseum 11.4)
+### Phase 3 — Screen specifications (after 1.4, 2.2 and CLI 11.4)
 
 - ☐ **3.1** — `R2` — Shell, settings and engine library —
   PLAN §G9
@@ -101,7 +101,7 @@ are never reused.
 - ☐ **4.2** — `R2`, then `I2` — Shell and CLI process manager: bundled
   and pinned CLI, handshake and version check, crash handling, Windows Job
   Object; the lifecycle decision (close, detach, re-attach) analysed and
-  taken with Colosseum 13.4, recorded by ADR — PLAN §G9
+  taken with CLI 13.4, recorded by ADR — PLAN §G9
 - ☐ **4.3** — `I1` — Engine library with the 1.x import —
   PLAN §G9
 - ☐ **4.4** — `I1` — Tournament creation and presets: run
@@ -120,7 +120,7 @@ are never reused.
 - ☐ **4.8 — EXIT** — `V` — Every keep item present or
   dropped; budgets met on a real tournament on the three required platforms
   (native Rarog and Basilisk on macOS and Linux); usability walkthrough;
-  against the Colosseum 13.8 release candidate — PLAN §G9 (M7)
+  against the CLI 13.8 release candidate — PLAN §G9 (M7)
 
 ### Phase 5 — Release
 
@@ -133,8 +133,8 @@ are never reused.
 **Start 1.1 and 2.1 together.** 1.1 reads the Colosseum checkout beside this
 one at `gui-v1.1.0` and writes the inventory; 2.1 stands the repository up
 on the provisional stack. 1.2 follows 1.1 and is reviewed with it; when it is
-signed off it goes to the Colosseum repository, whose 11.3 and 11.4 produce
-the protocol specification Phase 3 needs. 2.3 waits for Colosseum 13.2.
+signed off it goes to the CLI repository, whose 11.3 and 11.4 produce
+the protocol specification Phase 3 needs. 2.3 waits for CLI 13.2.
 Nothing in Phase 4 starts before its Phase 3 specification is signed off.
 
 ```
@@ -164,6 +164,8 @@ binding repository workflow.
 ### Cutting a release (maintainer)
 
 - The CLI release this build pins is published first.
+- The first release only: the `gui-v2.0.0` bridge release beside `v2.0.0`,
+  then the repository swap with its same-day checklist (PLAN §G8).
 - Changelog dated; candidate dispatched and its packages started on the
   three required platforms; tag; watch the release workflow; check the
   release page and the updater from the previous version.
@@ -175,7 +177,7 @@ binding repository workflow.
 | A screen is wanted before its specification is signed off | Not allowed: design first (PLAN §G2) |
 | A screen needs a component the catalogue lacks | Extend the catalogue and the gallery in both themes first, then use it |
 | Something takes longer than a frame on the UI thread | Move it to the CLI or off the UI thread; virtualise the list; coalesce the updates |
-| The CLI does not provide something a screen needs | A CLI extension through the protocol, requested via Colosseum's gap analysis — never game-playing, rating or chess logic here |
+| The CLI does not provide something a screen needs | A CLI extension through the protocol, requested via the CLI repository's gap analysis — never game-playing, rating or chess logic here |
 | A protocol message is unknown to this build | Ignore it if the handshake's major version matches; refuse to start the CLI if it does not |
 | A `gap` fact arrives | Request a snapshot and re-apply facts above it; never guess |
 | Tempted to keep a derived statistic | Ask the CLI's query again; the run directory is the record |

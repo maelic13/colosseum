@@ -1,8 +1,9 @@
-# <GUI> — desktop application plan
+# Colosseum — desktop application plan
 
-> **Seed.** Written in the Colosseum repository (`docs/gui-v2/PLAN.md`) and
-> committed as this repository's root `PLAN.md` at Colosseum step 11.2.
-> `<GUI>` is the name decided at Colosseum step 11.1. This file is
+> **Seed.** Written in the CLI repository (`docs/gui-v2/PLAN.md`) and
+> committed as this repository's root `PLAN.md` at CLI step 11.2, under the
+> names CLI step 11.1 decided ([CLI ADR-0012](https://github.com/maelic13/colosseum/blob/main/docs/architecture/adr/0012-names-and-repositories-after-the-split.md)).
+> A step number prefixed `CLI` is the CLI repository's. This file is
 > maintainer-facing: it holds the binding requirements, the architecture,
 > the specifications each step fills in, and the open work. `GUIDE.md` is
 > the ordered tracker; `README.md` is user-facing.
@@ -18,7 +19,7 @@ starts the CLI as a child process and talks to it through the CLI's
 front-end protocol, the way a chess GUI talks to a UCI engine. Everything
 that plays or scores a game is the CLI's; everything the user sees, and the
 user's own data, is this application's
-([Colosseum ADR-0011](https://github.com/maelic13/colosseum/blob/main/docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md)).
+([CLI ADR-0011](https://github.com/maelic13/colosseum/blob/main/docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md)).
 
 Not in scope: the CLI's own workflows (matches, SPRT gates, SPSA tunes,
 position suites, calibration) are not shown here; there is no served
@@ -65,14 +66,14 @@ Every step in §G9 is bound by them.
   progress and stop*, and *stop now* — both leaving a tournament that
   resumes. What closing the application does, whether a tournament can keep
   running without it, and whether it can be re-attached are analysed and
-  chosen at implementation (4.2, together with Colosseum 13.4). The
+  chosen at implementation (4.2, together with CLI 13.4). The
   maintainer's starting preference: closing the application stops now;
   keeping a tournament running without it is worth evaluating.
 - **Changed engines and amendments.** An engine executable that changed
   since a tournament started; removing a participant from an active
   tournament; adding one to a running tournament; changing an active
-  tournament's length. All are CLI mechanisms (decided at Colosseum 11.3,
-  implemented in Colosseum 13.5 and 13.6) that this application presents.
+  tournament's length. All are CLI mechanisms (decided at CLI 11.3,
+  implemented in CLI 13.5 and 13.6) that this application presents.
 - **Sign-offs.** Each design step ends in a maintainer sign-off; consecutive
   document steps are reviewed in pairs (1.1 with 1.2, 1.3 with 1.4).
 
@@ -118,9 +119,9 @@ statistic and holds no chess logic: positions arrive as FEN.
    commands, presented as edits on the running tournament.
 
 **The protocol** is the CLI's contract, not this repository's: principles in
-Colosseum `PLAN.md` §S5.15, catalogue and schema in `docs/cli/protocol.md`
-there. What this application relies on: a handshake with versions; facts
-that are sequence-numbered and never silently dropped, with a `gap` fact and
+the CLI repository's `PLAN.md` §S5.15, catalogue and schema in
+`docs/cli/protocol.md` there. What this application relies on: a handshake
+with versions; facts that are sequence-numbered and never silently dropped, with a `gap` fact and
 a snapshot request for resync; state that coalesces; emission that never
 blocks an engine; positions as FEN; synthetic streams for tests; transport
 independence so a later remote transport needs no second protocol.
@@ -241,16 +242,36 @@ product rules across.
 - Required targets build, test and package in CI from 2.1; wanted targets
   are added at 4.7 where the cost is a matrix entry.
 - The bundle includes the pinned CLI release's binary for that platform,
-  fetched by checksum from the Colosseum release, and it is signed and
-  notarised together with the application.
+  fetched by checksum from the CLI repository's release, and it is signed
+  and notarised together with the application.
 - Installers: msi or nsis, dmg, deb, rpm, AppImage, an Arch package where
   1.x had one; the updater checks this repository's releases only.
-- **Versioning and order.** The version of the first release is the
-  maintainer's call at 5.1 (2.0.0 if the Colosseum brand continues, 1.0.0
-  under a new name). The CLI release that carries the protocol is tagged
-  first; this application's release follows, pinned to it, in quick
-  succession. A CLI patch never requires a release here; a protocol minor
-  bump does.
+- **Apart from 1.x.** Colosseum 1.x keeps its data in the directories an
+  application named Colosseum gets by default (`%APPDATA%\Colosseum`,
+  `~/Library/Application Support/Colosseum`, `~/.config/colosseum` and
+  `~/.local/share/colosseum`). This application uses its own directory,
+  reads the 1.x one only to import the engine library, and never writes
+  there; the two may be installed side by side. Whether its installers
+  replace an installed 1.x or coexist with it is decided at 4.7 against the
+  1.x installer identities.
+- **Tags and versions.** Plain `v<semver>` tags; this repository starts with
+  none. The first release is **2.0.0**, the Colosseum brand continuing. It
+  is published twice: `v2.0.0`, and a bridge release `gui-v2.0.0` on the
+  same commit with the same assets, neither draft nor prerelease and not
+  marked Latest. 1.x's updater reads `maelic13/colosseum` but accepts only
+  `gui-v` tags, so the bridge is how installed 1.x copies learn of 2.0.0.
+  One bridge is enough; this application's own updater reads `v` tags.
+- **Order.** The CLI release that carries the protocol is tagged first;
+  this application's release follows, pinned to it, in quick succession. A
+  CLI patch never requires a release here; a protocol minor bump does.
+- **The repository swap** (maintainer, once, right after 5.1, CLI
+  ADR-0012). Rename the CLI repository `maelic13/colosseum` to
+  `maelic13/colosseum-cli`, then at once this repository
+  `maelic13/colosseum-gui` to `maelic13/colosseum`. Taking the name ends
+  GitHub's redirect for the old address, so the same day: the address the
+  build fetches the pinned CLI from, and every link to the CLI repository
+  in this repository's documents, move to `maelic13/colosseum-cli`; every
+  clone of the CLI repository updates its `origin`.
 - `CHANGELOG.md` is user-facing; the release notes are its section.
 
 ## G9. Implementation plan
@@ -260,7 +281,7 @@ product rules across.
 Each open `GUIDE.md` step carries a stable **capability class**; `GUIDE.md`'s
 "Current model mapping" table is the single maintainer-edited source that
 maps classes to the current Claude model and thinking mode. The classes are
-the ones the Colosseum and Rarog repositories use. They are task-risk
+the ones the CLI and Rarog repositories use. They are task-risk
 judgements, not part of the product and never a measured ranking.
 
 | Class | Required capability | Typical use here |
@@ -290,9 +311,9 @@ reason; the recommendation never changes the active model by itself.
 | 4.5, 4.6, 4.7 | `I2` |
 | 4.8, 5.1 | `V` |
 
-### Joint milestones with the Colosseum repository
+### Joint milestones with the CLI repository
 
-| | Milestone | Colosseum | Here |
+| | Milestone | CLI repository | Here |
 |---|---|---|---|
 | M0 | Names decided | 11.1 | — |
 | M1 | This repository exists | 11.2 hands over the seed | 1.1 and 2.1 start |
@@ -303,12 +324,13 @@ reason; the recommendation never changes the active model by itself.
 | M6 | Amendments, changed engines, queries | 13.5–13.7 | 4.6 |
 | M7 | CLI release candidate | 13.8 | 4.8 acceptance against it |
 | M8 | Releases in quick succession | the CLI minor release | 5.1, pinned to it |
-| M9 | Retirement of the 1.x application | 14.1, 14.2 | — |
+| M9 | Retirement of the 1.x application | the repository swap, 14.1, 14.2 | takes `maelic13/colosseum`; the CLI address updated (§G8) |
 
 ### Phase 1 — Design foundations (documents only)
 
 - **1.1 Inventory of 1.x** (`R2`). Everything the 1.x application
-  does, read from its code at Colosseum `gui-v1.1.0`, its changelog, its
+  does, read from its code at the CLI repository's `gui-v1.1.0` (commit
+  `ba30829`), its changelog, its
   guidelines and its release history — every screen, control, setting,
   stored item, workflow, keyboard path, error and warning surface,
   background behaviour (updater, rating writeback, resume, incident reports,
@@ -327,7 +349,7 @@ reason; the recommendation never changes the active model by itself.
   expects on close (the options 4.2 will analyse), what amending a running
   tournament should look like, what the user expects when an engine changed.
   **Exit:** `docs/design/requirements.md` signed off with 1.1; handed to
-  Colosseum 11.3. (M2)
+  CLI 11.3. (M2)
 - **1.3 Layout concepts** (`R2`). Two or three information
   architectures — at least the sidebar / list / detail model, a workspace
   with docked panels, and the strongest alternative the analysis suggests —
@@ -363,7 +385,7 @@ reason; the recommendation never changes the active model by itself.
   **Exit:** every catalogue component in the gallery in both themes, or the
   catalogue amended.
 - **2.3 — EXIT: Performance proof** (`V`). Against the 1.2 budgets at
-  the §G5 scale, using the CLI's synthetic streams (Colosseum 13.2): the
+  the §G5 scale, using the CLI's synthetic streams (CLI 13.2): the
   largest tournament's history, the maximum concurrent live games of the
   maximum running tournaments at the CLI's update rate, the virtualised
   games list, the 64-participant standings and crosstable, cold start,
@@ -372,11 +394,11 @@ reason; the recommendation never changes the active model by itself.
   expected weak point).
   **Exit:** the shell chosen by ADR from the measurements, Electron unless
   Tauri meets every budget and its smaller bundle is judged worth it
-  (Colosseum ADR-0011's status updated there); the other shell's build
+  (CLI ADR-0011's status updated there); the other shell's build
   removed; or, if the front end fails in both shells, the failures recorded
   and the §G4 fallbacks measured the same way before anything is built. (M4)
 
-### Phase 3 — Screen specifications (after 1.4, 2.2 and Colosseum 11.4)
+### Phase 3 — Screen specifications (after 1.4, 2.2 and CLI 11.4)
 
 Each screen: purpose, the data it shows and where it comes from (the
 protocol message or the GUI-owned store, by name), the catalogue components
@@ -405,9 +427,9 @@ and behaviour at the §G5 scale.
 - **4.2 Shell and CLI process manager** (`R2`, then `I2`). Navigation, settings,
   the bundled and pinned CLI, the handshake and version check, crash
   handling and error surfaces, the Windows Job Object; the **lifecycle
-  decision** analysed and taken with Colosseum 13.4 — what close does,
+  decision** analysed and taken with CLI 13.4 — what close does,
   whether a tournament keeps running without the application, whether it
-  can be re-attached — recorded in an ADR here and in Colosseum S5.15.
+  can be re-attached — recorded in an ADR here and in CLI S5.15.
 - **4.3 Engine library** (`I1`). Per 3.1, including the 1.x import.
 - **4.4 Tournament creation and presets** (`I1`). Per 3.2: the run-file
   writer, dry-run validation, creation and start of the largest tournament
@@ -425,15 +447,16 @@ and behaviour at the §G5 scale.
 - **4.8 — EXIT: Acceptance** (`V`). Every *keep* item present or
   dropped by the maintainer; the 1.2 budgets met on a real tournament from
   the maintainer's library on the three required platforms; a usability
-  walkthrough with the maintainer; all of it against the Colosseum 13.8 CLI
+  walkthrough with the maintainer; all of it against the CLI 13.8
   release candidate. (M7)
 
 ### Phase 5 — Release
 
-- **5.1 — EXIT: First release** (`V`). The version chosen by the
-  maintainer; `CHANGELOG.md`; the pin set to the released CLI; the release
-  published right after the CLI's, from this repository's own lane. The 1.x
-  application's retirement (Colosseum 14.1) may start. (M8)
+- **5.1 — EXIT: First release** (`V`). 2.0.0 with its `gui-v2.0.0`
+  bridge release (§G8); `CHANGELOG.md`; the pin set to the released CLI;
+  the release published right after the CLI's, from this repository's own
+  lane. Then the repository swap (§G8), and the 1.x application's
+  retirement (CLI 14.1) may start. (M8)
 
 **Programme exit:** the desktop application released from this repository
 over the protocol, with one game-playing implementation, in the CLI.
@@ -443,7 +466,7 @@ over the protocol, with one game-playing implementation, in the CLI.
 | Risk | Mitigation |
 |---|---|
 | A 1.x capability users rely on is lost | 1.1 inventory with every item classified; 3.3 and 4.8 check every *keep* item |
-| The CLI cannot serve a requirement, discovered late | 1.2 is handed to Colosseum 11.3 before any screen is specified; *not feasible* items are resolved with the maintainer first |
+| The CLI cannot serve a requirement, discovered late | 1.2 is handed to CLI 11.3 before any screen is specified; *not feasible* items are resolved with the maintainer first |
 | The web front end is not fast enough, notably WebKitGTK | Budgets as numbers at 1.2, measured at 2.3 on synthetic streams in both shells before anything is built; Electron's single Chromium is the default expectation; Qt/QML and Flutter only if the front end itself fails |
 | The shell choice leaks into the front end | one small typed shell interface from 2.1 on; the front end never imports a shell API directly |
 | The design system is fiction | 2.2 builds the whole catalogue on the real stack before Phase 3 specifies screens against it |
@@ -461,7 +484,7 @@ over the protocol, with one game-playing implementation, in the CLI.
 | `docs/architecture/adr/` | decisions of this repository (technology at 2.3, lifecycle at 4.2, …) |
 | `docs/dependencies.md` | every dependency with its reason |
 | `src/` | the front end and shell layout fixed at 2.1 |
-| Colosseum `PLAN.md` §S5.15, §S8 | protocol principles; the programme and joint milestones |
-| Colosseum `docs/cli/protocol.md` | the protocol contract; schema and fixtures published with each CLI release |
-| Colosseum `docs/architecture/gui-v2-research.md` | the technology research behind §G4 |
-| Colosseum `gui-v1.1.0` tag | the 1.x application, read for the inventory |
+| CLI repository `PLAN.md` §S5.15, §S8 | protocol principles; the programme and joint milestones |
+| CLI repository `docs/cli/protocol.md` | the protocol contract; schema and fixtures published with each CLI release |
+| CLI repository `docs/architecture/gui-v2-research.md` | the technology research behind §G4 |
+| CLI repository `gui-v1.1.0` (commit `ba30829`) | the 1.x application, read for the inventory |
