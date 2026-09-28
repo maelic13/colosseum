@@ -1,0 +1,186 @@
+# ADR-0012: Names and repositories after the split
+
+- **Status:** Accepted
+- **Date:** 2026-09-28
+- **Supersedes:** [ADR-0009](0009-retain-colosseum-for-1-0.md)'s release-lane
+  row once the repositories are swapped; ADR-0009's product and executable
+  names are retained unchanged
+- **Relates to:** PLAN §Phase 11 (step 11.1, milestone M0) and §Phase 14;
+  [ADR-0011](0011-desktop-application-as-separate-cli-client.md);
+  [naming research](../naming-decision.md)
+
+## Context
+
+[ADR-0011](0011-desktop-application-as-separate-cli-client.md) splits the
+product into two repositories: the desktop application, re-implemented as a
+client of the CLI, and this repository, which becomes the CLI alone. Step
+11.1 names both products, both executables and both repositories.
+
+The plan went in recommending that the CLI keep `colosseum-cli` because a
+rename would land on the projects that adopted it. The maintainer removed that
+premise on 2026-09-28: the only adopter is Rarog, the maintainer's own engine,
+which is updated by hand. The maintainer also has no stronger name than
+Colosseum and wants the desktop application to keep it.
+
+The CLI executable could therefore be either `colosseum` or `colosseum-cli`.
+Four facts decide it:
+
+1. The desktop application bundles one pinned CLI release per platform
+   (the GUI repository's PLAN, packaging). Windows and default macOS file
+   systems are case-insensitive, so `Colosseum.exe` and `colosseum.exe` are
+   one name there, and two processes called `colosseum` in a task list or a
+   crash report would be indistinguishable.
+2. **Colosseum** is the desktop application; a command called `colosseum` is
+   expected to open it.
+3. Engine developers know the pattern: Cute Chess ships `cutechess` and
+   `cutechess-cli`, and fastchess users come from the same tooling.
+4. `colosseum-cli` is what exists: no rename, no transition release, no
+   documentation, archive or workflow churn.
+
+Shortness is the only argument for `colosseum`, and run files already keep
+invocations short.
+
+The repositories are a separate question. The desktop application should own
+`maelic13/colosseum`: it carries the brand, and the 1.x updater and About link
+point there. But this repository holds the history, the published releases of
+both products, and every CLI link in use, so it cannot simply give the name
+up while the 1.x application is still maintained from it.
+
+## Decision
+
+### Names
+
+| Surface | Name |
+|---|---|
+| Desktop product | **Colosseum** |
+| Desktop executable | `Colosseum` / `colosseum` as each platform's packaging names it; never `colosseum-cli` |
+| CLI product | **Colosseum CLI** |
+| CLI executable and Cargo package | `colosseum-cli` (unchanged) |
+| Shared packages in this repository | `colosseum-*` (unchanged) |
+
+ADR-0009's descriptive qualifiers ("Colosseum chess-engine testing",
+"Colosseum CLI for UCI chess engines") and its no-alias rule continue.
+
+### Repositories: a temporary name, then a swap
+
+| | Until the swap | After the swap |
+|---|---|---|
+| Desktop repository | `maelic13/colosseum-gui` (created at 11.2) | `maelic13/colosseum` |
+| This repository | `maelic13/colosseum` | `maelic13/colosseum-cli`, with its full history and every published release |
+
+The maintainer performs the swap as soon as the desktop application's first
+release is published (M8), before 14.1, so that 1.x users are told about it at
+once:
+
+1. Rename `maelic13/colosseum` to `maelic13/colosseum-cli`.
+2. Immediately rename `maelic13/colosseum-gui` to `maelic13/colosseum`.
+
+GitHub redirects a renamed repository's old address only until another
+repository takes that name. Step 2 ends the redirect, so from then on every old
+`maelic13/colosseum` address, including CLI release downloads and clone URLs,
+resolves to the desktop repository. The same day:
+
+- the desktop repository changes the address it fetches the pinned CLI from to
+  `maelic13/colosseum-cli`;
+- Rarog's CLI download addresses are updated;
+- every clone of this repository runs
+  `git remote set-url origin https://github.com/maelic13/colosseum-cli.git`,
+  otherwise the next fetch reads the desktop repository.
+
+The documentation links in this repository move to the new address in 14.1,
+which already rewrites those documents for a CLI-only repository.
+
+### Tags
+
+| Repository | Until the swap | After the swap |
+|---|---|---|
+| Desktop | `v<semver>` from its first release, plus one bridge release (below) | `v<semver>` |
+| CLI | `cli-v<semver>` | `v<semver>`, from the 14.2 release on |
+
+- **The bridge release.** GUI 1.1.0's update check reads
+  `maelic13/colosseum`'s releases but accepts only `gui-v` tags, and plain `v`
+  tags only up to 1.0.2 (`crates/colosseum-gui/src/update.rs`). After the swap
+  it would ignore `v2.0.0` and report "up to date" forever, and a 1.x patch
+  cannot reach users who never install it. So the desktop repository
+  publishes its first release twice: `v<first>` and a bridge release
+  `gui-v<first>` on the same commit with the same assets, neither draft nor
+  prerelease, and not marked Latest. 1.1.0 then offers the update and opens
+  the bridge release's page. One bridge is enough: the new application's own
+  updater reads `v` tags. The first version is 2.0.0, following the GUI
+  plan's own rule for a continuing brand.
+- **Legacy tags.** This repository already holds the GUI's `v1.0.0-rc.1`
+  through `v1.0.2`. Before the first plain-`v` CLI tag, the maintainer renames
+  them to `gui-v1.0.0-rc.1` through `gui-v1.0.2`, and points their releases
+  at the renamed tags, so that `v` names only CLI releases. After the swap no
+  updater reads this repository's release list.
+- **No 1.x patch after the swap.** A `gui-v1.1.x` release published from
+  `maelic13/colosseum-cli` would be invisible to 1.x updaters. The 1.x answer
+  to a defect found after the swap is the new application.
+
+### What keeping the name costs the desktop application
+
+The new application must not share the 1.x application's data directories.
+They are the default for an application named Colosseum (`%APPDATA%\Colosseum`
+on Windows, `~/Library/Application Support/Colosseum` on macOS; on Linux,
+`~/.config/colosseum` and `~/.local/share/colosseum`). The two may be installed
+side by side during the transition, and 1.x tournaments are not migrated
+(ADR-0011). The new application therefore uses its own directory. It reads the
+1.x directory only to import the engine library. Whether its installers
+replace an installed 1.x or coexist with it is decided at GUI step 4.7 against
+the 1.x installer identities (`msi`, `deb`, `rpm`, `dmg`, Arch). This
+constraint is carried into the GUI repository's `PLAN.md` at step 11.2.
+
+## Collision revalidation, 2026-09-28
+
+| Surface | Evidence | Result |
+|---|---|---|
+| Same chess domain | The Coliseum chess GUI moved from itch.io to [PhelRin/Coliseum](https://github.com/PhelRin/Coliseum) and remains active (v3.4.0, 2026-06-18). It advertises engine tournaments and testing as an Arena replacement. | Unchanged risk, now against the desktop product only. The CLI's executable spelling is distinct. |
+| Existing CLI | The wireless platform's [Colosseum CLI documentation](https://colosseumwireless.readthedocs.io/en/latest/radio_api_traffic/colosseum_cli.html) still documents `colosseumcli`; [colosseum-wiot/colosseumcli-public](https://github.com/colosseum-wiot/colosseumcli-public) is the only repository matching `colosseumcli`. | Unchanged. The executable spelling differs. |
+| GitHub repository names | No repository is named exactly `colosseum-cli` (two near matches, both unrelated API clients). [tps01/colosseum-gui](https://github.com/tps01/colosseum-gui) is an unrelated GUI-testing plugin. `maelic13/colosseum-cli` and `maelic13/colosseum-gui` are free. | Both chosen names are available in the maintainer's namespace. |
+| crates.io | `colosseum-cli` and `colosseum-gui` are unregistered; `colosseum` and `coliseum` remain taken. The CLI stays `publish = false`. | Unchanged. |
+| Preliminary trademark screen | TMview is a browser-only application and was not re-run in this step. The 2026-08-03 counts (177 COLOSSEUM, 128 COLISEUM) stand. | Not legal clearance; unchanged obligation below. |
+
+## Consequences
+
+- No product, executable, package, path or run-format identifier changes.
+  Internal format labels (`colosseum-rng-v1`, `colosseum-epd-fen-suite-v1`,
+  `./colosseum-runs/`) are unaffected.
+- The desktop application ends with the brand's address, and 1.x users are
+  led to it through the bridge release.
+- The CLI keeps its history, and its links move once, on a known day. Links
+  published before the swap that name `maelic13/colosseum` for the CLI go to
+  the desktop repository afterwards; that cost is accepted.
+- Step 14.2 no longer renames an executable. It applies the `v` tag lane and
+  publishes the first CLI release from `maelic13/colosseum-cli`.
+- ADR-0009's trademark caveat stands: obtain professional, jurisdiction- and
+  class-specific clearance before commercial use, registration or substantial
+  promotion.
+
+## Alternatives considered
+
+### The CLI takes `colosseum`
+
+Rejected for the four reasons in the context. The saving is a few keystrokes.
+
+### A new name for both products, now that renaming is cheap
+
+Not taken. The maintainer has no stronger candidate, and ADR-0009's triggers
+(a legal conflict, recurring support or discovery failures, a materially
+stronger replacement) have not occurred.
+
+### The desktop repository keeps a permanent `colosseum-desktop` name
+
+Rejected. It leaves the brand's address with the CLI, sends the 1.x updater
+and About link to a repository with no new desktop release, and needs a 1.x
+patch that 1.1.0 users would never see.
+
+### The swap at the start of the programme
+
+Rejected. The 1.x updater would read an empty desktop repository for the whole
+programme, and `gui-v1.1.x` maintenance patches from this repository would be
+invisible to it.
+
+### The desktop repository keeps `gui-v` tags permanently
+
+Rejected by the maintainer. A one-product repository needs no lane prefix,
+and one bridge release covers 1.1.0.
