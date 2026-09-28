@@ -127,3 +127,12 @@ preliminary trademark checks on 2026-08-03. ADR-0009 records the decision to
 retain Colosseum for 1.0. Any future reconsideration uses ADR-0009's concrete
 triggers and requires a complete whole-product migration; no name change or
 compatibility alias is added silently.
+
+Step 11.1 repeated the checks on 2026-09-28 for the separation of the desktop
+application into its own repository (ADR-0011).
+[ADR-0012](adr/0012-names-and-repositories-after-the-split.md) keeps
+**Colosseum** for the desktop application and **Colosseum CLI** /
+`colosseum-cli` for the CLI. It also moves the `maelic13/colosseum` address to
+the desktop repository after its first release, and this repository to
+`maelic13/colosseum-cli`. The same-domain Coliseum GUI is still active and now
+lives on GitHub. TMview was not re-run.

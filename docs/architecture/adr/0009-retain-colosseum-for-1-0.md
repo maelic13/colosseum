@@ -1,6 +1,8 @@
 # ADR-0009: Retain Colosseum for the 1.0 product family
 
-- **Status:** Accepted
+- **Status:** Accepted; the release-lane row is superseded by
+  [ADR-0012](0012-names-and-repositories-after-the-split.md) once the
+  repositories are swapped
 - **Date:** 2026-08-03
 - **Supersedes:** ADR-0008's temporary Phase 9.0 decision gate
 - **Relates to:** PLAN Phase 9.0; ADR-0006, ADR-0007 and ADR-0008

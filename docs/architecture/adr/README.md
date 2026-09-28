@@ -16,9 +16,10 @@ decision.
 | [0006](0006-one-repository-independent-product-releases.md) | Accepted | Keep one repository with independently versioned and released GUI/CLI products |
 | [0007](0007-name-the-cli-uci-rig.md) | Rejected | Name the independent CLI UCI Rig |
 | [0008](0008-use-colosseum-through-implementation.md) | Accepted | Use Colosseum consistently through implementation and defer an optional final rebrand |
-| [0009](0009-retain-colosseum-for-1-0.md) | Accepted | Retain Colosseum and Colosseum CLI for the 1.0 product family |
+| [0009](0009-retain-colosseum-for-1-0.md) | Accepted; release lanes superseded by 0012 at the repository swap | Retain Colosseum and Colosseum CLI for the 1.0 product family |
 | [0010](0010-version-cli-documentation-with-the-binary.md) | Accepted | Keep canonical CLI Markdown with the binary and generate parser-derived command reference |
 | [0011](0011-desktop-application-as-separate-cli-client.md) | Accepted (technology provisional) | Make the desktop application a separate repository that drives the CLI through a versioned process protocol; this repository becomes the CLI alone |
+| [0012](0012-names-and-repositories-after-the-split.md) | Accepted | Keep Colosseum for the desktop application and `colosseum-cli` for the CLI; the desktop repository starts as `colosseum-gui` and takes `colosseum` in a swap after its first release; plain `v` tags in both |
 
 Phase 0.5's detailed release and CI design is in
 [`release-architecture.md`](../release-architecture.md).
@@ -32,3 +33,5 @@ Phase 9.0's final 1.0 identity and dated collision revalidation are in
 [ADR-0009](0009-retain-colosseum-for-1-0.md).
 Phase 9.1's versioned, offline and parser-synchronized documentation contract is
 in [ADR-0010](0010-version-cli-documentation-with-the-binary.md).
+Step 11.1's names, repository swap, tag lanes and dated collision revalidation
+are in [ADR-0012](0012-names-and-repositories-after-the-split.md).
