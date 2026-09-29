@@ -19,7 +19,7 @@ decision.
 | [0009](0009-retain-colosseum-for-1-0.md) | Accepted; release lanes superseded by 0012 at the repository swap | Retain Colosseum and Colosseum CLI for the 1.0 product family |
 | [0010](0010-version-cli-documentation-with-the-binary.md) | Accepted | Keep canonical CLI Markdown with the binary and generate parser-derived command reference |
 | [0011](0011-desktop-application-as-separate-cli-client.md) | Accepted (technology provisional) | Make the desktop application a separate repository that drives the CLI through a versioned process protocol; this repository becomes the CLI alone |
-| [0012](0012-names-and-repositories-after-the-split.md) | Accepted | Keep Colosseum for the desktop application and `colosseum-cli` for the CLI; the desktop repository starts as `colosseum-gui` and takes `colosseum` in a swap after its first release; plain `v` tags in both |
+| [0012](0012-names-and-repositories-after-the-split.md) | Accepted | Keep Colosseum for the desktop application and `colosseum-cli` for the CLI; the desktop repository starts as `colosseum-gui` and takes `colosseum` in a swap before both releases; both `dev` branches merged after it; plain `v` tags in both |
 
 Phase 0.5's detailed release and CI design is in
 [`release-architecture.md`](../release-architecture.md).

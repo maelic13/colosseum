@@ -60,9 +60,10 @@ document remains the binding design record and maintenance specification.
 [ADR-0012](docs/architecture/adr/0012-names-and-repositories-after-the-split.md).
 The desktop product and executable are **Colosseum** / `colosseum`; the 1.x
 Cargo package is `colosseum-gui`. The independent CLI product, Cargo package
-and executable are **Colosseum CLI** / `colosseum-cli`. After the desktop
-application's first release, `maelic13/colosseum` becomes its repository and
-this one becomes `maelic13/colosseum-cli` (ADR-0012). Shared packages keep their coherent
+and executable are **Colosseum CLI** / `colosseum-cli`. At the end of the
+programme (14.1), `maelic13/colosseum` becomes the desktop application's
+repository and this one becomes `maelic13/colosseum-cli` (ADR-0012). Shared
+packages keep their coherent
 `colosseum-*` names. Phase 0.6 established real search and supportability risks,
 and its CLI-only **UCI Rig** proposal was rejected. ADR-0008 accepts those risks
 for implementation and defers an optional whole-product reconsideration to
@@ -1807,6 +1808,7 @@ never changes the active model by itself.
 |---|---|
 | 11.1 | `R2` |
 | 11.2 | `M` |
+| 11.2.1 | `I1` |
 | 11.3–11.4 | `R2` |
 | 13.1 | `I2` |
 | 13.2 | `I1` |
@@ -1853,10 +1855,10 @@ Facts from those phases that still govern new work:
 - `cargo xtask build|package|release-check` is the one build entry point, and
   both release workflows call it. Artifacts are
   `<colosseum-gui|colosseum-cli>-<version>-<windows|linux|macos>-<x64|arm64>`;
-  tags are `gui-v<semver>` and `cli-v<semver>` and nothing else until 14.2
+  tags are `gui-v<semver>` and `cli-v<semver>` and nothing else until 14.1
   moves the CLI to plain `v<semver>` (ADR-0012); the repository-wide "latest"
-  belongs to the stable GUI release until the repository swap; no
-  `SHA256SUMS` is published.
+  belongs to the stable GUI release until 14.1; a release is published only
+  from a commit reachable from `main`; no `SHA256SUMS` is published.
 - 10(w) was closed as rejected: the forfeits it studied were an engine
   defect, not the harness.
 
@@ -1906,9 +1908,9 @@ in full and the joint milestones, so the programme reads in one place.
 | M4 | Synthetic streams available | 13.2 | 2.3 performance proof |
 | M5 | Live events and control | 13.3, 13.4 | 4.5 live view on the real CLI |
 | M6 | Amendments, changed engines, queries | 13.5–13.7 | 4.6 results, history, amendments |
-| M7 | CLI release candidate | 13.8 | 4.8 acceptance against the candidate |
-| M8 | Releases in quick succession | the CLI minor release | 5.1, pinned to it |
-| M9 | Retirement | the repository swap (maintainer, right after M8), 14.1, 14.2 | takes `maelic13/colosseum`; the CLI address updated |
+| M7 | CLI release candidate | 13.8, from `dev` | 4.8 acceptance against the candidate |
+| M8 | Swap and merges | 14.1: the repository swap, then `dev` into `main` | takes `maelic13/colosseum`; `dev` into `master` |
+| M9 | Releases in quick succession | 14.2: the CLI release, then the 1.x releases deleted | 5.1, pinned to it, with the bridge release |
 
 **Maintainer requirements (2026-09-27, revised after the same day's
 review), binding for every step in both repositories:**
@@ -2008,13 +2010,14 @@ all of it as reports arrive.
   `colosseum-cli`. The maintainer lifted the adoption premise, since Rarog is
   the only adopter, but the bundled CLI, the brand and the `cutechess-cli`
   pattern decide for the existing name. The desktop repository starts as
-  `maelic13/colosseum-gui`. Right after its first release (M8) the
-  maintainer renames this repository to `maelic13/colosseum-cli` and the
-  desktop repository to `maelic13/colosseum`. Both use plain `v` tags; the
-  desktop application's first release also carries one `gui-v2.0.0` bridge
-  release for the 1.1.0 updater. The 1.x releases and their tags are deleted
-  from this repository in 14.1. The new application must not share 1.x's
-  data directories.
+  `maelic13/colosseum-gui`. At 14.1 the maintainer renames this repository
+  to `maelic13/colosseum-cli` and the desktop repository to
+  `maelic13/colosseum`, before both `dev` branches are merged and before
+  both releases (revised 2026-09-29). Both use plain `v` tags; the desktop
+  application's first release also carries one `gui-v2.0.0` bridge release
+  for the 1.1.0 updater. The 1.x releases and their tags are deleted from
+  this repository at 14.2. The new application must not share 1.x's data
+  directories.
 - **11.2 The GUI repository seed** (`M`). [`docs/gui-v2/`](docs/gui-v2/README.md)
   finalised under the 11.1 names — `AGENTS.md`, `PLAN.md`, `GUIDE.md` — and
   handed to the maintainer, who creates the remote repository
@@ -2026,13 +2029,24 @@ all of it as reports arrive.
   `docs/gui-v2/` is then reduced here to a pointer, and `README.md` names
   the new application. The inventory of 1.x (GUI 1.1) reads this
   repository's code at the `gui-v1.1.0` tag; the seed names its commit
-  (`ba30829`) as well, because 14.1 deletes the tag.
+  (`ba30829`) as well, because 14.2 deletes the tag.
   **Exit:** the GUI repository exists with the seed as its root; this
   repository points to it. (M1)
   **Done 2026-09-29:** [`maelic13/colosseum-gui`](https://github.com/maelic13/colosseum-gui) published
   by the maintainer; its root commit `22d0be1` holds `AGENTS.md`,
   `PLAN.md` and `GUIDE.md` byte-identical to the seed at `54b9c47`, with
   the licence and a `.gitattributes`.
+- **11.2.1 Retire the egui application from `dev`** (`I1`). After GUI 1.1
+  has read the 1.x code, and on `dev` only: `main` keeps 1.x and CLI 0.2.0
+  until 14.1 (ADR-0012, *Branches and order*). Remove `colosseum-gui`,
+  `engine::scheduler`, the SQLite store, the runtime adapter, and the `gui-v`
+  release lane and its packaging. Archive `docs/design/`. S4, `CLAUDE.md`,
+  `AGENTS.md`, `README.md` and `docs/DEVELOPMENT.md` describe a CLI-only
+  repository that points to the new application. ADR-0006 is superseded. The
+  1.x source stays in history at `ba30829` and on `main`.
+  **Exit:** the workspace builds and tests without the GUI; the required CLI
+  suite and the parity checks are unchanged; nothing on `dev` names a GUI
+  1.x module.
 - **11.3 The CLI against the requirements** (`R2`). After GUI 1.2 is
   signed off: a head-to-head evaluation of what `colosseum-cli` does today
   against every *keep* and *change* item of the inventory and every
@@ -2110,29 +2124,32 @@ all of it as reports arrive.
   journal's PGN byte ranges.
   **Exit:** budgets met on a synthetic directory at the largest target;
   nothing mutated. (M6, with 13.5 and 13.6)
-- **13.8 — EXIT: Conformance and release** (`V`). The conformance
-  suite green; the schema and fixtures published as one release asset;
-  `docs/cli/protocol.md` final; a CLI release candidate the GUI accepts
-  against (M7); then the CLI minor release, followed by the GUI's first
-  release (M8).
+- **13.8 — EXIT: Conformance and candidate** (`V`). The conformance
+  suite green; the schema and fixtures packaged as one release asset;
+  `docs/cli/protocol.md` final; a CLI release candidate dispatched from
+  `dev`, which GUI 4.8 accepts against (M7). The release itself follows the
+  swap and the merge (14.2).
 
-### Phase 14 — Retirement (this repository)
+### Phase 14 — Swap, merge and release (both repositories)
 
-- **14.1 Retire the egui application** (`I1`). After the GUI's first
-  release and the ADR-0012 repository swap: remove `colosseum-gui`,
-  `engine::scheduler`, the SQLite store, the runtime adapter, the `gui-v`
-  release lane and its packaging; archive `docs/design/`; S4, `CLAUDE.md`,
-  `AGENTS.md`, `README.md` and `docs/DEVELOPMENT.md` describe a CLI-only
-  repository at `maelic13/colosseum-cli` and point to the new application,
-  and every link to this repository's old address is updated; ADR-0006
-  superseded. The maintainer deletes every 1.x release and its tag
-  (`v1.0.0-rc.1`…`v1.0.2`, `gui-v1.1.x`) from this repository; the 1.x
-  source stays in history (ADR-0012).
-- **14.2 — EXIT: The CLI as the repository's product** (`V`). The CLI
-  release lane moves to plain `v<semver>` tags (the release workflow and
-  `cargo xtask release-check`); a CLI release from
-  `maelic13/colosseum-cli`. No executable is renamed
-  (ADR-0012). (M9)
+The egui application itself leaves `dev` at 11.2.1; this phase ends the
+programme in the order ADR-0012 *Branches and order* fixes.
+
+- **14.1 Swap and merge** (`I1`). After GUI 4.8 (M7). On `dev`, before
+  the merge: the CLI release lane moves to plain `v<semver>` tags and claims
+  the repository's Latest (the release workflow, `cargo xtask
+  release-check`, the architecture tests), and every link to this
+  repository's old address moves to `maelic13/colosseum-cli`. Then the
+  maintainer swaps the repositories and carries out the same-day checklist,
+  and merges `dev` into `main` here and into `master` in the desktop
+  repository, one pull request each. `main` loses the 1.x application in
+  that merge. (M8)
+- **14.2 — EXIT: Releases** (`V`). The CLI minor release that carries the
+  protocol, the first plain-`v` tag, from `maelic13/colosseum-cli`; then
+  the desktop 2.0.0 release with its `gui-v2.0.0` bridge release, pinned to
+  it (GUI 5.1). Then the maintainer deletes every 1.x release and its tag
+  (`v1.0.0-rc.1`…`v1.0.2`, `gui-v1.1.x`) from this repository. The 1.x
+  source stays in history. No executable is renamed (ADR-0012). (M9)
 
 **Programme exit:** one game-playing implementation, in the CLI; the desktop
 application released from its own repository over the protocol; this
@@ -2143,7 +2160,8 @@ repository building and releasing the CLI alone.
 Corrections and small additions reported by projects using the released CLI.
 This phase runs beside Phases 11, 13 and 14, not after them: a step here is small, changes
 no statistic and breaks no run-directory or run-file format, ships as its own
-CLI release from `main`, and never waits for GUI work. Each report becomes
+CLI release from `main` (then merged into `dev`), and never waits for GUI
+work. Each report becomes
 one numbered step with its regression tests. The version follows the
 changelog section the step lands in: fixes only are a patch (`cli-v0.1.x`);
 a new command or option is a minor release (`cli-v0.2.0` carries 12.1–12.4,

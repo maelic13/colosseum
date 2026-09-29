@@ -1,6 +1,9 @@
 # ADR-0012: Names and repositories after the split
 
-- **Status:** Accepted
+- **Status:** Accepted. Revised 2026-09-29, before any of it was acted on:
+  the swap moved from after the desktop application's first release to
+  before both releases, when the maintainer chose to merge both `dev`
+  branches only after the rename (see *Branches and order*)
 - **Date:** 2026-09-28
 - **Supersedes:** [ADR-0009](0009-retain-colosseum-for-1-0.md)'s release-lane
   row once the repositories are swapped; ADR-0009's product and executable
@@ -68,9 +71,9 @@ ADR-0009's descriptive qualifiers ("Colosseum chess-engine testing",
 | Desktop repository | `maelic13/colosseum-gui` (created at 11.2) | `maelic13/colosseum` |
 | This repository | `maelic13/colosseum` | `maelic13/colosseum-cli`, with its full history and the CLI releases |
 
-The maintainer performs the swap as soon as the desktop application's first
-release is published (M8), before 14.1, so that 1.x users are told about it at
-once:
+The maintainer performs the swap once the desktop application has been
+accepted against the CLI release candidate (M7), before either `dev` branch is
+merged and before either release (step 14.1):
 
 1. Rename `maelic13/colosseum` to `maelic13/colosseum-cli`.
 2. Immediately rename `maelic13/colosseum-gui` to `maelic13/colosseum`.
@@ -80,22 +83,50 @@ repository takes that name. Step 2 ends the redirect, so from then on every old
 `maelic13/colosseum` address, including CLI release downloads and clone URLs,
 resolves to the desktop repository. The same day:
 
-- the desktop repository changes the address it fetches the pinned CLI from to
-  `maelic13/colosseum-cli`;
 - Rarog's CLI download addresses are updated;
 - every clone of this repository runs
   `git remote set-url origin https://github.com/maelic13/colosseum-cli.git`,
-  otherwise the next fetch reads the desktop repository.
+  and every clone of the desktop repository points its `origin` at
+  `maelic13/colosseum`; otherwise the next fetch reads the other repository;
+- the links in both repositories' documents move to the new addresses, in
+  the `dev` branches about to be merged.
 
-The documentation links in this repository move to the new address in 14.1,
-which already rewrites those documents for a CLI-only repository.
+The desktop build fetches its pinned CLI from `maelic13/colosseum-cli` from
+the start, because the CLI release it pins is published after the swap.
+
+### Branches and order
+
+Both repositories develop on `dev`; `main` (`master` in the desktop
+repository) holds what is released. In this repository, `main` keeps the 1.x
+application and CLI 0.2.0 until the final merge. A 1.x or Phase 12 patch
+still ships from `main` and is merged into `dev`. On `dev`, the egui
+application leaves as soon as the desktop inventory (GUI 1.1) has read it
+(step 11.2.1), so the CLI work of Phases 11 and 13 no longer carries it.
+
+The end of the programme, in order:
+
+1. The CLI release candidate is dispatched from `dev` (13.8), and the desktop
+   application is accepted against it (GUI 4.8, M7).
+2. The swap (above), then one pull request per repository merges `dev` into
+   its default branch (14.1, M8). This repository's `main` loses the 1.x
+   application in that merge.
+3. The CLI release, the first plain-`v` tag, from `maelic13/colosseum-cli`.
+   The release workflow publishes only commits reachable from `main`, which is
+   why the merge precedes it. Then the desktop 2.0.0 release with its bridge
+   release, pinned to it (14.2, GUI 5.1, M9).
+4. The maintainer deletes the 1.x releases and tags from
+   `maelic13/colosseum-cli` (14.2).
+
+Between the swap and the desktop release, 1.x's update check reads a desktop
+repository with no release yet and reports "up to date". It is short and
+harmless.
 
 ### Tags
 
 | Repository | Until the swap | After the swap |
 |---|---|---|
 | Desktop | `v<semver>` from its first release, plus one bridge release (below) | `v<semver>` |
-| CLI | `cli-v<semver>` | `v<semver>` from the 14.2 release on; the published `cli-v0.x` releases stay |
+| CLI | `cli-v<semver>` | `v<semver>` from the first release after the swap (14.2); the published `cli-v0.x` releases stay |
 
 - **The bridge release.** GUI 1.1.0's update check reads
   `maelic13/colosseum`'s releases but accepts only `gui-v` tags, and plain `v`
@@ -111,10 +142,11 @@ which already rewrites those documents for a CLI-only repository.
   no tags, so nothing there can clash.
 - **The 1.x releases and tags are deleted.** After the swap no updater reads
   this repository's release list: 1.x and the new application both read
-  `maelic13/colosseum`. In 14.1 the maintainer deletes every desktop release
-  from `maelic13/colosseum-cli` together with its tag (`v1.0.0-rc.1` through
-  `v1.0.2`, `gui-v1.1.0` and any later `gui-v1.1.x`). That frees `v` for the
-  CLI and leaves the repository with CLI releases only. The 1.x installers
+  `maelic13/colosseum`. Once the desktop 2.0.0 release is out (14.2), the
+  maintainer deletes every desktop release from `maelic13/colosseum-cli`
+  together with its tag (`v1.0.0-rc.1` through `v1.0.2`, `gui-v1.1.0` and any
+  later `gui-v1.1.x`). That leaves the repository with CLI releases only. No
+  `v` tag clashes in the meantime: the CLI is at 0.x. The 1.x installers
   stop being downloadable, and the maintainer accepts that. The 1.x source
   stays in this repository's history. Anything that must still reach it
   names the commit, not the tag: `gui-v1.1.0` is
@@ -122,6 +154,8 @@ which already rewrites those documents for a CLI-only repository.
 - **No 1.x patch after the swap.** A `gui-v1.1.x` release published from
   `maelic13/colosseum-cli` would be invisible to 1.x updaters. The 1.x answer
   to a defect found after the swap is the new application.
+- **Latest.** After the swap the CLI release lane claims the repository's
+  "Latest" (14.1), which until then belongs to the stable GUI release.
 
 ### What keeping the name costs the desktop application
 
@@ -161,11 +195,12 @@ unrelated domain, and overlaps only in web searches.
 - The CLI keeps its history, and its links move once, on a known day. Links
   published before the swap that name `maelic13/colosseum` for the CLI go to
   the desktop repository afterwards; that cost is accepted.
-- Step 14.2 no longer renames an executable. It applies the `v` tag lane and
-  publishes the first CLI release from `maelic13/colosseum-cli`.
+- Step 14.2 no longer renames an executable. It publishes the first
+  plain-`v` CLI release from `maelic13/colosseum-cli`, and 14.1 before it
+  moves the lane to `v` tags and to claiming Latest.
 - If a naming conflict ever arises, both products are renamed together, as
   one complete migration (ADR-0009). No clearance is sought in advance.
-- The 1.x installers are no longer published once 14.1 deletes their
+- The 1.x installers are no longer published once 14.2 deletes their
   releases.
 
 ## Alternatives considered
@@ -191,6 +226,13 @@ patch that 1.1.0 users would never see.
 Rejected. The 1.x updater would read an empty desktop repository for the whole
 programme, and `gui-v1.1.x` maintenance patches from this repository would be
 invisible to it.
+
+### The swap after the desktop application's first release
+
+The original form of this ADR. Superseded on 2026-09-29: the maintainer merges
+both `dev` branches only after the rename, and the CLI release must be on
+`main`. The swap therefore comes before both releases. That also removes the
+desktop build's change of CLI address on the day of the swap.
 
 ### The desktop repository keeps `gui-v` tags permanently
 

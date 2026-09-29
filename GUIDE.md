@@ -18,9 +18,9 @@ internal naming or method argumentation.
 | What exists | Phases 0–10 complete and published (10.9m rejected; 10.9h, 10.9p, 10.9t deferred). Phase 12.1–12.4 complete and published as CLI 0.2.0. GUI v2 decided 2026-09-27: the desktop application becomes a separate client of the CLI in its own repository ([ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md)); the programme was reviewed and re-cut the same day into Phases 11, 13 and 14 here and GUI Phases 1–5 in the GUI repository. 11.1 complete 2026-09-28: names and repositories in [ADR-0012](docs/architecture/adr/0012-names-and-repositories-after-the-split.md). 11.2 complete 2026-09-29: the GUI repository [`maelic13/colosseum-gui`](https://github.com/maelic13/colosseum-gui) published with the seed as its root (M1) |
 | What is missing | Here: **Phase 11** ( the CLI gap analysis, the protocol specification), **Phase 13** (the protocol in the CLI, one minor release), **Phase 14** (retiring the egui application). In the GUI repository: GUI Phases 1–5 (design, repository and technology proof, screen specifications, implementation, release) |
 | Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
-| Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 CLI candidate archives ☑ exact-archive smoke · the `gui-v` release lane has run once, for 1.1.0, and is retired at 14.1; its candidate mode is the rehearsal before any `gui-v1.1.x` patch |
-| Next step | **11.3** — the CLI gap analysis — `R2` (Claude Opus 5 — High); it waits for GUI 1.2 (requirements signed off). Meanwhile the work is in the GUI repository: GUI 1.1 (inventory of 1.x) and 2.1 (skeleton). Phase 12 steps are taken beside the programme as Rarog reports them |
-| Confirmed decisions | The 2026-09-22 set, confirmed by the maintainer and not reopened, recorded with the release preparation in [`phase-10-record.md`](docs/architecture/phase-10-record.md): exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, the explicit GUI artifact list, versions kept in artifact names, the updater prerelease fix now and pagination later, the throughput margin not chased. The 2026-09-27 set for GUI v2, in [ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md) and PLAN §Phase 11: design first; the desktop application a separate repository over a CLI protocol; this repository the CLI alone; 1.x tournaments not migrated; no CLI runs in the GUI; device theme with light and dark; no served dashboard, broadcast and remote control kept possible; front-end technology provisional (TypeScript + React) until measured. The same day's review set, in PLAN §S8 maintainer requirements and §S5.15: placement stays a CLI feature and desktop tournaments run with it off, several at a time; 64 participants the design point; lifecycle and close behaviour analysed at implementation (13.4 / GUI 4.2) with *stop now on close* the starting preference; changed engines and amendments (add, remove, length) are CLI mechanisms decided at 11.3; configuration by run file, a rebuildable index, positions as FEN, two event classes, emission off the game path, a handshake version, short-lived queries, synthetic streams; the shell a measured choice at GUI 2.3 between Electron and Tauri with Electron the default expectation, shadcn/ui on Radix and Tailwind the provisional component system; the 1.x engine library imported. The 2026-09-28 naming set, in [ADR-0012](docs/architecture/adr/0012-names-and-repositories-after-the-split.md): Colosseum and `colosseum-cli` kept; the desktop repository `maelic13/colosseum-gui` until it takes `maelic13/colosseum` right after its first release, this repository becoming `maelic13/colosseum-cli`; plain `v` tags in both, one `gui-v2.0.0` bridge release for the 1.1.0 updater, the 1.x releases and tags deleted from this repository at 14.1; the naming risk accepted, both products renamed together if a conflict ever arises; the new application's data directories apart from 1.x's |
+| Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 CLI candidate archives ☑ exact-archive smoke · the `gui-v` release lane has run once, for 1.1.0, leaves `dev` at 11.2.1 and `main` at 14.1; its candidate mode is the rehearsal before any `gui-v1.1.x` patch |
+| Next step | **GUI 1.1** — inventory of 1.x, in the GUI repository — `R2` (Claude Opus 5 — High); then **11.2.1** here — the egui application retired from `dev` — `I1` (Claude Sonnet 5 — Medium). 11.3 waits for GUI 1.2. Both repositories work on `dev`; Phase 12 patches ship from `main` and are merged into `dev` |
+| Confirmed decisions | The 2026-09-22 set, confirmed by the maintainer and not reopened, recorded with the release preparation in [`phase-10-record.md`](docs/architecture/phase-10-record.md): exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, the explicit GUI artifact list, versions kept in artifact names, the updater prerelease fix now and pagination later, the throughput margin not chased. The 2026-09-27 set for GUI v2, in [ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md) and PLAN §Phase 11: design first; the desktop application a separate repository over a CLI protocol; this repository the CLI alone; 1.x tournaments not migrated; no CLI runs in the GUI; device theme with light and dark; no served dashboard, broadcast and remote control kept possible; front-end technology provisional (TypeScript + React) until measured. The same day's review set, in PLAN §S8 maintainer requirements and §S5.15: placement stays a CLI feature and desktop tournaments run with it off, several at a time; 64 participants the design point; lifecycle and close behaviour analysed at implementation (13.4 / GUI 4.2) with *stop now on close* the starting preference; changed engines and amendments (add, remove, length) are CLI mechanisms decided at 11.3; configuration by run file, a rebuildable index, positions as FEN, two event classes, emission off the game path, a handshake version, short-lived queries, synthetic streams; the shell a measured choice at GUI 2.3 between Electron and Tauri with Electron the default expectation, shadcn/ui on Radix and Tailwind the provisional component system; the 1.x engine library imported. The 2026-09-28 naming set, in [ADR-0012](docs/architecture/adr/0012-names-and-repositories-after-the-split.md): Colosseum and `colosseum-cli` kept; the desktop repository `maelic13/colosseum-gui` until the swap at 14.1, before both releases, when it takes `maelic13/colosseum` and this repository becomes `maelic13/colosseum-cli`; both repositories on `dev`, merged by one pull request each after the swap, with the egui code off `dev` after GUI 1.1 (revised 2026-09-29); plain `v` tags in both, one `gui-v2.0.0` bridge release for the 1.1.0 updater, the 1.x releases and tags deleted from this repository at 14.2; the naming risk accepted, both products renamed together if a conflict ever arises; the new application's data directories apart from 1.x's |
 
 ## Current model mapping
 
@@ -103,8 +103,8 @@ for it, and the GUI tracker says the same the other way.
 
 - ☑ **11.1 — DONE** — `R2` — Naming of both products, executables and
   repositories after a dated collision screen: Colosseum and
-  `colosseum-cli` kept, the repository swap after the GUI's first release,
-  plain `v` tags;
+  `colosseum-cli` kept, the repository swap before both releases
+  (revised 2026-09-29), plain `v` tags;
   [ADR-0012](docs/architecture/adr/0012-names-and-repositories-after-the-split.md)
   — PLAN §Phase 11 (M0)
 - ☑ **11.2 — DONE** — `M` — The GUI repository seed finalised
@@ -113,6 +113,11 @@ for it, and the GUI tracker says the same the other way.
   commit (`22d0be1`, identical to the seed at `54b9c47`);
   [`docs/gui-v2/`](docs/gui-v2/README.md) reduced to a pointer; `README.md`
   names the new application — PLAN §Phase 11 (M1)
+- ☐ **11.2.1** — `I1` — After GUI 1.1, on `dev` only: the egui
+  application, `engine::scheduler`, the SQLite store, the runtime adapter
+  and the `gui-v` lane and packaging removed; `docs/design/` archived;
+  documents describe a CLI-only repository; ADR-0006 superseded; `main`
+  keeps 1.x until 14.1 — PLAN §Phase 11
 - ☐ **11.3** — `R2` — After GUI 1.2: the CLI against every
   inventory and requirement item — supported / CLI extension / GUI-owned /
   not feasible; the changed-engine behaviour and the amendment semantics
@@ -152,21 +157,19 @@ for it, and the GUI tracker says the same the other way.
   FEN per ply, standings and crosstable as read-only `--json` invocations
   within the CLI-side budgets on the largest target — PLAN §Phase 13 (M6)
 - ☐ **13.8 — EXIT** — `V` — Conformance suite green; schema
-  and fixtures one release asset; `docs/cli/protocol.md` final; CLI release
-  candidate for GUI 4.8 (M7); the CLI minor release, then the GUI release
-  (M8) — PLAN §Phase 13
+  and fixtures one release asset; `docs/cli/protocol.md` final; the CLI
+  release candidate from `dev` for GUI 4.8 (M7) — PLAN §Phase 13
 
-#### Phase 14 — Retirement
+#### Phase 14 — Swap, merge and release
 
-- ☐ **14.1** — `I1` — After the GUI's first release and the
-  ADR-0012 repository swap: remove `colosseum-gui`, `engine::scheduler`,
-  the SQLite store, the runtime adapter, the `gui-v` lane and packaging;
-  archive `docs/design/`; documents describe a CLI-only repository at
-  `maelic13/colosseum-cli` with every old-address link updated; the 1.x
-  releases and tags deleted by the maintainer; ADR-0006 superseded — PLAN
-  §Phase 14
-- ☐ **14.2 — EXIT** — `V` — The CLI lane on plain `v` tags; a
-  CLI release from `maelic13/colosseum-cli` — PLAN §Phase 14 (M9)
+- ☐ **14.1** — `I1` — After GUI 4.8: on `dev`, the CLI lane on
+  plain `v` tags claiming Latest and every old-address link moved; then the
+  maintainer swaps the repositories and merges `dev` into `main` here and
+  into `master` there, one pull request each (M8) — PLAN §Phase 14
+- ☐ **14.2 — EXIT** — `V` — The CLI release (first `v` tag)
+  from `maelic13/colosseum-cli`, then desktop 2.0.0 with its bridge
+  release, pinned to it; then the 1.x releases and tags deleted (M9) —
+  PLAN §Phase 14
 
 ### Phase 12 — CLI maintenance from adoption (beside Phases 11, 13 and 14, CLI patch releases)
 
@@ -259,21 +262,21 @@ are done.** Two repositories move together:
 
 1. The GUI repository, [`maelic13/colosseum-gui`](https://github.com/maelic13/colosseum-gui), tracks its
    own steps in its `GUIDE.md`: GUI 1.1 (inventory of 1.x, read from this
-   repository at `gui-v1.1.0`) and 2.1 (skeleton) start now.
+   repository at `gui-v1.1.0`) and 2.1 (skeleton) start now. Once 1.1 is
+   done, 11.2.1 removes the egui application from `dev` here.
 2. Here: 11.3 waits for GUI 1.2 (requirements signed off); 11.4 follows and
    unblocks the GUI screen specifications (GUI 3.x).
 3. Here: Phase 13 in order. 13.2 unblocks the GUI performance proof (GUI
    2.3); 13.3 and 13.4 unblock the GUI live view (4.5); 13.4's lifecycle
    decision is taken together with GUI 4.2; 13.5–13.7 unblock GUI 4.6.
-4. 13.8 produces the CLI release candidate the GUI accepts against (GUI
-   4.8); the CLI minor release is tagged first and the GUI's first release
-   follows, pinned to it.
-5. Right after that release the maintainer swaps the repositories
-   (ADR-0012): this one becomes `maelic13/colosseum-cli`, the GUI
-   repository takes `maelic13/colosseum`, and the same day the GUI's CLI
-   address, Rarog's download addresses and every clone's `origin` are
-   updated.
-6. Then 14.1 and 14.2 here.
+4. 13.8 produces the CLI release candidate, from `dev`, that the GUI
+   accepts against (GUI 4.8).
+5. 14.1: the maintainer swaps the repositories (ADR-0012): this one becomes
+   `maelic13/colosseum-cli`, the GUI repository takes `maelic13/colosseum`,
+   and the same day Rarog's download addresses and every clone's `origin`
+   are updated. Then `dev` is merged in both, one pull request each.
+6. 14.2: the CLI release, then the GUI's 2.0.0 release pinned to it, then
+   the 1.x releases deleted.
 
 Each design step (GUI 1.1–1.4, 3.1–3.3) ends in a maintainer sign-off,
 reviewed in pairs; no GUI screen is implemented before its specification is

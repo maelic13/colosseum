@@ -1,8 +1,8 @@
 # GUI v2 repository
 
 The new Colosseum desktop application is developed in its own repository,
-[`maelic13/colosseum-gui`](https://github.com/maelic13/colosseum-gui), which takes `maelic13/colosseum`
-after its first release
+[`maelic13/colosseum-gui`](https://github.com/maelic13/colosseum-gui), which takes
+`maelic13/colosseum` in the repository swap at the end of the programme
 ([ADR-0012](../architecture/adr/0012-names-and-repositories-after-the-split.md)).
 Its `AGENTS.md`, `PLAN.md` and `GUIDE.md` were seeded from this folder at step
 11.2 (the seed's final state is commit `54b9c47`) and are maintained there.
