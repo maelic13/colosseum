@@ -122,7 +122,23 @@ for it, and the GUI tracker says the same the other way.
   inventory and requirement item — supported / CLI extension / GUI-owned /
   not feasible; the changed-engine behaviour and the amendment semantics
   decided with the maintainer; `docs/architecture/gui-gap-analysis.md`;
-  13.5–13.7 confirmed or re-cut — PLAN §Phase 11 (M2)
+  13.5–13.7 confirmed or re-cut; the inventory's CLI column taken in —
+  PLAN §Phase 11 (M2)
+- ☐ **11.3.1** — `R2` — Decide engine option resolution: threads and
+  hash mapped and clamped, compatibility notes, tablebase settings and
+  switch — in the CLI or composed by the application (inventory PLY-11–13)
+  — PLAN §Phase 11
+- ☐ **11.3.2** — `R2` — Decide ponder: `Ponder=false` when off; ponder
+  without a clock or separate cores (PLY-14) — PLAN §Phase 11
+- ☐ **11.3.3** — `R2` — Decide adjudication: defaults offered,
+  one-sided resign, book and scoreless plies in the windows, the start
+  position in threefold (PLY-15, PLY-35) — PLAN §Phase 11
+- ☐ **11.3.4** — `R2` — Decide faults: an engine that cannot start,
+  the fault allowance, a fixed-search hang (PLY-17, PLY-18, PLY-35) — PLAN
+  §Phase 11
+- ☐ **11.3.5** — `R2` — Decide scheduling: parallel games changed
+  during a run; colours across cycles at one game per pair (PLY-26,
+  DEF-14) — PLAN §Phase 11
 - ☐ **11.4 — EXIT** — `R2` — Protocol specification: PLAN
   §S5.15 message catalogue, run-file hand-off, amendment and changed-engine
   semantics, versioning, JSON Schema from Rust types, conformance fixture
@@ -139,7 +155,7 @@ for it, and the GUI tracker says the same the other way.
   at chosen scale and rate, and a replay of a finished run directory; both
   schema-valid without engines; recorded as fixtures — PLAN §Phase 13 (M4)
 - ☐ **13.3** — `I2` — Live events from `tournament run`: game
-  start, every move with clocks and FEN, search state per side, game end,
+  start, every move with SAN, clocks, FEN and the opening name, search state per side, game end,
   standings and rating snapshot per scored game; artifacts identical with
   and without the protocol (stub engines) — PLAN §Phase 13
 - ☐ **13.4** — `R2`, then `I2` — Control and lifecycle: *stop* and *stop
@@ -156,6 +172,13 @@ for it, and the GUI tracker says the same the other way.
 - ☐ **13.7** — `I1` — Queries: run summary, paged games with
   FEN per ply, standings and crosstable as read-only `--json` invocations
   within the CLI-side budgets on the largest target — PLAN §Phase 13 (M6)
+- ☐ **13.7.1** — `I1` — Tournament statistics 1.x showed: SB and
+  shared places, gauntlet score share, Perf, nps, depth, time per move,
+  forfeits split, terminations, decisive/drawn; equal to 1.x on a frozen
+  fixture — PLAN §Phase 13
+- ☐ **13.7.2** — `I1` — Tournament options for the application:
+  opening count cap, tournament name and date in the PGN, "name version"
+  labels, and what 11.3.1–11.3.5 put in the CLI — PLAN §Phase 13
 - ☐ **13.8 — EXIT** — `V` — Conformance suite green; schema
   and fixtures one release asset; `docs/cli/protocol.md` final; the CLI
   release candidate from `dev` for GUI 4.8 (M7) — PLAN §Phase 13
@@ -191,6 +214,9 @@ for it, and the GUI tracker says the same the other way.
 - ☑ **12.4** — `I1` — A warning, kept in the run record,
   whenever a command-line option list replaces a run file's list and drops
   values it named — PLAN §Phase 12(b)
+- ☐ **12.5** — `I1` — An unparsable start position is refused
+  instead of silently replaced by the standard one (from the 1.x
+  inventory) — PLAN §Phase 12(c)
 
 ### Deferred and post-release (not steps until reopened)
 
