@@ -38,6 +38,10 @@ The desktop application plays many games at once and shows them live. It
 detects engine options, supports opening books, adjudication, tablebases and
 pondering, keeps every finished game, and resumes an interrupted tournament.
 
+> A new Colosseum desktop application, built on the CLI, is being developed
+> in [maelic13/colosseum-gui](https://github.com/maelic13/colosseum-gui). It will replace this one; until
+> its first release, the application described here is the one to install.
+
 ![Colosseum — Arena tab with live game view](docs/screenshot.png)
 
 ### Install

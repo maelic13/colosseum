@@ -1890,9 +1890,9 @@ together:
 | GUI 4 — Implementation | GUI repository | the application, packaging, acceptance |
 | GUI 5 — Release | GUI repository | the first release, pinned to the Phase 13 CLI release |
 
-The GUI repository's `AGENTS.md`, `PLAN.md` and `GUIDE.md` are seeded from
-[`docs/gui-v2/`](docs/gui-v2/README.md) in this repository at step 11.2 and
-are the tracker for its steps from then on. This section keeps the CLI steps
+The GUI repository, [`maelic13/colosseum-gui`](https://github.com/maelic13/colosseum-gui), was seeded
+with its `AGENTS.md`, `PLAN.md` and `GUIDE.md` from this repository at step
+11.2 and is the tracker for its steps. This section keeps the CLI steps
 in full and the joint milestones, so the programme reads in one place.
 
 **Joint milestones** — the order both trackers follow:
@@ -2022,12 +2022,17 @@ all of it as reports arrive.
   seed carries ADR-0012's obligations for that repository: plain `v` tags,
   first release 2.0.0 with its `gui-v2.0.0` bridge release, the CLI fetched
   from `maelic13/colosseum-cli` after the swap, and data directories apart
-  from 1.x's with the installer relationship to 1.x decided at GUI 4.7. `docs/gui-v2/` is then reduced here to a
-  pointer, and `README.md` names the new application. The inventory of 1.x
-  (GUI 1.1) reads this repository's code at the `gui-v1.1.0` tag; the seed
-  names its commit (`ba30829`) as well, because 14.1 deletes the tag.
+  from 1.x's with the installer relationship to 1.x decided at GUI 4.7.
+  `docs/gui-v2/` is then reduced here to a pointer, and `README.md` names
+  the new application. The inventory of 1.x (GUI 1.1) reads this
+  repository's code at the `gui-v1.1.0` tag; the seed names its commit
+  (`ba30829`) as well, because 14.1 deletes the tag.
   **Exit:** the GUI repository exists with the seed as its root; this
   repository points to it. (M1)
+  **Done 2026-09-29:** [`maelic13/colosseum-gui`](https://github.com/maelic13/colosseum-gui) published
+  by the maintainer; its root commit `22d0be1` holds `AGENTS.md`,
+  `PLAN.md` and `GUIDE.md` byte-identical to the seed at `54b9c47`, with
+  the licence and a `.gitattributes`.
 - **11.3 The CLI against the requirements** (`R2`). After GUI 1.2 is
   signed off: a head-to-head evaluation of what `colosseum-cli` does today
   against every *keep* and *change* item of the inventory and every
@@ -2284,7 +2289,7 @@ Not scheduled steps; each needs its own evidence before it becomes one.
 | `crates/colosseum-cli/src/composition.rs`, `composition/` | parser, dispatch, shared resolvers; one module per command |
 | `crates/colosseum-cli/src/{match_runner,sprt_runner,spsa_driver,tournament_driver}.rs` | the harness drivers; the tournament driver gains the S5.15 protocol in Phase 13 |
 | `crates/colosseum-gui/src/{backend,runtime_adapter,update}.rs` | GUI 1.x composition root, its unused runtime seam, the `gui-v` updater — all retired at 14.1 |
-| `docs/gui-v2/` | the GUI repository's seed: its `AGENTS.md`, `PLAN.md`, `GUIDE.md`; handed over at 11.2 |
+| `docs/gui-v2/` | a pointer to the GUI repository, seeded from here at 11.2 |
 | `docs/architecture/gui-gap-analysis.md` | the CLI against the GUI requirements (11.3) |
 | `docs/cli/protocol.md` | the front-end protocol contract (11.4, final at 13.8) |
 | `docs/architecture/` | current/target architecture, ADRs, phase exit documents, the Phase 0–9 and Phase 10 records, the qualification |
