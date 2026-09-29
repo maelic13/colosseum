@@ -132,7 +132,7 @@ Step 11.1 repeated the checks on 2026-09-28 for the separation of the desktop
 application into its own repository (ADR-0011).
 [ADR-0012](adr/0012-names-and-repositories-after-the-split.md) keeps
 **Colosseum** for the desktop application and **Colosseum CLI** /
-`colosseum-cli` for the CLI. It also moves the `maelic13/colosseum` address to
-the desktop repository after its first release, and this repository to
+`colosseum-cli` for the CLI. At the end of the programme it moves the
+`maelic13/colosseum` address to the desktop repository and this repository to
 `maelic13/colosseum-cli`. The same-domain Coliseum GUI is still active and now
 lives on GitHub. TMview was not re-run.
