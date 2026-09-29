@@ -1,13 +1,11 @@
 //! Colosseum core: pure domain types and logic. No I/O, no UI, no async.
 //!
-//! This crate defines the stable "seams" the rest of the app builds on:
-//! engine/option/time/tournament/adjudication config types, the rating math
-//! ([`rating::ml_ratings`] and friends), [`event::TournamentEvent`], and the
-//! game/result types.
+//! This crate defines the stable "seams" the CLI builds on: option, time,
+//! tournament-format and adjudication types, the rating math
+//! ([`rating::ml_ratings`] and friends), the statistics, SPSA and RNG
+//! contracts, and the game/result types.
 
 pub mod adjudication;
-pub mod engine;
-pub mod event;
 pub mod export;
 pub mod game;
 pub mod ids;
@@ -25,16 +23,14 @@ pub mod tournament;
 pub use adjudication::{
     Adjudication, AdjudicationConfig, DrawAdjudication, ResignAdjudication, adjudicate,
 };
-pub use engine::{EngineConfig, EngineMeta};
-pub use event::TournamentEvent;
 pub use export::{ExportRow, crosstable_csv, standings_csv};
 pub use game::{GameResult, GameStats, Pairing, Termination};
-pub use ids::{EngineId, GameId, PairId, ParticipantId, RunId, TournamentId, UnitId};
+pub use ids::{EngineId, GameId, PairId, ParticipantId, RunId, UnitId};
 pub use options::{
     UciOption, UciOptionValue, is_chess960_option, is_hash_option, is_tablebase_option,
     is_thread_option, is_uci_true,
 };
-pub use pairing::{gauntlet, generate_schedule, round_robin};
+pub use pairing::{gauntlet, round_robin};
 pub use rating::{ml_ratings, ml_ratings_anchored, performance_rating, rating_error};
 pub use rng::{
     NamedRng, RNG_ALGORITHM_ID, RNG_DERIVATION_ID, RNG_U64_SAMPLING_ID, RngError,
@@ -56,8 +52,5 @@ pub use stats::{
     StatisticsError, elo_with_error, fixed_n_achieved_resolution, fixed_n_plan, los,
     pentanomial_sprt, pentanomial_statistics, sprt, sprt_wald_bounds,
 };
-pub use time::{TimeControl, TimeUnit};
-pub use tournament::{
-    CommonEngineOptions, Format, OpeningBook, OpeningFormat, OpeningOrder, RatingWriteback,
-    StartPosition, TournamentConfig,
-};
+pub use time::TimeControl;
+pub use tournament::{Format, OpeningBook, OpeningFormat, OpeningOrder};

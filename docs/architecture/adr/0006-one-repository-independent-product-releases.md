@@ -1,6 +1,8 @@
 # ADR-0006: Keep one repository with independent product releases
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0011](0011-desktop-application-as-separate-cli-client.md):
+  the repository builds and releases the CLI alone on `dev` from step 11.2.1,
+  and on `main` from the merge at step 14.1
 - **Date:** 2026-07-31
 - **Relates to:** PLAN §S4 and Phase 0(c); finding CS-12
 

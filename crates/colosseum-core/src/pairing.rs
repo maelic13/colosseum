@@ -6,18 +6,7 @@
 //! `games_per_pair` games with alternating colors, and the whole schedule repeats
 //! `cycles` times.
 
-use crate::{game::Pairing, ids::EngineId, tournament::Format, tournament::TournamentConfig};
-
-/// Generate the full game schedule for a tournament configuration.
-#[must_use]
-pub fn generate_schedule(engines: &[EngineId], config: &TournamentConfig) -> Vec<Pairing> {
-    match config.format {
-        Format::RoundRobin { cycles } => round_robin(engines, cycles, config.games_per_pair),
-        Format::Gauntlet { seeds, cycles } => {
-            gauntlet(engines, seeds, cycles, config.games_per_pair)
-        }
-    }
-}
+use crate::{game::Pairing, ids::EngineId};
 
 /// Generate round-robin pairings: every engine meets every other, `games_per_pair`
 /// games per encounter (colors alternating), repeated `cycles` times.

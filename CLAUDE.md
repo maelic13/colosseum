@@ -1,105 +1,94 @@
 # Colosseum
 
-One repository for the independently versioned Colosseum desktop GUI and
-headless Colosseum CLI chess-engine testing products. GPL-3.0. The primary
-development machine is Windows.
+The repository of Colosseum CLI, a headless tool for testing ordinary UCI
+chess engines. GPL-3.0. The primary development machine is Windows.
+
+The desktop application, Colosseum, is a separate product in its own
+repository, `maelic13/colosseum-gui` (local checkout `D:\code\colosseum-gui`),
+and drives this CLI through its process protocol (ADR-0011, ADR-0012). The 1.x
+egui application left this repository's `dev` at step 11.2.1; `main` keeps it
+and its `gui-v` release lane until the merge at step 14.1, and its documents
+are archived in `docs/archive/gui-1.x/`. `docs/gui-v2/` only points to the new
+repository.
 
 ## Workspace
 
 | Crate | Role |
 |---|---|
-| `colosseum-core` | Pure domain logic, no I/O: config types, pairings, standings, rating math (`ml_ratings`, `performance_rating`, `rating_error`), SPRT/LOS stats, adjudication |
+| `colosseum-core` | Pure domain logic, no I/O: option, time, format and adjudication types, pairings, standings, rating math (`ml_ratings`, `performance_rating`, `rating_error`), SPRT/LOS and pentanomial statistics, SPSA, the RNG contract |
 | `colosseum-application` | Runtime-neutral use cases, launch/run models and driven ports |
 | `colosseum-uci` | UCI protocol + engine process management (spawn, handshake, search) |
-| `colosseum-engine` | Tournament scheduler/driver, game runner, SQLite store, PGN/openings, incident forensics and OS topology/affinity adapters |
-| `colosseum-gui` | eframe GUI composition root plus GUI-owned library/config/path adapters |
-| `colosseum-cli` | Independent headless composition root; ordinary UCI executables only. `composition.rs` holds the parser, dispatch and shared resolvers, with one module per command in `composition/` |
+| `colosseum-engine` | The one-game runner, PGN, openings, incident forensics (feature `runner`) and OS topology/allowed-CPU/affinity adapters (feature `platform`) |
+| `colosseum-cli` | The headless composition root; ordinary UCI executables only. `composition.rs` holds the parser, dispatch and shared resolvers, with one module per command in `composition/` |
 
-Commands: `cargo check --workspace --tests`, `cargo clippy --workspace`,
-`cargo test --workspace --all-targets`; run the GUI with
-`cargo run -p colosseum-gui` and the CLI with `cargo run -p colosseum-cli -- --help`.
-Before implementation work, read `AGENTS.md`, `PLAN.md` and `GUIDE.md`.
-`PLAN.md` and `GUIDE.md` are the maintainer-facing CLI specification/tracker;
-`README.md` and the product changelogs are **user-facing** (keep them simple, no
-phase/internal-method detail); `docs/DEVELOPMENT.md` holds implemented build,
-test, workspace and release facts.
-The successor desktop application lives in its own repository,
-`maelic13/colosseum-gui` (ADR-0011, ADR-0012), seeded at step 11.2;
-`docs/gui-v2/` only points there and is not part of this product.
-App data lives in `%APPDATA%\colosseum\` (`config/engines.json`,
-`data/colosseum.db`, `data/logs/` incl. per-game incident reports);
-`--portable` keeps everything next to the exe. The user's real engine
-binaries are in `D:\chess\engines\` (37-entry library incl. old, buggy
-engines — Rybka, Junior, Hydra — that crash/misbehave; treat engine bugs as
-a real possibility when diagnosing, see the incident logs).
+Commands: `cargo check --workspace --tests`, `cargo clippy --workspace
+--all-targets -- -D warnings`, `cargo test --workspace --all-targets`; run the
+CLI with `cargo run -p colosseum-cli -- --help`; builds and archives through
+`cargo xtask build|package cli`. Before implementation work, read `AGENTS.md`,
+`PLAN.md` and `GUIDE.md`. `PLAN.md` and `GUIDE.md` are the maintainer-facing
+specification/tracker; `README.md`, `packaging/cli/README.md`, `docs/cli/` and
+`CHANGELOG-CLI.md` are **user-facing** (keep them simple, no phase/internal-
+method detail); `docs/DEVELOPMENT.md` holds implemented build, test, workspace
+and release facts.
+
+The user's real engine binaries are in `D:\chess\engines\` (37-entry library
+incl. old, buggy engines — Rybka, Junior, Hydra — that crash/misbehave; treat
+engine bugs as a real possibility when diagnosing, see the incident reports).
 
 ## Architecture in one paragraph
 
-The GUI's `Backend` owns a tokio runtime and a `Vec<ActiveTournament>`; each
-loaded tournament has a driver future (`scheduler::drive`) that launches
-games up to the concurrency limit, and publishes a `TournamentSnapshot`
-(standings, ML Elo entries, in-flight games with live search state) behind an
-`Arc<Mutex>` the GUI reads every frame. Everything is persisted in SQLite
-(`store.rs`) as it happens; resume replays finished games from the DB to
-rebuild standings. Each game owns its two engine processes — spawned,
-configured, played, and quit within `runner::run_game` (`kill_on_drop` covers
-aborts).
+Every command resolves its inputs (command line over run file) into a run
+directory: the resolved configuration and its hash, the engine executables'
+hashes, one master seed, an append-only journal of committed games, the PGN,
+checkpoints, a run record and the results. The drivers (`match_runner`,
+`sprt_runner`, `spsa_driver`, `tournament_driver`) launch games up to the
+concurrency limit on CPU slots from the placement plan, and each game is played
+by `colosseum_engine::runner` through two UCI engine processes. Resume replays
+the journal; a changed configuration is refused. Faults are classified and
+counted, never folded into a score.
 
 ## Conventions that matter (learned the hard way)
 
-- **Engine identity is "name version"** (e.g. `Basilisk 1.7.0`) everywhere a
-  single string names an engine: PGN White/Black tags, live view, standings,
-  error messages (`versioned_name` in scheduler, `join_name_version` in GUI).
-  Name and version are separate fields in the library/DB.
+- **Engine identity is "name version"** (e.g. `Basilisk 1.7.0`) wherever a
+  single string names an engine — the desktop application keeps name and
+  version apart in its library and passes the joined string as the label.
 - **Ratings are always a joint ML recompute** (`ml_ratings`, Ordo-style,
-  anchored to the participants' *tournament-start* mean — the DB `start_elo`
-  seeds, never the current library) from the standings — never incremental
-  K-factor Elo. Every engine carries `PRIOR_WEIGHT` virtual draws against
-  its own prior (Bayesian damping — one win must not produce a capped ±400
-  split). Error bars via `rating_error` (Fisher information). The
-  `RatingWriteback` (None / All / Chosen) is applied to the library **after
-  every finished game** (`Backend::apply_rating_writebacks`), and the Elo
-  column shows exactly what the library holds; Δ is always vs tournament
-  start. `Estimate(id)` survives only for deserializing old tournaments.
+  anchored to the participants' starting mean unless pinned) from the
+  standings — never incremental K-factor Elo. Every engine carries
+  `PRIOR_WEIGHT` virtual draws against its own prior (Bayesian damping — one
+  win must not produce a capped ±400 split). Error bars via `rating_error`
+  (Fisher information). The CLI computes; the desktop application keeps the
+  engine library, passes library ratings as starting ratings, pins what must
+  not move, and writes the CLI's figures back (PLAN, maintainer requirements,
+  2026-09-29).
 - **UCI option mapping is allowlist-based**: thread/hash options are matched
   by exact (whitespace/case-insensitive) names (`is_thread_option`,
   `is_hash_option`) — substring heuristics corrupted options like Rybka's
   "CPU Usage" (a % throttle) before. An unrecognised name is a visible miss,
   not silent corruption.
-- **The Arena tab is live-only**: no per-game browsing/viewer in-app; users
-  export PGN for analysis elsewhere. One tournament is always selected and
-  auto-loaded; there is no "close tournament".
-- **The GUI spawns engines per game, deliberately.** Measured on the real
-  library (spawn+handshake+ucinewgame): modern engines 17–350 ms, worst case
-  Rybka 3 ~840 ms, vs ~34 s average game time — a 1–3% overhead; reuse would
-  keep idle Hash allocations alive and trust `ucinewgame` in exactly the old
-  engines known to leak state. **The CLI keeps each slot's engines between
-  games by default** (`--engine-processes per-slot`, the Phase 10 record, item (ae)),
-  replacing one after any fault: fresh processes put an engine's one-time
-  work inside a game's search (Rarog's KPK bitbase forfeited games that way),
-  and fastchess keeps its engines too. Tournaments keep fresh processes.
-- **Store writes are batched**: schedule inserts are one transaction
-  (`insert_pending_games`) — per-row inserts froze the UI for minutes.
-- GUI: all visual rules live in `docs/design/GUIDELINES.md` (binding). The
-  non-negotiables: fixed-width table columns (never `Column::auto` on live
-  data — jitter), no `selectable_label` in row layouts (hover shift), no
-  `egui::ComboBox` (phantom scrollbar — use `widgets::select`), real bold via
-  `theme::semibold` (embedded Inter), only font-verified glyphs, widget size
-  must never depend on hover/selection state.
-- Serde configs tolerate unknown/missing fields (`#[serde(default)]`),
-  so removing config fields is backward-compatible with stored tournaments
-  and presets.
+- **Engine processes: kept per slot for matches, fresh per game for
+  tournaments.** The CLI keeps each slot's engines between games by default
+  (`--engine-processes per-slot`, the Phase 10 record, item (ae)), replacing
+  one after any fault: fresh processes put an engine's one-time work inside a
+  game's search (Rarog's KPK bitbase forfeited games that way), and fastchess
+  keeps its engines too. Tournaments keep fresh processes: measured on the
+  real library, spawn+handshake+ucinewgame costs 17–350 ms (Rybka 3 ~840 ms)
+  against ~34 s games, and reuse would trust `ucinewgame` in exactly the old
+  engines known to leak state.
+- **Durable writes are never silent**: a failed journal, PGN or checkpoint
+  write ends the run as an infrastructure error.
+- Serde configs tolerate unknown/missing fields (`#[serde(default)]`), so
+  added fields stay compatible with existing run files and run directories.
 
 ## Verifying changes
 
-Unit/integration tests cover core math, committed statistics fixtures, store,
-scheduler, and GUI logic (`cargo test --workspace --all-targets`). The required
-suite is repository-only. Real-engine runner/scheduler/UCI smoke targets require
-the explicit `real-engine-smoke` feature and `COLOSSEUM_SMOKE_ENGINE`; they do
-not count as release or platform evidence. Live-view/UI changes need a real
-run: launch the app, start a short tournament (e.g. 2 engines, 100 ms/move)
-with engines from `D:\chess\engines\`, and delete the test tournament
-afterwards.
+Unit/integration tests cover core math, committed statistics fixtures, the
+drivers against fixture engines, and the CLI surface
+(`cargo test --workspace --all-targets`). The required suite is
+repository-only. Real-engine runner/UCI smoke targets require the explicit
+`real-engine-smoke` feature and `COLOSSEUM_SMOKE_ENGINE`; they do not count as
+release or platform evidence. A change to anything that plays games repeats the
+oracle replay and parity checks (`GUIDE.md`, recurring procedures).
 
 ## Implementation and commits
 

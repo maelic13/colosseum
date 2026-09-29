@@ -12,15 +12,15 @@ specification; `GUIDE.md` is the ordered implementation tracker.
   documents, ADRs, the Phase 0–9 and Phase 10 records). Do not re-derive or
   re-litigate what they record; extend them when a step adds evidence.
 - Dependencies point inward: domain → nothing outward; application use cases →
-  domain and ports; adapters/drivers implement ports. The CLI and GUI are
-  separate composition roots and must not depend on each other.
-- Preserve working UCI, runner, GUI, persistence, and compatibility behaviour.
+  domain and ports; adapters/drivers implement ports. The CLI is the one
+  composition root; the desktop application lives in its own repository and
+  reaches the CLI only through its process protocol (ADR-0011).
+- Preserve working UCI, runner, persistence, and compatibility behaviour.
   Prefer the smallest boundary refactor that satisfies the target architecture.
 - The CLI accepts ordinary UCI executables. Do not add engine manifests, custom
   build/bench requirements, compiler inspection, or engine-specific logic.
 - Treat existing engine crashes and protocol quirks as real supported input
   conditions. Never hide them by weakening diagnostics or fault classification.
-- Follow `docs/design/GUIDELINES.md` for every GUI change.
 
 ## Step and commit discipline
 
@@ -110,5 +110,6 @@ consistency validation; they do not require rerunning unchanged Rust tests.
   argumentation.
 - `docs/DEVELOPMENT.md`: implemented build/test/release facts; update it when
   the workspace or release process actually changes, not merely when planned.
-- `CHANGELOG-GUI.md` and `CHANGELOG-CLI.md`: released user-visible changes for
-  their independently versioned products; root `CHANGELOG.md` is only the index.
+- `CHANGELOG-CLI.md`: released user-visible changes of the CLI; root
+  `CHANGELOG.md` is only the index. The 1.x desktop application's changelog
+  is archived under `docs/archive/gui-1.x/`.

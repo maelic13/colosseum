@@ -323,29 +323,26 @@ Both models are supported and the model in force is always printed (A6).
 
 Phase 0 records the current and target architecture before implementation. The
 target follows the **Clean Architecture dependency rule**: source dependencies
-point inward; policy does not depend on frameworks, storage, operating systems,
-the CLI or the GUI.
+point inward; policy does not depend on frameworks, storage, operating systems
+or the command line.
 
 | Layer | Responsibility | Allowed dependencies |
 |---|---|---|
 | Domain/entities | Scores, pair outcomes, statistical models, schedules, run-state invariants and opaque identity values | Side-effect-free value/math/serialization libraries only; no I/O, OS, clocks or entropy sources |
 | Application/use cases | Match, SPRT, calibration, SPSA, NPS, tournament, suite, status; ports for engines, persistence, time, affinity and progress | Domain |
-| Interface adapters | CLI parsing/config resolution, GUI mapping, UCI adapter, SQLite/run-directory adapter, PGN/external-log adapters | Application + domain |
-| Frameworks/drivers | Tokio/processes, filesystem, `rusqlite`, OS topology/affinity, terminal and GUI frameworks | Adapters |
+| Interface adapters | CLI parsing/config resolution, UCI adapter, run-directory adapter, PGN/external-log adapters | Application + domain |
+| Frameworks/drivers | Tokio/processes, filesystem, OS topology/affinity, terminal | Adapters |
 
-The target package map is chosen in Phase 0 after the dependency audit. A
-separate application crate is the default design because both CLI and GUI may
-invoke use cases; keeping workflows in the CLI would make the command-line
-adapter the owner of application policy. Phase 0 may choose another package
-layout only if it enforces the same dependency direction.
+Phase 0 chose the package map after the dependency audit. A separate
+application crate keeps workflows out of the command-line adapter, which would
+otherwise own application policy.
 
 ```
 colosseum-core          domain/entities          ← pure statistics and invariants
 colosseum-application   use cases + ports        ← new by default; no OS/UI/storage
 colosseum-uci           UCI driven adapter       ← engine sessions/process protocol
-colosseum-engine        infrastructure adapters  ← runner, store, topology, affinity
+colosseum-engine        infrastructure adapters  ← runner, topology, affinity
 colosseum-cli           command-line adapter     ← parse, compose, present
-colosseum-gui           desktop adapter          ← map GUI library entries to use cases
 ```
 
 The roles, edges and `colosseum-*` spellings above are binding implementation
@@ -359,43 +356,40 @@ what keeps a possible Phase 9.0 rename bounded.
 
 - A runtime `EngineLaunchSpec` contains only path, arguments, working directory,
   environment, display label, effective UCI options and allocated CPUs. It has
-  no logo, library rating, arbitrary metadata or GUI persistence fields.
-- Saved GUI engine-library data (`EngineConfig`/`EngineMeta` today),
-  `EngineLibrary`, `AppConfig`, `AppDirs` and rating writeback remain in the GUI
-  adapter. They are mapped to runtime specifications at the boundary.
+  no logo, library rating, arbitrary metadata or front-end persistence fields.
+- An engine library, application settings and rating writeback belong to the
+  desktop application's repository; they reach the CLI only as run-file values,
+  arguments and protocol messages.
 - Application use cases receive ports such as `EngineSessionFactory`,
   `RunRepository`, `ArtifactSink`, `CpuPlacement`, `Clock`, `IdGenerator`,
   `MasterSeedSource` and `ProgressSink`; they do not open global paths, obtain
   entropy, generate process-global identities or select concrete databases.
-- Framework types (`rusqlite::Connection`, Tokio handles, GUI types, OS handles)
-  do not cross into the domain.
+- Framework types (Tokio handles, OS handles) do not cross into the domain.
 - Paths and artifact sinks are injected. No process-wide mutable/global output
   directory is part of the application contract.
-- CLI and GUI are composition roots. Neither depends on the other.
+- The CLI is the composition root. Nothing here depends on the desktop
+  application.
 
 **Independence contract**
 
-- The CLI reads no GUI engine library, configuration or application-data path.
+- The CLI reads no desktop engine library, configuration or application-data
+  path; the desktop application passes everything as arguments or protocol
+  messages, exactly as a user would.
 - Every CLI run is self-contained in its selected run directory (S5.11).
-- `cargo tree -p colosseum-cli` contains no GUI/windowing dependencies.
+- `cargo tree -p colosseum-cli` contains no windowing dependencies.
 - The published CLI starts and completes `self-test` on a headless host.
-- CLI and GUI have separate versions, tags, artifacts and release notes even if
-  they stay in one repository.
-- Changes to shared layers run both CLI and GUI test suites.
 
-**After Phase 14** ([ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md)):
-`colosseum-gui`, the scheduler and the SQLite store leave the workspace; the
-desktop application is a separate repository that starts the CLI as a child
-process and speaks the protocol of S5.15. The independence contract above then
-holds across repositories: the CLI still reads no desktop library,
-configuration or data path — the desktop application passes everything as
-arguments or protocol messages, exactly as a user would.
+**Since step 11.2.1** ([ADR-0011](docs/architecture/adr/0011-desktop-application-as-separate-cli-client.md)):
+`colosseum-gui`, the scheduler, the SQLite store and the core types only they
+used left `dev`; `main` keeps them, with the 1.x application, until the merge
+at 14.1. The desktop application is a separate repository that starts the CLI
+as a child process and speaks the protocol of S5.15.
 
 ### Required end state
 
 At completion, the repository contains reviewed current/target architecture and
-ADRs; inward-only shared layers; a still-working independently released GUI; and
-an independently versioned/packageable CLI with this public capability surface:
+ADRs; inward-only shared layers; and an independently versioned/packageable
+CLI with this public capability surface:
 
 | Need | CLI surface |
 |---|---|
@@ -1853,13 +1847,13 @@ Facts from those phases that still govern new work:
   directories are refused; Chess960 is refused.
 - A game the runner could not play is unscorable: it is excluded from
   standings, ratings and the PGN export, and re-queued on the next start.
-- `cargo xtask build|package|release-check` is the one build entry point, and
-  both release workflows call it. Artifacts are
-  `<colosseum-gui|colosseum-cli>-<version>-<windows|linux|macos>-<x64|arm64>`;
-  tags are `gui-v<semver>` and `cli-v<semver>` and nothing else until 14.1
-  moves the CLI to plain `v<semver>` (ADR-0012); the repository-wide "latest"
-  belongs to the stable GUI release until 14.1; a release is published only
-  from a commit reachable from `main`; no `SHA256SUMS` is published.
+- `cargo xtask build|package|release-check cli` is the one build entry
+  point, and the release workflow calls it. Artifacts are
+  `colosseum-cli-<version>-<windows|linux|macos>-<x64|arm64>`; tags are
+  `cli-v<semver>` until 14.1 moves the lane to plain `v<semver>` (ADR-0012);
+  `main` keeps the 1.x `gui-v` lane, whose stable release holds the
+  repository-wide "latest", until 14.1; a release is published only from a
+  commit reachable from `main`; no `SHA256SUMS` is published.
 - 10(w) was closed as rejected: the forfeits it studied were an engine
   defect, not the harness.
 
@@ -2058,6 +2052,20 @@ all of it as reports arrive.
   **Exit:** the workspace builds and tests without the GUI; the required CLI
   suite and the parity checks are unchanged; nothing on `dev` names a GUI
   1.x module.
+  **Done 2026-09-29:** removed `crates/colosseum-gui`; from
+  `colosseum-engine` the `tournament` feature (`scheduler`, `store`,
+  `detect`, `error`) and its `scheduler_smoke` target, `rusqlite`,
+  `crossbeam-channel`, `anyhow`, `uuid` and `serde_json`; from
+  `colosseum-core` the types only they used (`TournamentConfig`,
+  `CommonEngineOptions`, `RatingWriteback`, `StartPosition`,
+  `TournamentEvent`, `EngineConfig`, `EngineMeta`, `TimeUnit`,
+  `TournamentId`, `generate_schedule`); the `gui` product from `xtask` and
+  the release tool, `release-gui.yml`, the GUI smoke script, the Linux GTK
+  steps in CI and the desktop packaging files. `docs/design/`, the GUI
+  changelog, screenshot and macOS signing notes moved to
+  `docs/archive/gui-1.x/`. The CLI's code, its tests and the Phase 7 GUI
+  parity fixture are untouched; the architecture tests keep their
+  forbidden-dependency lists as guards.
 - **11.3 The CLI against the requirements** (`R2`). After GUI 1.2 is
   signed off: a head-to-head evaluation of what `colosseum-cli` does today
   against every *keep* and *change* item of the inventory and every
