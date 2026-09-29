@@ -1809,18 +1809,19 @@ never changes the active model by itself.
 | 11.1 | `R2` |
 | 11.2 | `M` |
 | 11.2.1 | `I1` |
-| 11.3–11.4 | `R2` |
+| 11.3, 11.3.1–11.3.5, 11.4 | `R2` |
 | 13.1 | `I2` |
 | 13.2 | `I1` |
 | 13.3 | `I2` |
 | 13.4 | `R2` for the lifecycle analysis, then `I2` |
 | 13.5 | `I2` |
-| 13.6–13.7 | `I1` |
+| 13.6–13.7, 13.7.1–13.7.2 | `I1` |
 | 13.8 | `V` |
 | 14.1 | `I1` |
 | 14.2 | `V` |
 | GUI Phases 1–5 | assigned in the GUI repository's `PLAN.md` §G9 (same classes) |
 | 12.1–12.4 | `I1` (completed) |
+| 12.5 | `I1` |
 
 Completed steps keep the class recorded in their phase record.
 
@@ -1914,6 +1915,16 @@ in full and the joint milestones, so the programme reads in one place.
 
 **Maintainer requirements (2026-09-27, revised after the same day's
 review), binding for every step in both repositories:**
+
+- **Ratings (2026-09-29).** The CLI computes every tournament's ratings —
+  the joint ML fit, error bars and performance ratings — from the starting
+  ratings and pins the run file carries (`--rating`, `--fixed`, `--anchor`),
+  and publishes a rating snapshot after every scored game. The desktop
+  application owns the engine library and its ratings: it passes each
+  engine's library rating as the starting rating, pins the engines a
+  tournament must not move (its *Chosen* mode pins the rest), and writes the
+  CLI's number into the library after each scored game. It never computes a
+  rating.
 
 - **Design first.** Inventory, requirements, layout, design system and
   screen specifications are finished and signed off before a screen is
@@ -2057,12 +2068,55 @@ all of it as reports arrive.
   Known candidates: the live event stream; the control channel; amendments;
   the changed-engine policy; paged queries with positions; the synthetic
   streams; anything the engine library needs beyond `engine inspect --json`
-  and `engine check --json`. The two decisions the maintainer asked for are
-  taken here with him: the changed-engine behaviour and the amendment
-  semantics.
+  and `engine check --json`; and the CLI column of the GUI repository's `docs/design/inventory.md` §8, drafted
+  2026-09-29 — tournament statistics (13.7.1), tournament options
+  (13.7.2), SAN and opening names in the live events (13.3). The two
+  decisions the maintainer asked for are taken here with him: the
+  changed-engine behaviour and the amendment semantics. The inventory's
+  other CLI questions are 11.3.1–11.3.5. Two are settled: the time
+  tolerance past the clock is already `--margin-ms`, any value, so the
+  application chooses its default (GUI 1.1.2); ratings follow the
+  2026-09-29 requirement above.
   **Exit:** `docs/architecture/gui-gap-analysis.md`; every requirement
   classified; *not feasible* items resolved with the maintainer; 13.5–13.7
   confirmed or re-cut from it. (M2)
+- **11.3.1 Decide engine option resolution** (`R2`). Inventory PLY-11,
+  PLY-12, PLY-13: mapping the requested threads and hash to what each
+  engine calls them, clamped to the declared range (the exact-name
+  allowlist, never substrings); the compatibility notes before a start;
+  the global tablebase settings and the per-tournament switch that
+  withholds every tablebase option. Either the CLI resolves them against
+  the engines' declared options, or the application composes exact
+  per-engine options into the run file from its library.
+  **Exit:** the choice in the gap analysis, with the implementing step
+  named (13.7.2 or a GUI step).
+- **11.3.2 Decide ponder** (`R2`). Inventory PLY-14: whether a tournament
+  with ponder off sends `Ponder=false` to every engine, as 1.x did, and
+  whether ponder is allowed without a clock control or without separate
+  cores for each engine, which the CLI refuses today.
+  **Exit:** the choice in the gap analysis; a CLI change, if any, named.
+- **11.3.3 Decide adjudication** (`R2`). Inventory PLY-15, PLY-35: the
+  defaults the application offers (1.x: draw from ply 40, 8 moves, 8 cp;
+  resign 4 moves, 800 cp; max moves 300 — against the CLI's 40 moves,
+  8 moves, 10 cp; 3 moves, 600 cp); whether one-sided resign is offered;
+  and two shared runner behaviours that change results — book and
+  scoreless plies counting in the adjudication windows, and the start
+  position not counting toward a threefold repetition.
+  **Exit:** the choice in the gap analysis; a result-changing CLI fix is
+  a minor-release step of its own, never a patch.
+- **11.3.4 Decide faults in tournaments** (`R2`). Inventory PLY-17,
+  PLY-18, PLY-35: a game whose engine cannot start — the CLI ends the run
+  as an infrastructure error; 1.x skipped the game and replayed it at the
+  next resume; the fault allowance that marks a run invalid; and whether a
+  hang in a fixed-nodes or fixed-depth search is a time loss or a crash.
+  **Exit:** the choice in the gap analysis; a CLI change, if any, named.
+- **11.3.5 Decide scheduling** (`R2`). Inventory PLY-26 and DEF-14:
+  changing the number of parallel games while a tournament runs (1.x yes,
+  CLI fixed per run); and colours across cycles when a pair plays one game
+  per cycle — the shared pairing gives the same engine White every cycle.
+  A pairing change alters the schedule of a resumable run, so the fix
+  names its resume compatibility.
+  **Exit:** the choice in the gap analysis; a CLI change, if any, named.
 - **11.4 — EXIT: Protocol specification** (`R2`). S5.15 filled in: the
   message catalogue (handshake, facts, state, commands, responses, errors,
   gap and snapshot), the run-file hand-off, the amendment and changed-engine
@@ -2091,7 +2145,9 @@ all of it as reports arrive.
   **Exit:** GUI 2.3 can run against them; their output recorded as
   conformance fixtures. (M4)
 - **13.3 Live events** (`I2`). `tournament run` publishes game start,
-  every move with clocks and FEN, the latest search information per side as
+  every move with its SAN, clocks and FEN and the opening's ECO code and
+  name while it is known (the 1.x `eco` module and its lichess CC0 data,
+  restored from `ba30829`), the latest search information per side as
   state, game end with termination and sample class, and the standings and
   rating snapshot after every scored game — fanned out from the runner's
   live state, which exists (`engine::live`), through a richer tournament
@@ -2124,6 +2180,22 @@ all of it as reports arrive.
   journal's PGN byte ranges.
   **Exit:** budgets met on a synthetic directory at the largest target;
   nothing mutated. (M6, with 13.5 and 13.6)
+- **13.7.1 Tournament statistics** (`I1`). What the 1.x standings showed
+  and the CLI does not compute (the GUI repository's `docs/design/inventory.md`, ARN-11, ARN-12, ARN-18, PLY-21,
+  PLY-22, PLY-24): Sonneborn–Berger with shared places, the one-seed
+  gauntlet's score-share ranking, the performance rating, each engine's
+  average nps (derived from nodes and time when an engine reports 0),
+  depth and time per move, forfeits split into time, crash and illegal
+  move, the termination breakdown and the decisive/drawn split — in
+  `result.json`, the standings query (13.7) and the snapshot fact (13.3).
+  **Exit:** the figures equal 1.x's on a frozen fixture replayed through
+  both, as Phase 7 matched the GUI's ratings.
+- **13.7.2 Tournament options for the application** (`I1`). From the
+  inventory (PLY-05, PLY-19, PLY-20) and whatever 11.3.1–11.3.5 put in the
+  CLI: an opening count cap, the tournament's name and date in the PGN
+  `Event` and `Date`, and "name version" labels carried to every output.
+  **Exit:** a test per option; the run-file schema and the command
+  reference regenerated.
 - **13.8 — EXIT: Conformance and candidate** (`V`). The conformance
   suite green; the schema and fixtures packaged as one release asset;
   `docs/cli/protocol.md` final; a CLI release candidate dispatched from
@@ -2237,6 +2309,13 @@ a finite ETA in `spsa status`.
     silent. No warning when nothing was dropped. A test resolves a run
     file with three options against a one-option command line and asserts
     the warning and the recorded note.
+- **(c) Findings from the 1.x inventory** (GUIDE 12.5, `I1`), GUI step 1.1,
+  2026-09-29; latent, not reported by an adopter.
+  - **12.5 An unparsable start position is refused.** The runner falls back
+    to the standard start position when a game's start FEN does not parse,
+    while the engines are still sent that FEN. Books are validated at load,
+    so no run reaches it today; the fallback becomes an error naming the
+    game and the FEN. A test hands the runner an invalid FEN.
 
 **Exit criterion (b):** each step's tests pass, the command reference is
 regenerated, `CHANGELOG-CLI.md` Unreleased names each change, and the run
