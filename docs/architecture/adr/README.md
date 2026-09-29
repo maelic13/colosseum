@@ -13,7 +13,7 @@ decision.
 | [0003](0003-application-ports-and-commit-boundary.md) | Accepted | Inject object-safe, runtime-neutral ports and make durable commit authoritative |
 | [0004](0004-gui-library-runtime-mapping.md) | Accepted | Keep saved engine/library policy in the GUI and map it explicitly to runtime input |
 | [0005](0005-incremental-boundary-migration.md) | Accepted | Migrate by abstraction around the working UCI, runner, SQLite and GUI behavior |
-| [0006](0006-one-repository-independent-product-releases.md) | Accepted | Keep one repository with independently versioned and released GUI/CLI products |
+| [0006](0006-one-repository-independent-product-releases.md) | Superseded by 0011 (dev at 11.2.1, main at 14.1) | Keep one repository with independently versioned and released GUI/CLI products |
 | [0007](0007-name-the-cli-uci-rig.md) | Rejected | Name the independent CLI UCI Rig |
 | [0008](0008-use-colosseum-through-implementation.md) | Accepted | Use Colosseum consistently through implementation and defer an optional final rebrand |
 | [0009](0009-retain-colosseum-for-1-0.md) | Accepted; release lanes superseded by 0012 at the repository swap | Retain Colosseum and Colosseum CLI for the 1.0 product family |

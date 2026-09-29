@@ -1,4 +1,4 @@
-//! `cargo xtask build <gui|cli>` — compile exactly one product.
+//! `cargo xtask build cli` — compile the product.
 
 use std::path::{Path, PathBuf};
 

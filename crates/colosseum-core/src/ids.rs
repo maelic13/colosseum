@@ -63,10 +63,6 @@ id_type!(
     GameId
 );
 id_type!(
-    /// Identifies a tournament.
-    TournamentId
-);
-id_type!(
     /// Identifies a durable experiment run.
     RunId
 );

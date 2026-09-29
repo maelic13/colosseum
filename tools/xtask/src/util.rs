@@ -61,24 +61,6 @@ pub fn run(program: &str, arguments: &[&str], working_directory: &Path) -> Resul
     Ok(())
 }
 
-/// Run a tool and capture its standard output.
-pub fn capture(program: &str, arguments: &[&str], working_directory: &Path) -> Result<String> {
-    let output = Command::new(program)
-        .args(arguments)
-        .current_dir(working_directory)
-        .output()
-        .map_err(|error| format!("could not run `{program}`: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "`{program} {}` failed with {}:\n{}",
-            arguments.join(" "),
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
 /// The SHA-256 of a finished artifact, printed beside it so a local archive
 /// can be compared with a published one without a second tool.
 pub fn sha256(path: &Path) -> Result<String> {

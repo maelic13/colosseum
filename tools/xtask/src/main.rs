@@ -1,14 +1,13 @@
 //! One entry point for building, packaging and release-checking Colosseum.
 //!
 //! ```text
-//! cargo xtask build   <gui|cli> [--target <triple>] [--profile release|ci-release]
-//! cargo xtask package <gui|cli> [--target <triple>] [--format <list>] [--no-smoke]
-//! cargo xtask release-check <gui-vX.Y.Z|cli-vX.Y.Z>
+//! cargo xtask build   cli [--target <triple>] [--profile release|ci-release]
+//! cargo xtask package cli [--target <triple>] [--format <list>] [--no-smoke]
+//! cargo xtask release-check <cli-vX.Y.Z>
 //! ```
 //!
-//! The two products stay separate: no command builds or packages both, and the
-//! CLI archive never contains the GUI. Both release workflows call these
-//! commands, so a local archive and a published one come from one recipe.
+//! The release workflow calls these commands, so a local archive and a
+//! published one come from one recipe.
 
 mod archive;
 mod build;
@@ -90,7 +89,7 @@ fn run() -> Result<()> {
         "release-check" => {
             let tag = rest
                 .first()
-                .ok_or("release-check needs a tag, for example gui-v1.1.0")?;
+                .ok_or("release-check needs a tag, for example cli-v0.2.0")?;
             check::release_check(&root, tag)
         }
         "help" | "--help" | "-h" => {
@@ -111,11 +110,11 @@ fn run() -> Result<()> {
 fn print_usage() {
     println!(
         "Usage:
-  cargo xtask build   <gui|cli> [--target <triple>] [--profile release|ci-release]
-  cargo xtask package <gui|cli> [--target <triple>] [--format <list>] [--no-smoke]
-  cargo xtask release-check <gui-vX.Y.Z|cli-vX.Y.Z>
+  cargo xtask build   cli [--target <triple>] [--profile release|ci-release]
+  cargo xtask package cli [--target <triple>] [--format <list>] [--no-smoke]
+  cargo xtask release-check <cli-vX.Y.Z>
 
-The product is a positional argument, and one command handles one product.
+The product is a positional argument: `cli`.
 `--target` defaults to this host's triple and is always passed to cargo, so
 every build lands under target/<triple>/<profile>/. Builds are `--locked`.
 
@@ -125,14 +124,10 @@ named <product>-<version>-<platform>-<arch>.<ext>, prints each one's SHA-256,
 and reads the portable archive back with its smoke script unless --no-smoke.
 
 --format takes a comma-separated list; it defaults to the platform's portable
-archive (zip on Windows, tar.gz elsewhere). Available:
-  gui   zip | tar.gz | msi | deb | rpm | dmg | pkg.tar.zst
-  cli   zip | tar.gz
-A format whose tool is not installed is an error, never a skip.
+archive (zip on Windows, tar.gz elsewhere), the only one it takes there.
 
 Examples:
   cargo xtask build cli
-  cargo xtask package gui --format zip,msi
   cargo xtask package cli --target aarch64-pc-windows-msvc
   cargo xtask release-check cli-v0.1.0"
     );
@@ -180,7 +175,7 @@ impl Options {
         let name = self
             .product
             .as_deref()
-            .ok_or("this command needs a product: gui or cli")?;
+            .ok_or("this command needs a product: cli")?;
         Product::parse(name)
     }
 
@@ -214,11 +209,11 @@ mod tests {
     #[test]
     fn the_product_is_positional_and_options_are_named() {
         let parsed = Options::parse(
-            &arguments(&["gui", "--target", "x86_64-pc-windows-msvc", "--no-smoke"]),
+            &arguments(&["cli", "--target", "x86_64-pc-windows-msvc", "--no-smoke"]),
             &["--target", "--format"],
         )
         .unwrap();
-        assert_eq!(parsed.product().unwrap(), Product::Gui);
+        assert_eq!(parsed.product().unwrap(), Product::Cli);
         assert_eq!(parsed.value("--target"), Some("x86_64-pc-windows-msvc"));
         assert!(parsed.flag("--no-smoke"));
     }
@@ -227,24 +222,24 @@ mod tests {
     fn a_mistyped_option_or_a_missing_product_is_refused() {
         assert!(Options::parse(&arguments(&["cli", "--targets", "x"]), &["--target"]).is_err());
         assert!(Options::parse(&arguments(&["cli", "--target"]), &["--target"]).is_err());
-        assert!(Options::parse(&arguments(&["cli", "gui"]), &["--target"]).is_err());
+        assert!(Options::parse(&arguments(&["cli", "cli"]), &["--target"]).is_err());
         assert!(
             Options::parse(&arguments(&[]), &["--target"])
                 .unwrap()
                 .product()
                 .is_err()
         );
-        assert!(Product::parse("both").is_err());
+        assert!(Product::parse("gui").is_err());
     }
 
     #[test]
     fn a_format_list_is_parsed_and_unknown_entries_are_named() {
-        let formats: Result<Vec<Format>> = "zip, msi"
+        let formats: Result<Vec<Format>> = "zip, tar.gz"
             .split(',')
             .map(str::trim)
             .map(Format::parse)
             .collect();
-        assert_eq!(formats.unwrap(), vec![Format::Zip, Format::Msi]);
-        assert!(Format::parse("tar.bz2").is_err());
+        assert_eq!(formats.unwrap(), vec![Format::Zip, Format::TarGz]);
+        assert!(Format::parse("msi").is_err());
     }
 }

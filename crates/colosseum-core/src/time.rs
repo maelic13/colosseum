@@ -66,37 +66,6 @@ impl Default for TimeControl {
     }
 }
 
-/// Units offered by the time-control widget (value + unit dropdown).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TimeUnit {
-    Milliseconds,
-    Seconds,
-    Minutes,
-}
-
-impl TimeUnit {
-    /// Convert a value in this unit to milliseconds.
-    #[must_use]
-    pub fn to_millis(self, value: f64) -> u64 {
-        let factor = match self {
-            Self::Milliseconds => 1.0,
-            Self::Seconds => 1_000.0,
-            Self::Minutes => 60_000.0,
-        };
-        (value * factor).round().max(0.0) as u64
-    }
-
-    /// Short label for the dropdown.
-    #[must_use]
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Milliseconds => "ms",
-            Self::Seconds => "s",
-            Self::Minutes => "min",
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,10 +1,14 @@
 # Development guide
 
 Maintainer-facing notes: building from source, running the tests, and cutting
-a release. [`README.md`](../README.md) introduces both products;
+a release. [`README.md`](../README.md) introduces the CLI;
 [`packaging/cli/README.md`](../packaging/cli/README.md) (the front page of
 every CLI archive) and [`cli/`](cli/README.md) are the CLI landing page and
-complete user guide.
+complete user guide. The desktop application is developed in its own
+repository, [maelic13/colosseum-gui](https://github.com/maelic13/colosseum-gui);
+the 1.x egui application it replaces stays on `main` until the merge that
+ends the programme, and its documents are archived in
+[`archive/gui-1.x/`](archive/gui-1.x/README.md).
 
 ## Prerequisites
 
@@ -13,22 +17,6 @@ complete user guide.
 | **Rust 1.88+** | `rustup update stable` (edition 2024) |
 | **C linker** | Windows: MSVC build tools; Linux: `gcc`; macOS: Xcode CLT |
 | **clang** | Windows ARM64 only — see below |
-| **GUI libraries** | Linux only — see below |
-
-### Linux GUI dependencies
-
-```bash
-# Debian / Ubuntu
-sudo apt-get install -y \
-  libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
-  libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
-
-# Fedora / RHEL
-sudo dnf install gtk3-devel libxcb-devel libxkbcommon-devel openssl-devel
-
-# Arch
-sudo pacman -S gtk3 libxcb libxkbcommon openssl
-```
 
 ### Windows ARM64: clang
 
@@ -51,55 +39,36 @@ no extra step.
 ```bash
 git clone https://github.com/maelic13/colosseum.git
 cd colosseum
-cargo run --release --bin colosseum
 cargo run -p colosseum-cli -- --help
 ```
 
 ## One build entry point
 
-`cargo xtask` builds, packages and release-checks both products, and the two
-release workflows call the same commands, so a local artifact and a published
-one come from one recipe:
+`cargo xtask` builds, packages and release-checks the CLI, and the release
+workflow calls the same commands, so a local artifact and a published one come
+from one recipe:
 
 ```bash
-cargo xtask build   <gui|cli> [--target <triple>] [--profile release|ci-release]
-cargo xtask package <gui|cli> [--target <triple>] [--format <list>] [--no-smoke]
-cargo xtask release-check <gui-vX.Y.Z|cli-vX.Y.Z>
+cargo xtask build   cli [--target <triple>] [--profile release|ci-release]
+cargo xtask package cli [--target <triple>] [--format <list>] [--no-smoke]
+cargo xtask release-check <cli-vX.Y.Z>
 ```
 
-The product is positional and one command handles one product: nothing builds
-or packages both, and the CLI archive never contains the GUI. `--target`
-defaults to the host's triple and is always passed to cargo, so every build
-lands under `target/<triple>/<profile>/`; builds are `--locked`.
+The product is the positional `cli`. `--target` defaults to the host's triple
+and is always passed to cargo, so every build lands under
+`target/<triple>/<profile>/`; builds are `--locked`.
 
 `build` compiles and prints the binary's path, and copies nothing. `package`
 always uses the `release` profile, writes artifacts to `target/dist/` as
 `<product>-<version>-<platform>-<arch>.<ext>`, prints each one's SHA-256, and
 reads the portable archive back with its smoke script unless `--no-smoke`.
-`--format` takes a comma-separated list and defaults to the platform's portable
-archive — `zip` on Windows, `tar.gz` elsewhere:
-
-| Product | Formats |
-|---|---|
-| `gui` | `zip`, `tar.gz`, `msi`, `deb`, `rpm`, `dmg`, `pkg.tar.zst` |
-| `cli` | `zip`, `tar.gz` |
-
-A format whose tool is not installed is an error, never a skip. The installer
-formats need their platform's tooling — WiX for `msi`, `cargo-deb` and
-`cargo-generate-rpm` for Linux, `create-dmg` for `dmg`, `makepkg` for
-`pkg.tar.zst` — which is why each one is built on its own runner.
+`--format` defaults to the platform's portable archive — `zip` on Windows,
+`tar.gz` elsewhere — the only format the CLI ships.
 
 ```bash
 cargo xtask package cli                       # this host's portable archive
-cargo xtask package gui --format zip,msi      # what the Windows release leg runs
-cargo xtask release-check cli-v0.1.0
+cargo xtask release-check cli-v0.2.0
 ```
-
-On macOS a bare executable opened from Finder always spawns a Terminal window,
-so the `dmg` wraps the binary in an app bundle with a Dock icon, stamped with
-the product manifest's version. The bundle is ad-hoc signed: fine on the
-machine that built it, but distributing it to other Macs requires codesigning
-and notarization — see [`macos-signing.md`](macos-signing.md).
 
 ## Tests
 
@@ -138,8 +107,8 @@ Real-engine interoperability coverage is a separate, explicit local smoke
 tier. It receives a local UCI executable through `COLOSSEUM_SMOKE_ENGINE`,
 copies that executable to a temporary directory, and fails if the variable is
 absent or invalid rather than passing by skip. `uci_smoke` expects `Threads`
-and `Hash`; `runner_smoke` and `scheduler_smoke` additionally exercise
-Stockfish-style strength options. Run the targets appropriate to the selected
+and `Hash`; `runner_smoke` additionally exercises Stockfish-style strength
+options. Run the targets appropriate to the selected
 engine, for example:
 
 ```bash
@@ -148,9 +117,6 @@ COLOSSEUM_SMOKE_ENGINE=/path/to/engine \
 
 COLOSSEUM_SMOKE_ENGINE=/path/to/engine \
   cargo test -p colosseum-engine --features real-engine-smoke --test runner_smoke -- --nocapture
-
-COLOSSEUM_SMOKE_ENGINE=/path/to/engine \
-  cargo test -p colosseum-engine --features real-engine-smoke --test scheduler_smoke -- --nocapture
 ```
 
 On PowerShell, set `$env:COLOSSEUM_SMOKE_ENGINE` before running the same Cargo
@@ -166,10 +132,6 @@ and fails elsewhere rather than passing by skip:
 cargo test -p colosseum-engine --features platform-smoke --test affinity_smoke
 ```
 
-GUI and live-view changes need a real run as well: launch the app, play a short
-tournament (two engines, 100 ms/move), and delete the test tournament
-afterwards.
-
 ## Workspace layout
 
 ```
@@ -178,40 +140,34 @@ colosseum/
 │  ├─ colosseum-core/     Pure domain rules, statistics and opaque identity values
 │  ├─ colosseum-application/ Runtime-neutral use cases and ports
 │  ├─ colosseum-uci/      UCI protocol & async engine process management (tokio)
-│  ├─ colosseum-engine/   Runner/store plus OS topology and affinity adapters
-│  ├─ colosseum-gui/      eframe/egui GUI composition root
-│  └─ colosseum-cli/      independent headless CLI composition root
-├─ tools/release/         product tag/version/changelog validation, archive staging and smoke
-├─ tools/xtask/           the build/package/release-check entry point both workflows call
+│  ├─ colosseum-engine/   One-game runner, PGN, openings, incident forensics; OS topology and affinity adapters
+│  └─ colosseum-cli/      the headless CLI composition root
+├─ tools/release/         tag/version/changelog validation, archive staging and smoke
+├─ tools/xtask/           the build/package/release-check entry point the workflow calls
 ├─ tools/docs/            parser-derived CLI command-reference generator
-├─ packaging/             Linux desktop entry + icon (.deb / .rpm / Arch assets);
-│                         cli/README.md, the front page of every CLI archive
+├─ packaging/cli/         README.md, the front page of every CLI archive
 ├─ tests/fixtures/        vendored statistics fixtures and their generator
 ├─ docs/cli/              CLI user guide (shipped in every CLI archive)
 ├─ docs/architecture/     architecture, ADRs, phase records and acceptance evidence
-├─ docs/design/           binding GUI visual guidelines and design assets
-├─ docs/                  this guide and the macOS signing notes
-└─ .github/workflows/     push/PR CI plus the GUI and CLI release workflows
+├─ docs/archive/gui-1.x/  the retired egui application's guidelines, changelog and notes
+├─ docs/gui-v2/           a pointer to the desktop application's repository
+├─ docs/                  this guide and the logo
+└─ .github/workflows/     push/PR CI and the CLI release workflow
 ```
-
-The GUI never blocks on engine I/O: a tokio runtime drives all engine
-processes, and live state is published behind shared snapshots the UI reads
-each frame. Visual rules for the GUI are binding and live in
-[`design/GUIDELINES.md`](design/GUIDELINES.md).
 
 ## Product versions and release lanes
 
-The GUI and CLI own independent explicit versions in
-`crates/colosseum-gui/Cargo.toml` and `crates/colosseum-cli/Cargo.toml`.
-Their release notes are similarly separate in
-[`CHANGELOG-GUI.md`](../CHANGELOG-GUI.md) and
-[`CHANGELOG-CLI.md`](../CHANGELOG-CLI.md). Product tags use `gui-v<semver>` and
-`cli-v<semver>`; validate prepared tags locally with:
+The CLI owns its version in `crates/colosseum-cli/Cargo.toml` and its release
+notes in [`CHANGELOG-CLI.md`](../CHANGELOG-CLI.md). Tags are `cli-v<semver>`
+until the repository swap moves the lane to plain `v<semver>` (ADR-0012);
+validate a prepared tag locally with:
 
 ```bash
-cargo xtask release-check gui-v1.1.0
-cargo xtask release-check cli-v0.1.0
+cargo xtask release-check cli-v0.2.0
 ```
+
+`main` still carries the 1.x desktop application and its `gui-v` lane until the
+merge that ends the programme; a `gui-v1.1.x` patch is made there, never here.
 
 `release-check` validates the tag's prefix and shape, that the product manifest
 carries exactly that version and that the product's changelog has a section for
@@ -233,42 +189,39 @@ cargo test --workspace --all-targets --profile ci-release
 
 The shipped binary is still built with the full `release` profile; only the
 test legs use `ci-release`.
-Product release automation is split between `release-gui.yml` and
-`release-cli.yml`; only their final publication jobs receive write permission.
-Each verifies the exact artifact list by name and count before publishing it,
-so a release carries what its matrix produced and nothing else. Checksums are
+Release automation is `release-cli.yml`; only its final publication job
+receives write permission. It verifies the exact artifact list by name and
+count before publishing it, so a release carries what its matrix produced and
+nothing else. Checksums are
 generated and re-checked between jobs but are not published as an asset: the
 per-asset digests GitHub records are what to compare a download against.
 
-Both lanes also build a candidate on a manual dispatch: every artifact is
+The lane also builds a candidate on a manual dispatch: every artifact is
 built, packaged and smoked, and the bundle is retained as
-`colosseum-<product>-candidate-<full-commit-sha>` with its checksums and a
-candidate identity file, without a tag and without publishing anything.
+`colosseum-cli-candidate-<full-commit-sha>` with its checksums and a candidate
+identity file, without a tag and without publishing anything.
 
 ### Candidates and tags
 
-A candidate is made from **Actions → Colosseum CLI candidate and release**
-(or **Colosseum GUI candidate and release**) **→ Run workflow**, on `main`, or
-from a terminal:
+A candidate is made from **Actions → Colosseum CLI candidate and release →
+Run workflow**, on `main`, or from a terminal:
 
 ```bash
 gh workflow run release-cli.yml --ref main
-gh workflow run release-gui.yml --ref main
 ```
 
 A candidate creates no tag or GitHub Release. The CLI lane builds Windows
 x64/Arm64, Linux x64 and macOS Arm64 archives, stages only the CLI, license,
 CLI-specific README, CLI changelog and `docs/cli/`, then checks packaged
 documentation links and runs version/help/self-test/deterministic JSON smoke
-against each unpacked archive. The GUI lane builds and smokes every installer
-and archive. Download the retained bundle from the run's **Artifacts** section
+against each unpacked archive. Download the retained bundle from the run's **Artifacts** section
 to inspect it; Actions keeps it for the repository's artifact retention period.
 
-Rerun a candidate after changing that product's code, dependencies, user
+Rerun a candidate after changing the CLI's code, dependencies, user
 documentation or packaging. Once it is accepted, tag the same commit on `main`
-with `gui-v<version>` or `cli-v<version>` and push the tag. The tag workflow
-proves the commit is on `main`, rebuilds and re-smokes every artifact, and only
-then creates the product's GitHub Release with the artifacts attached as
+with `cli-v<version>` and push the tag. The tag workflow proves the commit is
+on `main`, rebuilds and re-smokes every artifact, and only then creates the
+GitHub Release with the artifacts attached as
 release assets. The ordinary CI workflow remains responsible for the complete
 debug/release workspace test matrix; release packaging does not duplicate it.
 

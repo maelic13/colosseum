@@ -73,81 +73,51 @@ fn cli_source_has_no_gui_state_or_app_directory_access() {
 }
 
 #[test]
-fn independent_release_lanes_are_complete_and_least_privileged() {
+fn the_cli_release_lane_is_the_only_one_and_is_complete_and_least_privileged() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     assert!(!root.join(".github/workflows/release.yml").exists());
-    let gui = fs::read_to_string(root.join(".github/workflows/release-gui.yml")).unwrap();
+    // The desktop application releases from its own repository (ADR-0011).
+    assert!(!root.join(".github/workflows/release-gui.yml").exists());
     let cli = fs::read_to_string(root.join(".github/workflows/release-cli.yml")).unwrap();
 
-    assert!(gui.contains("'gui-v*'"));
-    assert!(!gui.contains("'cli-v*'"));
     assert!(cli.contains("'cli-v*'"));
     assert!(!cli.contains("'gui-v*'"));
-    // Both lanes build a candidate only on a manual dispatch, never on a
-    // branch push.
-    for workflow in [&gui, &cli] {
-        assert!(workflow.contains("workflow_dispatch:"));
-        assert!(!workflow.contains("branches:"));
-    }
+    // A candidate is built only on a manual dispatch, never on a branch push.
+    assert!(cli.contains("workflow_dispatch:"));
+    assert!(!cli.contains("branches:"));
 
-    // Each lane builds, packages and smokes exactly its own product, through
-    // the one build entry point, and never reaches across to the other's.
+    // The lane builds, packages and smokes the product through the one build
+    // entry point.
     assert!(cli.contains("cargo xtask package cli"));
-    assert!(!cli.contains("xtask package gui"));
-    assert!(gui.contains("cargo xtask package gui"));
-    assert!(!gui.contains("xtask package cli"));
 
-    for (workflow, name) in [(&gui, "gui"), (&cli, "cli")] {
-        assert!(
-            workflow.contains("permissions:\n  contents: read"),
-            "{name}"
-        );
-        assert_eq!(workflow.matches("contents: write").count(), 1, "{name}");
-        // A candidate proves the whole lane without a tag or a release.
-        assert!(workflow.contains("workflow_dispatch:"), "{name}");
-        assert!(workflow.contains("CANDIDATE.json"), "{name}");
-        // The published set is an exact list checked by name and by count, so
-        // a release carries what its matrix produced and nothing else.
-        assert!(workflow.contains("expected=("), "{name}");
-        assert!(
-            workflow.contains(
-                r#"for file in "${expected[@]}"; do test -f "release-artifacts/$file"; done"#
-            ),
-            "{name}"
-        );
-        assert!(
-            workflow.contains("(cd release-artifacts && sha256sum --check SHA256SUMS)"),
-            "{name}"
-        );
-        // Checksums are generated and re-checked, never published as an asset.
-        assert!(
-            !workflow.contains("release-artifacts/SHA256SUMS\n"),
-            "{name}"
-        );
-    }
+    assert!(cli.contains("permissions:\n  contents: read"));
+    assert_eq!(cli.matches("contents: write").count(), 1);
+    // A candidate proves the whole lane without a tag or a release.
+    assert!(cli.contains("CANDIDATE.json"));
+    // The published set is an exact list checked by name and by count, so a
+    // release carries what its matrix produced and nothing else.
+    assert!(cli.contains("expected=("));
+    assert!(
+        cli.contains(r#"for file in "${expected[@]}"; do test -f "release-artifacts/$file"; done"#)
+    );
+    assert!(cli.contains("(cd release-artifacts && sha256sum --check SHA256SUMS)"));
+    // Checksums are generated and re-checked, never published as an asset.
+    assert!(!cli.contains("release-artifacts/SHA256SUMS\n"));
 }
 
 #[test]
-fn repository_latest_release_is_owned_by_the_gui_product_lane() {
+fn the_cli_release_lane_leaves_latest_alone_until_the_repository_swap() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let gui = fs::read_to_string(root.join(".github/workflows/release-gui.yml")).unwrap();
     let cli = fs::read_to_string(root.join(".github/workflows/release-cli.yml")).unwrap();
 
-    // GitHub keeps exactly one repository-wide "latest" release. Leaving it to
-    // chance lets a CLI tag displace the GUI download the front page offers.
+    // GitHub keeps exactly one repository-wide "latest" release. Until the
+    // repository swap (ADR-0012, step 14.1) it belongs to the GUI 1.1.0
+    // release published from `main`; a CLI tag must not displace it.
     assert!(
         cli.contains("\n          make_latest: false\n"),
         "CLI release lane must never claim the repository-wide latest release"
     );
-    assert!(
-        gui.contains(
-            "\n          make_latest: ${{ needs.validate.outputs.prerelease == 'true' && 'false' || 'true' }}\n"
-        ),
-        "GUI release lane must claim latest for a stable release and never for a prerelease"
-    );
-    for workflow in [&gui, &cli] {
-        assert_eq!(workflow.matches("make_latest:").count(), 1);
-    }
+    assert_eq!(cli.matches("make_latest:").count(), 1);
 }
 
 #[test]
@@ -158,7 +128,6 @@ fn user_facing_documentation_links_product_tag_lists_not_repository_latest() {
         root.join("packaging/cli/README.md"),
         root.join("CHANGELOG.md"),
         root.join("CHANGELOG-CLI.md"),
-        root.join("CHANGELOG-GUI.md"),
     ];
     documents.extend(
         fs::read_dir(root.join("docs/cli"))

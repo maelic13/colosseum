@@ -99,8 +99,8 @@ fn fail_usage() {
 }
 
 fn usage() {
-    eprintln!("usage: colosseum-release <gui-vSEMVER|cli-vSEMVER> [root]");
-    eprintln!("       colosseum-release candidate <gui|cli> [root]");
+    eprintln!("usage: colosseum-release <cli-vSEMVER> [root]");
+    eprintln!("       colosseum-release candidate cli [root]");
     eprintln!("       colosseum-release notes <tag> <output> [root]");
     eprintln!(
         "       colosseum-release stage-cli <version> <platform> <arch> <binary> <output> [root]"

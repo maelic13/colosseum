@@ -23,14 +23,13 @@ struct Product {
     package: &'static str,
     manifest: &'static str,
     changelog: &'static str,
-    other_changelog: &'static str,
     artifact_name: &'static str,
     tag_prefix: &'static str,
 }
 
 #[derive(Debug, Error)]
 pub enum MetadataError {
-    #[error("tag must start with gui-v or cli-v")]
+    #[error("tag must start with cli-v")]
     TagPrefix,
     #[error("invalid release semantic version: {0}")]
     Semver(#[from] semver::Error),
@@ -59,7 +58,7 @@ pub enum MetadataError {
         changelog: &'static str,
         version: Version,
     },
-    #[error("product must be gui or cli")]
+    #[error("product must be cli")]
     Product,
     #[error("invalid CLI artifact platform/architecture pair: {platform}/{arch}")]
     Platform { platform: String, arch: String },
@@ -77,13 +76,10 @@ pub enum MetadataError {
 }
 
 pub fn validate(root: &Path, tag: &str) -> Result<ReleaseMetadata, MetadataError> {
-    let (product, raw_version) = if let Some(version) = tag.strip_prefix("gui-v") {
-        (product("gui")?, version)
-    } else if let Some(version) = tag.strip_prefix("cli-v") {
-        (product("cli")?, version)
-    } else {
+    let Some(raw_version) = tag.strip_prefix("cli-v") else {
         return Err(MetadataError::TagPrefix);
     };
+    let product = product("cli")?;
 
     let version = Version::parse(raw_version)?;
     if !version.build.is_empty() {
@@ -104,9 +100,6 @@ pub fn validate(root: &Path, tag: &str) -> Result<ReleaseMetadata, MetadataError
     let heading = format!("## [{}]", version);
     let notes = read(root, product.changelog)?;
     if !notes.lines().any(|line| line.trim().starts_with(&heading)) {
-        let _misfiled = read(root, product.other_changelog)?
-            .lines()
-            .any(|line| line.trim().starts_with(&heading));
         return Err(MetadataError::MissingNotes {
             changelog: product.changelog,
             version,
@@ -263,21 +256,11 @@ fn metadata(
 
 fn product(name: &str) -> Result<Product, MetadataError> {
     match name {
-        "gui" => Ok(Product {
-            name: "gui",
-            package: "colosseum-gui",
-            manifest: "crates/colosseum-gui/Cargo.toml",
-            changelog: "CHANGELOG-GUI.md",
-            other_changelog: "CHANGELOG-CLI.md",
-            artifact_name: "colosseum-gui",
-            tag_prefix: "gui-v",
-        }),
         "cli" => Ok(Product {
             name: "cli",
             package: "colosseum-cli",
             manifest: "crates/colosseum-cli/Cargo.toml",
             changelog: "CHANGELOG-CLI.md",
-            other_changelog: "CHANGELOG-GUI.md",
             artifact_name: "colosseum-cli",
             tag_prefix: "cli-v",
         }),
@@ -345,32 +328,32 @@ mod tests {
 
     fn fixture() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();
-        for package in ["colosseum-gui", "colosseum-cli"] {
-            fs::create_dir_all(root.path().join("crates").join(package)).unwrap();
-            fs::write(
-                root.path().join("crates").join(package).join("Cargo.toml"),
-                format!("[package]\nname = \"{package}\"\nversion = \"1.2.3\"\n"),
-            )
-            .unwrap();
-        }
-        fs::write(root.path().join("CHANGELOG-GUI.md"), "## [1.2.3]\n").unwrap();
+        fs::create_dir_all(root.path().join("crates/colosseum-cli")).unwrap();
+        fs::write(
+            root.path().join("crates/colosseum-cli/Cargo.toml"),
+            "[package]\nname = \"colosseum-cli\"\nversion = \"1.2.3\"\n",
+        )
+        .unwrap();
         fs::write(root.path().join("CHANGELOG-CLI.md"), "## [1.2.3]\n").unwrap();
         root
     }
 
     #[test]
-    fn routes_both_product_tags() {
+    fn routes_the_cli_tag_and_refuses_any_other() {
         let root = fixture();
-        let gui = validate(root.path(), "gui-v1.2.3").unwrap();
         let cli = validate(root.path(), "cli-v1.2.3").unwrap();
-        assert_eq!(gui.package, "colosseum-gui");
-        assert_eq!(gui.artifact_stem, "colosseum-gui-1.2.3");
+        for other in ["gui-v1.2.3", "v1.2.3"] {
+            assert!(matches!(
+                validate(root.path(), other),
+                Err(MetadataError::TagPrefix)
+            ));
+        }
         assert_eq!(cli.package, "colosseum-cli");
         assert_eq!(cli.artifact_stem, "colosseum-cli-1.2.3");
         assert_eq!(cli.validation, "release");
     }
 
-    /// One naming scheme for both products. The tokens are the artifact's,
+    /// One naming scheme. The tokens are the artifact's,
     /// not the triple's: a download called `…-windows-x64.zip` says what it
     /// runs on, where `…-x86_64-pc-windows-msvc` says how it was compiled.
     #[test]
@@ -421,7 +404,7 @@ mod tests {
     fn rejects_wrong_version_and_build_metadata() {
         let root = fixture();
         assert!(matches!(
-            validate(root.path(), "gui-v1.2.4"),
+            validate(root.path(), "cli-v1.2.4"),
             Err(MetadataError::VersionMismatch { .. })
         ));
         assert!(matches!(
@@ -475,13 +458,13 @@ mod tests {
     fn notes_end_before_the_rule_that_separates_versions() {
         let root = fixture();
         fs::write(
-            root.path().join("CHANGELOG-GUI.md"),
-            "# GUI\n\n---\n\n## [1.2.3] - 2026-01-01\n\nGUI notes.\n\n---\n\n## [1.2.2]\n\nOld.\n",
+            root.path().join("CHANGELOG-CLI.md"),
+            "# CLI\n\n---\n\n## [1.2.3] - 2026-01-01\n\nCLI notes.\n\n---\n\n## [1.2.2]\n\nOld.\n",
         )
         .unwrap();
         assert_eq!(
-            release_notes(root.path(), "gui-v1.2.3").unwrap(),
-            "GUI notes.\n"
+            release_notes(root.path(), "cli-v1.2.3").unwrap(),
+            "CLI notes.\n"
         );
     }
 

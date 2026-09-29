@@ -1,121 +1,38 @@
 <p align="center">
-  <img src="docs/design/logo.svg" width="88" alt="Colosseum logo">
+  <img src="docs/logo.svg" width="88" alt="Colosseum logo">
 </p>
 
-<h1 align="center">Colosseum</h1>
+<h1 align="center">Colosseum CLI</h1>
 
 <p align="center">
-  Run, watch and rigorously test ordinary UCI chess engines.
+  Rigorously test ordinary UCI chess engines from the command line.
 </p>
 
 > **Windows · Linux · macOS · GPL-3.0-or-later**
 
-Colosseum is two programs that share one engine-playing core:
+Colosseum CLI answers *is this build better than that build, and can I trust
+the answer?* It plays fixed matches, pair-atomic SPRT gates, SPSA tunes,
+calibration runs, NPS and scaling measurements, position suites, round robins
+and gauntlets, with opening-book tools and statistics replay. It launches
+ordinary [UCI](https://www.shredderchess.com/chess-info/features/uci-universal-chess-interface.html)
+executables as separate processes: an engine needs no manifest, build
+integration or source access.
 
-| | **Colosseum GUI** — `colosseum` | **Colosseum CLI** — `colosseum-cli` |
-|---|---|---|
-| Question it answers | *Which of my engines is the strongest?* | *Is this build better than that build, and can I trust the answer?* |
-| Made for | Tournaments between many engines, watched live | Engine development: gates, tuning, speed measurement, repeatable experiments |
-| Runs as | Desktop application | Headless command line, scriptable |
-| Highlights | Live boards, round robins and gauntlets, ratings with error bars, engine library, PGN and CSV export | Fixed matches, pair-atomic SPRT, SPSA tuning, calibration, NPS and scaling, position suites, tournaments, book tools, statistics replay |
-| Releases | [`gui-v…` release list](https://github.com/maelic13/colosseum/releases?q=tag%3Agui-v) | [`cli-v…` release list](https://github.com/maelic13/colosseum/releases?q=tag%3Acli-v) |
-| Documentation | This page and the [GUI changelog](CHANGELOG-GUI.md) | [Complete CLI guide](docs/cli/README.md) and the [CLI changelog](CHANGELOG-CLI.md) |
-
-Both launch ordinary [UCI](https://www.shredderchess.com/chess-info/features/uci-universal-chess-interface.html)
-executables as separate processes. An engine needs no manifest, build
-integration or source access. The two products are versioned, packaged and
-released independently; install either one or both.
-
-**Not sure which you want?** If you are choosing between engines you did not
-write, or you want to watch games, take the GUI. If you are developing an
-engine and need to know whether a change helped, take the CLI.
+**Looking for the desktop application?** Colosseum, for running and watching
+engine tournaments, is developed in its own repository,
+[maelic13/colosseum-gui](https://github.com/maelic13/colosseum-gui), and
+drives this CLI.
 
 ---
 
-## Colosseum GUI
+## What it does
 
-The desktop application plays many games at once and shows them live. It
-detects engine options, supports opening books, adjudication, tablebases and
-pondering, keeps every finished game, and resumes an interrupted tournament.
-
-> A new Colosseum desktop application, built on the CLI, is being developed
-> in [maelic13/colosseum-gui](https://github.com/maelic13/colosseum-gui). It will replace this one; until
-> its first release, the application described here is the one to install.
-
-![Colosseum — Arena tab with live game view](docs/screenshot.png)
-
-### Install
-
-Pick the newest entry on the [GUI release list](https://github.com/maelic13/colosseum/releases?q=tag%3Agui-v)
-and download the file for your machine.
-
-| Platform | File | How to install |
-|---|---|---|
-| Windows, Intel or AMD | `colosseum-gui-…-windows-x64.msi` | Double-click and follow the installer |
-| Windows, Arm (Snapdragon) | `colosseum-gui-…-windows-arm64.msi` | Double-click and follow the installer |
-| Windows, no installer | `colosseum-gui-…-windows-….zip` | Unzip and run `colosseum.exe` |
-| Ubuntu, Debian, Mint, Pop!_OS | `colosseum-gui-…-linux-x64.deb` | `sudo apt install ./colosseum-gui-….deb` |
-| Fedora, RHEL, openSUSE | `colosseum-gui-…-linux-x64.rpm` | `sudo dnf install ./colosseum-gui-….rpm` |
-| Arch, CachyOS, EndeavourOS, Manjaro | `colosseum-gui-…-linux-x64.pkg.tar.zst` | `sudo pacman -U ./colosseum-gui-….pkg.tar.zst` |
-| Other Linux | `colosseum-gui-…-linux-x64.tar.gz` | Extract and run `./colosseum` |
-| macOS, Apple Silicon | `colosseum-gui-…-macos-arm64.dmg` | Open and drag Colosseum to Applications |
-
-Intel Macs are not supported. The macOS app is not signed, so the first launch
-is blocked: open **System Settings → Privacy & Security** and click
-**Open Anyway**.
-
-To check a download arrived intact, compare its SHA-256 with the digest GitHub
-shows beside that asset on the release page:
-
-```text
-Get-FileHash colosseum-gui-1.1.0-windows-x64.msi
-sha256sum colosseum-gui-1.1.0-linux-x64.deb
-shasum -a 256 colosseum-gui-1.1.0-macos-arm64.dmg
-```
-
-The three lines are Windows, Linux and macOS respectively.
-
-### First tournament
-
-1. **Engines tab** — *Add Engine* and pick an executable, or *Scan Folder* to
-   add many at once. Set a starting Elo if you know one.
-2. **Tournament tab** — tick the engines, choose a format and a time control,
-   press *Start Tournament*.
-3. **Arena tab** — watch the standings fill, or switch to *Live* to follow a
-   game move by move.
-
-Tips:
-
-- Keep **Parallel games** at or below your CPU core count. Engines that share
-  a core lose on time.
-- **Update ratings** decides whose library Elo the tournament changes. Testing
-  one new engine? Choose *Chosen engines* and pick only that one.
-- Stopped a tournament? Select it in the Arena list and press *Start*; it
-  continues where it left off.
-- A game whose engine could not be started at all is shown as aborted and
-  not scored. An engine that starts and then crashes, plays an illegal move
-  or runs out of time loses that game.
-
-### Where the GUI keeps its files
-
-| | Windows | Linux | macOS |
-|---|---|---|---|
-| Settings and engine library | `%APPDATA%\Colosseum\` | `~/.config/colosseum/` | `~/Library/Application Support/Colosseum/` |
-| Games and logs | `%APPDATA%\Colosseum\` | `~/.local/share/colosseum/` | `~/Library/Application Support/Colosseum/` |
-
-Start Colosseum with `--portable` to keep everything next to the program.
-`colosseum --version` prints the installed version.
-
----
-
-## Colosseum CLI
-
-The command-line tool is built for experiments you can repeat and defend. Every
+Colosseum CLI is built for experiments you can repeat and defend. Every
 run records the resolved inputs, the engine executables' hashes, one master
 seed, the games, checkpoints and the statistics in a self-contained run
 directory. Engine faults are counted and shown, never folded into a score.
 
-### Install
+## Install
 
 Pick the newest entry on the [CLI release list](https://github.com/maelic13/colosseum/releases?q=tag%3Acli-v),
 download the archive for your platform (`colosseum-cli-…-windows-x64.zip`,
@@ -136,7 +53,7 @@ If you pin a version in automation, pin that digest with it.
 
 To build it yourself instead, see [Build from source](#build-from-source).
 
-### First experiments
+## First experiments
 
 Inspect two engines, then play a fixed match between them at 100 ms a move:
 
@@ -208,51 +125,38 @@ git clone https://github.com/maelic13/colosseum.git
 cd colosseum
 ```
 
-Linux also needs the GTK and XCB development packages for the GUI, and
-Windows on Arm needs `clang`; the
-[development guide](docs/DEVELOPMENT.md#prerequisites) lists the exact
-packages for each distribution.
+Windows on Arm also needs `clang`; the
+[development guide](docs/DEVELOPMENT.md#prerequisites) has the details.
 
-To try either product straight away:
+To try it straight away:
 
 ```text
-cargo run --release --bin colosseum        # the GUI
-cargo run -p colosseum-cli -- --help       # the CLI
+cargo run -p colosseum-cli -- --help
 ```
 
-`cargo xtask` is the one entry point for real builds, and the release
-workflows call the same commands, so what you build locally is what a release
-ships. One command handles one product:
+`cargo xtask` is the one entry point for real builds, and the release workflow
+calls the same commands, so what you build locally is what a release ships:
 
 ```text
-cargo xtask build   gui          # the executable, path printed
-cargo xtask build   cli
-cargo xtask package gui          # the downloadable archive, into target/dist/
-cargo xtask package cli
+cargo xtask build   cli          # the executable, path printed
+cargo xtask package cli          # the downloadable archive, into target/dist/
 ```
 
-`package` also prints each artifact's SHA-256 and unpacks the archive to check
-it. It can build the installers too — `cargo xtask package gui --format
-zip,msi` on Windows, and `deb`, `rpm`, `dmg` or `pkg.tar.zst` on the platform
-each belongs to. The [development guide](docs/DEVELOPMENT.md#one-build-entry-point)
-covers the formats, cross-target builds and the release checks.
+`package` also prints the archive's SHA-256 and unpacks it to check it. The
+[development guide](docs/DEVELOPMENT.md#one-build-entry-point) covers
+cross-target builds and the release checks.
 
 ---
 
 ## Help and project links
 
 - Something broken or missing? [Open an issue](https://github.com/maelic13/colosseum/issues).
-- Release histories: [GUI changelog](CHANGELOG-GUI.md) · [CLI changelog](CHANGELOG-CLI.md)
+- Release history: [CLI changelog](CHANGELOG-CLI.md)
 - Building, testing and releasing from source: [development guide](docs/DEVELOPMENT.md)
 
 ---
 
-## Credits and licence
+## Licence
 
-Chess pieces by Colin M.L. Burnett ([cburnett](https://github.com/lichess-org/lila/tree/master/public/piece/cburnett),
-CC BY-SA 3.0) · opening names from [lichess chess-openings](https://github.com/lichess-org/chess-openings)
-(CC0) · fonts [Inter](https://rsms.me/inter/) and [JetBrains Mono](https://www.jetbrains.com/lp/mono/)
-(SIL OFL 1.1).
-
-Colosseum is free software under the **GNU General Public License v3.0 or
+Colosseum CLI is free software under the **GNU General Public License v3.0 or
 later** — see [LICENSE](LICENSE). Copyright © 2026 Miloslav Macůrek.
