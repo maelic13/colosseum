@@ -7,9 +7,9 @@
 //! the round trip, and only stamps taken at each step can say where.
 //!
 //! Every stamp is taken by the thread that performs its step: the game task
-//! stamps the `go` before writing it, the return of that write, and the moment
-//! it takes a line off the channel; the pipe reader thread stamps each line as
-//! it arrives. Recording them costs a copied `Instant` per step and nothing on
+//! stamps the `go` before handing it to the pipe's writer thread and the
+//! moment it takes a line off the channel; the writer thread stamps the
+//! completion of the write, and the reader thread each line as it arrives. Recording them costs a copied `Instant` per step and nothing on
 //! the reader thread beyond the stamp it already took.
 
 use std::time::{Duration, Instant};
@@ -23,7 +23,9 @@ pub struct SearchTiming {
     /// Stamped by the game task just before the `go` (or `stop`, or
     /// `ponderhit`) is written. The charged interval starts here.
     pub go_stamped: Instant,
-    /// Stamped by the game task when the write and its flush returned.
+    /// When the command's write to the pipe completed, as the writer thread
+    /// stamped it; until the answer arrives, when the game task handed the
+    /// command to that thread.
     pub write_returned: Instant,
     /// When the search must have answered: the charged interval may not end
     /// after this.
@@ -60,7 +62,7 @@ pub struct SearchTiming {
 /// One phase of a search's round trip, named for the report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoundTripPhase {
-    /// `go` stamped → its write returned: the harness writing to the pipe.
+    /// `go` stamped → its write completed: the harness writing to the pipe.
     GoWrite,
     /// Write returned → first `info` arrived: the engine starting to search,
     /// and its first report crossing the pipe.

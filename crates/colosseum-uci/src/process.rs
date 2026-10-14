@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use colosseum_core::UciOption;
 
 use crate::cpu_time::ProcessSample;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -107,7 +107,10 @@ pub fn install_process_tree_guard() -> Result<(), UciError> {
 pub struct EngineProcess {
     containment: ProcessContainment,
     child: Child,
-    stdin: ChildStdin,
+    /// Engine input. A dedicated writer thread owns the pipe, so sending a
+    /// command costs the game task one hand-off, not a wait on the runtime's
+    /// blocking pool for every write and flush.
+    stdin: PipeWriter,
     /// Engine output, one line at a time, each stamped with the instant its
     /// newline arrived. A dedicated reader thread owns the pipe, so a line is
     /// timed when the engine sent it and not when a busy harness got round to
@@ -196,7 +199,7 @@ impl EngineProcess {
         let containment = ProcessContainment::attach(&child)?;
         #[cfg(windows)]
         containment.resume(&child)?;
-        let stdin = child.stdin.take().ok_or(UciError::Terminated)?;
+        let stdin = spawn_pipe_writer(child.stdin.take().ok_or(UciError::Terminated)?)?;
         let stdout = child.stdout.take().ok_or(UciError::Terminated)?;
         let lines = spawn_pipe_reader(stdout)?;
         let cpu = child.id().and_then(crate::cpu_time::ProcessCpu::open);
@@ -608,6 +611,13 @@ impl EngineProcess {
             let arrived = line.arrived;
             let line = line.text.trim();
             if let Some((best_move, ponder)) = parse::parse_bestmove_ponder(line) {
+                // The engine answered, so the command it answered was written
+                // by now: the writer thread's stamp says when.
+                if let Some(written) = self.stdin.last_written()
+                    && written >= timing.go_stamped
+                {
+                    timing.write_returned = written;
+                }
                 timing.bestmove_arrived = Some(arrived);
                 timing.consumed = Some(self.last_consumed);
                 timing.process_at_answer = self.process_sample();
@@ -685,14 +695,15 @@ impl EngineProcess {
         self.child.id()
     }
 
-    /// Write a command line to the engine and flush.
+    /// Write a command line to the engine. The line and its newline go to
+    /// the pipe in one write, so the engine never sees half a command.
     async fn send(&mut self, line: &str) -> Result<(), UciError> {
         tracing::trace!(target: "uci", direction = "send", "{line}");
         self.record(">", line);
-        self.stdin.write_all(line.as_bytes()).await?;
-        self.stdin.write_all(b"\n").await?;
-        self.stdin.flush().await?;
-        Ok(())
+        let mut bytes = Vec::with_capacity(line.len() + 1);
+        bytes.extend_from_slice(line.as_bytes());
+        bytes.push(b'\n');
+        self.stdin.send(bytes)
     }
 
     /// Read the next line, enforcing an absolute deadline. Maps a timeout to
@@ -794,6 +805,81 @@ enum PipeEvent {
     Eof,
     /// The pipe could not be read. Nothing more will come.
     Failed(UciError),
+}
+
+/// The game task's end of the engine's stdin: commands go to a thread that
+/// does nothing but write them.
+struct PipeWriter {
+    commands: std::sync::mpsc::Sender<Vec<u8>>,
+    /// Set by the writer thread as each write completes.
+    written: Arc<Mutex<Option<Instant>>>,
+    /// The write that failed, after which the thread wrote nothing more.
+    failed: Arc<Mutex<Option<(std::io::ErrorKind, String)>>>,
+}
+
+impl PipeWriter {
+    /// Queue one command. Once a write has failed, every later send fails
+    /// with its error, as writing to the closed pipe would.
+    fn send(&self, bytes: Vec<u8>) -> Result<(), UciError> {
+        if let Some(error) = self.failure() {
+            return Err(error);
+        }
+        self.commands.send(bytes).map_err(|_| {
+            self.failure().unwrap_or_else(|| {
+                UciError::Io(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+            })
+        })
+    }
+
+    fn failure(&self) -> Option<UciError> {
+        let failed = self.failed.lock().ok()?;
+        let (kind, message) = failed.as_ref()?;
+        Some(UciError::Io(std::io::Error::new(*kind, message.clone())))
+    }
+
+    /// When the most recent write completed.
+    fn last_written(&self) -> Option<Instant> {
+        *self.written.lock().ok()?
+    }
+}
+
+/// Move the engine's stdin onto a thread that does nothing but write it.
+///
+/// A write to a pipe blocks while the engine is not reading, so it must not
+/// run on the game task; and on Windows the runtime's own pipe sends every
+/// write and every flush through its blocking pool, each a thread to wake on
+/// a host the engines keep busy, before the engine sees its command. The
+/// thread exits when its sender is dropped or a write fails.
+fn spawn_pipe_writer(stdin: ChildStdin) -> Result<PipeWriter, UciError> {
+    #[cfg(unix)]
+    let mut file = std::fs::File::from(stdin.into_owned_fd()?);
+    #[cfg(windows)]
+    let mut file = std::fs::File::from(stdin.into_owned_handle()?);
+    let (commands, receiver) = std::sync::mpsc::channel::<Vec<u8>>();
+    let written = Arc::new(Mutex::new(None));
+    let failed = Arc::new(Mutex::new(None));
+    let (thread_written, thread_failed) = (Arc::clone(&written), Arc::clone(&failed));
+    std::thread::Builder::new()
+        .name("uci-stdin".into())
+        .spawn(move || {
+            use std::io::Write;
+            for bytes in receiver {
+                if let Err(error) = file.write_all(&bytes) {
+                    if let Ok(mut failed) = thread_failed.lock() {
+                        *failed = Some((error.kind(), error.to_string()));
+                    }
+                    return;
+                }
+                if let Ok(mut written) = thread_written.lock() {
+                    *written = Some(Instant::now());
+                }
+            }
+        })?;
+    Ok(PipeWriter {
+        commands,
+        written,
+        failed,
+    })
 }
 
 /// Move the engine's stdout onto a thread that does nothing but read it.

@@ -14,6 +14,11 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fresh processes. The setting is part of a tournament's configuration, so
   a tournament run directory from an earlier version is refused on resume
   as a changed configuration
+- Commands reach an engine sooner and cost the harness less CPU: each engine
+  has its own thread writing its input, and each command is one write. On
+  Windows every command used to wait on the runtime's shared thread pool
+  three times. The time charged to an engine's clock still runs from the
+  `go` to the arrival of its `bestmove`
 
 ### Fixed
 - Threefold repetition now counts the position a game starts from, as the
