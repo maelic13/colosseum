@@ -23,6 +23,10 @@ struct FixtureArgs {
     /// reporting `report_time_ms`, wait, `bestmove`. Each line is flushed as
     /// it is written, so each delay lands in exactly one round-trip phase.
     phases: Option<Phases>,
+    /// Scripted games, one per line as `START | MOVE MOVE …`, where START is
+    /// a FEN or `startpos`. From a script's start position with N moves
+    /// played, the fixture answers with the script's move N + 1.
+    script: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -57,6 +61,8 @@ fn arguments() -> FixtureArgs {
             parsed.append_pid_file = true;
         } else if let Some(value) = argument.strip_prefix("--pid-file=") {
             parsed.pid_file = Some(value.into());
+        } else if let Some(value) = argument.strip_prefix("--script=") {
+            parsed.script = Some(value.into());
         } else if let Some(value) = argument.strip_prefix("--log-commands=") {
             parsed.log_commands = Some(value.into());
         } else if let Some(value) = argument.strip_prefix("--uciok-after-ms=") {
@@ -117,6 +123,10 @@ fn main() -> std::io::Result<()> {
         ),
         None => None,
     };
+    let script = match &arguments.script {
+        Some(path) => read_script(path)?,
+        None => Vec::new(),
+    };
     for line in stdin.lock().lines() {
         let line = line?;
         let line = line.trim();
@@ -163,7 +173,10 @@ fn main() -> std::io::Result<()> {
                 if let Some(phases) = arguments.phases {
                     write_timed_search(&mut stdout, phases)?;
                 }
-                if arguments.legal_sequence {
+                if arguments.script.is_some() {
+                    writeln!(stdout, "info depth 1 nodes 1 score cp 0")?;
+                    writeln!(stdout, "bestmove {}", scripted_move(&script, &position))?;
+                } else if arguments.legal_sequence {
                     write_legal_bestmove(&mut stdout, &position, arguments.phases.is_none())?;
                 } else {
                     writeln!(stdout, "bestmove e2e4")?;
@@ -210,4 +223,43 @@ fn write_legal_bestmove(
         writeln!(output, "info depth 1 nodes 1 score cp 0")?;
     }
     writeln!(output, "bestmove {best}")
+}
+
+/// One scripted game: its start (`startpos` or the first four FEN fields)
+/// and its moves.
+type ScriptedGame = (String, Vec<String>);
+
+fn read_script(path: &std::path::Path) -> std::io::Result<Vec<ScriptedGame>> {
+    Ok(std::fs::read_to_string(path)?
+        .lines()
+        .filter_map(|line| line.split_once('|'))
+        .map(|(start, moves)| {
+            (
+                script_start(start),
+                moves.split_whitespace().map(str::to_owned).collect(),
+            )
+        })
+        .collect())
+}
+
+/// A start position as scripts and `position` commands are compared: the
+/// placement, side, castling and en passant fields, without the counters.
+fn script_start(start: &str) -> String {
+    start
+        .split_whitespace()
+        .take(4)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn scripted_move(script: &[ScriptedGame], position: &str) -> String {
+    let rest = position.strip_prefix("position ").unwrap_or(position);
+    let (start, moves) = rest.split_once(" moves ").unwrap_or((rest, ""));
+    let start = script_start(start.strip_prefix("fen ").unwrap_or(start));
+    let played = moves.split_whitespace().count();
+    script
+        .iter()
+        .find(|(scripted, _)| *scripted == start)
+        .and_then(|(_, moves)| moves.get(played).cloned())
+        .unwrap_or_else(|| "0000".into())
 }

@@ -729,6 +729,12 @@ async fn play(
     // next search.
     let mut ponder_pred: [Option<(String, std::time::Instant)>; 2] = [None, None];
 
+    // The position the game starts from is its first occurrence (FIDE Laws,
+    // Article 9.2): its third occurrence is a threefold, not its fourth.
+    *repetitions
+        .entry(pos.zobrist_hash::<Zobrist64>(EnPassantMode::Legal))
+        .or_insert(0) += 1;
+
     // Pre-play the assigned opening moves before the engines take over. These
     // were validated when the book was loaded, but we re-validate defensively.
     for uci in &spec.opening_moves {

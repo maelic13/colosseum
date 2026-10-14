@@ -6,6 +6,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Threefold repetition now counts the position a game starts from, as the
+  Laws of Chess do: the start position (an EPD/FEN opening, or the position
+  before a PGN opening's first move or `startpos`) occurring for the third
+  time ends the game as a draw. Before, the start position needed a fourth
+  occurrence. This is a rules fix in every command that plays games. It can
+  shorten games whose start position recurs, and rarely changes their
+  result; other games are unchanged. A run resumed from an earlier version
+  plays its remaining games under the corrected rule
+
 ## [0.2.0] — 2026-09-25
 
 What the first weeks of use asked for: resumed runs that keep their time and

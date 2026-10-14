@@ -26,5 +26,6 @@ mod slot_pool;
 mod spsa;
 mod status;
 mod stop_boundaries;
+mod threefold;
 mod tournament;
 mod unscorable_games;
