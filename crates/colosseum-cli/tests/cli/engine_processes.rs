@@ -216,3 +216,102 @@ fn engines_are_reaped_when_the_harness_is_killed_whether_kept_or_per_game() {
         }
     }
 }
+
+/// A tournament of `participants` fixture engines, each logging the commands
+/// it receives to its own file, `games_per_pair` games per encounter.
+fn tournament_command(
+    root: &Path,
+    name: &str,
+    participants: usize,
+    games_per_pair: u32,
+    cycles: u32,
+    mode: &str,
+) -> (Command, Vec<std::path::PathBuf>) {
+    let logs = (1..=participants)
+        .map(|index| root.join(format!("{name}-{index}.log")))
+        .collect::<Vec<_>>();
+    let mut command = cli();
+    command.args(["tournament", "run"]);
+    for _ in 0..participants {
+        command.arg("--engine").arg(fixture());
+    }
+    for (index, log) in logs.iter().enumerate() {
+        command.arg(format!(
+            "--engine-arg-at={}:--log-commands={}",
+            index + 1,
+            log.display()
+        ));
+    }
+    command
+        .args([
+            "--engine-arg=--legal-sequence",
+            "--max-moves",
+            "2",
+            "--games-per-pair",
+            &games_per_pair.to_string(),
+            "--cycles",
+            &cycles.to_string(),
+            "--seed",
+            "7",
+            "--concurrency",
+            "1",
+            "--placement",
+            "off",
+            "--engine-processes",
+            mode,
+            "--json",
+            "--dir",
+        ])
+        .arg(root.join(name));
+    (command, logs)
+}
+
+#[test]
+fn a_tournament_slot_keeps_its_engines_across_games_unless_asked_not_to() {
+    let root = tempfile::tempdir().unwrap();
+    let play = |mode: &str| {
+        let (mut command, logs) = tournament_command(root.path(), mode, 2, 2, 3, mode);
+        succeeded(&command.output().unwrap());
+        logs.iter().map(|log| commands(log)).collect::<Vec<_>>()
+    };
+
+    // Six games, colours alternating: one process per participant, told of
+    // every new game.
+    for log in play("per-slot") {
+        assert_eq!(processes(&log), 1);
+        assert_eq!(count(&log, "uci"), 1);
+        assert_eq!(count(&log, "ucinewgame"), 6);
+    }
+    for log in play("per-game") {
+        assert_eq!(processes(&log), 6);
+    }
+
+    let resolved: Value = serde_json::from_slice(
+        &std::fs::read(root.path().join("per-slot").join("resolved-config.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(resolved["engine_processes"], "per-slot", "{resolved}");
+}
+
+#[test]
+fn a_tournament_slot_hands_each_participant_its_own_kept_engine() {
+    let root = tempfile::tempdir().unwrap();
+    // Three participants whose launches differ, two games per encounter on one
+    // slot: an encounter's second game reuses both engines of its first, and
+    // a participant playing two encounters in a row keeps its engine between
+    // them, whichever colour it has.
+    let (mut command, logs) = tournament_command(root.path(), "run", 3, 2, 1, "per-slot");
+    let output = command.output().unwrap();
+    succeeded(&output);
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let mut started = 0;
+    for log in logs.iter().map(|log| commands(log)) {
+        // Each participant plays two encounters of two games.
+        assert_eq!(count(&log, "ucinewgame"), 4, "{report}");
+        assert!(processes(&log) <= 2, "{log:?}");
+        started += processes(&log);
+    }
+    // Three encounters in a row on one slot: at most one participant sits
+    // one out between its two, so at most four processes in all.
+    assert!(started <= 4, "{started} processes for 12 engine-games");
+}

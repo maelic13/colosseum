@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- `tournament` and `gauntlet` keep each game slot's engine processes from
+  game to game, like `match`, `sprt` and `spsa`, instead of starting two
+  fresh processes for every game. Short games no longer pay an engine's
+  start-up and handshake each time. `--engine-processes per-game` restores
+  fresh processes. The setting is part of a tournament's configuration, so
+  a tournament run directory from an earlier version is refused on resume
+  as a changed configuration
+
 ### Fixed
 - Threefold repetition now counts the position a game starts from, as the
   Laws of Chess do: the start position (an EPD/FEN opening, or the position

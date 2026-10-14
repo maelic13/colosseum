@@ -493,14 +493,14 @@ impl SlotEngines {
         })
     }
 
-    async fn take(&self, slot: usize) -> [Option<KeptEngine>; 2] {
+    pub(crate) async fn take(&self, slot: usize) -> [Option<KeptEngine>; 2] {
         match self.slots.get(slot) {
             Some(engines) => std::mem::take(&mut *engines.lock().await),
             None => [None, None],
         }
     }
 
-    async fn put(&self, slot: usize, engines: [Option<KeptEngine>; 2]) {
+    pub(crate) async fn put(&self, slot: usize, engines: [Option<KeptEngine>; 2]) {
         if let Some(stored) = self.slots.get(slot) {
             *stored.lock().await = engines;
         }
@@ -731,6 +731,10 @@ pub struct FixedMatchRequest {
     /// The tournament knows the encounter and the opening it selected, so it
     /// supplies them rather than having them patched into the written text.
     pub identity_override: Option<GamePairIdentity>,
+    /// Engines a caller keeps across matches, indexed by slot. When set, the
+    /// match plays with them instead of a store of its own, whatever
+    /// `engine_processes` says, and leaves them running for the caller.
+    pub kept_engines: Option<Arc<SlotEngines>>,
     pub observer: Option<Arc<dyn MatchObserver>>,
 }
 
@@ -1158,12 +1162,15 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         progress,
         cancellation,
         identity_override,
+        kept_engines: caller_engines,
         observer,
     } = request;
     if games == 0 {
         return Err(MatchError::ZeroGames);
     }
-    let kept_engines = SlotEngines::for_mode(engine_processes, execution.slots.len());
+    let owns_engines = caller_engines.is_none();
+    let kept_engines =
+        caller_engines.or_else(|| SlotEngines::for_mode(engine_processes, execution.slots.len()));
     let engine_a = engine_spec(engine_a, EngineId::from_u128(1));
     let engine_b = engine_spec(engine_b, EngineId::from_u128(2));
     let mut report = FixedMatchReport {
@@ -1267,7 +1274,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
         report.games.push(game);
         cancellation.record_committed_unit();
     }
-    if let Some(engines) = &kept_engines {
+    if owns_engines && let Some(engines) = &kept_engines {
         engines.shutdown().await;
     }
     report.games.sort_by_key(|game| game.number);
