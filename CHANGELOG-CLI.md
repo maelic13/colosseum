@@ -6,6 +6,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-14
+
+What moving engine data generation onto the harness asked for: the rules
+counting repetitions as the Laws of Chess do, and short games played at
+least as fast as other runners play them.
+
 ### Changed
 - `tournament` and `gauntlet` keep each game slot's engine processes from
   game to game, like `match`, `sprt` and `spsa`, instead of starting two
