@@ -73,11 +73,16 @@ impl Cancellation {
         let Some(remaining) = &self.remaining_units else {
             return;
         };
-        let left = remaining
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
-                Some(value.saturating_sub(1))
-            })
-            .unwrap_or(0);
+        // A decrement that stops at zero; `left` is the value before it.
+        let mut left = remaining.load(Ordering::Acquire);
+        while let Err(actual) = remaining.compare_exchange_weak(
+            left,
+            left.saturating_sub(1),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            left = actual;
+        }
         if left <= 1 {
             self.request_stop();
         }

@@ -103,6 +103,12 @@ pub(crate) struct TournamentRunCommand {
     /// Both engines then search at once, so each needs its own cores.
     #[arg(long, requires = "cores_per_engine")]
     pub(crate) ponder: bool,
+    /// Whether a slot keeps its engine processes from game to game
+    /// (`per-slot`, restarting one after a fault or when the slot's next game
+    /// needs a different engine) or starts fresh ones for every game
+    /// (`per-game`).
+    #[arg(long, value_enum, default_value = "per-slot")]
+    pub(crate) engine_processes: match_runner::EngineProcesses,
 
     /// Adjudicate a draw once both engines agree; off unless requested.
     #[arg(long)]
@@ -569,6 +575,7 @@ pub(crate) async fn run_tournament_command(
             "time_control": time_control,
             "adjudication": adjudication,
             "ponder": command.ponder,
+            "engine_processes": command.engine_processes,
             "execution": &execution,
             "max_engine_faults": max_engine_faults,
             "master_seed": master_seed,
@@ -674,6 +681,7 @@ pub(crate) async fn run_tournament_command(
         "anchor": anchor,
         "fixed_ratings": &fixed_ratings,
         "ponder": command.ponder,
+        "engine_processes": command.engine_processes,
         "fault_policy": {
             "mode": if command.max_engine_faults.is_some() { "explicit-limit" } else { "default-allowance" },
             "max_engine_faults": max_engine_faults,
@@ -704,6 +712,7 @@ pub(crate) async fn run_tournament_command(
         time_control,
         adjudication,
         ponder: command.ponder,
+        engine_processes: command.engine_processes,
         execution,
         master_seed,
         master_seed_generated,

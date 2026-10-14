@@ -69,6 +69,15 @@ or extends one participant where engines differ:
 --engine-button 3:ClearHash
 ```
 
+Each game slot keeps its engine processes from game to game
+(`--engine-processes per-slot`, the default), as `match`, `sprt` and `spsa`
+do: a participant's engine is started once on a slot and told of every new
+game with `ucinewgame`. A slot holds the two engines of its current game; an
+engine that faulted is replaced, and one whose participant does not play the
+slot's next game is ended or handed to the next game's participant when its
+launch fits. `--engine-processes per-game` starts two fresh processes for
+every game instead, for engines that do not reset cleanly on `ucinewgame`.
+
 `--dry-run` resolves all invocations and settings without launching an engine.
 Use `--label` once per engine for readable names; otherwise executable file
 stems are used.

@@ -8,6 +8,7 @@ use colosseum_application::{
     TournamentResults, TournamentScheduleGame,
 };
 use colosseum_core::{AdjudicationConfig, GameResult, ParticipantId, Termination};
+use colosseum_engine::KeptEngine;
 use colosseum_engine::{ClockAccountingReport, GameFault, GamePairIdentity};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -16,7 +17,7 @@ use crate::cancellation::Cancellation;
 use crate::journal::GameRecord;
 use crate::match_runner::{
     ConfiguredTimeControl, EngineProcesses, FaultPolicy, FixedMatchRequest, MatchExecutionPlan,
-    MatchOpenings, MatchProgress, OpeningAssignment, run_fixed_match,
+    MatchOpenings, MatchProgress, OpeningAssignment, SlotEngines, run_fixed_match,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +153,8 @@ pub struct TournamentRunRequest {
     pub time_control: ConfiguredTimeControl,
     pub adjudication: AdjudicationConfig,
     pub ponder: bool,
+    /// Whether a slot keeps its engine processes from game to game.
+    pub engine_processes: EngineProcesses,
     pub execution: MatchExecutionPlan,
     pub master_seed: u64,
     pub master_seed_generated: bool,
@@ -192,6 +195,34 @@ pub enum TournamentRunError {
     Output(String),
     #[error("tournament result calculation failed: {0}")]
     Results(String),
+}
+
+/// Hand a slot's kept engines to the sides of its next game, `[white,
+/// black]`, given whom each was kept from.
+///
+/// A slot plays different encounters in turn, so each side first gets the
+/// engine its own participant left; a side whose participant left none takes
+/// an engine no other side claimed, which the runner keeps when it fits the
+/// side's launch and quits when it does not. Nothing is left over: a slot
+/// holds at most the two processes of its current game.
+fn assign_kept_engines(
+    engines: [Option<KeptEngine>; 2],
+    kept_from: [Option<ParticipantId>; 2],
+    sides: [ParticipantId; 2],
+) -> [Option<KeptEngine>; 2] {
+    let mut engines = engines;
+    let mut assigned: [Option<KeptEngine>; 2] = [None, None];
+    for (side, participant) in sides.iter().enumerate() {
+        if let Some(index) =
+            (0..2).find(|&index| kept_from[index] == Some(*participant) && engines[index].is_some())
+        {
+            assigned[side] = engines[index].take();
+        }
+    }
+    for side in assigned.iter_mut().filter(|side| side.is_none()) {
+        *side = engines.iter_mut().find_map(Option::take);
+    }
+    assigned
 }
 
 /// The schedule identity a tournament game is written with.
@@ -262,6 +293,11 @@ pub async fn run_tournament(
         .execution
         .slot_pool()
         .map_err(|error| TournamentRunError::Game(error.to_string()))?;
+    let kept_engines =
+        SlotEngines::for_mode(request.engine_processes, request.execution.slots.len());
+    // Per slot, the participants whose engines its last game left, `[white,
+    // black]`; the slot's next game is launched only after that one ended.
+    let mut kept_from = vec![[None, None]; request.execution.slots.len()];
     while (!pending.is_empty() && !request.cancellation.stopping()) || !workers.is_empty() {
         while !infrastructure_error
             && !request.cancellation.stopping()
@@ -282,6 +318,12 @@ pub async fn run_tournament(
                 .expect("a tournament keeps no more games live than it has slots");
             debug_assert_eq!(pool.held(), workers.len() + 1);
             let slot = request.execution.slots[position].clone();
+            let slot_index = slot.slot_index;
+            let previous = kept_from
+                .get_mut(slot_index)
+                .map(|kept| std::mem::replace(kept, [Some(scheduled.white), Some(scheduled.black)]))
+                .unwrap_or_default();
+            let kept_engines = kept_engines.clone();
             let execution = MatchExecutionPlan {
                 concurrency: 1,
                 allocation: request.execution.allocation,
@@ -294,6 +336,13 @@ pub async fn run_tournament(
             let adjudication = request.adjudication;
             let master_seed = request.master_seed;
             let game = async move {
+                if let Some(store) = &kept_engines {
+                    let engines = store.take(slot_index).await;
+                    let assigned =
+                        assign_kept_engines(engines, previous, [scheduled.white, scheduled.black]);
+                    // The one-game match plays its engine A as White.
+                    store.put(slot_index, assigned).await;
+                }
                 let report = run_fixed_match(FixedMatchRequest {
                     engine_a: white,
                     engine_b: black,
@@ -302,7 +351,8 @@ pub async fn run_tournament(
                     engine_b_time_control: time_control,
                     adjudication,
                     ponder: request.ponder,
-                    // A tournament's slot changes engines from game to game.
+                    // The tournament owns the kept engines, when it keeps
+                    // them; a one-game match without them starts its own.
                     engine_processes: EngineProcesses::PerGame,
                     fault_policy: FaultPolicy {
                         max_engine_faults: u32::MAX,
@@ -319,6 +369,7 @@ pub async fn run_tournament(
                     // finishes or is abandoned with the rest.
                     cancellation: Cancellation::inactive(),
                     identity_override: Some(encounter_identity(&scheduled, &opening)),
+                    kept_engines,
                     observer: None,
                 })
                 .await
@@ -373,7 +424,8 @@ pub async fn run_tournament(
         };
         let (position, game) =
             joined.map_err(|error| TournamentRunError::Worker(error.to_string()))?;
-        // The one-game match returned: its engines have exited.
+        // The one-game match returned: its engines have exited, or are kept
+        // ready for the slot's next game.
         pool.give_back(position);
         let game = game.map_err(TournamentRunError::Game)?;
         infrastructure_error |= matches!(game.fault, Some(GameFault::Infrastructure { .. }));
@@ -387,6 +439,9 @@ pub async fn run_tournament(
         game.pgn = String::new();
         request.cancellation.record_committed_unit();
         games.push(game);
+    }
+    if let Some(engines) = &kept_engines {
+        engines.shutdown().await;
     }
     games.sort_by_key(|game| game.number);
     let engine_faults = games

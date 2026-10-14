@@ -74,7 +74,11 @@ aborts).
   games by default** (`--engine-processes per-slot`, the Phase 10 record, item (ae)),
   replacing one after any fault: fresh processes put an engine's one-time
   work inside a game's search (Rarog's KPK bitbase forfeited games that way),
-  and fastchess keeps its engines too. Tournaments keep fresh processes.
+  and fastchess keeps its engines too. Tournaments and gauntlets keep them per
+  slot too since CLI 0.3.0 (`--engine-processes`, maintainer decision
+  2026-10-14): Rarog's fast fixed-node games paid ~340 ms of spawn and
+  handshake per ~0.75 s game; `per-game` restores fresh processes for old
+  engines that leak state across `ucinewgame`.
 - **Store writes are batched**: schedule inserts are one transaction
   (`insert_pending_games`) — per-row inserts froze the UI for minutes.
 - GUI: all visual rules live in `docs/design/GUIDELINES.md` (binding). The

@@ -195,6 +195,7 @@ pub(crate) async fn run_calibration(
         progress: progress.clone(),
         cancellation: cancellation.clone(),
         identity_override: None,
+        kept_engines: None,
         observer: Some(observer.clone()),
     };
     if !machine {

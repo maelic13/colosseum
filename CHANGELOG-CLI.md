@@ -6,6 +6,36 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-14
+
+What moving engine data generation onto the harness asked for: the rules
+counting repetitions as the Laws of Chess do, and short games played at
+least as fast as other runners play them.
+
+### Changed
+- `tournament` and `gauntlet` keep each game slot's engine processes from
+  game to game, like `match`, `sprt` and `spsa`, instead of starting two
+  fresh processes for every game. Short games no longer pay an engine's
+  start-up and handshake each time. `--engine-processes per-game` restores
+  fresh processes. The setting is part of a tournament's configuration, so
+  a tournament run directory from an earlier version is refused on resume
+  as a changed configuration
+- Commands reach an engine sooner and cost the harness less CPU: each engine
+  has its own thread writing its input, and each command is one write. On
+  Windows every command used to wait on the runtime's shared thread pool
+  three times. The time charged to an engine's clock still runs from the
+  `go` to the arrival of its `bestmove`
+
+### Fixed
+- Threefold repetition now counts the position a game starts from, as the
+  Laws of Chess do: the start position (an EPD/FEN opening, or the position
+  before a PGN opening's first move or `startpos`) occurring for the third
+  time ends the game as a draw. Before, the start position needed a fourth
+  occurrence. This is a rules fix in every command that plays games. It can
+  shorten games whose start position recurs, and rarely changes their
+  result; other games are unchanged. A run resumed from an earlier version
+  plays its remaining games under the corrected rule
+
 ## [0.2.0] — 2026-09-25
 
 What the first weeks of use asked for: resumed runs that keep their time and
