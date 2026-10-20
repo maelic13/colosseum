@@ -120,9 +120,10 @@ Three further points that only became clear from the source:
   reference setup that is ~4 s of fixed overhead against ~0.77 s/game — ~14% of
   a 40-hour tune — most of it re-parsing a 167 MB / 2.6M-position opening book
   *to use 16 openings*. A long-lived driver loads the book once, so the cost is
-  not optimised: it does not exist. (Per-*game* engine spawn stays, deliberately:
-  17–350 ms against ~34 s games, and it buys crash isolation and per-game
-  forensics. See `CLAUDE.md`.)
+  not optimised: it does not exist. (Per-*game* engine spawn was kept at
+  first — 17–350 ms against ~34 s games, for crash isolation and per-game
+  forensics; Phase 10 and CLI 0.3.0 made per-slot processes the default after
+  short games paid that spawn inside their search. See `CLAUDE.md`.)
 
 ### The one real cost, accepted with mitigation
 
@@ -1843,7 +1844,9 @@ Facts from those phases that still govern new work:
   every game-playing change repeats the oracle replay and parity matrix
   (`GUIDE.md`, recurring procedures).
 - Adjudication is off unless asked for; `--engine-processes per-slot` is the
-  CLI default while tournaments keep fresh processes; pre-10.9g run
+  default for every command, tournaments and gauntlets included since CLI
+  0.3.0 ([record](docs/architecture/cli-0.3.0-record.md)), with `per-game`
+  for engines that leak state across `ucinewgame`; pre-10.9g run
   directories are refused; Chess960 is refused.
 - A game the runner could not play is unscorable: it is excluded from
   standings, ratings and the PGN export, and re-queued on the next start.
