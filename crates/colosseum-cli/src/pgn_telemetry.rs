@@ -31,7 +31,13 @@ pub struct EngineTelemetryReport {
     pub depth: TelemetryMetric,
     pub elapsed_seconds: TelemetryMetric,
     pub nodes: TelemetryMetric,
+    /// Per-move nodes divided by that move's time: every move weighs the
+    /// same, so short searches pull the mean up.
     pub implied_nps: TelemetryMetric,
+    /// Total nodes over total search time, over the moves that reported both:
+    /// the rate the engine searched at across the run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nodes_per_second: Option<f64>,
     /// Reported score in centipawns from the mover's point of view. A mate
     /// score is a claim about distance to mate, not an evaluation, so it is
     /// counted as covered but excluded from the centipawn statistics.
@@ -107,6 +113,9 @@ struct EngineSamples {
     elapsed: Vec<f64>,
     nodes: Vec<f64>,
     implied_nps: Vec<f64>,
+    /// Nodes and seconds summed over the moves that reported both.
+    timed_nodes: f64,
+    timed_seconds: f64,
     score_cp: Vec<f64>,
     absolute_score_cp: Vec<f64>,
     mate_scores: u32,
@@ -206,9 +215,12 @@ pub fn analyze_pgn(text: &str) -> SearchTelemetryReport {
             }
             if let (Some(nodes), Some(elapsed)) =
                 (parsed.telemetry.nodes, parsed.telemetry.elapsed_seconds)
-                && elapsed > 0.0
             {
-                samples.implied_nps.push(nodes / elapsed);
+                samples.timed_nodes += nodes;
+                samples.timed_seconds += elapsed;
+                if elapsed > 0.0 {
+                    samples.implied_nps.push(nodes / elapsed);
+                }
             }
         }
     }
@@ -224,6 +236,8 @@ pub fn analyze_pgn(text: &str) -> SearchTelemetryReport {
             elapsed_seconds: metric(samples.elapsed, samples.eligible),
             nodes: metric(samples.nodes, samples.eligible),
             implied_nps: metric(samples.implied_nps, samples.eligible),
+            nodes_per_second: (samples.timed_seconds > 0.0)
+                .then(|| samples.timed_nodes / samples.timed_seconds),
             score_cp: score_metric(samples.score_cp, samples.eligible, samples.mate_scores),
             mean_absolute_score_cp: score_metric(
                 samples.absolute_score_cp,
@@ -597,6 +611,8 @@ mod tests {
         assert_eq!(a.depth.mean, Some(20.0));
         assert_eq!(a.elapsed_seconds.median, Some(1.0));
         assert_eq!(a.implied_nps.mean, Some(1_500.0));
+        // 3,500 nodes over two seconds, where the per-move mean is 1,500.
+        assert_eq!(a.nodes_per_second, Some(1_750.0));
         let b = report
             .engines
             .iter()

@@ -9,6 +9,7 @@ mod calibration;
 mod chess960;
 mod command_line;
 mod cpu_allocation;
+mod end_of_run_results;
 mod engine_check;
 mod engine_processes;
 mod engine_setup_faults;

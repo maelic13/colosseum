@@ -43,10 +43,10 @@ pub use rng::{
 pub use spsa::{
     SPSA_ALPHA, SPSA_END_STATE_RELATIVE_TOLERANCE, SPSA_GAMMA, SPSA_PERTURBATION_BYTES_PER_DRAW,
     SPSA_PERTURBATION_DRAW_ORDER, SPSA_PERTURBATION_SAMPLER_ID, SPSA_SCHEDULE_SCHEMA_VERSION,
-    SPSA_STABILITY_FRACTION, SpsaArmValue, SpsaCoefficients, SpsaDerivedKnob, SpsaEndSpec,
-    SpsaError, SpsaIteration, SpsaKnob, SpsaPerturbationContract, SpsaSchedule,
-    SpsaScheduleArtifact, perturbations_for_iteration, prepare_iteration,
-    round_half_away_from_zero, update_centers,
+    SPSA_STABILITY_FRACTION, SpsaArmClamp, SpsaArmValue, SpsaCoefficients, SpsaDerivedKnob,
+    SpsaEndSpec, SpsaError, SpsaIteration, SpsaKnob, SpsaPerturbationContract, SpsaSchedule,
+    SpsaScheduleArtifact, arm_clamp, iteration_arm_clamps, perturbations_for_iteration,
+    prepare_iteration, round_half_away_from_zero, update_centers,
 };
 pub use standings::{EngineStanding, GameOutcome, HeadToHead, PairGameResult, Standings};
 pub use stats::{

@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use colosseum_core::{PairGameResult, PentanomialVector, pentanomial_statistics};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -68,6 +68,136 @@ pub struct StatsReplayReport {
     /// Where each game's wall time went, from a run's journal.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub game_phases: Option<GamePhaseReport>,
+    /// The replayed games by colour, the perspective's engine first. Absent
+    /// when the source cannot say which engine had White, or names more than
+    /// two engines.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub by_colour: Option<Vec<EngineColourResults>>,
+}
+
+/// One engine's games with one colour, from that engine's side of the board.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct ColourRecord {
+    pub games: u32,
+    pub wins: u32,
+    pub draws: u32,
+    pub losses: u32,
+    /// Points per game, absent without games.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+}
+
+impl ColourRecord {
+    fn add(&mut self, outcome: PairGameResult) {
+        match outcome {
+            PairGameResult::Win => self.wins += 1,
+            PairGameResult::Draw => self.draws += 1,
+            PairGameResult::Loss => self.losses += 1,
+        }
+        self.games += 1;
+        self.score =
+            Some((f64::from(self.wins) + 0.5 * f64::from(self.draws)) / f64::from(self.games));
+    }
+}
+
+/// One engine's games as White and as Black.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EngineColourResults {
+    pub engine: String,
+    pub as_white: ColourRecord,
+    pub as_black: ColourRecord,
+}
+
+/// Both engines' games by colour from the first engine's outcomes: whether
+/// it had White, and how it scored. The second engine's record is the same
+/// games from the other side of the board.
+fn colour_results(
+    games: impl IntoIterator<Item = (bool, PairGameResult)>,
+    names: [String; 2],
+) -> Vec<EngineColourResults> {
+    let [first_name, second_name] = names;
+    let mut first = EngineColourResults {
+        engine: first_name,
+        as_white: ColourRecord::default(),
+        as_black: ColourRecord::default(),
+    };
+    let mut second = EngineColourResults {
+        engine: second_name,
+        as_white: ColourRecord::default(),
+        as_black: ColourRecord::default(),
+    };
+    for (first_white, outcome) in games {
+        if first_white {
+            first.as_white.add(outcome);
+            second.as_black.add(invert(outcome));
+        } else {
+            first.as_black.add(outcome);
+            second.as_white.add(invert(outcome));
+        }
+    }
+    vec![first, second]
+}
+
+/// What a two-engine run reports at its end beyond its own statistics: each
+/// engine's official games by colour, from the journal, and each engine's
+/// search telemetry, from every game in the PGN, exactly as `stats` replays
+/// them.
+#[derive(Debug, Clone, Serialize)]
+pub struct RunResults {
+    /// Engine A first. Only games of the official sample count: post-terminal
+    /// pairs and games nobody could score are left out, as the sample leaves
+    /// them out.
+    pub by_colour: Vec<EngineColourResults>,
+    pub telemetry: SearchTelemetryReport,
+}
+
+/// The end-of-run results of the two-engine run in `root`, whose engines A
+/// and B are named `names` in its PGN.
+pub fn run_results(root: &Path, names: [&str; 2]) -> RunResults {
+    let journal = fs::read(root.join(crate::journal::JOURNAL_FILE)).unwrap_or_default();
+    let games = crate::journal::read_journal_bytes(&journal)
+        .into_iter()
+        .filter(|record| record.scorable && record.sample.eq_ignore_ascii_case(OFFICIAL_SAMPLE))
+        .filter_map(|record| {
+            let first_white = side_had_white(&record.white)?;
+            let white_score = white_outcome(record.result);
+            Some((
+                first_white,
+                if first_white {
+                    white_score
+                } else {
+                    invert(white_score)
+                },
+            ))
+        });
+    let by_colour = colour_results(games, names.map(str::to_owned));
+    let telemetry = match fs::read_to_string(root.join(crate::journal::PGN_FILE)) {
+        Ok(text) => analyze_pgn(&text),
+        Err(error) => unavailable(format!("the run's PGN could not be read: {error}")),
+    };
+    RunResults {
+        by_colour,
+        telemetry,
+    }
+}
+
+/// Whether the journal's `white` names engine A, for a two-engine run.
+fn side_had_white(white: &str) -> Option<bool> {
+    if white.eq_ignore_ascii_case("a") {
+        Some(true)
+    } else if white.eq_ignore_ascii_case("b") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn white_outcome(result: colosseum_core::GameResult) -> PairGameResult {
+    match result {
+        colosseum_core::GameResult::WhiteWin => PairGameResult::Win,
+        colosseum_core::GameResult::BlackWin => PairGameResult::Loss,
+        colosseum_core::GameResult::Draw => PairGameResult::Draw,
+    }
 }
 
 /// The distribution over a run's games of each phase of a game's wall time,
@@ -239,7 +369,10 @@ impl PairSlot {
 struct RawGame {
     slot: Option<PairSlot>,
     opening: Option<String>,
+    /// The outcome from the perspective's side.
     outcome: PairGameResult,
+    /// Whether the perspective's engine had White, when the source says.
+    first_white: Option<bool>,
 }
 
 pub fn replay(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, String> {
@@ -401,6 +534,8 @@ struct SourceGames {
     /// sample, so a reader can see they were left out rather than lost.
     excluded: ExcludedGames,
     telemetry: SearchTelemetryReport,
+    /// The perspective's engine and its opponent, when the source names them.
+    names: Option<[String; 2]>,
 }
 
 fn read_source(
@@ -422,6 +557,7 @@ fn read_source(
             paired_capable: true,
             excluded,
             telemetry: unavailable("the journal holds no PGN move annotations"),
+            names: run_engine_names(path),
         });
     }
     match authority {
@@ -431,9 +567,10 @@ fn read_source(
             paired_capable: true,
             excluded,
             telemetry: unavailable("structured source has no PGN move annotations"),
+            names: run_engine_names(path),
         }),
         "pgn-export" => {
-            let (games, paired_capable, excluded) = pgn_games(&text, subject);
+            let (games, paired_capable, excluded, names) = pgn_games(&text, subject);
             let perspective = match (subject, paired_capable) {
                 (Some(value), _) => value.to_owned(),
                 (None, true) => "first engine of each pair".into(),
@@ -445,6 +582,7 @@ fn read_source(
                 paired_capable,
                 excluded,
                 telemetry: analyze_pgn(&text),
+                names,
             })
         }
         "forensic-log" => Ok(SourceGames {
@@ -453,6 +591,7 @@ fn read_source(
             paired_capable: true,
             excluded: ExcludedGames::default(),
             telemetry: unavailable("forensic log has no PGN move annotations"),
+            names: run_engine_names(path),
         }),
         _ => Ok(SourceGames {
             games: result_tokens(&text),
@@ -460,6 +599,7 @@ fn read_source(
             paired_capable: false,
             excluded: ExcludedGames::default(),
             telemetry: unavailable("console source has no PGN move annotations"),
+            names: None,
         }),
     }
 }
@@ -568,6 +708,7 @@ fn parse_structured_game(value: &Value) -> Option<RawGame> {
         _ => return None,
     };
     let slot = structured_slot(value);
+    let first_white = white.and_then(side_had_white);
     let outcome = match white {
         // A match or an SPRT names the two sides of its own pair, so the
         // record says outright which of them had White.
@@ -588,6 +729,7 @@ fn parse_structured_game(value: &Value) -> Option<RawGame> {
             .get("opening")
             .map(|opening| serde_json::to_string(opening).unwrap_or_default()),
         outcome,
+        first_white,
     })
 }
 
@@ -665,9 +807,15 @@ fn log_games(text: &str) -> Vec<RawGame> {
 /// had White in assignment 1 — which is the perspective the journal uses,
 /// so the two sources agree. A PGN without the tags yields no identity and the
 /// caller falls back to labelled unpaired statistics.
-fn pgn_games(text: &str, subject: Option<&str>) -> (Vec<RawGame>, bool, ExcludedGames) {
+fn pgn_games(
+    text: &str,
+    subject: Option<&str>,
+) -> (Vec<RawGame>, bool, ExcludedGames, Option<[String; 2]>) {
     let mut paired_capable = true;
     let mut excluded = ExcludedGames::default();
+    // Every engine the games name, and whether it was ever the perspective's
+    // engine and ever its opponent.
+    let mut engines = BTreeMap::<String, (bool, bool)>::new();
     let games = split_pgn(text)
         .into_iter()
         .filter_map(|game| {
@@ -690,26 +838,69 @@ fn pgn_games(text: &str, subject: Option<&str>) -> (Vec<RawGame>, bool, Excluded
             if identity.is_none() {
                 paired_capable = false;
             }
-            let outcome = match subject {
-                Some(name) if white == name => white_score,
-                Some(name) if black == name => invert(white_score),
+            let first_white = match subject {
+                Some(name) if white == name => Some(true),
+                Some(name) if black == name => Some(false),
                 Some(_) => return None,
                 // An even assignment is the same opening with the colours
                 // reversed, so its White is the pair's second engine.
-                None => match identity.as_ref() {
-                    Some(identity) if !identity.slot.is_first_assignment() => invert(white_score),
-                    _ => white_score,
-                },
+                None => identity
+                    .as_ref()
+                    .map(|identity| identity.slot.is_first_assignment()),
             };
+            let outcome = if first_white == Some(false) {
+                invert(white_score)
+            } else {
+                white_score
+            };
+            if first_white.is_some() {
+                let (first, second) = if first_white == Some(true) {
+                    (white, black)
+                } else {
+                    (black, white)
+                };
+                engines.entry(first).or_default().0 = true;
+                engines.entry(second).or_default().1 = true;
+            }
             Some(RawGame {
                 slot: identity.as_ref().map(|identity| identity.slot),
                 opening: identity.as_ref().map(|identity| identity.opening.clone()),
                 outcome,
+                first_white,
             })
         })
         .collect::<Vec<_>>();
     let paired_capable = paired_capable && !games.is_empty();
-    (games, paired_capable, excluded)
+    let names = pgn_engine_names(&engines);
+    // Colours are one engine's against one opponent: a PGN of more engines,
+    // a tournament's, has no single split to give.
+    let games = if names.is_some() {
+        games
+    } else {
+        games
+            .into_iter()
+            .map(|game| RawGame {
+                first_white: None,
+                ..game
+            })
+            .collect()
+    };
+    (games, paired_capable, excluded, names)
+}
+
+/// The perspective's engine and its opponent, when a PGN names exactly two
+/// engines and each kept its side; a tournament's PGN names more, or swaps
+/// which engine of an encounter comes first.
+fn pgn_engine_names(engines: &BTreeMap<String, (bool, bool)>) -> Option<[String; 2]> {
+    let [(first, first_sides), (second, second_sides)] = engines.iter().collect::<Vec<_>>()[..]
+    else {
+        return None;
+    };
+    match (first_sides, second_sides) {
+        ((true, false), (false, true)) => Some([first.clone(), second.clone()]),
+        ((false, true), (true, false)) => Some([second.clone(), first.clone()]),
+        _ => None,
+    }
 }
 
 /// The schedule identity a Colosseum export carries.
@@ -770,6 +961,7 @@ fn result_tokens(text: &str) -> Vec<RawGame> {
             slot: None,
             opening: None,
             outcome,
+            first_white: None,
         })
         .collect()
 }
@@ -803,6 +995,7 @@ fn build_report(
         paired_capable,
         excluded,
         telemetry,
+        names,
     } = source;
     let mut wins = 0;
     let mut draws = 0;
@@ -869,6 +1062,19 @@ fn build_report(
             .expect_err("statistics were unavailable")
             .to_string()
     });
+    let by_colour = games
+        .iter()
+        .map(|game| {
+            game.first_white
+                .map(|first_white| (first_white, game.outcome))
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(|games| {
+            colour_results(
+                games,
+                names.unwrap_or_else(|| ["engine A".to_owned(), "engine B".to_owned()]),
+            )
+        });
     let games_count = games.len() as u32;
     let mut warnings = Vec::new();
     if !excluded.is_empty() {
@@ -916,7 +1122,28 @@ fn build_report(
         warnings,
         telemetry,
         game_phases: None,
+        by_colour,
     }
+}
+
+/// The names of engines A and B of the run directory a structured source
+/// sits in, as its PGN names them: the label, or the executable's file stem.
+pub(crate) fn run_engine_names(source: &Path) -> Option<[String; 2]> {
+    let config: Value =
+        serde_json::from_slice(&fs::read(source.parent()?.join("resolved-config.json")).ok()?)
+            .ok()?;
+    let name = |key: &str| -> Option<String> {
+        let engine = config.get(key)?;
+        if let Some(label) = engine.get("label").and_then(Value::as_str) {
+            return Some(label.to_owned());
+        }
+        Path::new(engine.get("executable")?.as_str()?)
+            .file_stem()?
+            .to_str()
+            .filter(|stem| !stem.is_empty())
+            .map(str::to_owned)
+    };
+    Some([name("engine_a")?, name("engine_b")?])
 }
 
 #[cfg(test)]
@@ -926,7 +1153,7 @@ mod tests {
     #[test]
     fn pgn_without_pair_identity_is_never_guessed_into_pairs() {
         let pgn = "[Event \"x\"]\n[White \"A\"]\n[Black \"B\"]\n[Result \"1-0\"]\n\n1-0\n\n[Event \"x\"]\n[White \"B\"]\n[Black \"A\"]\n[Result \"0-1\"]\n\n0-1\n";
-        let (games, paired_capable, excluded) = pgn_games(pgn, Some("A"));
+        let (games, paired_capable, excluded, names) = pgn_games(pgn, Some("A"));
         assert!(excluded.is_empty());
         assert!(
             !paired_capable,
@@ -941,6 +1168,7 @@ mod tests {
                 paired_capable,
                 excluded,
                 telemetry: unavailable("fixture has no annotations"),
+                names,
             },
             vec![],
         );
@@ -993,6 +1221,117 @@ mod tests {
         let path = root.path().join("games.pgn");
         fs::write(&path, text).unwrap();
         replay(&path, None)
+    }
+
+    /// The colour split counts the official sample only, from each engine's
+    /// own side of the board: a post-terminal pair and a game nobody could
+    /// score are recorded, but not counted.
+    #[test]
+    fn run_results_split_the_official_games_by_colour_and_leave_the_rest_out() {
+        use colosseum_core::GameResult::{BlackWin, Draw, WhiteWin};
+        let root = tempfile::tempdir().unwrap();
+        let games = [
+            // A wins as White, loses as Black, draws as White, wins as Black.
+            (1, "a", WhiteWin, OFFICIAL_SAMPLE, true),
+            (2, "b", WhiteWin, OFFICIAL_SAMPLE, true),
+            (3, "a", Draw, OFFICIAL_SAMPLE, true),
+            (4, "b", BlackWin, OFFICIAL_SAMPLE, true),
+            (5, "a", BlackWin, POST_TERMINAL_SAMPLE, true),
+            (6, "b", WhiteWin, OFFICIAL_SAMPLE, false),
+        ];
+        let mut journal = Vec::new();
+        for (seq, (number, white, result, sample, scorable)) in games.into_iter().enumerate() {
+            let game = crate::journal::GameRecord {
+                white: white.into(),
+                black: if white == "a" { "b" } else { "a" }.into(),
+                result,
+                sample: sample.into(),
+                scorable,
+                ..crate::run_writer::tests::record(number)
+            };
+            let span = crate::journal::PgnSpan {
+                offset: 0,
+                length: 0,
+                sha256: String::new(),
+            };
+            journal.extend(crate::journal::encode_line(seq as u64, &game, &span));
+        }
+        fs::write(root.path().join(crate::journal::JOURNAL_FILE), journal).unwrap();
+
+        let results = run_results(root.path(), ["Alpha", "Beta"]);
+        let record = |wins, draws, losses| ColourRecord {
+            games: wins + draws + losses,
+            wins,
+            draws,
+            losses,
+            score: Some(
+                (f64::from(wins) + 0.5 * f64::from(draws)) / f64::from(wins + draws + losses),
+            ),
+        };
+        assert_eq!(
+            results.by_colour,
+            [
+                EngineColourResults {
+                    engine: "Alpha".into(),
+                    as_white: record(1, 1, 0),
+                    as_black: record(1, 0, 1),
+                },
+                EngineColourResults {
+                    engine: "Beta".into(),
+                    as_white: record(1, 0, 1),
+                    as_black: record(0, 1, 1),
+                },
+            ]
+        );
+        // No PGN, so no telemetry; the colours stand without it.
+        assert_eq!(results.telemetry.status, "unavailable");
+    }
+
+    /// A PGN of two engines splits by colour under their own names; one of
+    /// three engines cannot say whose colours a single split would be.
+    #[test]
+    fn a_pgn_of_two_engines_splits_by_colour_and_one_of_three_does_not() {
+        let report = replay_pgn(&format!(
+            "{}{}{}{}",
+            game(1, 1, 1, "Alpha 1.0.0", "1-0", None),
+            game(2, 1, 2, "Beta 1.0.0", "1-0", None),
+            game(3, 2, 1, "Alpha 1.0.0", "1/2-1/2", None),
+            game(4, 2, 2, "Beta 1.0.0", "0-1", None),
+        ))
+        .unwrap();
+        let by_colour = report.by_colour.unwrap();
+        assert_eq!(by_colour[0].engine, "Alpha 1.0.0");
+        assert_eq!(by_colour[1].engine, "Beta 1.0.0");
+        assert_eq!(
+            (by_colour[0].as_white.wins, by_colour[0].as_white.draws),
+            (1, 1)
+        );
+        assert_eq!(
+            (by_colour[0].as_black.wins, by_colour[0].as_black.losses),
+            (1, 1)
+        );
+        assert_eq!(by_colour[1].as_white.wins, 1);
+
+        let third = game(5, 3, 1, "Alpha 1.0.0", "1-0", None).replace("Beta 1.0.0", "Gamma 1.0.0");
+        let report = replay_pgn(&format!(
+            "{}{}{third}",
+            game(1, 1, 1, "Alpha 1.0.0", "1-0", None),
+            game(2, 1, 2, "Beta 1.0.0", "1-0", None),
+        ))
+        .unwrap();
+        assert!(report.by_colour.is_none(), "{:?}", report.by_colour);
+
+        // Two engines, but the second encounter is Beta's: whose colours a
+        // split would count changes from pair to pair.
+        let report = replay_pgn(&format!(
+            "{}{}{}{}",
+            game(1, 1, 1, "Alpha 1.0.0", "1-0", None),
+            game(2, 1, 2, "Beta 1.0.0", "1-0", None),
+            game(3, 2, 1, "Beta 1.0.0", "1-0", None),
+            game(4, 2, 2, "Alpha 1.0.0", "1-0", None),
+        ))
+        .unwrap();
+        assert!(report.by_colour.is_none(), "{:?}", report.by_colour);
     }
 
     /// A PGN alone reproduces the pentanomial vector, because it says which

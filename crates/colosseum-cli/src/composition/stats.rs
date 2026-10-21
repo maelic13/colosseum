@@ -129,6 +129,11 @@ pub(crate) fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
                 if let Some(vector) = report.pentanomial {
                     println!("pentanomial: {vector:?}");
                 }
+                if let Some(by_colour) = &report.by_colour {
+                    for line in colour_lines(by_colour) {
+                        println!("{line}");
+                    }
+                }
                 if let Some(reason) = &report.paired_statistics_unavailable {
                     println!("paired statistics unavailable: {reason}");
                 }
@@ -138,14 +143,18 @@ pub(crate) fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
                 }
                 for engine in &report.telemetry.engines {
                     println!(
-                        "{}: {}/{} annotated moves ({:.1}%); depth mean/median {}; elapsed mean/median {}; implied NPS mean/median {}",
+                        "{}: {}/{} annotated moves ({:.1}%); depth mean/median {}; nodes per move mean/median {}; elapsed mean/median {}; implied NPS mean/median {}; total nodes over total time {}",
                         engine.engine,
                         engine.annotated_moves,
                         engine.eligible_moves,
                         engine.annotation_coverage * 100.0,
                         metric_text(&engine.depth),
+                        metric_text(&engine.nodes),
                         metric_text(&engine.elapsed_seconds),
                         metric_text(&engine.implied_nps),
+                        engine
+                            .nodes_per_second
+                            .map_or_else(|| "unavailable".to_owned(), |nps| format!("{nps:.3}")),
                     );
                     if let Some(line) = overhead_text(&engine.harness_overhead_ms) {
                         println!("{}: {line}", engine.engine);
@@ -176,6 +185,86 @@ pub(crate) fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// One line per engine: its games as White, then as Black, each from its own
+/// side of the board.
+pub(crate) fn colour_lines(by_colour: &[crate::stats_replay::EngineColourResults]) -> Vec<String> {
+    let record = |record: &crate::stats_replay::ColourRecord| match record.score {
+        Some(score) => format!(
+            "{} W / {} D / {} L of {}, score {:.1}%",
+            record.wins,
+            record.draws,
+            record.losses,
+            record.games,
+            score * 100.0
+        ),
+        None => "no games".to_owned(),
+    };
+    by_colour
+        .iter()
+        .map(|engine| {
+            format!(
+                "{}: as White {}; as Black {}",
+                engine.engine,
+                record(&engine.as_white),
+                record(&engine.as_black)
+            )
+        })
+        .collect()
+}
+
+/// What a two-engine run prints at its end after its own statistics: each
+/// engine's official games by colour, then each engine's search, in the
+/// figures `stats` replays from the same run directory.
+pub(crate) fn run_results_lines(results: &crate::stats_replay::RunResults) -> Vec<String> {
+    let mut lines = colour_lines(&results.by_colour);
+    let telemetry = &results.telemetry;
+    if let Some(reason) = &telemetry.unavailable_reason {
+        lines.push(format!("search telemetry unavailable: {reason}"));
+        return lines;
+    }
+    for engine in &telemetry.engines {
+        let mut parts = vec![format!(
+            "{} of {} moves annotated ({:.1}%)",
+            grouped(engine.annotated_moves.into()),
+            grouped(engine.eligible_moves.into()),
+            engine.annotation_coverage * 100.0
+        )];
+        if let (Some(mean), Some(median)) = (engine.depth.mean, engine.depth.median) {
+            parts.push(format!("depth {mean:.2} mean, {median} median"));
+        }
+        if let Some(mean) = engine.nodes.mean {
+            parts.push(format!("{} nodes per move", grouped(mean.round() as u64)));
+        }
+        if let Some(mean) = engine.elapsed_seconds.mean {
+            parts.push(format!("{:.1} ms per move", mean * 1_000.0));
+        }
+        if let Some(nps) = engine.nodes_per_second {
+            parts.push(format!("{:.2}M nodes per second", nps / 1e6));
+        }
+        lines.push(format!("{}: {}", engine.engine, parts.join("; ")));
+    }
+    lines
+}
+
+pub(crate) fn print_run_results(results: Option<&crate::stats_replay::RunResults>) {
+    for line in results.map(run_results_lines).unwrap_or_default() {
+        println!("{line}");
+    }
+}
+
+/// `1234567` as `1,234,567`.
+pub(crate) fn grouped(value: u64) -> String {
+    let digits = value.to_string();
+    let mut text = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            text.push(',');
+        }
+        text.push(digit);
+    }
+    text
 }
 
 /// The harness overhead of an engine's moves in one line, or nothing when the
@@ -338,4 +427,37 @@ pub(crate) fn parse_u32_five(value: &str) -> Result<[u32; 5], String> {
     parsed
         .try_into()
         .map_err(|values: Vec<u32>| format!("expected five counts, got {}", values.len()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counts_are_grouped_in_thousands() {
+        assert_eq!(grouped(0), "0");
+        assert_eq!(grouped(999), "999");
+        assert_eq!(grouped(1_000), "1,000");
+        assert_eq!(grouped(181_306), "181,306");
+        assert_eq!(grouped(1_190_627), "1,190,627");
+    }
+
+    /// Not part of the suite: what a two-engine run would print and keep at
+    /// its end, computed by the end-of-run code from a recorded run directory
+    /// named by `COLOSSEUM_RECORDED_RUN`, without replaying its games.
+    #[test]
+    #[ignore = "reads a recorded run directory named by COLOSSEUM_RECORDED_RUN"]
+    fn the_end_of_run_results_of_a_recorded_run() {
+        let root = PathBuf::from(
+            std::env::var_os("COLOSSEUM_RECORDED_RUN")
+                .expect("COLOSSEUM_RECORDED_RUN names a run directory"),
+        );
+        let [a, b] = crate::stats_replay::run_engine_names(&root.join("result.json"))
+            .expect("the run directory names its engines");
+        let results = crate::stats_replay::run_results(&root, [a.as_str(), b.as_str()]);
+        for line in run_results_lines(&results) {
+            println!("{line}");
+        }
+        println!("{}", serde_json::to_string_pretty(&results).unwrap());
+    }
 }

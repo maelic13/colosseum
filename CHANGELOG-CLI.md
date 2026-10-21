@@ -6,6 +6,38 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-21
+
+What reading a finished run without a parser of your own asked for: each
+engine's results by colour, its search at the end of the run, and where a
+tune's arms ran into a range end. Reporting only: no game is played, paired,
+scored or tested differently.
+
+### Added
+- `match`, `sprt` and `calibrate` end by printing each engine's wins, draws,
+  losses, score and games as White and as Black, counting only the games the
+  run counted, and each engine's search: annotated moves, depth, nodes and
+  time per move and nodes per second. The same figures are kept in
+  `run-record.json` under `results` and in the `--json` value
+- `stats` splits a two-engine run's games by colour, in text and JSON
+- Search telemetry reports nodes per move in its text line and
+  `nodes_per_second`, total nodes over total search time, beside the
+  per-move mean implied NPS
+- A finished or stopped tune counts, per parameter, the iterations on which
+  an arm was clamped at a range end — `centre - c` below the minimum or
+  `centre + c` above the maximum — prints them as `clamped` in its final
+  report and keeps one warning per such parameter in `result.json`
+- `spsa history` shows those counts as they ran: `clamped_at_min` and
+  `clamped_at_max` per row in JSON, and `<N` / `>N` beside a centre in the
+  table
+- `spsa --dry-run` warns about every parameter whose first arms, `initial ±
+  c_0`, already leave its range, and lists them as `rail_warnings` in its
+  JSON. It is a warning, not a refusal
+
+### Changed
+- `run-record.json` is schema version 6, and an SPSA `result.json` is schema
+  version 4. `status` still reads a version 5 run record
+
 ## [0.3.0] — 2026-10-14
 
 What moving engine data generation onto the harness asked for: the rules

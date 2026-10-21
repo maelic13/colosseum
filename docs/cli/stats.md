@@ -23,6 +23,18 @@ counted as unpaired. The usual paired statistics block is calculated when the co
 sample is sufficient and non-degenerate; otherwise its precise reason is
 reported.
 
+For two engines, the report also splits the games by colour: each engine's
+wins, draws, losses, score and games as White and as Black, from its own side
+of the board. Only the games the run counted are split, so an SPRT's
+post-terminal pairs and games nobody could score stay out, as they stay out of
+the sample. A run directory names its engines as its PGN does; a PGN must name
+exactly two engines that keep their sides, so a tournament's PGN has no split.
+
+```text
+candidate: as White 2755 W / 5010 D / 1907 L of 9672, score 54.4%; as Black 2050 W / 4973 D / 2649 L of 9672, score 46.9%
+baseline: as White 2649 W / 4973 D / 2050 L of 9672, score 53.1%; as Black 1907 W / 5010 D / 2755 L of 9672, score 45.6%
+```
+
 PGN and console text do not prove Colosseum pair/opening identity, so replay
 reports labelled unpaired W/D/L and never guesses pairs from file order. Pass
 `--subject "Engine name"` to select an engine perspective for PGN; without it,
@@ -96,10 +108,15 @@ the writer omits a field it has no value for. Only an absent field is absent.
 
 Each engine receives an eligible post-opening move count, an annotated-move
 coverage fraction, and separate coverage/mean/median reports for score,
-mean absolute score, depth, elapsed seconds, nodes and implied NPS. A metric
-with no valid samples is labelled `unavailable`; missing data is never
+mean absolute score, depth, elapsed seconds, nodes per move and implied NPS. A
+metric with no valid samples is labelled `unavailable`; missing data is never
 converted to zero. Implied NPS requires nodes and positive elapsed time on the
-same move. A mate score counts towards score coverage but is deliberately left
+same move, and is the mean of each move's own rate, so every move weighs the
+same and short searches pull it up. `nodes_per_second` is the other reading:
+total nodes over total search time, over the moves that reported both — the
+rate the engine searched at across the whole run. Every annotated move counts,
+including those with a mate score, which are often short and deep; leave them
+out and depth falls while nodes and time per move rise. A mate score counts towards score coverage but is deliberately left
 out of the centipawn values: it is a claim about distance to mate, not an
 evaluation on the same scale.
 

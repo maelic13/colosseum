@@ -113,6 +113,22 @@ lines alike, is appended to `run.log`, and the most recent one is retained in
 `run-record.json`, so [`status`](status.md) prints exactly what the console
 last showed and a closed console loses nothing.
 
+At its end, `match`, `sprt` and `calibrate` also print each engine's games by
+colour and its search, read back from the run directory exactly as
+[`stats`](stats.md) replays them, and keep the same figures in
+`run-record.json` under `results` and in the `--json` value:
+
+```text
+candidate: as White 2755 W / 5010 D / 1907 L of 9672, score 54.4%; as Black 2050 W / 4973 D / 2649 L of 9672, score 46.9%
+baseline: as White 2649 W / 4973 D / 2050 L of 9672, score 53.1%; as Black 1907 W / 5010 D / 2755 L of 9672, score 45.6%
+candidate: 1,190,627 of 1,190,627 moves annotated (100.0%); depth 15.20 mean, 13 median; 175,913 nodes per move; 70.5 ms per move; 2.49M nodes per second
+baseline: 1,190,480 of 1,190,480 moves annotated (100.0%); depth 15.50 mean, 13 median; 174,757 nodes per move; 70.4 ms per move; 2.48M nodes per second
+```
+
+Only counted games are split by colour; the search figures cover every game in
+`games.pgn`. Two sides with the same name are told apart as `(A)` and `(B)`
+in the split, but their searches are one line, since the PGN names them alike.
+
 A final report never lists a run's games one by one. It says how many ended
 abnormally and in which way; `games.pgn` holds every result, `run.log` every
 event, and `failed-games/` the round-trip timing and UCI traffic of each

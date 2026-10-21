@@ -20,8 +20,12 @@ use crate::run_writer::RunWriter;
 /// engine CPU placement; version 4 replaced the execution plan's
 /// `cores_per_engine` count with the slot allocation mode that produced it;
 /// version 5 retains the run's most recent progress block so `status` reports
-/// what the console last showed.
-pub const RUN_RECORD_SCHEMA_VERSION: u64 = 5;
+/// what the console last showed; version 6 adds a two-engine run's end-of-run
+/// `results`, its games by colour and its search telemetry.
+pub const RUN_RECORD_SCHEMA_VERSION: u64 = 6;
+/// The oldest record this version reads. Version 5 differs only in lacking
+/// `results`, so `status` still reads a run an earlier release left.
+const OLDEST_READABLE_SCHEMA_VERSION: u64 = 5;
 static RECORD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,6 +112,11 @@ pub struct RunRecord {
     /// one. `status` prints exactly this, so a closed console loses nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress: Option<ProgressBlock>,
+    /// What a two-engine run reported at its end beyond its statistics: each
+    /// engine's official games by colour and its search telemetry. Absent
+    /// until the run ends, and for other commands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub results: Option<Value>,
     pub host: HostSummary,
     pub workflow: Value,
     pub anomalies: Vec<Anomaly>,
@@ -127,6 +136,7 @@ impl RunRecord {
             updated_unix_ms: now,
             official_sample: OfficialSample::default(),
             progress: None,
+            results: None,
             host: HostSummary::current(),
             workflow: json!({
                 "applicability": "not-yet-populated",
@@ -144,7 +154,9 @@ impl RunRecord {
             source,
         })?;
         let record: Self = serde_json::from_slice(&bytes)?;
-        if record.schema_version != RUN_RECORD_SCHEMA_VERSION {
+        if !(OLDEST_READABLE_SCHEMA_VERSION..=RUN_RECORD_SCHEMA_VERSION)
+            .contains(&record.schema_version)
+        {
             return Err(RunRecordError::UnsupportedSchema {
                 path,
                 version: record.schema_version,
@@ -201,6 +213,8 @@ impl RunRecorder {
             return Err(RunRecordError::TerminalResume(record.status));
         }
         record.status = RunStatus::Running;
+        // From here on this version writes the record.
+        record.schema_version = RUN_RECORD_SCHEMA_VERSION;
         record.anomalies.push(Anomaly {
             code: "run-resumed".into(),
             message: "workflow resumed from its durable run directory".into(),
@@ -252,6 +266,14 @@ impl RunRecorder {
     pub fn update_progress(&mut self, block: ProgressBlock) -> Result<(), RunRecordError> {
         self.require_running()?;
         self.record.progress = Some(block);
+        self.touch();
+        self.persist()
+    }
+
+    /// Keep what a run reported at its end beyond its statistics.
+    pub fn set_results(&mut self, results: Value) -> Result<(), RunRecordError> {
+        self.require_running()?;
+        self.record.results = Some(results);
         self.touch();
         self.persist()
     }
@@ -489,6 +511,44 @@ mod tests {
                 .contains_key("process-tree-containment")
         );
         assert_eq!(record.anomalies[0].code, "workflow-owner-dropped");
+    }
+
+    /// A record an earlier release left differs only in lacking `results`:
+    /// `status` still reads it, and a resume rewrites it as this version.
+    /// Anything older is still refused.
+    #[test]
+    fn a_version_five_record_still_reads_and_a_resume_rewrites_it_as_this_version() {
+        let root = tempfile::tempdir().unwrap();
+        let run = RunDirectory::create_unique(root.path(), "match", &config(root.path()))
+            .unwrap()
+            .directory;
+        RunRecorder::begin(&run, "match")
+            .unwrap()
+            .finish(RunStatus::Cancelled)
+            .unwrap();
+        let path = run.paths().root.join("run-record.json");
+        let with_version = |version: u64| {
+            let mut value: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            value["schema_version"] = json!(version);
+            fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        };
+
+        with_version(4);
+        assert!(matches!(
+            RunRecord::read(&run.paths().root),
+            Err(RunRecordError::UnsupportedSchema { version: 4, .. })
+        ));
+        with_version(5);
+        let record = RunRecord::read(&run.paths().root).unwrap();
+        assert_eq!(record.schema_version, 5);
+        assert!(record.results.is_none());
+
+        let mut recorder = RunRecorder::resume(&run).unwrap();
+        recorder.set_results(json!({"by_colour": []})).unwrap();
+        recorder.finish(RunStatus::Completed).unwrap();
+        let record = RunRecord::read(&run.paths().root).unwrap();
+        assert_eq!(record.schema_version, RUN_RECORD_SCHEMA_VERSION);
+        assert_eq!(record.results, Some(json!({"by_colour": []})));
     }
 
     #[test]

@@ -203,6 +203,7 @@ pub(crate) async fn run_nps(command: NpsCommand, machine: bool, dry_run: bool) -
                 resolved_configuration: resolved.value(),
                 invocations,
                 wave_shape: None,
+                rail_warnings: None,
             },
             machine,
         );
@@ -525,6 +526,7 @@ pub(crate) async fn run_nps_scaling(
                 resolved_configuration: resolved.value(),
                 invocations,
                 wave_shape: None,
+                rail_warnings: None,
             },
             machine,
         );

@@ -605,6 +605,7 @@ pub(crate) async fn run_tournament_command(
                 resolved_configuration: resolved.value(),
                 invocations,
                 wave_shape: None,
+                rail_warnings: None,
             },
             machine,
         );

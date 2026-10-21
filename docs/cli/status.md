@@ -72,3 +72,4 @@ Run-record schema history:
 | 3 | Added the last-level cache domain to every engine CPU placement, the versioned game-record annotation writer, and the SPSA estimator that produced a tuned vector |
 | 4 | Replaced the execution plan's `cores_per_engine` count with the slot allocation mode, so a record says whether the two engines of a game shared their cores or had their own |
 | 5 | Added the run's most recent progress block, so `status` reports what the console last showed |
+| 6 | Added `results` for `match`, `sprt` and `calibrate`: each engine's games by colour and its search telemetry at the run's end. A version 5 record is still read, and a resumed one is rewritten as version 6 |

@@ -400,6 +400,18 @@ pub enum SpsaTuneWarning {
         initial: i64,
         rail: i64,
     },
+    /// Completed iterations on which an arm was sent as a range end instead
+    /// of its own value: `centre - c` as `min`, or `centre + c` as `max`. A
+    /// clamped arm measures a smaller perturbation than the update assumes.
+    /// Added to a finished tune's audit; never a refusal.
+    ArmsClampedAtRangeEnd {
+        name: String,
+        min: i64,
+        max: i64,
+        completed_iterations: u32,
+        clamped_at_min: u32,
+        clamped_at_max: u32,
+    },
 }
 
 /// Completed application-level SPSA configuration audit.

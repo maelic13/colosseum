@@ -44,6 +44,7 @@ pub(crate) async fn run_engine(command: EngineAction, machine: bool, dry_run: bo
             resolved_configuration: resolved.value(),
             invocations: vec![&launch],
             wave_shape: None,
+            rail_warnings: None,
         };
         print_output(&output, machine);
         return ExitCode::SUCCESS;

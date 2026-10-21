@@ -179,6 +179,7 @@ mod tests {
                 ..OfficialSample::default()
             },
             progress: None,
+            results: None,
             host: crate::HostSummary::current(),
             workflow,
             anomalies: Vec::new(),
