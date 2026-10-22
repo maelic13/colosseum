@@ -8,6 +8,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::pgn_telemetry::{SearchTelemetryReport, analyze_pgn, unavailable};
+use crate::run_analysis::{
+    FaultReport, TerminationReport, TournamentAnalysis, TournamentInputs, analyse_directory,
+};
 
 const Z95: f64 = 1.959_963_984_540_054;
 
@@ -73,6 +76,16 @@ pub struct StatsReplayReport {
     /// two engines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub by_colour: Option<Vec<EngineColourResults>>,
+    /// How a run directory's counted games ended, overall and per engine.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminations: Option<TerminationReport>,
+    /// A run directory's faulted games and time losses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub faults: Option<FaultReport>,
+    /// A tournament's standings and pairs. A tournament has no pooled
+    /// pentanomial or Elo: its games are against several opponents.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tournament: Option<TournamentAnalysis>,
 }
 
 /// One engine's games with one colour, from that engine's side of the board.
@@ -138,46 +151,82 @@ fn colour_results(
     vec![first, second]
 }
 
-/// What a two-engine run reports at its end beyond its own statistics: each
-/// engine's official games by colour, from the journal, and each engine's
-/// search telemetry, from every game in the PGN, exactly as `stats` replays
-/// them.
+/// What a run reports at its end beyond its own statistics, read back from
+/// its run directory exactly as `stats` replays it: a two-engine run's games
+/// by colour, a tournament's standings and pairs, how the counted games
+/// ended, the faults and how they were scored, and each engine's search
+/// telemetry from every game in the PGN.
 #[derive(Debug, Clone, Serialize)]
 pub struct RunResults {
-    /// Engine A first. Only games of the official sample count: post-terminal
-    /// pairs and games nobody could score are left out, as the sample leaves
-    /// them out.
+    /// Engine A first, for a two-engine run. Only games of the official
+    /// sample count: post-terminal pairs and games nobody could score are
+    /// left out, as the sample leaves them out.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub by_colour: Vec<EngineColourResults>,
     pub telemetry: SearchTelemetryReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminations: Option<TerminationReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub faults: Option<FaultReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tournament: Option<TournamentAnalysis>,
+    /// Why the journal's analysis is missing, when it is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_unavailable: Option<String>,
 }
 
-/// The end-of-run results of the two-engine run in `root`, whose engines A
-/// and B are named `names` in its PGN.
-pub fn run_results(root: &Path, names: [&str; 2]) -> RunResults {
+/// The end-of-run results of the run in `root`: a two-engine run's, whose
+/// engines A and B are named `names` in its PGN, or a tournament's, which
+/// names its participants itself.
+pub fn run_results(root: &Path, names: Option<[&str; 2]>) -> RunResults {
     let journal = fs::read(root.join(crate::journal::JOURNAL_FILE)).unwrap_or_default();
-    let games = crate::journal::read_journal_bytes(&journal)
-        .into_iter()
-        .filter(|record| record.scorable && record.sample.eq_ignore_ascii_case(OFFICIAL_SAMPLE))
-        .filter_map(|record| {
-            let first_white = side_had_white(&record.white)?;
-            let white_score = white_outcome(record.result);
-            Some((
-                first_white,
-                if first_white {
-                    white_score
-                } else {
-                    invert(white_score)
-                },
-            ))
-        });
-    let by_colour = colour_results(games, names.map(str::to_owned));
+    let by_colour = match names {
+        Some(names) => {
+            let games = crate::journal::read_journal_bytes(&journal)
+                .into_iter()
+                .filter(|record| {
+                    record.scorable && record.sample.eq_ignore_ascii_case(OFFICIAL_SAMPLE)
+                })
+                .filter_map(|record| {
+                    let first_white = side_had_white(&record.white)?;
+                    let white_score = white_outcome(record.result);
+                    Some((
+                        first_white,
+                        if first_white {
+                            white_score
+                        } else {
+                            invert(white_score)
+                        },
+                    ))
+                });
+            colour_results(games, names.map(str::to_owned))
+        }
+        None => Vec::new(),
+    };
     let telemetry = match fs::read_to_string(root.join(crate::journal::PGN_FILE)) {
         Ok(text) => analyze_pgn(&text),
         Err(error) => unavailable(format!("the run's PGN could not be read: {error}")),
     };
+    let (analysis, analysis_unavailable) = match analyse_directory(root, names) {
+        Some(Ok(analysis)) => (Some(analysis), None),
+        Some(Err(error)) => (None, Some(error)),
+        None => (None, Some("the run has no journal".to_owned())),
+    };
+    let (terminations, faults, tournament) = match analysis {
+        Some(analysis) => (
+            Some(analysis.terminations),
+            Some(analysis.faults),
+            analysis.tournament,
+        ),
+        None => (None, None, None),
+    };
     RunResults {
         by_colour,
         telemetry,
+        terminations,
+        faults,
+        tournament,
+        analysis_unavailable,
     }
 }
 
@@ -375,15 +424,43 @@ struct RawGame {
     first_white: Option<bool>,
 }
 
+/// Replay `path`, from `subject`'s side when one is named.
 pub fn replay(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, String> {
     if path.is_dir() {
+        let tournament = TournamentInputs::read(path).transpose()?;
+        let names = run_engine_names(&path.join("resolved-config.json"));
+        if let Some(subject) = subject {
+            check_subject(path, subject, names.as_ref(), tournament.as_ref())?;
+        }
         let mut report = replay_directory(path, subject)?;
         report.game_phases = game_phase_report(&path.join(crate::journal::JOURNAL_FILE));
+        match analyse_directory(path, names.as_ref().map(|[a, b]| [a.as_str(), b.as_str()])) {
+            Some(Ok(analysis)) => {
+                report.terminations = Some(analysis.terminations);
+                report.faults = Some(analysis.faults);
+                report.tournament = analysis.tournament;
+            }
+            Some(Err(error)) => report
+                .warnings
+                .push(format!("the run's journal could not be analysed: {error}")),
+            None => {}
+        }
+        if let Some(analysis) = report.tournament.clone() {
+            report_tournament_as_pairs(&mut report, &analysis, subject);
+        }
         Ok(report)
     } else if let Some(directory) = directory_of_named_journal(path) {
         replay(directory, subject)
     } else {
         let mut report = replay_file(path, subject)?;
+        if let Some(subject) = subject
+            && report.perspective != subject
+        {
+            return Err(format!(
+                "--subject {subject:?} cannot be applied to {}: it names no engine of that source",
+                path.display()
+            ));
+        }
         let journal = path
             .extension()
             .and_then(|value| value.to_str())
@@ -393,6 +470,111 @@ pub fn replay(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, S
         }
         Ok(report)
     }
+}
+
+/// Refuse a `--subject` the run directory has no engine of, rather than
+/// silently report from another side.
+fn check_subject(
+    path: &Path,
+    subject: &str,
+    names: Option<&[String; 2]>,
+    tournament: Option<&TournamentInputs>,
+) -> Result<(), String> {
+    let known = match (tournament, names) {
+        (Some(inputs), _) => inputs
+            .participants()
+            .names()
+            .map(str::to_owned)
+            .collect::<Vec<_>>(),
+        (None, Some(names)) => names.to_vec(),
+        (None, None) => {
+            return Err(format!(
+                "--subject {subject:?} cannot be applied to {}: the run directory does not name its engines",
+                path.display()
+            ));
+        }
+    };
+    if known.iter().any(|name| name == subject) {
+        Ok(())
+    } else {
+        Err(format!(
+            "--subject {subject:?} names no engine of {}; its engines are {}",
+            path.display(),
+            known
+                .iter()
+                .map(|name| format!("{name:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    }
+}
+
+/// A tournament's games are against several opponents, so pooling them into
+/// one pentanomial and one Elo gives a number that is not a rating. The pairs
+/// carry the statistics instead; the top-level W/D/L is the subject's score
+/// against the whole field, labelled as such. A tournament whose counted
+/// games are all between one pair is that pair, and keeps its statistics.
+fn report_tournament_as_pairs(
+    report: &mut StatsReplayReport,
+    analysis: &TournamentAnalysis,
+    subject: Option<&str>,
+) {
+    if analysis.pairs_played <= 1 {
+        return;
+    }
+    report.pentanomial = None;
+    report.paired_statistics = None;
+    report.paired_statistics_unavailable = None;
+    report.by_colour = None;
+    report.pairing = "per-pair";
+    report.complete_pairs = analysis.colour_pairs;
+    report.unpaired_games = analysis.unpaired_games;
+    report
+        .warnings
+        .retain(|warning| !warning.starts_with("pair/opening identity"));
+    report.warnings.push(
+        "a tournament's games are against several opponents, so no pooled pentanomial or Elo is reported; each pair's are under tournament.pairs"
+            .into(),
+    );
+    let subject = subject.map(str::to_owned).or_else(|| {
+        (analysis.format == "gauntlet" && analysis.subjects.len() == 1)
+            .then(|| analysis.subjects[0].clone())
+    });
+    let Some(subject) = subject else {
+        report.perspective =
+            "first engine of each encounter; a tournament has no single side, see the pairs".into();
+        return;
+    };
+    let mut own = analysis
+        .pairs
+        .iter()
+        .filter(|pair| pair.engine == subject)
+        .map(|pair| (pair.result.wins, pair.result.draws, pair.result.losses))
+        .collect::<Vec<_>>();
+    if own.is_empty() {
+        // A gauntlet reports from its seeds' side; an opponent's own side is
+        // the same games the other way round.
+        own = analysis
+            .pairs
+            .iter()
+            .filter(|pair| pair.opponent == subject)
+            .map(|pair| (pair.result.losses, pair.result.draws, pair.result.wins))
+            .collect();
+    }
+    let (wins, draws, losses) = own.into_iter().fold((0, 0, 0), |total, pair| {
+        (total.0 + pair.0, total.1 + pair.1, total.2 + pair.2)
+    });
+    let games = wins + draws + losses;
+    report.perspective = format!("{subject} against the whole field: a score, not a rating");
+    report.games = games;
+    report.wins = wins;
+    report.draws = draws;
+    report.losses = losses;
+    report.score = if games == 0 {
+        0.0
+    } else {
+        (f64::from(wins) + 0.5 * f64::from(draws)) / f64::from(games)
+    };
 }
 
 fn replay_directory(path: &Path, subject: Option<&str>) -> Result<StatsReplayReport, String> {
@@ -536,9 +718,38 @@ struct SourceGames {
     telemetry: SearchTelemetryReport,
     /// The perspective's engine and its opponent, when the source names them.
     names: Option<[String; 2]>,
+    /// The games are against more than one opponent, as a tournament's PGN
+    /// is: pooling them into one pentanomial and Elo gives no rating.
+    several_opponents: bool,
 }
 
+/// Read one evidence source, from `subject`'s side when the source names
+/// it. A PGN chooses its side by name as it reads; a structured source is
+/// read from engine A's side and turned round when the subject is engine B.
 fn read_source(
+    authority: &'static str,
+    path: &Path,
+    subject: Option<&str>,
+) -> Result<SourceGames, String> {
+    let mut source = read_source_as_written(authority, path, subject)?;
+    if authority != "pgn-export"
+        && let (Some(subject), Some([first, second])) = (subject, source.names.clone())
+    {
+        if subject == second {
+            for game in &mut source.games {
+                game.outcome = invert(game.outcome);
+                game.first_white = game.first_white.map(|white| !white);
+            }
+            source.names = Some([second, first]);
+            source.perspective = subject.to_owned();
+        } else if subject == first {
+            source.perspective = subject.to_owned();
+        }
+    }
+    Ok(source)
+}
+
+fn read_source_as_written(
     authority: &'static str,
     path: &Path,
     subject: Option<&str>,
@@ -558,6 +769,7 @@ fn read_source(
             excluded,
             telemetry: unavailable("the journal holds no PGN move annotations"),
             names: run_engine_names(path),
+            several_opponents: false,
         });
     }
     match authority {
@@ -568,9 +780,11 @@ fn read_source(
             excluded,
             telemetry: unavailable("structured source has no PGN move annotations"),
             names: run_engine_names(path),
+            several_opponents: false,
         }),
         "pgn-export" => {
-            let (games, paired_capable, excluded, names) = pgn_games(&text, subject);
+            let (games, paired_capable, excluded, names, several_opponents) =
+                pgn_games(&text, subject);
             let perspective = match (subject, paired_capable) {
                 (Some(value), _) => value.to_owned(),
                 (None, true) => "first engine of each pair".into(),
@@ -583,6 +797,7 @@ fn read_source(
                 excluded,
                 telemetry: analyze_pgn(&text),
                 names,
+                several_opponents,
             })
         }
         "forensic-log" => Ok(SourceGames {
@@ -592,6 +807,7 @@ fn read_source(
             excluded: ExcludedGames::default(),
             telemetry: unavailable("forensic log has no PGN move annotations"),
             names: run_engine_names(path),
+            several_opponents: false,
         }),
         _ => Ok(SourceGames {
             games: result_tokens(&text),
@@ -600,6 +816,7 @@ fn read_source(
             excluded: ExcludedGames::default(),
             telemetry: unavailable("console source has no PGN move annotations"),
             names: None,
+            several_opponents: false,
         }),
     }
 }
@@ -810,7 +1027,7 @@ fn log_games(text: &str) -> Vec<RawGame> {
 fn pgn_games(
     text: &str,
     subject: Option<&str>,
-) -> (Vec<RawGame>, bool, ExcludedGames, Option<[String; 2]>) {
+) -> (Vec<RawGame>, bool, ExcludedGames, Option<[String; 2]>, bool) {
     let mut paired_capable = true;
     let mut excluded = ExcludedGames::default();
     // Every engine the games name, and whether it was ever the perspective's
@@ -885,7 +1102,8 @@ fn pgn_games(
             })
             .collect()
     };
-    (games, paired_capable, excluded, names)
+    let several_opponents = engines.len() > 2;
+    (games, paired_capable, excluded, names, several_opponents)
 }
 
 /// The perspective's engine and its opponent, when a PGN names exactly two
@@ -996,6 +1214,7 @@ fn build_report(
         excluded,
         telemetry,
         names,
+        several_opponents,
     } = source;
     let mut wins = 0;
     let mut draws = 0;
@@ -1035,33 +1254,37 @@ fn build_report(
     for _ in paired_games..games.len() {
         sample.record_unpaired_game();
     }
-    let paired_statistics = pentanomial_statistics(&sample, Z95).ok().map(|stats| {
-        json!({
-            "score": stats.score,
-            "variance": stats.variance,
-            "standard_error": stats.standard_error,
-                "logistic_elo": {
-                    "elo": stats.logistic_elo.elo,
-                    "score": stats.logistic_elo.score,
-                    "lower": stats.logistic_elo.lower,
-                    "upper": stats.logistic_elo.upper,
-                },
-                "normalized_elo": {
-                    "elo": stats.normalized_elo.elo,
-                    "lower": stats.normalized_elo.lower,
-                    "upper": stats.normalized_elo.upper,
-                },
-            "los": stats.los,
-            "draw_ratio": stats.draw_ratio,
-            "pairs_ratio": stats.pairs_ratio,
-            "win_loss_to_double_draw_ratio": stats.win_loss_to_double_draw_ratio,
-        })
-    });
-    let unavailable = (sample.pairs() > 0 && paired_statistics.is_none()).then(|| {
-        pentanomial_statistics(&sample, Z95)
-            .expect_err("statistics were unavailable")
-            .to_string()
-    });
+    let paired_statistics = pentanomial_statistics(&sample, Z95)
+        .ok()
+        .filter(|_| !several_opponents)
+        .map(|stats| {
+            json!({
+                "score": stats.score,
+                "variance": stats.variance,
+                "standard_error": stats.standard_error,
+                    "logistic_elo": {
+                        "elo": stats.logistic_elo.elo,
+                        "score": stats.logistic_elo.score,
+                        "lower": stats.logistic_elo.lower,
+                        "upper": stats.logistic_elo.upper,
+                    },
+                    "normalized_elo": {
+                        "elo": stats.normalized_elo.elo,
+                        "lower": stats.normalized_elo.lower,
+                        "upper": stats.normalized_elo.upper,
+                    },
+                "los": stats.los,
+                "draw_ratio": stats.draw_ratio,
+                "pairs_ratio": stats.pairs_ratio,
+                "win_loss_to_double_draw_ratio": stats.win_loss_to_double_draw_ratio,
+            })
+        });
+    let unavailable = (sample.pairs() > 0 && paired_statistics.is_none() && !several_opponents)
+        .then(|| {
+            pentanomial_statistics(&sample, Z95)
+                .expect_err("statistics were unavailable")
+                .to_string()
+        });
     let by_colour = games
         .iter()
         .map(|game| {
@@ -1088,6 +1311,12 @@ fn build_report(
             excluded.summary()
         ));
     }
+    if several_opponents {
+        warnings.push(
+            "these games are against several opponents, so no pooled pentanomial or Elo is reported; replay the run directory for each pair's"
+                .into(),
+        );
+    }
     if sample.unpaired_games() > 0 {
         warnings.push(
             "pair/opening identity is absent or incomplete for some games; unpaired W/D/L is reported without invented pentanomial statistics"
@@ -1101,7 +1330,9 @@ fn build_report(
         authority,
         source: path,
         perspective,
-        pairing: if sample.pairs() > 0 {
+        pairing: if several_opponents {
+            "several-opponents"
+        } else if sample.pairs() > 0 {
             "paired"
         } else {
             "unpaired"
@@ -1111,7 +1342,7 @@ fn build_report(
         draws,
         losses,
         score: (f64::from(wins) + 0.5 * f64::from(draws)) / f64::from(games_count),
-        pentanomial: (sample.pairs() > 0).then(|| sample.counts()),
+        pentanomial: (sample.pairs() > 0 && !several_opponents).then(|| sample.counts()),
         complete_pairs: sample.pairs(),
         unpaired_games: sample.unpaired_games(),
         paired_statistics,
@@ -1123,6 +1354,9 @@ fn build_report(
         telemetry,
         game_phases: None,
         by_colour,
+        terminations: None,
+        faults: None,
+        tournament: None,
     }
 }
 
@@ -1153,7 +1387,7 @@ mod tests {
     #[test]
     fn pgn_without_pair_identity_is_never_guessed_into_pairs() {
         let pgn = "[Event \"x\"]\n[White \"A\"]\n[Black \"B\"]\n[Result \"1-0\"]\n\n1-0\n\n[Event \"x\"]\n[White \"B\"]\n[Black \"A\"]\n[Result \"0-1\"]\n\n0-1\n";
-        let (games, paired_capable, excluded, names) = pgn_games(pgn, Some("A"));
+        let (games, paired_capable, excluded, names, several_opponents) = pgn_games(pgn, Some("A"));
         assert!(excluded.is_empty());
         assert!(
             !paired_capable,
@@ -1169,6 +1403,7 @@ mod tests {
                 excluded,
                 telemetry: unavailable("fixture has no annotations"),
                 names,
+                several_opponents,
             },
             vec![],
         );
@@ -1258,7 +1493,7 @@ mod tests {
         }
         fs::write(root.path().join(crate::journal::JOURNAL_FILE), journal).unwrap();
 
-        let results = run_results(root.path(), ["Alpha", "Beta"]);
+        let results = run_results(root.path(), Some(["Alpha", "Beta"]));
         let record = |wins, draws, losses| ColourRecord {
             games: wins + draws + losses,
             wins,
@@ -1285,6 +1520,14 @@ mod tests {
         );
         // No PGN, so no telemetry; the colours stand without it.
         assert_eq!(results.telemetry.status, "unavailable");
+        // The same four counted games, by how they ended.
+        let terminations = results.terminations.unwrap();
+        assert_eq!(
+            terminations.overall,
+            BTreeMap::from([("Checkmate".to_owned(), 4)])
+        );
+        assert_eq!(terminations.by_engine[0].engine, "Alpha");
+        assert_eq!(terminations.by_engine[0].losses.get("Checkmate"), Some(&1));
     }
 
     /// A PGN of two engines splits by colour under their own names; one of

@@ -648,17 +648,20 @@ pub(crate) async fn run_sprt(
                 eprintln!("run record failed: {error}");
                 return ExitCode::from(3);
             }
-            let results = match record_run_results(&writer, &mut recorder, &players).await {
-                Ok(results) => Some(results),
-                Err(ResultsFailure::Output(error)) => {
-                    eprintln!("SPRT output failed: {error}");
-                    return ExitCode::from(3);
-                }
-                Err(ResultsFailure::Record(error)) => {
-                    eprintln!("run record failed: {error}");
-                    return ExitCode::from(3);
-                }
-            };
+            let results =
+                match record_run_results(&writer, &mut recorder, Some(players.distinct_names()))
+                    .await
+                {
+                    Ok(results) => Some(results),
+                    Err(ResultsFailure::Output(error)) => {
+                        eprintln!("SPRT output failed: {error}");
+                        return ExitCode::from(3);
+                    }
+                    Err(ResultsFailure::Record(error)) => {
+                        eprintln!("run record failed: {error}");
+                        return ExitCode::from(3);
+                    }
+                };
             let run_status = match status {
                 sprt_runner::SprtStatus::H1
                 | sprt_runner::SprtStatus::H0

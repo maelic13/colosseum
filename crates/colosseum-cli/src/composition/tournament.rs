@@ -763,17 +763,45 @@ pub(crate) async fn run_tournament_command(
         publish_progress(&final_block, &writer, &mut recorder);
     }
     match outcome {
-        Ok(report) => {
+        Ok(mut report) => {
+            // Every game is on disk before the summary is read back from the
+            // files `stats` replays; the standings' speeds come from the same
+            // read.
+            let results = match record_run_results(&writer, &mut recorder, None).await {
+                Ok(results) => results,
+                Err(ResultsFailure::Output(error)) => {
+                    eprintln!("tournament output failed: {error}");
+                    return ExitCode::from(3);
+                }
+                Err(ResultsFailure::Record(error)) => {
+                    eprintln!("run record failed: {error}");
+                    return ExitCode::from(3);
+                }
+            };
+            report.results.standings_csv =
+                standings_csv_with_speeds(&report.results.standings, &results.telemetry);
             if let Err(error) = observer.finish(&report) {
                 eprintln!("tournament output failed: {error}");
                 return ExitCode::from(3);
             }
+            // A tournament's pairs are against different opponents, so its
+            // colour pairs are counted but no pooled pentanomial is kept: each
+            // pair's own is in the results.
+            let (completed_pairs, unpaired_games) = results.tournament.as_ref().map_or(
+                (0, report.results.games_scored as u64),
+                |tournament| {
+                    (
+                        u64::from(tournament.colour_pairs),
+                        u64::from(tournament.unpaired_games),
+                    )
+                },
+            );
             if let Err(error) = recorder.update_sample(OfficialSample {
                 committed_units: report.games.len() as u64,
                 scored_games: report.results.games_scored as u64,
-                completed_pairs: 0,
+                completed_pairs,
                 pentanomial: [0; 5],
-                unpaired_games: report.results.games_scored as u64,
+                unpaired_games,
             }) {
                 eprintln!("run record failed: {error}");
                 return ExitCode::from(3);
@@ -809,9 +837,11 @@ pub(crate) async fn run_tournament_command(
                     run_directory: directory.paths().root.clone(),
                     report,
                     resume,
+                    results: Some(results),
                 });
             } else {
                 print_tournament(&report);
+                print_run_results(Some(&results));
                 println!("artifacts: {}", directory.paths().root.display());
             }
             ExitCode::from(exit_code)
@@ -876,6 +906,37 @@ pub(crate) fn parse_fixed_ratings(
 pub(crate) fn tournament_configuration_error(error: &str) -> ExitCode {
     eprintln!("configuration error: {error}");
     ExitCode::from(2)
+}
+
+/// The standings CSV with each engine's search speed, total nodes over total
+/// search time from the run's PGN, in `AvgNps`.
+pub(crate) fn standings_csv_with_speeds(
+    standings: &[colosseum_application::TournamentStanding],
+    telemetry: &crate::pgn_telemetry::SearchTelemetryReport,
+) -> String {
+    let rows = standings
+        .iter()
+        .map(|row| colosseum_core::ExportRow {
+            rank: row.rank,
+            name: row.name.clone(),
+            version: String::new(),
+            elo: row.rating,
+            elo_delta: (!row.fixed).then_some(row.rating - row.initial_rating),
+            fixed: row.fixed,
+            points: row.points,
+            games: row.games,
+            wins: row.wins,
+            draws: row.draws,
+            losses: row.losses,
+            nps: telemetry
+                .engines
+                .iter()
+                .find(|engine| engine.engine == row.name)
+                .and_then(|engine| engine.nodes_per_second)
+                .map(|nps| nps.round() as u64),
+        })
+        .collect::<Vec<_>>();
+    colosseum_core::standings_csv(&rows)
 }
 
 pub(crate) fn print_tournament(report: &tournament_driver::TournamentReport) {
@@ -952,8 +1013,9 @@ pub(crate) fn tournament_progress_block(
         Ok(results) => {
             block.field("scored", format!("{} games", results.games_scored));
             // The header of the standings table: the label names the block
-            // once and the rows line up under it.
-            for (index, standing) in results.standings.iter().take(5).enumerate() {
+            // once and the rows line up under it. Every participant is
+            // listed, so `status` shows the whole field.
+            for (index, standing) in results.standings.iter().enumerate() {
                 block.field(
                     if index == 0 { "standings" } else { "" },
                     format!(

@@ -313,17 +313,18 @@ pub(crate) async fn run_calibration(
         eprintln!("run record failed: {error}");
         return ExitCode::from(3);
     }
-    let results = match record_run_results(&writer, &mut recorder, &players).await {
-        Ok(results) => Some(results),
-        Err(ResultsFailure::Output(error)) => {
-            eprintln!("calibration output failed: {error}");
-            return ExitCode::from(3);
-        }
-        Err(ResultsFailure::Record(error)) => {
-            eprintln!("run record failed: {error}");
-            return ExitCode::from(3);
-        }
-    };
+    let results =
+        match record_run_results(&writer, &mut recorder, Some(players.distinct_names())).await {
+            Ok(results) => Some(results),
+            Err(ResultsFailure::Output(error)) => {
+                eprintln!("calibration output failed: {error}");
+                return ExitCode::from(3);
+            }
+            Err(ResultsFailure::Record(error)) => {
+                eprintln!("run record failed: {error}");
+                return ExitCode::from(3);
+            }
+        };
     let run_status = if status == CalibrationStatus::Invalid {
         RunStatus::Invalid
     } else if report.fixed_match.status == match_runner::MatchStatus::Cancelled {

@@ -1670,7 +1670,7 @@ Options:
           Emit exactly one JSON value on stdout
 
       --subject <SUBJECT>
-          Engine name used as the perspective for PGN replay
+          The engine whose side the replay reports from, by name. A run directory refuses a name that is not one of its engines
 
       --dry-run
           Resolve and print configuration/invocations without launching an engine

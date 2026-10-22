@@ -18,6 +18,7 @@ pub mod journal;
 pub mod master_seed;
 pub mod pgn_telemetry;
 pub mod progress;
+pub mod run_analysis;
 pub mod run_directory;
 pub mod run_record;
 pub mod run_writer;

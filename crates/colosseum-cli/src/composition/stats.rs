@@ -6,7 +6,8 @@ use super::*;
 pub(crate) struct StatsCommand {
     /// Run directory or structured JSON, PGN, log, or console-text file.
     pub(crate) input: Option<PathBuf>,
-    /// Engine name used as the perspective for PGN replay.
+    /// The engine whose side the replay reports from, by name. A run
+    /// directory refuses a name that is not one of its engines.
     #[arg(long)]
     pub(crate) subject: Option<String>,
     #[command(subcommand)]
@@ -137,6 +138,21 @@ pub(crate) fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
                 if let Some(reason) = &report.paired_statistics_unavailable {
                     println!("paired statistics unavailable: {reason}");
                 }
+                if let Some(tournament) = &report.tournament {
+                    for line in tournament_lines(tournament) {
+                        println!("{line}");
+                    }
+                }
+                if let Some(terminations) = &report.terminations {
+                    for line in termination_lines(terminations) {
+                        println!("{line}");
+                    }
+                }
+                if let Some(faults) = &report.faults {
+                    for line in fault_lines(faults) {
+                        println!("{line}");
+                    }
+                }
                 println!("search telemetry: {}", report.telemetry.status);
                 if let Some(reason) = &report.telemetry.unavailable_reason {
                     println!("telemetry unavailable: {reason}");
@@ -216,15 +232,27 @@ pub(crate) fn colour_lines(by_colour: &[crate::stats_replay::EngineColourResults
         .collect()
 }
 
-/// What a two-engine run prints at its end after its own statistics: each
-/// engine's official games by colour, then each engine's search, in the
-/// figures `stats` replays from the same run directory.
+/// What a run prints at its end after its own statistics, in the figures
+/// `stats` replays from the same run directory: a two-engine run's colours or
+/// a tournament's standings and pairs, how the games ended, the faults and
+/// each engine's search.
 pub(crate) fn run_results_lines(results: &crate::stats_replay::RunResults) -> Vec<String> {
     let mut lines = colour_lines(&results.by_colour);
+    if let Some(tournament) = &results.tournament {
+        lines.extend(tournament_lines(tournament));
+    }
+    if let Some(terminations) = &results.terminations {
+        lines.extend(termination_lines(terminations));
+    }
+    if let Some(faults) = &results.faults {
+        lines.extend(fault_lines(faults));
+    }
+    if let Some(reason) = &results.analysis_unavailable {
+        lines.push(format!("game analysis unavailable: {reason}"));
+    }
     let telemetry = &results.telemetry;
     if let Some(reason) = &telemetry.unavailable_reason {
         lines.push(format!("search telemetry unavailable: {reason}"));
-        return lines;
     }
     for engine in &telemetry.engines {
         let mut parts = vec![format!(
@@ -256,6 +284,189 @@ pub(crate) fn run_results_lines(results: &crate::stats_replay::RunResults) -> Ve
         lines.push(format!("{}: {}", engine.engine, parts.join("; ")));
     }
     lines
+}
+
+/// `+172.8`, or the bound that does not exist.
+fn elo_text(elo: Option<f64>) -> String {
+    elo.map_or_else(|| "unbounded".to_owned(), |elo| format!("{elo:+.1}"))
+}
+
+/// `248-88-64 of 400, 73.0%, Elo +172.8 [+141.5, +206.9]`.
+fn score_elo_text(result: &colosseum_core::ScoreElo) -> String {
+    let score = result.score.map_or_else(
+        || "no games".to_owned(),
+        |score| format!("{:.1}%", score * 100.0),
+    );
+    format!(
+        "{}-{}-{} of {}, {score}, Elo {} [{}, {}]",
+        result.wins,
+        result.draws,
+        result.losses,
+        result.games,
+        elo_text(result.elo),
+        elo_text(result.elo_lower),
+        elo_text(result.elo_upper)
+    )
+}
+
+fn pair_line(pair: &crate::run_analysis::PairReport) -> Vec<String> {
+    let mut line = format!("vs {}: {}", pair.opponent, score_elo_text(&pair.result));
+    if let (Some(vector), Some(elo)) = (pair.pentanomial, pair.pentanomial_elo) {
+        line.push_str(&format!(
+            "; Ptnml {vector:?}, Elo {:+.1} [{:+.1}, {:+.1}]",
+            elo.elo, elo.lower, elo.upper
+        ));
+    }
+    let mut lines = vec![line];
+    if let Some(excluding) = &pair.excluding_faults {
+        lines.push(format!(
+            "  excluding {} fault-scored {}: {}",
+            pair.fault_scored_games,
+            if pair.fault_scored_games == 1 {
+                "game"
+            } else {
+                "games"
+            },
+            score_elo_text(excluding)
+        ));
+    }
+    lines
+}
+
+/// Every participant's rating, then each pair from its engine's side: one
+/// block for a gauntlet's seed, one per engine for a round robin.
+pub(crate) fn tournament_lines(
+    tournament: &crate::run_analysis::TournamentAnalysis,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    match &tournament.standings_unavailable {
+        Some(reason) => lines.push(format!("standings unavailable: {reason}")),
+        None => {
+            lines.push("standings, ratings with 95% intervals:".to_owned());
+            lines.extend(standing_lines(&tournament.standings));
+        }
+    }
+    lines.push(
+        "pairs, each from its engine's side; Elo by the trinomial formula with a 95% interval:"
+            .to_owned(),
+    );
+    let mut engine = None;
+    for pair in &tournament.pairs {
+        if engine != Some(&pair.engine) {
+            lines.push(format!("  {}:", pair.engine));
+            engine = Some(&pair.engine);
+        }
+        for line in pair_line(pair) {
+            lines.push(format!("    {line}"));
+        }
+    }
+    lines
+}
+
+/// `1. Name 3428.8 +/- 19.2 [3409.6, 3448.0] - 2007/2400 points (1787-440-173)`.
+pub(crate) fn standing_lines(
+    standings: &[colosseum_application::TournamentStanding],
+) -> Vec<String> {
+    standings
+        .iter()
+        .map(|standing| {
+            let rating = if standing.fixed {
+                format!("{:.1} (fixed)", standing.rating)
+            } else {
+                match standing.error_95 {
+                    Some(error) => format!(
+                        "{:.1} +/- {error:.1} [{:.1}, {:.1}]",
+                        standing.rating,
+                        standing.rating - error,
+                        standing.rating + error
+                    ),
+                    None => format!("{:.1} (interval unavailable)", standing.rating),
+                }
+            };
+            format!(
+                "  {}. {} {rating} - {}/{} points ({}-{}-{})",
+                standing.rank,
+                standing.name,
+                standing.points,
+                standing.games,
+                standing.wins,
+                standing.draws,
+                standing.losses
+            )
+        })
+        .collect()
+}
+
+/// `Checkmate 1960, Threefold 291`, most frequent first.
+fn counts_text(counts: &BTreeMap<String, u32>) -> String {
+    if counts.is_empty() {
+        return "none".to_owned();
+    }
+    let mut sorted = counts.iter().collect::<Vec<_>>();
+    sorted.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+    sorted
+        .into_iter()
+        .map(|(kind, count)| format!("{kind} {count}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+pub(crate) fn termination_lines(report: &crate::run_analysis::TerminationReport) -> Vec<String> {
+    let mut lines = vec![format!("terminations: {}", counts_text(&report.overall))];
+    for engine in &report.by_engine {
+        lines.push(format!(
+            "  {}: won {}; drew {}; lost {}",
+            engine.engine,
+            counts_text(&engine.wins),
+            counts_text(&engine.draws),
+            counts_text(&engine.losses)
+        ));
+    }
+    lines
+}
+
+pub(crate) fn fault_lines(report: &crate::run_analysis::FaultReport) -> Vec<String> {
+    let faults = if report.faults.is_empty() {
+        "none".to_owned()
+    } else {
+        report
+            .faults
+            .iter()
+            .map(|fault| {
+                format!(
+                    "{} {} ({}) during {} x{}, scored as {}",
+                    fault.engine,
+                    fault.termination,
+                    fault.kind,
+                    fault.phase,
+                    fault.games,
+                    if fault.scored_as == "not scored" {
+                        "nothing: not scored".to_owned()
+                    } else {
+                        format!("a {}", fault.scored_as)
+                    }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    let time_losses = report
+        .time_losses
+        .iter()
+        .filter(|engine| engine.games > 0)
+        .map(|engine| format!("{} {}", engine.engine, engine.games))
+        .collect::<Vec<_>>();
+    vec![
+        format!("faults: {faults}"),
+        format!(
+            "time losses: {}",
+            if time_losses.is_empty() {
+                "none".to_owned()
+            } else {
+                time_losses.join(", ")
+            }
+        ),
+    ]
 }
 
 pub(crate) fn print_run_results(results: Option<&crate::stats_replay::RunResults>) {
@@ -464,7 +675,7 @@ mod tests {
         );
         let [a, b] = crate::stats_replay::run_engine_names(&root.join("result.json"))
             .expect("the run directory names its engines");
-        let results = crate::stats_replay::run_results(&root, [a.as_str(), b.as_str()]);
+        let results = crate::stats_replay::run_results(&root, Some([a.as_str(), b.as_str()]));
         for line in run_results_lines(&results) {
             println!("{line}");
         }

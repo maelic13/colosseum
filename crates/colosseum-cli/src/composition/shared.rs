@@ -468,6 +468,10 @@ pub(crate) enum MachineOutput<'a> {
         /// fresh run.
         #[serde(skip_serializing_if = "Option::is_none")]
         resume: Option<ResumeFacts>,
+        /// The standings, pairs, terminations, faults and search telemetry,
+        /// as the run record keeps them.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        results: Option<crate::stats_replay::RunResults>,
     },
     SelfTest {
         report: self_test::SelfTestReport,
@@ -479,6 +483,10 @@ pub(crate) enum MachineOutput<'a> {
         /// that keeps them.
         #[serde(skip_serializing_if = "Option::is_none")]
         durable: Option<Value>,
+        /// A tournament's standings, every participant, rated again from its
+        /// journal.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        standings: Option<Vec<colosseum_application::TournamentStanding>>,
     },
 }
 

@@ -125,6 +125,8 @@ candidate: 1,190,627 of 1,190,627 moves annotated (100.0%); depth 15.20 mean, 13
 baseline: 1,190,480 of 1,190,480 moves annotated (100.0%); depth 15.50 mean, 13 median; 174,757 nodes per move; 70.4 ms per move; 2.48M nodes per second
 ```
 
+They are followed by how the counted games ended and the faults and time
+losses, as [`stats`](stats.md) describes them; each search line also gives the depth without mate scores.
 Only counted games are split by colour; the search figures cover every game in
 `games.pgn`. Two sides with the same name are told apart as `(A)` and `(B)`
 in the split, but their searches are one line, since the PGN names them alike.

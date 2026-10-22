@@ -341,20 +341,25 @@ pub(crate) enum ResultsFailure {
     Record(String),
 }
 
-/// Read a two-engine run's results back from its directory, once every game
-/// it wrote is there, and keep them in its run record before the record turns
-/// terminal. They are read from the files `stats` replays, so the end of a
-/// run and a later replay report the same figures.
+/// Read a run's results back from its directory, once every game it wrote is
+/// there, and keep them in its run record before the record turns terminal.
+/// They are read from the files `stats` replays, so the end of a run and a
+/// later replay report the same figures. `names` are a two-engine run's
+/// engines A and B; a tournament names its participants itself.
 pub(crate) async fn record_run_results(
     writer: &RunWriter,
     recorder: &mut RunRecorder,
-    players: &Players,
+    names: Option<[String; 2]>,
 ) -> Result<crate::stats_replay::RunResults, ResultsFailure> {
     settle(writer).await.map_err(ResultsFailure::Output)?;
     let root = writer.root().to_path_buf();
-    let names = players.distinct_names();
     let results = tokio::task::spawn_blocking(move || {
-        crate::stats_replay::run_results(&root, [names[0].as_str(), names[1].as_str()])
+        crate::stats_replay::run_results(
+            &root,
+            names
+                .as_ref()
+                .map(|names| [names[0].as_str(), names[1].as_str()]),
+        )
     })
     .await
     .map_err(|error| ResultsFailure::Output(error.to_string()))?;

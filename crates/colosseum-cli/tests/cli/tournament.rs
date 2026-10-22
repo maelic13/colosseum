@@ -328,3 +328,119 @@ fn anchor_and_fixed_on_one_participant_are_refused_before_any_run_directory() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+/// What a round robin reports at its end, in its `--json` value, its run
+/// record, `stats` and `status`: every pair from both sides, the whole field's
+/// standings, how the games ended, and each engine's speed in the standings
+/// export. A tournament pools nothing across opponents.
+#[test]
+fn a_round_robin_reports_every_pair_both_ways_and_its_whole_field() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("round-robin");
+    let binary = Path::new(env!("CARGO_BIN_EXE_colosseum-cli"));
+    let played = cli()
+        .args(["tournament", "run"])
+        .arg("--engine")
+        .arg(binary)
+        .arg("--engine")
+        .arg(binary)
+        .arg("--engine")
+        .arg(binary)
+        .args([
+            "--label",
+            "Alpha",
+            "--label",
+            "Beta",
+            "--label",
+            "Gamma",
+            "--engine-arg=__uci-stub",
+            "--engine-arg=--sleep-ms=2",
+            "--games-per-pair",
+            "2",
+            "--max-moves",
+            "1",
+            "--placement",
+            "off",
+            "--concurrency",
+            "1",
+            "--anchor",
+            "1",
+            "--seed",
+            "7",
+            "--dir",
+        ])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(
+        played.status.success(),
+        "{}",
+        String::from_utf8_lossy(&played.stderr)
+    );
+    let output: serde_json::Value = serde_json::from_slice(&played.stdout).unwrap();
+    let results = &output["results"];
+    let tournament = &results["tournament"];
+    assert_eq!(tournament["format"], "round-robin");
+    assert_eq!(tournament["standings"].as_array().unwrap().len(), 3);
+    // Three pairs, each from both sides: the full matrix.
+    let pairs = tournament["pairs"].as_array().unwrap();
+    assert_eq!(pairs.len(), 6, "{pairs:?}");
+    for pair in pairs {
+        assert_eq!(pair["games"], 2, "{pair}");
+        assert_eq!(pair["colour_pairs"], 1, "{pair}");
+        assert!(pair["pentanomial"].is_array(), "{pair}");
+        let mirrored = pairs
+            .iter()
+            .find(|other| {
+                other["engine"] == pair["opponent"] && other["opponent"] == pair["engine"]
+            })
+            .unwrap_or_else(|| panic!("no mirror of {pair}"));
+        assert_eq!(pair["wins"], mirrored["losses"], "{pair}");
+    }
+    let counted = results["terminations"]["overall"]
+        .as_object()
+        .unwrap()
+        .values()
+        .map(|count| count.as_u64().unwrap())
+        .sum::<u64>();
+    assert_eq!(counted, 6);
+    assert_eq!(results["faults"]["faults"].as_array().unwrap().len(), 0);
+
+    // The record keeps the same results and counts the colour pairs.
+    let record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
+    assert_eq!(&record["results"], results);
+    assert_eq!(record["official_sample"]["completed_pairs"], 3);
+    assert_eq!(record["official_sample"]["unpaired_games"], 0);
+
+    // Every row of the standings export has its engine's speed.
+    let csv = std::fs::read_to_string(run.join("standings.csv")).unwrap();
+    for row in csv.lines().skip(1) {
+        let speed = row.rsplit(',').next().unwrap();
+        assert!(speed.parse::<u64>().is_ok(), "no AvgNps in {row:?}");
+    }
+
+    // `stats` reports per pair and pools nothing.
+    let replay = cli().arg("stats").arg(&run).arg("--json").output().unwrap();
+    assert!(replay.status.success(), "{replay:?}");
+    let replay: serde_json::Value = serde_json::from_slice(&replay.stdout).unwrap();
+    let report = &replay["report"];
+    assert_eq!(report["pairing"], "per-pair");
+    assert!(report["pentanomial"].is_null());
+    assert!(report["paired_statistics"].is_null());
+    assert_eq!(report["complete_pairs"], 3);
+    assert_eq!(report["tournament"]["pairs"], tournament["pairs"]);
+
+    // `status` lists the whole field.
+    let status = cli().arg("status").arg(&run).output().unwrap();
+    let status = String::from_utf8(status.stdout).unwrap();
+    let after = status
+        .split("standings, ratings with 95% intervals:")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no standings in:\n{status}"));
+    for name in ["Alpha", "Beta", "Gamma"] {
+        assert!(after.contains(name), "{name} missing:\n{status}");
+    }
+    assert!(status.is_ascii(), "{status}");
+}

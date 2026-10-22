@@ -156,3 +156,73 @@ split matched a direct count of its journal.
 
 The required suite is unchanged in kind. Nothing that plays games changed, so
 the oracle replay and parity checks were not repeated.
+
+## Second batch: tournament reporting and the remaining hand calculations
+
+A second request, 2026-10-22, listed every value the client still computed
+by hand after a run. Each was checked against what Colosseum should report
+for any engine; only the general ones were implemented. Reporting only, as
+before: nothing in game play, scheduling, pairing, scoring, the SPRT or the
+SPSA update changed.
+
+| Request | Outcome |
+|---|---|
+| Per-pair results in tournaments (trinomial Elo, pentanomial, matrix) | Done |
+| Complete standings with intervals | Done: progress blocks, end of run, `status` |
+| No pooled number for a multi-opponent run; reconcile pair counts | Done |
+| Terminations overall and per engine | Done |
+| Faults by engine, kind, phase and scoring; pair without faults; time losses | Done |
+| Non-mate depth | Done |
+| Conversion audit (persistent material advantage, fixed thresholds) | **Not implemented**: one engine project's diagnostic, with its own thresholds and lone-minor rule, not a measure a general harness owes every user |
+| `standings.csv` `AvgNps`, `stats --subject` on a run directory, ASCII `status`, `spsa status` clamp counts | Done |
+| `stats compare` of two runs | Not implemented; it was optional |
+
+### Decisions
+
+**Trinomial pair Elo with the fixed 1.96.** `colosseum_core::trinomial_elo`
+is the hand calculation from a crosstable cell, `p = (W + D/2)/n`,
+`var = (W + D/4)/n - p^2`, interval at `p -/+ 1.96 se`, kept exactly so the
+figures agree with it to the last decimal. Where a pair's games are
+colour-paired, its pentanomial and the existing pentanomial Elo sit beside it.
+
+**One analysis, read from the run directory.** `run_analysis` builds the
+terminations, faults, standings and pairs from the journal and the resolved
+configuration. A tournament's end-of-run summary, `stats` and `status` all
+call it, so they cannot disagree, and a 0.3.0 run directory is read the same
+way. A fault is in the `setup` phase when neither side has a charged search,
+which is how a crash while the engine was started or readied is journalled.
+
+**No pooled statistics across opponents.** A tournament whose counted games
+span more than one pair of participants reports no pooled pentanomial or Elo;
+its top-level W/D/L is the subject's score against the whole field, labelled
+as such, and its statistics are per pair. A PGN whose games name more than two
+engines is treated the same way. The tournament run record now counts colour
+pairs, as `stats` does, and keeps its pentanomial at zero. Two existing replay
+tests ran three participants of one executable without labels, which a PGN
+cannot tell apart; they now label them.
+
+**Golden values outside the repository.** The figures were checked against
+the client's recorded runs, but the required suite is repository-only and
+names no engine project, so the comparison ran from a script outside the
+repository on `stats --json` and `status --json` of the release build: 66 of
+66 values match, among them every pair's W-D-L, score and interval, the full
+standings, 1,200 colour pairs and no pooled figure on the 4-thread gauntlet,
+both termination tables, the three setup crashes scored as losses and the
+pair without them (241-95-61, +169.9 [+139.0, +203.4]), the non-mate depth of
+every engine of three gauntlets (for example 13.20 mean, 13 median over
+127,169 moves), a run directory read from engine B's and from a non-seed's
+side, an unknown subject refused, and `spsa status`'s clamp counts.
+
+### Tests
+
+- `colosseum-core`: `the_trinomial_interval_reproduces_the_hand_calculation`,
+  `a_perfect_or_empty_score_has_no_finite_elo`.
+- `run_analysis`: terminations overall and per engine; faults with their
+  phase and scoring, and time losses; a pair's trinomial Elo, pentanomial and
+  result without faults.
+- `pgn_telemetry`: non-mate depth on the frozen annotated fixture.
+- `progress`: stored symbols printed as ASCII.
+- Integration: a round robin's pairs in both directions, its whole field in
+  `status`, its colour pairs in the run record, `AvgNps` in `standings.csv`
+  and no pooled figure in `stats`; `spsa status` clamp counts in text and
+  JSON.

@@ -670,7 +670,7 @@ mod tests {
     #[test]
     fn an_arm_is_clamped_when_its_unrounded_value_leaves_the_range() {
         let knob = SpsaKnob::new(0, 2048, 256.0, 1.0).unwrap();
-        // Rarog's CoreRfpCorrection: seed 80, c_0 256.
+        // A seed of 80 with c_0 256 in 0..2048.
         assert_eq!(
             arm_clamp(80.0, 256.0, knob),
             SpsaArmClamp {

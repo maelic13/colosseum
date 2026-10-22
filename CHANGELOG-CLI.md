@@ -33,15 +33,37 @@ scored or tested differently.
 - `spsa --dry-run` warns about every parameter whose first arms, `initial ±
   c_0`, already leave its range, and lists them as `rail_warnings` in its
   JSON. It is a warning, not a refusal
+- Tournaments report every pair: W/D/L, score and Elo with a 95% interval
+  from each engine's side, the pentanomial and its Elo where games are
+  colour-paired, and the result without fault-scored games. A gauntlet
+  reports from its seed's side; a round robin gives the full matrix. They are
+  in `stats`, at the end of the run and in `run-record.json`
+- Tournament standings list every participant, each estimated rating with
+  its interval and each pinned one marked fixed, in progress blocks, at the
+  end of the run and in `status`
+- How the counted games ended, overall and per engine, and the faulted games
+  grouped by engine, kind, when they happened and how they were scored, with
+  each engine's losses on time, in `stats` and at the end of `match`, `sprt`,
+  `calibrate` and tournaments
 - Search telemetry gives the depth over the moves without a mate score, with
   its move count, beside the depth over every move
+- `standings.csv` fills `AvgNps` with each engine's total nodes over total
+  search time
 - `spsa status` gives each parameter's clamp counts, as `arm_clamps` in JSON
 
 ### Changed
 - `run-record.json` is schema version 6, and an SPSA `result.json` is schema
   version 4. `status` still reads a version 5 run record
+- A tournament's run record counts its colour pairs, as `stats` does,
+  instead of every game as unpaired
 
 ### Fixed
+- `stats` on a tournament no longer pools all opponents into one
+  pentanomial and Elo, which was not a rating: the score against the field is
+  labelled as such and the statistics are per pair. Its pair count now agrees
+  with the run record's
+- `stats --subject` on a run directory reports from that engine's side, and
+  refuses a name that is none of the run's engines; it was silently ignored
 - `status` prints in ASCII what an earlier version stored with other symbols
 - Console output is plain ASCII, so a Windows console no longer shows
   symbols such as the dash in tournament standings as `ÔÇö`. Dashes print as

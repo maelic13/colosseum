@@ -11,6 +11,7 @@ pub mod event;
 pub mod export;
 pub mod game;
 pub mod ids;
+pub mod intervals;
 pub mod options;
 pub mod pairing;
 pub mod rating;
@@ -30,6 +31,7 @@ pub use event::TournamentEvent;
 pub use export::{ExportRow, crosstable_csv, standings_csv};
 pub use game::{GameResult, GameStats, Pairing, Termination};
 pub use ids::{EngineId, GameId, PairId, ParticipantId, RunId, TournamentId, UnitId};
+pub use intervals::{ScoreElo, TRINOMIAL_Z, logistic_elo, trinomial_elo};
 pub use options::{
     UciOption, UciOptionValue, is_chess960_option, is_hash_option, is_tablebase_option,
     is_thread_option, is_uci_true,
