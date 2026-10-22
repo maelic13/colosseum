@@ -155,6 +155,11 @@ or completed tune without acquiring ownership or changing any run bytes:
 colosseum-cli spsa status path/to/spsa-run
 ```
 
+Each knob's line also says on how many completed iterations an arm was
+clamped at a range end, and JSON gives every knob's counts as `arm_clamps`:
+a knob can be clamped on every iteration while its centre never touches a
+bound, which bound contact alone does not show.
+
 The report includes completed iteration and percentage, a linear ETA from the
 tune's elapsed time as its checkpoint records it across every stop and
 resume, and every knob's current

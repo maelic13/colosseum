@@ -1305,4 +1305,24 @@ fn arms_clamped_at_a_range_end_are_warned_counted_and_shown_in_history() {
     let table = cli().args(["spsa", "history"]).arg(&run).output().unwrap();
     let table = String::from_utf8(table.stdout).unwrap();
     assert!(table.lines().nth(4).unwrap().ends_with(" <3"), "{table}");
+
+    // `spsa status` reports the same counts, which bound contact alone does
+    // not show.
+    let status = cli()
+        .args(["--json", "spsa", "status"])
+        .arg(&run)
+        .output()
+        .unwrap();
+    assert!(status.status.success(), "{status:?}");
+    let clamps =
+        serde_json::from_slice::<Value>(&status.stdout).unwrap()["report"]["arm_clamps"].clone();
+    assert_eq!(clamps[0]["name"], "Hash");
+    assert_eq!(clamps[0]["clamped_at_min"], 3);
+    assert_eq!(clamps[0]["completed_iterations"], 3);
+    let status = cli().args(["spsa", "status"]).arg(&run).output().unwrap();
+    let status = String::from_utf8(status.stdout).unwrap();
+    assert!(
+        status.contains("; arm clamped at min on 3 of 3 iterations"),
+        "{status}"
+    );
 }

@@ -35,12 +35,14 @@ scored or tested differently.
   JSON. It is a warning, not a refusal
 - Search telemetry gives the depth over the moves without a mate score, with
   its move count, beside the depth over every move
+- `spsa status` gives each parameter's clamp counts, as `arm_clamps` in JSON
 
 ### Changed
 - `run-record.json` is schema version 6, and an SPSA `result.json` is schema
   version 4. `status` still reads a version 5 run record
 
 ### Fixed
+- `status` prints in ASCII what an earlier version stored with other symbols
 - Console output is plain ASCII, so a Windows console no longer shows
   symbols such as the dash in tournament standings as `ÔÇö`. Dashes print as
   `-`, plus-or-minus as `+/-`, multiplication as `x` and ranges as `..`; the

@@ -441,11 +441,24 @@ pub(crate) struct StoredSpsaWorkflow {
 pub(crate) struct SpsaStatusOutput {
     pub(crate) run_status: RunStatus,
     pub(crate) diagnostics: SpsaStatusReport,
+    /// Per knob, in tune-file order: the completed iterations whose arm
+    /// `centre - c` was sent as the minimum, or `centre + c` as the maximum.
+    /// A knob can be clamped on every iteration while its centre never
+    /// touches a bound, which bound contact does not show.
+    pub(crate) arm_clamps: Vec<SpsaKnobClamps>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) candidate_result: Option<SpsaTuneResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) candidate_unavailable_reason: Option<String>,
     pub(crate) snapshot_authority: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct SpsaKnobClamps {
+    pub(crate) name: String,
+    pub(crate) completed_iterations: u32,
+    pub(crate) clamped_at_min: u32,
+    pub(crate) clamped_at_max: u32,
 }
 
 /// A tune read back from its run directory for inspection.
@@ -556,6 +569,29 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
                     / 1_000.0,
             )
         });
+    let completed = replay.completed_iterations.len() as u32;
+    let arm_clamps = match spsa_clamp_counts(
+        &workflow.schedule,
+        &workflow.bound_tune.initial_centers(),
+        &replay.completed_iterations,
+    ) {
+        Ok(counts) => workflow
+            .schedule
+            .knobs
+            .iter()
+            .zip(counts.last().expect("the counts start from zeros"))
+            .map(|(knob, count)| SpsaKnobClamps {
+                name: knob.name.clone(),
+                completed_iterations: completed,
+                clamped_at_min: count.at_min,
+                clamped_at_max: count.at_max,
+            })
+            .collect(),
+        Err(error) => {
+            eprintln!("SPSA status failed: the stored schedule does not rebuild the arms: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let invalid = has_invalid || record.status == RunStatus::Invalid;
     let diagnostics = match diagnose_spsa(
         &workflow.bound_tune,
@@ -591,6 +627,7 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
     let output = SpsaStatusOutput {
         run_status: record.status,
         diagnostics,
+        arm_clamps,
         candidate_result,
         candidate_unavailable_reason,
         snapshot_authority: "checksum-verified current checkpoint with previous-generation fallback; read-only and never recovered in place".into(),
@@ -1047,8 +1084,25 @@ pub(crate) fn print_spsa_status(report: &SpsaStatusOutput, run_directory: &Path)
         ),
     }
     for knob in &report.diagnostics.knobs {
+        let clamped = report
+            .arm_clamps
+            .iter()
+            .find(|clamps| clamps.name == knob.name)
+            .filter(|clamps| clamps.clamped_at_min > 0 || clamps.clamped_at_max > 0)
+            .map_or_else(String::new, |clamps| {
+                format!(
+                    "; arm clamped {}",
+                    clamped_text(
+                        "",
+                        clamps.clamped_at_min,
+                        clamps.clamped_at_max,
+                        clamps.completed_iterations
+                    )
+                    .trim_start()
+                )
+            });
         println!(
-            "{}: {:.6} ({:.2}% of range); bound-contact {:?}, seed-movement {:?}, recent-stability {:?}, rounding-resolution {:?}",
+            "{}: {:.6} ({:.2}% of range); bound-contact {:?}, seed-movement {:?}, recent-stability {:?}, rounding-resolution {:?}{clamped}",
             knob.name,
             knob.current,
             knob.current_normalized_to_range * 100.0,

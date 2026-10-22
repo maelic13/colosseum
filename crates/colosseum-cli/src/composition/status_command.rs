@@ -33,8 +33,10 @@ pub(crate) fn run_status(run_directory: &Path, machine: bool) -> ExitCode {
         }
         // The last block the run published, verbatim: a closed console loses
         // nothing, and `status` never invents a second account of the run.
+        // An earlier version stored its blocks with non-ASCII symbols; they
+        // are printed as this version prints them.
         match &record.progress {
-            Some(block) => print!("{}", block.render()),
+            Some(block) => print!("{}", progress::ascii(&block.render())),
             None => println!("progress: {}", first_block_due(&record)),
         }
     }

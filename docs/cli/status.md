@@ -63,6 +63,8 @@ trajectory — its mini-match score, the gain and perturbation scale it used and
 what moved in it — which the progress blocks record but deliberately do not
 print. It likewise never repairs or mutates the run.
 
+Text an earlier version stored with non-ASCII symbols is printed in ASCII.
+
 Run-record schema history:
 
 | Version | Change |
