@@ -108,7 +108,10 @@ the writer omits a field it has no value for. Only an absent field is absent.
 
 Each engine receives an eligible post-opening move count, an annotated-move
 coverage fraction, and separate coverage/mean/median reports for score,
-mean absolute score, depth, elapsed seconds, nodes per move and implied NPS. A
+mean absolute score, depth, non-mate depth, elapsed seconds, nodes per move and
+implied NPS. Non-mate depth is the depth over the moves whose score is in
+centipawns, with the number of those moves: a move reporting a mate often
+reports a huge depth, and those moves swamp the all-move mean. A
 metric with no valid samples is labelled `unavailable`; missing data is never
 converted to zero. Implied NPS requires nodes and positive elapsed time on the
 same move, and is the mean of each move's own rate, so every move weighs the

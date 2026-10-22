@@ -29,6 +29,10 @@ pub struct EngineTelemetryReport {
     pub annotated_moves: u32,
     pub annotation_coverage: f64,
     pub depth: TelemetryMetric,
+    /// Depth over the moves whose score is in centipawns: a move reporting a
+    /// mate score often reports a huge depth, and those moves swamp the mean.
+    /// Its `samples` are the moves counted.
+    pub non_mate_depth: TelemetryMetric,
     pub elapsed_seconds: TelemetryMetric,
     pub nodes: TelemetryMetric,
     /// Per-move nodes divided by that move's time: every move weighs the
@@ -110,6 +114,7 @@ struct EngineSamples {
     eligible: u32,
     annotated: u32,
     depth: Vec<f64>,
+    non_mate_depth: Vec<f64>,
     elapsed: Vec<f64>,
     nodes: Vec<f64>,
     implied_nps: Vec<f64>,
@@ -206,6 +211,9 @@ pub fn analyze_pgn(text: &str) -> SearchTelemetryReport {
             }
             if let Some(value) = parsed.telemetry.depth {
                 samples.depth.push(value);
+                if parsed.telemetry.score_cp.is_some() {
+                    samples.non_mate_depth.push(value);
+                }
             }
             if let Some(value) = parsed.telemetry.elapsed_seconds {
                 samples.elapsed.push(value);
@@ -233,6 +241,7 @@ pub fn analyze_pgn(text: &str) -> SearchTelemetryReport {
             annotated_moves: samples.annotated,
             annotation_coverage: fraction(samples.annotated, samples.eligible),
             depth: metric(samples.depth, samples.eligible),
+            non_mate_depth: metric(samples.non_mate_depth, samples.eligible),
             elapsed_seconds: metric(samples.elapsed, samples.eligible),
             nodes: metric(samples.nodes, samples.eligible),
             implied_nps: metric(samples.implied_nps, samples.eligible),
@@ -763,6 +772,9 @@ mod tests {
         assert_eq!(alpha.nodes.coverage, 0.8);
         assert_eq!(alpha.depth.coverage, 1.0);
         assert_eq!(alpha.elapsed_seconds.coverage, 1.0);
+        // Two of Alpha's five moves reported a mate: the non-mate depth is
+        // over the other three.
+        assert_eq!(alpha.non_mate_depth.samples, 3);
 
         let beta = engine("Beta 2.3.1");
         assert_eq!(beta.score_cp.mean, Some(-89.5));

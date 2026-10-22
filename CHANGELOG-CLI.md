@@ -33,6 +33,8 @@ scored or tested differently.
 - `spsa --dry-run` warns about every parameter whose first arms, `initial ±
   c_0`, already leave its range, and lists them as `rail_warnings` in its
   JSON. It is a warning, not a refusal
+- Search telemetry gives the depth over the moves without a mate score, with
+  its move count, beside the depth over every move
 
 ### Changed
 - `run-record.json` is schema version 6, and an SPSA `result.json` is schema

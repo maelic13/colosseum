@@ -143,12 +143,14 @@ pub(crate) fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
                 }
                 for engine in &report.telemetry.engines {
                     println!(
-                        "{}: {}/{} annotated moves ({:.1}%); depth mean/median {}; nodes per move mean/median {}; elapsed mean/median {}; implied NPS mean/median {}; total nodes over total time {}",
+                        "{}: {}/{} annotated moves ({:.1}%); depth mean/median {}; non-mate depth mean/median {} over {} moves; nodes per move mean/median {}; elapsed mean/median {}; implied NPS mean/median {}; total nodes over total time {}",
                         engine.engine,
                         engine.annotated_moves,
                         engine.eligible_moves,
                         engine.annotation_coverage * 100.0,
                         metric_text(&engine.depth),
+                        metric_text(&engine.non_mate_depth),
+                        engine.non_mate_depth.samples,
                         metric_text(&engine.nodes),
                         metric_text(&engine.elapsed_seconds),
                         metric_text(&engine.implied_nps),
@@ -233,6 +235,14 @@ pub(crate) fn run_results_lines(results: &crate::stats_replay::RunResults) -> Ve
         )];
         if let (Some(mean), Some(median)) = (engine.depth.mean, engine.depth.median) {
             parts.push(format!("depth {mean:.2} mean, {median} median"));
+        }
+        if let (Some(mean), Some(median)) =
+            (engine.non_mate_depth.mean, engine.non_mate_depth.median)
+        {
+            parts.push(format!(
+                "without mate scores {mean:.2} mean, {median} median over {} moves",
+                grouped(engine.non_mate_depth.samples.into())
+            ));
         }
         if let Some(mean) = engine.nodes.mean {
             parts.push(format!("{} nodes per move", grouped(mean.round() as u64)));
