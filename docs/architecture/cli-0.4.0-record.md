@@ -1,12 +1,11 @@
 # Colosseum CLI 0.4.0 record
 
-Reporting additions Rarog asked for on 2026-10-21 so that its wrapper
-(`tools/colosseum.ps1`) can build a run's manifest without parsing PGN
-comments itself. Built on the branch `rarog-cli-0.4.0` from `main` at
-`cli-v0.3.0`. Reporting only: nothing in game play, scheduling, pairing,
-scoring, the SPRT or the SPSA update changed. The dry run of the `c10-long`
-configuration hashes to the same `config_sha256` as Rarog's recorded 0.3.0 dry
-run.
+Reporting additions a user asked for on 2026-10-21 so that a wrapper script
+can build a run's manifest without parsing PGN comments itself. Built on a
+branch from `main` at `cli-v0.3.0`. Reporting only: nothing in game play,
+scheduling, pairing, scoring, the SPRT or the SPSA update changed. The dry run
+of the recorded tune's configuration below hashes to the same `config_sha256`
+as its recorded 0.3.0 dry run.
 
 ## What was added
 
@@ -67,8 +66,8 @@ colour split.
 
 ## Oracle comparison
 
-Oracle values from Rarog, computed independently from the recorded runs in
-`D:\code\rarog\tools\results` (exact for counts, within 1% for telemetry).
+Oracle values computed independently by the requester from its recorded runs
+(exact for counts, within 1% for telemetry).
 Colosseum's figures from `stats` and from the end-of-run code on the same
 directories; the end-of-run figures were produced by the ignored tests
 `the_end_of_run_results_of_a_recorded_run` (`COLOSSEUM_RECORDED_RUN`) and
@@ -76,18 +75,18 @@ directories; the end-of-run figures were produced by the ignored tests
 which call the functions the commands call at their end, because neither run
 can be replayed to its end without replaying its games.
 
-### `rar-s105-gate` (sprt, 19,344 official games): by colour — exact
+### A recorded SPRT (19,344 official games): by colour — exact
 
-| `rarog-c10gate-pext-pgo` | Oracle W / D / L | Colosseum W / D / L |
+| Engine A | Oracle W / D / L | Colosseum W / D / L |
 |---|---|---|
 | as White | 2755 / 5010 / 1907 | 2755 / 5010 / 1907 |
 | as Black | 2050 / 4973 / 2649 | 2050 / 4973 / 2649 |
 
-The head build's split is the mirror image (as White 2649 / 4973 / 2050).
+Engine B's split is the mirror image (as White 2649 / 4973 / 2050).
 
-### `rar-s105-gate`: telemetry — differs by definition, explained
+### The same SPRT: telemetry — differs by definition, explained
 
-| | Oracle head / gate | Colosseum head / gate | Colosseum without mate-score moves |
+| | Oracle B / A | Colosseum B / A | Colosseum without mate-score moves |
 |---|---|---|---|
 | mean depth | 14.02 / 13.62 | 15.50 / 15.20 | 14.01 / 13.63 |
 | nodes per move | 181,306 / 182,418 | 174,757 / 175,913 | 181,269 / 182,456 |
@@ -103,7 +102,7 @@ reads 13% above total-over-total because every move weighs the same; that is
 why `nodes_per_second` was added. Coverage: 1,190,627 and 1,190,480 moves,
 all annotated.
 
-### `c10-long` (spsa, 82 knobs, 4,000 iterations): clamp counts — exact
+### A recorded tune (spsa, 82 knobs, 4,000 iterations): clamp counts — exact
 
 | Knob | Oracle (minus arm) | Colosseum `clamped_at_min` |
 |---|---:|---:|
@@ -118,10 +117,9 @@ all annotated.
 
 No plus arm was clamped in either; every other knob counts zero.
 
-### `c10-long`: dry-run rail warnings
+### The same tune: dry-run rail warnings
 
-The dry run of `c10long.run.toml` (engine `rarog-c103c-tune.exe`, 120,000
-games, seed 20261025) warns on CoreRfpCorrection (80 ± 256) and
+The dry run of the tune's run file (120,000 games, seed 20261025) warns on CoreRfpCorrection (80 ± 256) and
 CoreFpCorrection (213 ± 256), as the oracle expects, and on the six other
 knobs whose seed lies within `c_0` of the minimum: AspGrowthAdd (5 ± 6),
 CoreCorrWeightMinor (42 ± 48), CoreRfpImprovement (63 ± 64), CoreRfpThreat
@@ -130,8 +128,7 @@ exactly the eight knobs the tune went on to clamp.
 
 ### Live run
 
-A 12-pair SPRT between `rarog-c10gate-pext-pgo` and `rarog-c10head-pext-pgo`
-(1+0.01 s, `Hash=16`, UHO book, concurrency 8) printed the colour and search
+A 12-pair SPRT between the same two engine builds (1+0.01 s, `Hash=16`, UHO book, concurrency 8) printed the colour and search
 lines at its end and wrote them to a schema 6 `run-record.json`; the colour
 split matched a direct count of its journal.
 

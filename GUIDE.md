@@ -17,9 +17,9 @@ internal naming or method argumentation.
 | Branch / versions | `main` holds the published **GUI 1.1.0** (`gui-v1.1.0`, "latest") and **CLI 0.1.0** (`cli-v0.1.0`), both released 2026-09-22. `dev` carries Phase 12.1–12.4, unreleased CLI additions; the GUI is unchanged since 1.1.0 |
 | What exists | Phases 0–10 complete and published (10.9m rejected; 10.9h, 10.9p, 10.9t deferred). Phase 12.1–12.4 complete on `dev`: elapsed time carried across resumes, the resume note and `run.log` events, the SPRT test line, `spsa history`, `spsa --seed-from`, the run-file list-replacement warning, reviewed 2026-09-25 with one correction (run-file path resolution for the new option and command) |
 | What is missing | A CLI release carrying Phase 12.1–12.4 (`cli-v0.2.0`: two of the steps add a command and an option, which is a minor release, not a patch), then **Phase 11** (GUI on the harness), the main line of development |
-| Validation engines | **Rarog** (Rust) and **Basilisk** (C++) — available, active, different languages and build systems. Any two UCI engines would serve; nothing depends on these |
+| Validation engines | Two independently developed UCI engines in different languages and build systems. Any two UCI engines would serve; nothing depends on which |
 | Platform status | Windows/Linux/macOS ☑ required debug and optimized CI · Windows x86-64/ARM64, Linux x86-64 and macOS ARM64 CLI candidate archives ☑ exact-archive smoke · the `gui-v` release lane has never run; its candidate mode is the rehearsal to dispatch before the tag, and the only thing that will have exercised `deb`, `rpm`, `dmg` and `pkg.tar.zst` |
-| Next step | **Release the CLI as 0.2.0** (maintainer: version bump, dated changelog, `cargo xtask release-check cli-v0.2.0`, pull request `dev` → `main`, candidate dispatch, tag). Then **11.1** — Sol High (Claude: Opus 5, high). Further Phase 12 steps are taken as Rarog reports them, beside Phase 11 |
+| Next step | **Release the CLI as 0.2.0** (maintainer: version bump, dated changelog, `cargo xtask release-check cli-v0.2.0`, pull request `dev` → `main`, candidate dispatch, tag). Then **11.1** — Sol High (Claude: Opus 5, high). Further Phase 12 steps are taken as users report them, beside Phase 11 |
 | Confirmed decisions | The 2026-09-22 set, confirmed by the maintainer and not reopened, recorded with the release preparation in [`phase-10-record.md`](docs/architecture/phase-10-record.md): exclusion for unspawnable engines, GUI 1.1.0, the xtask surface, the explicit GUI artifact list, versions kept in artifact names, the updater prerelease fix now and pagination later, the throughput margin not chased |
 
 ## Completed phases
@@ -105,7 +105,7 @@ When reporting the next step, always report its model as well.
 
 ### Phase 12 — CLI maintenance from adoption (beside Phase 11, CLI patch releases)
 
-- ☑ **12.1** — **Model: Terra High.** Rarog's tooling notes from the first
+- ☑ **12.1** — **Model: Terra High.** Tooling notes from the first
   adoption: a regression test that a resumed tune's `spsa status` has a
   finite ETA (the ETA itself was fixed by carrying the run's elapsed time in
   the checkpoint); the resume note names completed and remaining units
@@ -130,7 +130,7 @@ When reporting the next step, always report its model as well.
   IRQ affinity, macOS advisory contract, WSL excluded). Reopens on a Linux
   or macOS placement report, or before CLI 1.0.0 — [record](docs/architecture/phase-10-record.md), item (r)
 - **10.9t** — Overlapped SPSA iterations, `--overlap 1`, off by default.
-  Reopens when a real Rarog tune on the released binary shows wall-clock
+  Reopens when a real tune on the released binary shows wall-clock
   that matters; taken before 10.9p — [record](docs/architecture/phase-10-record.md), item (ad)
 - **10.9p** — Two games per physical core for `spsa` and `match` only, as a
   measured experiment. Reopens only if 10.9t leaves a margin worth it —
@@ -165,7 +165,7 @@ Not steps — they are never "done".
 
 ### After completing a generic workflow
 
-- Migrate the corresponding Rarog and Basilisk harness workflow immediately.
+- Migrate the corresponding validation-engine harness workflows immediately.
 - Compare old/new resolved inputs, schedule, durable artifacts and statistics.
 - Archive the old generic implementation only after parity; retain declarative
   configs and thin project-policy/CI invocation.
