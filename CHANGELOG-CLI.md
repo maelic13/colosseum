@@ -6,7 +6,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.4.0] — 2026-10-21
+## [0.4.0] — 2026-10-22
 
 What reading a finished run without a parser of your own asked for: each
 engine's results by colour, its search at the end of the run, and where a
