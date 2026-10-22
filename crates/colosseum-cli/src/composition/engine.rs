@@ -116,7 +116,7 @@ pub(crate) fn print_compliance(report: &ComplianceReport) {
             ComplianceStatus::Fail => "FAIL",
             ComplianceStatus::Skipped => "SKIP",
         };
-        println!("[{status}] {} — {}", check.requirement, check.detail);
+        println!("[{status}] {} - {}", check.requirement, check.detail);
     }
 }
 

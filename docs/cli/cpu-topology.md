@@ -103,8 +103,8 @@ cores are divided between its two engines is the allocation mode:
 
 | Mode | Flag | Cores a slot consumes |
 |---|---|---|
-| Shared (default) | `--cores-per-game N` (default 1) | `game-slots × cores-per-game` |
-| Disjoint | `--cores-per-engine N` | `game-slots × 2 × cores-per-engine` |
+| Shared (default) | `--cores-per-game N` (default 1) | `game-slots x cores-per-game` |
+| Disjoint | `--cores-per-engine N` | `game-slots x 2 x cores-per-engine` |
 
 **A slot belongs to one game at a time.** A game takes a free slot before its
 first engine is spawned and gives it back only after both of its engine

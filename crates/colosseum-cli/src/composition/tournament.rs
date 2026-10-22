@@ -223,7 +223,7 @@ pub(crate) fn run_tournament_plan(
         );
         for game in &report.schedule {
             println!(
-                "game {:>4}: round {:>3}, encounter {:>3}.{} — {} vs {}",
+                "game {:>4}: round {:>3}, encounter {:>3}.{} - {} vs {}",
                 game.number,
                 game.round,
                 game.encounter,
@@ -893,7 +893,7 @@ pub(crate) fn print_tournament(report: &tournament_driver::TournamentReport) {
             "[fixed]".to_owned()
         } else {
             row.error_95
-                .map_or_else(|| "unavailable".into(), |value| format!("±{value:.1}"))
+                .map_or_else(|| "unavailable".into(), |value| format!("+/-{value:.1}"))
         };
         println!(
             "{}. {}: {:.1} {error}; {:.1}/{} ({}-{}-{})",
@@ -957,7 +957,7 @@ pub(crate) fn tournament_progress_block(
                 block.field(
                     if index == 0 { "standings" } else { "" },
                     format!(
-                        "{}. {} {:.1}{} — {}/{} points",
+                        "{}. {} {:.1}{} - {}/{} points",
                         standing.rank,
                         standing.name,
                         standing.rating,

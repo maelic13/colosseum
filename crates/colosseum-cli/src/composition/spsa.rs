@@ -854,7 +854,7 @@ pub(crate) fn print_spsa_rail_warning(warning: &SpsaRailWarning) {
         _ => format!("its maximum {}", warning.max),
     };
     eprintln!(
-        "SPSA rail warning: {:?} starts at {} with c_0 {:.3}, so its first arms {} ± {:.3} leave [{}, {}] and one is sent at {ends}",
+        "SPSA rail warning: {:?} starts at {} with c_0 {:.3}, so its first arms {} +/- {:.3} leave [{}, {}] and one is sent at {ends}",
         warning.name, warning.seed, warning.c0, warning.seed, warning.c0, warning.min, warning.max
     );
 }
@@ -2133,7 +2133,7 @@ fn coefficient_summary(prepared: &SpsaIteration) -> String {
         } else if (high - low).abs() < 1e-12 {
             format!("{low:.4}")
         } else {
-            format!("{low:.4}\u{2013}{high:.4}")
+            format!("{low:.4}..{high:.4}")
         }
     };
     format!(

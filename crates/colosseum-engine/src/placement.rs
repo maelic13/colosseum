@@ -162,8 +162,8 @@ impl SlotAllocation {
     #[must_use]
     pub fn pool_formula(self) -> &'static str {
         match self {
-            Self::Shared { .. } => "game-slots × cores-per-game",
-            Self::PerEngine { .. } => "game-slots × 2 × cores-per-engine",
+            Self::Shared { .. } => "game-slots x cores-per-game",
+            Self::PerEngine { .. } => "game-slots x 2 x cores-per-engine",
         }
     }
 
@@ -1495,7 +1495,7 @@ mod tests {
                 required: 8,
                 available: 4,
                 game_slots: 2,
-                formula: "game-slots × 2 × cores-per-engine",
+                formula: "game-slots x 2 x cores-per-engine",
             }
         );
     }
@@ -1749,7 +1749,7 @@ mod tests {
         assert!(
             refusal
                 .to_string()
-                .contains("game-slots × 2 × cores-per-engine"),
+                .contains("game-slots x 2 x cores-per-engine"),
             "{refusal}"
         );
     }

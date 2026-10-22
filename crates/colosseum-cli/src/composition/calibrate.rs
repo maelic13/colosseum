@@ -629,7 +629,7 @@ pub(crate) fn print_calibration(
     run_directory: &Path,
 ) {
     println!(
-        "calibration {:?}: {} games, {:.0}% confidence, ±{} nElo tolerance",
+        "calibration {:?}: {} games, {:.0}% confidence, +/-{} nElo tolerance",
         report.status,
         report.design.games,
         report.design.confidence * 100.0,

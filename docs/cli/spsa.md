@@ -107,7 +107,7 @@ configuration. It also lists, as `rail_warnings`, every knob whose first
 arms, `initial ± c_0`, already leave its range, and prints a warning for each:
 
 ```text
-SPSA rail warning: "RfpCorrection" starts at 80 with c_0 256.000, so its first arms 80 ± 256.000 leave [0, 2048] and one is sent at its minimum 0
+SPSA rail warning: "RfpCorrection" starts at 80 with c_0 256.000, so its first arms 80 +/- 256.000 leave [0, 2048] and one is sent at its minimum 0
 ```
 
 Such a knob's arm is played at the range end instead of where the update

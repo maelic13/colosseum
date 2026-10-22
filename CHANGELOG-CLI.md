@@ -38,6 +38,12 @@ scored or tested differently.
 - `run-record.json` is schema version 6, and an SPSA `result.json` is schema
   version 4. `status` still reads a version 5 run record
 
+### Fixed
+- Console output is plain ASCII, so a Windows console no longer shows
+  symbols such as the dash in tournament standings as `ÔÇö`. Dashes print as
+  `-`, plus-or-minus as `+/-`, multiplication as `x` and ranges as `..`; the
+  same applies to `failed-games/` reports
+
 ## [0.3.0] — 2026-10-14
 
 What moving engine data generation onto the harness asked for: the rules

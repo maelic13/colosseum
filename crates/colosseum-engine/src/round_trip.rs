@@ -18,7 +18,7 @@ pub const FORENSIC_SEARCHES: usize = 5;
 
 /// How to read [`RoundTripRecorder::forensic`] tables.
 pub const FORENSIC_LEGEND: &str = "(times are ms after `go` was stamped; `!` marks a bestmove \
-that arrived after the deadline and was read only to time it; overhead = bestmove − engine t; \
+that arrived after the deadline and was read only to time it; overhead = bestmove - engine t; \
 held = charged time the engine's process spent not running; kernel = its kernel-mode CPU in the \
 search, tick-granular; faults = its page faults in the search)\n";
 
@@ -147,12 +147,12 @@ impl RoundTripRecorder {
     pub fn forensic(&self, side: &str) -> String {
         let mut text = String::new();
         if self.recent.is_empty() {
-            let _ = writeln!(text, "\n── {side} round trip: no searches ──");
+            let _ = writeln!(text, "\n-- {side} round trip: no searches --");
             return text;
         }
         let _ = writeln!(
             text,
-            "\n── {side} round trip, last {} searches ──",
+            "\n-- {side} round trip, last {} searches --",
             self.recent.len()
         );
         let _ = writeln!(

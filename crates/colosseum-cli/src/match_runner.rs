@@ -1109,7 +1109,7 @@ pub fn plan_execution_on(
             engine_a_hash_mb,
             engine_b_hash_mb,
             lower_bound_mb,
-            formula: "concurrency × (engine-a Hash + engine-b Hash)".into(),
+            formula: "concurrency x (engine-a Hash + engine-b Hash)".into(),
             trusted_budget_mb: trusted_memory_budget_mb,
         },
     })
@@ -1786,7 +1786,7 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(
-            shared.contains("3 game slots need 3 physical cores (game-slots × cores-per-game)")
+            shared.contains("3 game slots need 3 physical cores (game-slots x cores-per-game)")
                 && shared.contains("provides 2"),
             "{shared}"
         );
@@ -1802,7 +1802,7 @@ mod tests {
         .to_string();
         assert!(
             disjoint
-                .contains("2 game slots need 4 physical cores (game-slots × 2 × cores-per-engine)")
+                .contains("2 game slots need 4 physical cores (game-slots x 2 x cores-per-engine)")
                 && disjoint.contains("provides 2"),
             "{disjoint}"
         );

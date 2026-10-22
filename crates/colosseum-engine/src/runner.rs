@@ -950,7 +950,7 @@ async fn play(
         if let Some(note) = leniency {
             tracing::warn!(
                 target: "runner",
-                "{} sent '{}' — accepted leniently ({note})",
+                "{} sent '{}' - accepted leniently ({note})",
                 if mover == Color::White { &spec.white.name } else { &spec.black.name },
                 output.best_move,
             );
@@ -1106,7 +1106,7 @@ async fn play(
             outcome.error = Some(if detail.is_empty() {
                 format!("see logs/incidents/{file}")
             } else {
-                format!("{detail} — see logs/incidents/{file}")
+                format!("{detail} - see logs/incidents/{file}")
             });
         }
     }
@@ -1215,7 +1215,7 @@ fn parse_engine_move(text: &str, pos: &Chess) -> Option<(shakmaty::Move, Option<
     if lower.len() == 4
         && let Some(mv) = try_uci(&format!("{lower}q"))
     {
-        return Some((mv, Some("promotion piece omitted — assumed queen")));
+        return Some((mv, Some("promotion piece omitted - assumed queen")));
     }
     None
 }
@@ -1275,14 +1275,14 @@ fn incident_report(
     for (label, engine) in [("white", white), ("black", black)] {
         let _ = writeln!(
             s,
-            "\n── {label} UCI transcript (last lines; > sent, < received; info collapsed) ──"
+            "\n-- {label} UCI transcript (last lines; > sent, < received; info collapsed) --"
         );
         for line in engine.transcript() {
             let _ = writeln!(s, "{line}");
         }
         let stderr = engine.stderr_tail();
         if !stderr.is_empty() {
-            let _ = writeln!(s, "── {label} stderr ──");
+            let _ = writeln!(s, "-- {label} stderr --");
             for line in stderr {
                 let _ = writeln!(s, "{line}");
             }
@@ -1602,7 +1602,7 @@ async fn handle_setup_failure(
     let stub = format!("SetupCrash-{}-r{}", side_spec.name, spec.round);
     if let Some(file) = crate::incidents::write(&stub, &text) {
         let detail = report.error.take().unwrap_or_default();
-        report.error = Some(format!("{detail} — see logs/incidents/{file}"));
+        report.error = Some(format!("{detail} - see logs/incidents/{file}"));
     }
     report
 }
@@ -1620,7 +1620,7 @@ fn setup_incident_report(
     let _ = writeln!(s, "event:       {} (round {})", spec.event, spec.round);
     let _ = writeln!(
         s,
-        "failed side: {} — {}  [{}]",
+        "failed side: {} - {}  [{}]",
         if failed == Color::White {
             "white"
         } else {
@@ -1656,14 +1656,14 @@ fn setup_incident_report(
     );
     match forensics {
         Some((transcript, stderr)) => {
-            let _ = writeln!(s, "\n── UCI transcript (> sent, < received) ──");
+            let _ = writeln!(s, "\n-- UCI transcript (> sent, < received) --");
             for line in transcript {
                 let _ = writeln!(s, "{line}");
             }
             if stderr.is_empty() {
-                let _ = writeln!(s, "── stderr: (none captured) ──");
+                let _ = writeln!(s, "-- stderr: (none captured) --");
             } else {
-                let _ = writeln!(s, "── stderr ──");
+                let _ = writeln!(s, "-- stderr --");
                 for line in stderr {
                     let _ = writeln!(s, "{line}");
                 }
@@ -1672,7 +1672,7 @@ fn setup_incident_report(
         None => {
             let _ = writeln!(
                 s,
-                "\n(process never spawned — check the executable path, its DLLs, \
+                "\n(process never spawned - check the executable path, its DLLs, \
                  and the working directory)"
             );
         }
