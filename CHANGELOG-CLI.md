@@ -6,6 +6,70 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-22
+
+What reading a finished run without a parser of your own asked for: each
+engine's results by colour, its search at the end of the run, and where a
+tune's arms ran into a range end. Reporting only: no game is played, paired,
+scored or tested differently.
+
+### Added
+- `match`, `sprt` and `calibrate` end by printing each engine's wins, draws,
+  losses, score and games as White and as Black, counting only the games the
+  run counted, and each engine's search: annotated moves, depth, nodes and
+  time per move and nodes per second. The same figures are kept in
+  `run-record.json` under `results` and in the `--json` value
+- `stats` splits a two-engine run's games by colour, in text and JSON
+- Search telemetry reports nodes per move in its text line and
+  `nodes_per_second`, total nodes over total search time, beside the
+  per-move mean implied NPS
+- A finished or stopped tune counts, per parameter, the iterations on which
+  an arm was clamped at a range end — `centre - c` below the minimum or
+  `centre + c` above the maximum — prints them as `clamped` in its final
+  report and keeps one warning per such parameter in `result.json`
+- `spsa history` shows those counts as they ran: `clamped_at_min` and
+  `clamped_at_max` per row in JSON, and `<N` / `>N` beside a centre in the
+  table
+- `spsa --dry-run` warns about every parameter whose first arms, `initial ±
+  c_0`, already leave its range, and lists them as `rail_warnings` in its
+  JSON. It is a warning, not a refusal
+- Tournaments report every pair: W/D/L, score and Elo with a 95% interval
+  from each engine's side, the pentanomial and its Elo where games are
+  colour-paired, and the result without fault-scored games. A gauntlet
+  reports from its seed's side; a round robin gives the full matrix. They are
+  in `stats`, at the end of the run and in `run-record.json`
+- Tournament standings list every participant, each estimated rating with
+  its interval and each pinned one marked fixed, in progress blocks, at the
+  end of the run and in `status`
+- How the counted games ended, overall and per engine, and the faulted games
+  grouped by engine, kind, when they happened and how they were scored, with
+  each engine's losses on time, in `stats` and at the end of `match`, `sprt`,
+  `calibrate` and tournaments
+- Search telemetry gives the depth over the moves without a mate score, with
+  its move count, beside the depth over every move
+- `standings.csv` fills `AvgNps` with each engine's total nodes over total
+  search time
+- `spsa status` gives each parameter's clamp counts, as `arm_clamps` in JSON
+
+### Changed
+- `run-record.json` is schema version 6, and an SPSA `result.json` is schema
+  version 4. `status` still reads a version 5 run record
+- A tournament's run record counts its colour pairs, as `stats` does,
+  instead of every game as unpaired
+
+### Fixed
+- `stats` on a tournament no longer pools all opponents into one
+  pentanomial and Elo, which was not a rating: the score against the field is
+  labelled as such and the statistics are per pair. Its pair count now agrees
+  with the run record's
+- `stats --subject` on a run directory reports from that engine's side, and
+  refuses a name that is none of the run's engines; it was silently ignored
+- `status` prints in ASCII what an earlier version stored with other symbols
+- Console output is plain ASCII, so a Windows console no longer shows
+  symbols such as the dash in tournament standings as `ÔÇö`. Dashes print as
+  `-`, plus-or-minus as `+/-`, multiplication as `x` and ranges as `..`; the
+  same applies to `failed-games/` reports
+
 ## [0.3.0] — 2026-10-14
 
 What moving engine data generation onto the harness asked for: the rules

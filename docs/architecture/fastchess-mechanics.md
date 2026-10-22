@@ -9,7 +9,7 @@ the time goes.
 **Source read:** fastchess at commit `072859b` ("chore: bump to
 v1.8.0-alpha"), the exact build the reference host runs (`fastchess.exe
 --version`: `alpha 1.8.0 compiled for windows-latest 20260128-072859b`).
-Paths below are relative to its `app/src`. **Invocation read:** Rarog's
+Paths below are relative to its `app/src`. **Invocation read:** The Rust engine's
 `tools/sprt.ps1`, which is how fastchess has been run on this host: 3+0.03,
 `timemargin=20`, concurrency 14, `-use-affinity 2,4,6,…,28`.
 
@@ -24,18 +24,18 @@ slot pool) and the two since (`colosseum-verify-sprt`,
 |---|---|
 | last `info` arrival minus the `time` it reported | 0.1–1.1 ms |
 | `bestmove` arrival minus the last `info` arrival | 59–89 ms |
-| `bestmove` arrival minus the engine's own hard cap (`0.8097 × R − 10` for Rarog) | 42–64 ms |
+| `bestmove` arrival minus the engine's own hard cap (`0.8097 × R − 10` for that engine) | 42–64 ms |
 
 The engine received `go` promptly and reported on time: its own clock and
 the harness's agree to about a millisecond at its last report. The time is
-lost after that, inside the engine's process. Rarog polls a precise clock
+lost after that, inside the engine's process. The Rust engine polls a precise clock
 every 2,048 nodes and aborts at its hard cap, so a `bestmove` 42–64 ms past
 the cap means its search thread did not run, or ran far slower, for about
 that long. The delivery of `go`, the pipes and the harness's reading are
 ruled out as carriers of this time.
 
 **`h=` is not harness overhead for such an engine.** `h=` is charged time
-minus the engine's last reported `time`. Rarog prints `info` only after a
+minus the engine's last reported `time`. The Rust engine prints `info` only after a
 completed iteration, so when the clock aborts an iteration it prints
 nothing more, and `h=` then holds the engine's own search time since its
 last report. In the maintainer's 15-slot tune (`colosseum-spsa-15x30-s`,
@@ -49,7 +49,7 @@ delays. The harness's own share is the last-`info` lag, 1.1 ms typical.
 **The desktop application's record is not evidence at a 20 ms margin.** Its
 database holds 251,192 finished games with 435 time forfeits, every one
 lost by Rybka 2.3.2a; its incident directory holds 756 forfeit reports, all
-Rybka. Rarog played 67,820 game-sides and Basilisk 97,816 without a
+Rybka. The Rust engine played 67,820 game-sides and Basilisk 97,816 without a
 forfeit. But the desktop scheduler has always charged with a 2 s margin
 (`TIMEOUT_TOLERANCE`, unchanged since 0.1.0), and its PGNs carry no
 per-move times from which a 20 ms margin could be replayed. It says only
@@ -198,7 +198,7 @@ cheap:
   of the ~110,000 searches per side of a 2,000-game run into a sample:
   the distribution's 99.9th percentile and the count above 25 ms compare
   directly between runs.
-- **Overrun past the engine's own cap, Rarog-specific.** Charged time minus
+- **Overrun past the engine's own cap, engine-specific.** Charged time minus
   `0.8097 × R − 10` for moves in scramble, the late-mode metric already in
   use; it fires only when the engine is near its cap.
 
@@ -228,21 +228,21 @@ step.
 
 Three runs of 2,000 games at 3+0.03, 14 slots, 20 ms margin, on the
 reference host, each with the held-time reading and the last with kernel
-time and page faults per search (`tools/results` in Rarog):
+time and page faults per search (the engine project's `tools/results`):
 
 | run | time losses | searches held > 25 ms | longest hold | lowest slack to the deadline |
 |---|---|---|---|---|
-| Rarog b22core–b22base, `--placement auto` | 1 | 4 of 254,005 | 32.7 ms | 18 ms |
+| Rust engine b22core–b22base, `--placement auto` | 1 | 4 of 254,005 | 32.7 ms | 18 ms |
 | Stockfish 18 against itself, `--placement auto` | 0 | 13 of 301,432 | 50.4 ms | 161 ms |
-| Rarog, one logical CPU per game (`2,4,…,28`) | 2 | not the carrier | — | — |
+| Rust engine, one logical CPU per game (`2,4,…,28`) | 2 | not the carrier | — | — |
 
 **The engine did the overrunning work.** The forfeiting search of the first
-run was held 0.2 ms: Rarog's process was on its CPU for the whole 76.6 ms,
+run was held 0.2 ms: the Rust engine's process was on its CPU for the whole 76.6 ms,
 42 ms past its own hard cap. The two of the third run were held 0.2 ms and
 26.5 ms, spent no measurable kernel time, and each took 129–130 page faults
 where the searches around them took none.
 
-**The carrier is Rarog's KPK bitbase, built on first use.** It is a
+**The carrier is the Rust engine's KPK bitbase, built on first use.** It is a
 `2 × 64 × 64 × 64`-byte table (`src/kpk.rs`, 512 KiB, 128 pages), generated
 by retrograde analysis inside the evaluation the first time a search reaches
 a king-and-pawn-against-king position, where the engine's clock check cannot
@@ -253,7 +253,7 @@ with about 130 page faults, the build; by chance the forfeiting search would
 be that search about once in 80, and both were. Replaying the second forfeit
 from its transcript (`go wtime 49 btime 855`) reproduces an overrun only in a
 fresh process: 37.7 ms median against a 29 ms cap, 25.4 ms with the bitbase
-built beforehand. Every Rarog forfeit on record came late in a game (plies
+built beforehand. Every Rust-engine forfeit on record came late in a game (plies
 77–180) with the bitbase not yet built in that process.
 
 **Why fastchess shows none.** fastchess keeps each engine process for the
@@ -265,8 +265,8 @@ measures correctly; it exposes an engine that does lazy work on its own
 clock, as any runner that starts engines per game would.
 
 **Stockfish is not immune to stalls, it keeps a reserve.** It was held off
-its CPU more often and longer than Rarog, but never came closer than 161 ms
-to its deadline, where Rarog routinely comes within 20–30 ms.
+its CPU more often and longer than the Rust engine, but never came closer than 161 ms
+to its deadline, where the Rust engine routinely comes within 20–30 ms.
 
 **One logical CPU per game** made no difference to the carrier (both of its
 forfeits were bitbase builds) and is not adopted on this evidence.

@@ -12,11 +12,21 @@ pub(crate) fn run_status(run_directory: &Path, machine: bool) -> ExitCode {
         }
     };
     let durable = durable_status(run_directory);
+    // A tournament's standings are rated again from its journal, so `status`
+    // lists every participant whatever the run's last block showed.
+    let standings = (record.command == "tournament")
+        .then(|| crate::run_analysis::analyse_directory(run_directory, None))
+        .flatten()
+        .and_then(Result::ok)
+        .and_then(|analysis| analysis.tournament)
+        .filter(|tournament| tournament.standings_unavailable.is_none())
+        .map(|tournament| tournament.standings);
     if machine {
         print_json(&MachineOutput::RunStatus {
             run_directory,
             record,
             durable: durable.map(|durable| durable.to_json()),
+            standings,
         });
     } else {
         println!("command: {}", record.command);
@@ -33,9 +43,17 @@ pub(crate) fn run_status(run_directory: &Path, machine: bool) -> ExitCode {
         }
         // The last block the run published, verbatim: a closed console loses
         // nothing, and `status` never invents a second account of the run.
+        // An earlier version stored its blocks with non-ASCII symbols; they
+        // are printed as this version prints them.
         match &record.progress {
-            Some(block) => print!("{}", block.render()),
+            Some(block) => print!("{}", progress::ascii(&block.render())),
             None => println!("progress: {}", first_block_due(&record)),
+        }
+        if let Some(standings) = &standings {
+            println!("standings, ratings with 95% intervals:");
+            for line in standing_lines(standings) {
+                println!("{line}");
+            }
         }
     }
     ExitCode::SUCCESS
@@ -179,6 +197,7 @@ mod tests {
                 ..OfficialSample::default()
             },
             progress: None,
+            results: None,
             host: crate::HostSummary::current(),
             workflow,
             anomalies: Vec::new(),

@@ -455,6 +455,7 @@ pub(crate) async fn run_sprt(
                 resolved_configuration: resolved.value(),
                 invocations: vec![&engine_a, &engine_b],
                 wave_shape: None,
+                rail_warnings: None,
             },
             machine,
         );
@@ -647,6 +648,20 @@ pub(crate) async fn run_sprt(
                 eprintln!("run record failed: {error}");
                 return ExitCode::from(3);
             }
+            let results =
+                match record_run_results(&writer, &mut recorder, Some(players.distinct_names()))
+                    .await
+                {
+                    Ok(results) => Some(results),
+                    Err(ResultsFailure::Output(error)) => {
+                        eprintln!("SPRT output failed: {error}");
+                        return ExitCode::from(3);
+                    }
+                    Err(ResultsFailure::Record(error)) => {
+                        eprintln!("run record failed: {error}");
+                        return ExitCode::from(3);
+                    }
+                };
             let run_status = match status {
                 sprt_runner::SprtStatus::H1
                 | sprt_runner::SprtStatus::H0
@@ -675,9 +690,15 @@ pub(crate) async fn run_sprt(
                     run_directory: directory.paths().root.clone(),
                     report,
                     resume,
+                    results,
                 });
             } else {
-                print_sprt(&report, &directory.paths().root, progress.run_elapsed());
+                print_sprt(
+                    &report,
+                    results.as_ref(),
+                    &directory.paths().root,
+                    progress.run_elapsed(),
+                );
             }
             ExitCode::from(sprt_exit_code(status))
         }
@@ -1048,6 +1069,7 @@ fn sprt_verdict(report: &sprt_runner::SprtReport) -> String {
 
 pub(crate) fn print_sprt(
     report: &sprt_runner::SprtReport,
+    results: Option<&crate::stats_replay::RunResults>,
     run_directory: &Path,
     elapsed: Duration,
 ) {
@@ -1105,6 +1127,7 @@ pub(crate) fn print_sprt(
             .invalid_pair
             .map_or_else(|| "none".into(), |value| value.to_string())
     );
+    print_run_results(results);
     println!("artifacts: {}", run_directory.display());
     println!("Finished match");
     println!(

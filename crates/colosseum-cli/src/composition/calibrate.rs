@@ -83,6 +83,7 @@ pub(crate) async fn run_calibration(
                 resolved_configuration: prepared.resolved.value(),
                 invocations: vec![&prepared.engine_a, &prepared.engine_b],
                 wave_shape: None,
+                rail_warnings: None,
             },
             machine,
         );
@@ -312,6 +313,18 @@ pub(crate) async fn run_calibration(
         eprintln!("run record failed: {error}");
         return ExitCode::from(3);
     }
+    let results =
+        match record_run_results(&writer, &mut recorder, Some(players.distinct_names())).await {
+            Ok(results) => Some(results),
+            Err(ResultsFailure::Output(error)) => {
+                eprintln!("calibration output failed: {error}");
+                return ExitCode::from(3);
+            }
+            Err(ResultsFailure::Record(error)) => {
+                eprintln!("run record failed: {error}");
+                return ExitCode::from(3);
+            }
+        };
     let run_status = if status == CalibrationStatus::Invalid {
         RunStatus::Invalid
     } else if report.fixed_match.status == match_runner::MatchStatus::Cancelled {
@@ -340,9 +353,10 @@ pub(crate) async fn run_calibration(
             run_directory: directory.paths().root.clone(),
             report,
             resume,
+            results,
         });
     } else {
-        print_calibration(&report, &directory.paths().root);
+        print_calibration(&report, results.as_ref(), &directory.paths().root);
     }
     ExitCode::from(exit_code)
 }
@@ -610,9 +624,13 @@ pub(crate) fn calibration_exit_code(status: CalibrationStatus) -> u8 {
     }
 }
 
-pub(crate) fn print_calibration(report: &CalibrationReport, run_directory: &Path) {
+pub(crate) fn print_calibration(
+    report: &CalibrationReport,
+    results: Option<&crate::stats_replay::RunResults>,
+    run_directory: &Path,
+) {
     println!(
-        "calibration {:?}: {} games, {:.0}% confidence, ±{} nElo tolerance",
+        "calibration {:?}: {} games, {:.0}% confidence, +/-{} nElo tolerance",
         report.status,
         report.design.games,
         report.design.confidence * 100.0,
@@ -637,6 +655,7 @@ pub(crate) fn print_calibration(report: &CalibrationReport, run_directory: &Path
             u64::from(report.fixed_match.games_attempted)
         )
     );
+    print_run_results(results);
     println!("artifacts: {}", run_directory.display());
 }
 

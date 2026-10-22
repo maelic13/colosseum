@@ -63,6 +63,11 @@ trajectory — its mini-match score, the gain and perturbation scale it used and
 what moved in it — which the progress blocks record but deliberately do not
 print. It likewise never repairs or mutates the run.
 
+For a tournament, `status` also rates the journal's games again and lists
+every participant, with its interval or marked fixed, under the last block,
+and gives them as `standings` in JSON. Text an earlier version stored with
+non-ASCII symbols is printed in ASCII.
+
 Run-record schema history:
 
 | Version | Change |
@@ -72,3 +77,4 @@ Run-record schema history:
 | 3 | Added the last-level cache domain to every engine CPU placement, the versioned game-record annotation writer, and the SPSA estimator that produced a tuned vector |
 | 4 | Replaced the execution plan's `cores_per_engine` count with the slot allocation mode, so a record says whether the two engines of a game shared their cores or had their own |
 | 5 | Added the run's most recent progress block, so `status` reports what the console last showed |
+| 6 | Added `results`: what `match`, `sprt`, `calibrate` and `tournament` report at their end beyond their statistics (colours or standings and pairs, terminations, faults, search telemetry). A tournament's sample counts its colour pairs. A version 5 record is still read, and a resumed one is rewritten as version 6 |

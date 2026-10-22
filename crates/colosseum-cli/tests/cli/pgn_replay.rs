@@ -118,6 +118,14 @@ fn a_tournament_replays_from_its_pgn_with_each_encounters_own_opening() {
         .args(["--engine".as_ref(), engine().as_os_str()])
         .args(["--engine".as_ref(), engine().as_os_str()])
         .args([
+            // Names a PGN can tell apart: three of one executable would all
+            // be `colosseum-cli` in it.
+            "--label",
+            "Alpha",
+            "--label",
+            "Beta",
+            "--label",
+            "Gamma",
             "--games-per-pair",
             "2",
             "--engine-arg=__uci-stub",

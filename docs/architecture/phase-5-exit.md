@@ -32,6 +32,6 @@ selection. `spsa plan` therefore remains factual workload arithmetic and
 
 The complete loop uses the cross-platform internal UCI stub and finishes in the
 required hermetic suite. No long real-engine SPSA or SPRT is required to accept
-the implementation. Rarog and Basilisk remain interoperability engines, not
+the implementation. The Rust engine and Basilisk remain interoperability engines, not
 hidden prerequisites or statistical oracles. A real gate through the released
 artifact remains Phase 9.7 evidence.

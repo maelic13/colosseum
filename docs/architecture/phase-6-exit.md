@@ -26,5 +26,5 @@ The required gate is hermetic. It validates workload accounting, scheduling,
 statistics, parsing, persistence and protocol behavior with deterministic
 fixtures; it does not claim a performance result for a particular chess
 engine or machine. A real NPS/scaling result remains meaningful only on the
-recorded host under controlled load. Real Rarog/Basilisk workflows remain
+recorded host under controlled load. Real Rust-engine and Basilisk workflows remain
 interoperability and release evidence, not hidden test dependencies.

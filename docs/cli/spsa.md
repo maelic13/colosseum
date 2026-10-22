@@ -103,7 +103,17 @@ warning: 32 games per iteration is not a multiple of 14 slots: the last wave of 
 ```
 
 `spsa --dry-run` carries the same shape as `wave_shape` beside the resolved
-configuration. Repeated `--compare-iterations` values show how
+configuration. It also lists, as `rail_warnings`, every knob whose first
+arms, `initial ± c_0`, already leave its range, and prints a warning for each:
+
+```text
+SPSA rail warning: "RfpCorrection" starts at 80 with c_0 256.000, so its first arms 80 +/- 256.000 leave [0, 2048] and one is sent at its minimum 0
+```
+
+Such a knob's arm is played at the range end instead of where the update
+assumes it was. It is a warning, not a refusal: whether to start there is your
+decision, and an empty `rail_warnings` is what a wrapper that wants to refuse
+can check. Repeated `--compare-iterations` values show how
 the first/final gains and cost change when the horizon changes.
 
 A wall-time range is emitted only from explicit end-to-end game-duration
@@ -132,12 +142,23 @@ table rounds them to three decimals, CSV and JSON give them in full. `--every N`
 keeps every Nth iteration and always the initial values and the latest
 iteration. `--csv` and `--json` cannot be combined.
 
+The table and JSON also show, per knob, how many iterations so far played an
+arm clamped at a range end: `centre - c` below the minimum, or `centre + c`
+above the maximum. JSON rows carry them as `clamped_at_min` and
+`clamped_at_max`, in knob order; the table marks a centre `<N` or `>N`. CSV
+keeps its centres-only shape.
+
 Inspect the last checksum-verified durable snapshot of a running, interrupted
 or completed tune without acquiring ownership or changing any run bytes:
 
 ```text
 colosseum-cli spsa status path/to/spsa-run
 ```
+
+Each knob's line also says on how many completed iterations an arm was
+clamped at a range end, and JSON gives every knob's counts as `arm_clamps`:
+a knob can be clamped on every iteration while its centre never touches a
+bound, which bound contact alone does not show.
 
 The report includes completed iteration and percentage, a linear ETA from the
 tune's elapsed time as its checkpoint records it across every stop and
@@ -283,6 +304,7 @@ Threads        4      3    3.4410      -1    1..16
   tuned      the values the tune ended on, rounded to whole numbers
   faults     time: 0-0; other: 0-0; 0 of 320 allowed
   at a rail  none
+  clamped    none
   files      /home/you/engine/colosseum-runs/spsa-...
              tuned-options.txt   setoption lines, ready to paste
              tuned-options.toml  the same as a run-file fragment
@@ -294,7 +316,10 @@ Threads        4      3    3.4410      -1    1..16
 UCI engine is given; `change` is that integer against the tune file's
 `initial`, and `range` is the knob's own bounds, so a value that has reached
 one is visible. `at a rail` names every knob whose tuned value sits on a bound,
-where the gradient was one-sided. With `--final-window-percent` the `tuned`
+where the gradient was one-sided. `clamped` names every knob whose arms were
+clamped at a range end during the tune, and on how many of its iterations, as
+in `RfpCorrection at min on 4000 of 4000 iterations`; `result.json` keeps one
+warning per such knob in `tune_audit`. With `--final-window-percent` the `tuned`
 line says the values are an average of the last stretch instead. The path is
 absolute, because the reader may be anywhere when they come back to it.
 
@@ -306,6 +331,7 @@ result; `spsa status` shows where every parameter stands at any time:
 SPSA stopped after iteration 24 of 60. Nothing is lost; run the same command again to resume.
   games    768 played
   faults   time: 0-0; other: 0-0; 0 of 3 allowed
+  clamped  none
   files    /home/you/engine/colosseum-runs/spsa-...
 ```
 

@@ -10,7 +10,7 @@ pub(crate) async fn run_self_test(machine: bool) -> ExitCode {
     } else {
         for check in &report.checks {
             let status = if check.success { "PASS" } else { "FAIL" };
-            println!("[{status}] {} — {}", check.name, check.detail);
+            println!("[{status}] {} - {}", check.name, check.detail);
         }
     }
     if success {

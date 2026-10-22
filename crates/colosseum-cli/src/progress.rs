@@ -150,6 +150,30 @@ impl ProgressBlock {
     }
 }
 
+/// `text` as plain ASCII, for a console that is not UTF-8: what an earlier
+/// version stored with an em dash, a plus-or-minus or a multiplication sign
+/// is printed as this version prints it. Any other non-ASCII character is a
+/// `?`.
+#[must_use]
+pub fn ascii(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for character in text.chars() {
+        if character.is_ascii() {
+            out.push(character);
+            continue;
+        }
+        out.push_str(match u32::from(character) {
+            // Em dash, en dash, minus sign, box-drawing horizontal.
+            0x2014 | 0x2013 | 0x2212 | 0x2500 => "-",
+            0x00B1 => "+/-",
+            0x00D7 => "x",
+            0x2026 => "...",
+            _ => "?",
+        });
+    }
+    out
+}
+
 /// Seconds as an operator reads them: `45s`, `6m30s`, `2h05m`.
 #[must_use]
 pub fn format_duration(seconds: f64) -> String {
@@ -389,6 +413,22 @@ pub fn time_for_units(done: u64, elapsed: Duration, remaining: u64) -> Option<Du
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What 0.3.0 stored is printed as this version prints it.
+    #[test]
+    fn stored_symbols_are_printed_as_ascii() {
+        let stored = [0x2014_u32, 0x00B1, 0x00D7, 0x2026]
+            .map(|code| char::from_u32(code).unwrap().to_string());
+        let stored = format!(
+            "3434.3 {} 19.5 {} 1983.5/2362 points; 16 {} 2 {}",
+            stored[1], stored[0], stored[2], stored[3]
+        );
+        assert_eq!(
+            ascii(&stored),
+            "3434.3 +/- 19.5 - 1983.5/2362 points; 16 x 2 ..."
+        );
+        assert_eq!(ascii("plain"), "plain");
+    }
 
     #[test]
     fn a_resumed_run_reports_its_whole_time_but_rates_only_this_invocation() {

@@ -1,11 +1,10 @@
 # Colosseum CLI 0.3.0 record
 
-Two defects Rarog reported against `colosseum-cli 0.2.0` (`ca05dfa`) while
-moving its training-data generation onto the harness (Rarog
-`analysis/artifacts/c84/colosseum-cli-prompt.md`), fixed on the branch
-`rarog-cli-0.3.0` from `main`, 2026-10-14. Host: AMD Ryzen 9 5950X (16 cores,
-32 threads), 128 GB, Windows 11 Pro 10.0.26300. Engine on both sides:
-`rarog-c8head-pext-pgo.exe` (`E73E3230…`), 8,000 nodes, `Threads=1`,
+Two defects a user reported against `colosseum-cli 0.2.0` (`ca05dfa`) while
+moving training-data generation onto the harness, fixed on a branch from
+`main`, 2026-10-14. Host: AMD Ryzen 9 5950X (16 cores, 32 threads), 128 GB,
+Windows 11 Pro 10.0.26300. Engine on both sides: the reporter's engine build
+(`E73E3230…`), 8,000 nodes, `Threads=1`,
 `Hash=16`; book `phase_book_v1-s10403.order.epd` (`F0CF3E07…`), first 900
 openings in order; no adjudication, 200-move cap, placement off. fastchess
 1.8.0 alpha (`8444E739…`) as the reference.
@@ -42,7 +41,8 @@ four fail without the fix. Every command reaches the same `runner::play`.
 
 ## 2. Colosseum took about 36% more wall time than fastchess
 
-**Reproduced** with Rarog's `harness_speed.ps1` on the pinned 0.2.0 exe:
+**Reproduced** with the reporter's harness-speed script on the pinned 0.2.0
+exe:
 35.3 / 34.4 / 33.9 s against fastchess 25.9 / 25.9 / 24.8 s (medians 34.4 and
 25.9 s); mean charged 8.53–8.61 ms a move, mean `h` 2.12–2.15 ms.
 
@@ -50,7 +50,7 @@ four fail without the fix. Every command reaches the same `runner::play`.
 (`clock.phases`). At concurrency 30 a 0.2.0 game spent 339.6 ms in start-up
 (spawn, handshake, options, `isready`, `ucinewgame`), 768 ms in play and
 18.9 ms in teardown: a tournament started two fresh processes for every game,
-so each slot paid Rarog's start-up about 30 times; fastchess keeps its
+so each slot paid the engine's start-up about 30 times; fastchess keeps its
 engines. Start-up is not only waiting: 30 slots starting engines at once
 loaded the host the searches ran on, which is why the charged time per move
 was 9.15 ms at concurrency 30 against 3.16 ms at 1.

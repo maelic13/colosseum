@@ -1005,7 +1005,7 @@ fn push_stderr(tail: &Arc<Mutex<VecDeque<String>>>, line: &[u8], truncated: bool
         }
         let mut text = String::from_utf8_lossy(line).into_owned();
         if truncated {
-            text.push_str("…[truncated]");
+            text.push_str("...[truncated]");
         }
         tail.push_back(text);
     }

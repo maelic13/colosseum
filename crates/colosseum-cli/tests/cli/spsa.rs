@@ -262,13 +262,23 @@ c_end = 1.0
     assert!(stderr.contains("starts at 1, but the engine advertises default 16"));
     assert!(stderr.contains("starts on its lower rail"));
     let output: Value = serde_json::from_slice(&output.stdout).unwrap();
+    // The result adds what the tune found once it ran: a seed on its rail
+    // clamps the arm below it.
+    let kinds = output["report"]["tune_audit"]["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|warning| warning["kind"].as_str().unwrap())
+        .collect::<Vec<_>>();
     assert_eq!(
-        output["report"]["tune_audit"]["warnings"]
-            .as_array()
-            .unwrap()
-            .len(),
-        2
+        kinds,
+        [
+            "initial-differs-from-engine-default",
+            "initial-on-lower-rail",
+            "arms-clamped-at-range-end"
+        ]
     );
+    // The record keeps the audit the tune started with.
     let record: Value =
         serde_json::from_slice(&std::fs::read(run.join("run-record.json")).unwrap()).unwrap();
     assert_eq!(
@@ -517,7 +527,7 @@ fn complete_mini_match_is_one_durable_gradient_commit() {
     // The result carries a summary per iteration and names the journal for
     // its games: one pair, games 1 and 2. What the schedule gives again (arm
     // vectors, signs, gains, the centres before) is not stored.
-    assert_eq!(value["report"]["schema_version"], 3);
+    assert_eq!(value["report"]["schema_version"], 4);
     assert_eq!(value["report"]["games"], "games.jsonl");
     let iteration = &value["report"]["driver"]["completed_iterations"][0];
     assert!(iteration.get("pairs").is_none(), "{iteration}");
@@ -1193,5 +1203,126 @@ fn seed_from_refuses_an_unfinished_tune_and_a_tune_file_with_other_names() {
     assert!(
         message.contains("the names and their order must match"),
         "{message}"
+    );
+}
+
+/// A knob seeded on its minimum: its arm `centre - c` leaves the range from
+/// the first iteration on. The dry run names it before anything is played,
+/// the result's audit counts the iterations that clamped it, and `spsa
+/// history` shows the running count. None of it changes what is played.
+#[test]
+fn arms_clamped_at_a_range_end_are_warned_counted_and_shown_in_history() {
+    let root = tempfile::tempdir().unwrap();
+    let tune = write_tune_contents(
+        root.path(),
+        "[[parameters]]\nname = \"Hash\"\ninitial = 1\nmin = 1\nmax = 1024\nc_end = 1.0\n",
+    );
+    let run = root.path().join("run");
+    let tune_command = |dry_run: bool| {
+        let mut command = cli();
+        command.arg("--json");
+        if dry_run {
+            command.arg("--dry-run");
+        }
+        command
+            .arg("spsa")
+            .arg(env!("CARGO_BIN_EXE_colosseum-uci-fixture"))
+            .arg("--tune")
+            .arg(&tune)
+            .args([
+                "--r-end",
+                "0.002",
+                "--iterations",
+                "3",
+                "--games-per-iteration",
+                "2",
+                "--depth",
+                "1",
+                "--seed",
+                "7",
+                "--__synthetic-games",
+                "--dir",
+            ])
+            .arg(&run);
+        command
+    };
+
+    let dry_run = tune_command(true).output().unwrap();
+    assert!(dry_run.status.success(), "{dry_run:?}");
+    let warnings = &serde_json::from_slice::<Value>(&dry_run.stdout).unwrap()["rail_warnings"];
+    assert_eq!(warnings.as_array().unwrap().len(), 1, "{warnings}");
+    assert_eq!(warnings[0]["name"], "Hash");
+    assert_eq!(warnings[0]["seed"], 1);
+    assert_eq!(warnings[0]["clamped_at_min"], true);
+    assert_eq!(warnings[0]["clamped_at_max"], false);
+    let stderr = String::from_utf8_lossy(&dry_run.stderr);
+    assert!(stderr.contains("SPSA rail warning: \"Hash\""), "{stderr}");
+    assert!(!run.exists(), "a dry run created its run directory");
+
+    let tuned = tune_command(false).output().unwrap();
+    assert!(
+        tuned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tuned.stderr)
+    );
+    let result: Value =
+        serde_json::from_slice(&std::fs::read(run.join("result.json")).unwrap()).unwrap();
+    assert_eq!(result["schema_version"], 4);
+    let clamped = result["tune_audit"]["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|warning| warning["kind"] == "arms-clamped-at-range-end")
+        .collect::<Vec<_>>();
+    assert_eq!(clamped.len(), 1, "{}", result["tune_audit"]);
+    assert_eq!(clamped[0]["name"], "Hash");
+    assert_eq!(clamped[0]["completed_iterations"], 3);
+    assert_eq!(clamped[0]["clamped_at_min"], 3);
+    assert_eq!(clamped[0]["clamped_at_max"], 0);
+
+    let history = cli()
+        .args(["--json", "spsa", "history"])
+        .arg(&run)
+        .output()
+        .unwrap();
+    assert!(history.status.success(), "{history:?}");
+    let rows = serde_json::from_slice::<Value>(&history.stdout).unwrap()["report"]["rows"].clone();
+    let running = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (
+                row["clamped_at_min"][0].clone(),
+                row["clamped_at_max"][0].clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        running,
+        [0, 1, 2, 3].map(|count| (serde_json::json!(count), serde_json::json!(0)))
+    );
+    let table = cli().args(["spsa", "history"]).arg(&run).output().unwrap();
+    let table = String::from_utf8(table.stdout).unwrap();
+    assert!(table.lines().nth(4).unwrap().ends_with(" <3"), "{table}");
+
+    // `spsa status` reports the same counts, which bound contact alone does
+    // not show.
+    let status = cli()
+        .args(["--json", "spsa", "status"])
+        .arg(&run)
+        .output()
+        .unwrap();
+    assert!(status.status.success(), "{status:?}");
+    let clamps =
+        serde_json::from_slice::<Value>(&status.stdout).unwrap()["report"]["arm_clamps"].clone();
+    assert_eq!(clamps[0]["name"], "Hash");
+    assert_eq!(clamps[0]["clamped_at_min"], 3);
+    assert_eq!(clamps[0]["completed_iterations"], 3);
+    let status = cli().args(["spsa", "status"]).arg(&run).output().unwrap();
+    let status = String::from_utf8(status.stdout).unwrap();
+    assert!(
+        status.contains("; arm clamped at min on 3 of 3 iterations"),
+        "{status}"
     );
 }

@@ -121,12 +121,12 @@ pub fn render_text(report: &CapabilitiesReport) -> String {
                     line(format!("SMT sibling map: exact ({} cores)", cores.len()));
                 }
                 SiblingMapping::Unavailable { reason } => {
-                    line(format!("SMT sibling map: unavailable — {reason}"));
+                    line(format!("SMT sibling map: unavailable - {reason}"));
                 }
             }
         }
         None => line(format!(
-            "topology: unavailable — {}",
+            "topology: unavailable - {}",
             reason_of(&report.topology.reason)
         )),
     }
@@ -140,10 +140,10 @@ pub fn render_text(report: &CapabilitiesReport) -> String {
                 .join(",")
         )),
         Some(AllowedCpuSet::Unavailable { reason }) => {
-            line(format!("allowed logical CPUs: unavailable — {reason}"));
+            line(format!("allowed logical CPUs: unavailable - {reason}"));
         }
         None => line(format!(
-            "allowed logical CPUs: unavailable — {}",
+            "allowed logical CPUs: unavailable - {}",
             reason_of(&report.allowed_cpus.reason)
         )),
     }
@@ -151,8 +151,8 @@ pub fn render_text(report: &CapabilitiesReport) -> String {
         Some(characteristics) => describe_characteristics(characteristics, &mut line),
         None => {
             let reason = reason_of(&report.core_characteristics.reason).to_owned();
-            line(format!("core class / NUMA: unavailable — {reason}"));
-            line(format!("last-level cache domains: unavailable — {reason}"));
+            line(format!("core class / NUMA: unavailable - {reason}"));
+            line(format!("last-level cache domains: unavailable - {reason}"));
         }
     }
     line(format!(
@@ -274,7 +274,7 @@ mod tests {
             assert!(text.contains(heading), "missing {heading} in\n{text}");
         }
         assert!(
-            text.contains("last-level cache domains: unavailable — logical CPU identities"),
+            text.contains("last-level cache domains: unavailable - logical CPU identities"),
             "{text}"
         );
     }

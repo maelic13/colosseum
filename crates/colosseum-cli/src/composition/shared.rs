@@ -217,6 +217,19 @@ impl Players {
     }
 }
 
+impl Players {
+    /// The two names as the PGN writes them. Two engines of one name are
+    /// told apart by their side, since their games are still two sides of a
+    /// board.
+    pub(crate) fn distinct_names(&self) -> [String; 2] {
+        if self.a == self.b {
+            [format!("{} (A)", self.a), format!("{} (B)", self.b)]
+        } else {
+            [self.a.clone(), self.b.clone()]
+        }
+    }
+}
+
 impl std::fmt::Display for Players {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "{} vs. {}", self.a, self.b)
@@ -348,6 +361,10 @@ pub(crate) enum MachineOutput<'a> {
         /// fresh run.
         #[serde(skip_serializing_if = "Option::is_none")]
         resume: Option<ResumeFacts>,
+        /// Each engine's games by colour and its search telemetry, as the run
+        /// record keeps them.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        results: Option<crate::stats_replay::RunResults>,
     },
     Sprt {
         run_directory: PathBuf,
@@ -356,6 +373,10 @@ pub(crate) enum MachineOutput<'a> {
         /// fresh run.
         #[serde(skip_serializing_if = "Option::is_none")]
         resume: Option<ResumeFacts>,
+        /// Each engine's games by colour and its search telemetry, as the run
+        /// record keeps them.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        results: Option<crate::stats_replay::RunResults>,
     },
     Spsa {
         run_directory: PathBuf,
@@ -383,6 +404,10 @@ pub(crate) enum MachineOutput<'a> {
         /// fresh run.
         #[serde(skip_serializing_if = "Option::is_none")]
         resume: Option<ResumeFacts>,
+        /// Each engine's games by colour and its search telemetry, as the run
+        /// record keeps them.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        results: Option<crate::stats_replay::RunResults>,
     },
     DryRun {
         command: &'a str,
@@ -392,6 +417,10 @@ pub(crate) enum MachineOutput<'a> {
         /// For `spsa`: how an iteration's games would fill the slots.
         #[serde(skip_serializing_if = "Option::is_none")]
         wave_shape: Option<SpsaWaveShape>,
+        /// For `spsa`: every knob whose first arms, `seed ± c_0`, leave its
+        /// range; empty when none does.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rail_warnings: Option<Vec<SpsaRailWarning>>,
     },
     EngineInspection {
         inspection: EngineInspection,
@@ -439,6 +468,10 @@ pub(crate) enum MachineOutput<'a> {
         /// fresh run.
         #[serde(skip_serializing_if = "Option::is_none")]
         resume: Option<ResumeFacts>,
+        /// The standings, pairs, terminations, faults and search telemetry,
+        /// as the run record keeps them.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        results: Option<crate::stats_replay::RunResults>,
     },
     SelfTest {
         report: self_test::SelfTestReport,
@@ -450,6 +483,10 @@ pub(crate) enum MachineOutput<'a> {
         /// that keeps them.
         #[serde(skip_serializing_if = "Option::is_none")]
         durable: Option<Value>,
+        /// A tournament's standings, every participant, rated again from its
+        /// journal.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        standings: Option<Vec<colosseum_application::TournamentStanding>>,
     },
 }
 

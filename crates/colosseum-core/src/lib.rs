@@ -11,6 +11,7 @@ pub mod event;
 pub mod export;
 pub mod game;
 pub mod ids;
+pub mod intervals;
 pub mod options;
 pub mod pairing;
 pub mod rating;
@@ -30,6 +31,7 @@ pub use event::TournamentEvent;
 pub use export::{ExportRow, crosstable_csv, standings_csv};
 pub use game::{GameResult, GameStats, Pairing, Termination};
 pub use ids::{EngineId, GameId, PairId, ParticipantId, RunId, TournamentId, UnitId};
+pub use intervals::{ScoreElo, TRINOMIAL_Z, logistic_elo, trinomial_elo};
 pub use options::{
     UciOption, UciOptionValue, is_chess960_option, is_hash_option, is_tablebase_option,
     is_thread_option, is_uci_true,
@@ -43,10 +45,10 @@ pub use rng::{
 pub use spsa::{
     SPSA_ALPHA, SPSA_END_STATE_RELATIVE_TOLERANCE, SPSA_GAMMA, SPSA_PERTURBATION_BYTES_PER_DRAW,
     SPSA_PERTURBATION_DRAW_ORDER, SPSA_PERTURBATION_SAMPLER_ID, SPSA_SCHEDULE_SCHEMA_VERSION,
-    SPSA_STABILITY_FRACTION, SpsaArmValue, SpsaCoefficients, SpsaDerivedKnob, SpsaEndSpec,
-    SpsaError, SpsaIteration, SpsaKnob, SpsaPerturbationContract, SpsaSchedule,
-    SpsaScheduleArtifact, perturbations_for_iteration, prepare_iteration,
-    round_half_away_from_zero, update_centers,
+    SPSA_STABILITY_FRACTION, SpsaArmClamp, SpsaArmValue, SpsaCoefficients, SpsaDerivedKnob,
+    SpsaEndSpec, SpsaError, SpsaIteration, SpsaKnob, SpsaPerturbationContract, SpsaSchedule,
+    SpsaScheduleArtifact, arm_clamp, iteration_arm_clamps, perturbations_for_iteration,
+    prepare_iteration, round_half_away_from_zero, update_centers,
 };
 pub use standings::{EngineStanding, GameOutcome, HeadToHead, PairGameResult, Standings};
 pub use stats::{

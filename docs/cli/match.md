@@ -199,7 +199,7 @@ Any requested placement that cannot be applied and read back is an
 infrastructure error, never a silent fallback.
 
 When both sides have an explicit numeric Hash option, output reports the
-conservative lower bound `concurrency × (A Hash + B Hash)`. It is informational
+conservative lower bound `concurrency x (engine-a Hash + engine-b Hash)`. It is informational
 unless `--memory-budget-mb N` supplies a trusted hard budget; only that explicit
 budget can cause memory refusal. Hash omits engine-private allocations, mapped
 files and other process memory, so the reported value is never labelled total

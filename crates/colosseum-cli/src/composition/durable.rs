@@ -333,6 +333,44 @@ pub(crate) async fn settle(writer: &RunWriter) -> Result<(), String> {
     writer.barrier().await.map(|_| ())
 }
 
+/// Why a two-engine run could not keep its end-of-run results.
+pub(crate) enum ResultsFailure {
+    /// A write the run made failed, so its files cannot be read back.
+    Output(String),
+    /// The run record refused them.
+    Record(String),
+}
+
+/// Read a run's results back from its directory, once every game it wrote is
+/// there, and keep them in its run record before the record turns terminal.
+/// They are read from the files `stats` replays, so the end of a run and a
+/// later replay report the same figures. `names` are a two-engine run's
+/// engines A and B; a tournament names its participants itself.
+pub(crate) async fn record_run_results(
+    writer: &RunWriter,
+    recorder: &mut RunRecorder,
+    names: Option<[String; 2]>,
+) -> Result<crate::stats_replay::RunResults, ResultsFailure> {
+    settle(writer).await.map_err(ResultsFailure::Output)?;
+    let root = writer.root().to_path_buf();
+    let results = tokio::task::spawn_blocking(move || {
+        crate::stats_replay::run_results(
+            &root,
+            names
+                .as_ref()
+                .map(|names| [names[0].as_str(), names[1].as_str()]),
+        )
+    })
+    .await
+    .map_err(|error| ResultsFailure::Output(error.to_string()))?;
+    let value = serde_json::to_value(&results)
+        .map_err(|error| ResultsFailure::Record(error.to_string()))?;
+    recorder
+        .set_results(value)
+        .map_err(|error| ResultsFailure::Record(error.to_string()))?;
+    Ok(results)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

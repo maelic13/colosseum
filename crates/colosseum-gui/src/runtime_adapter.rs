@@ -58,10 +58,10 @@ mod tests {
     fn maps_launch_controls_without_gui_metadata_or_schema() {
         let mut engine = EngineConfig::new(EngineId::from_u128(7), "bin/engine".into());
         engine.meta = EngineMeta {
-            name: "Rarog".into(),
+            name: "Candidate".into(),
             version: "1.0".into(),
             elo: Some(3100),
-            extra: BTreeMap::from([("logo".into(), "rarog.png".into())]),
+            extra: BTreeMap::from([("logo".into(), "candidate.png".into())]),
         };
         engine.args = vec!["--uci".into()];
         engine.working_dir = Some("bin".into());
@@ -78,7 +78,7 @@ mod tests {
 
         let runtime = runtime_participant(&engine);
         assert_eq!(runtime.id, ParticipantId::from_u128(7));
-        assert_eq!(runtime.launch.label.as_deref(), Some("Rarog 1.0"));
+        assert_eq!(runtime.launch.label.as_deref(), Some("Candidate 1.0"));
         assert_eq!(runtime.launch.arguments, ["--uci"]);
         assert_eq!(
             runtime.launch.working_directory.as_deref(),

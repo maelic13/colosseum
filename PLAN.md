@@ -13,8 +13,8 @@ question with harsher requirements: reproducibility, explicit CPU placement,
 byte-level identification of inputs, durable long runs, and results that mean
 the same thing next month.
 
-**It is a general tool.** Rarog and Basilisk are the first two engines used to
-validate it, not its specification. Where a policy could reasonably differ
+**It is a general tool.** The engines used to validate it are not its
+specification. Where a policy could reasonably differ
 between projects, the tool ships a default with a stated reason and lets the
 user change it — see S3.
 
@@ -77,9 +77,9 @@ the GUI's scheduler and the CLI's drivers both sit on the same runner, and
 Phase 11 removes the GUI's copy. The required suite is hermetic and runs on
 Windows, Linux and macOS in debug and optimized profiles.
 
-Validation engines: **Rarog** (Rust) and **Basilisk** (C++), chosen because they
-are available, actively developed, and differ in language and build system.
-Any two UCI engines would serve; nothing in the design depends on these.
+Validation engines: two independently developed UCI engines, in different
+languages and build systems. Any two UCI engines would serve; nothing in the
+design depends on which.
 
 ---
 
@@ -1741,7 +1741,7 @@ makes the CLI's drivers the single game-playing mechanism and keeps SQLite as
 the GUI's history index. It starts only after `cli-v0.1.0` and `gui-v1.1.0`
 are published, so the CLI release is never held by GUI work, and it is the
 main line of development afterwards: the maintainer's own use is the CLI for
-Rarog development and the GUI for tournaments, so GUI defects found in use
+engine development and the GUI for tournaments, so GUI defects found in use
 are fixed as patch releases on `main` while Phase 11 proceeds on a branch.
 
 - **(a) Harness library.** Move the run directory, run record, placement
@@ -1809,8 +1809,8 @@ changelog, and never lands as a patch. Added fields — a checkpoint's
 `seeded_from` — are compatible in both directions and do not count as
 format changes.
 
-- **(a) Rarog's tooling notes from the first adoption** (GUIDE 12.1, Terra
-  High), reported 2026-09-22 with Rarog's B.2.6.1 record; nothing blocks.
+- **(a) Tooling notes from the first adoption** (GUIDE 12.1, Terra
+  High), reported 2026-09-22; nothing blocks.
   - **`spsa status` ETA after a resume — resolved 2026-09-25, before this
     step.** Every checkpoint now records the run's total active time across
     invocations (`run_elapsed_seconds`), progress blocks and the SPRT total
@@ -1831,8 +1831,8 @@ format changes.
     path. A test stops and resumes a stub run and asserts both the note and
     the two log lines.
   - **`--json` carries the resume facts.** The human resume note stays on
-    stderr in `--json` mode — Rarog asked to keep it (B.2.7 notes,
-    2026-09-25), and the maintainer agreed — and the JSON value also
+    stderr in `--json` mode — kept at the user's request (2026-09-25),
+    which the maintainer agreed to — and the JSON value also
     carries the facts as a `resume` object (`unit`, `completed_units`,
     `remaining_units`), so a wrapper need not parse stderr. The
     JSON-contract tests assert that stdout is exactly one JSON value.
@@ -1844,9 +1844,9 @@ format changes.
 and the JSON-contract tests pass; a stopped and resumed synthetic tune shows
 a finite ETA in `spsa status`.
 
-- **(b) Rarog's notes from the B.2.7 tune and gate** (GUIDE 12.2–12.4, Terra
+- **(b) Notes from a production tune and gate** (GUIDE 12.2–12.4, Terra
   High), reported 2026-09-25 against `cli-v0.1.0`; the runner's SPSA and
-  SPRT were validated at Rarog's scale (a 150,000-game tune, +13 Elo, no
+  SPRT were validated at production scale (a 150,000-game tune, +13 Elo, no
   faults). The resume items of that report are (a) above.
   - **12.2 `spsa history`.** A read-only command that prints the centre
     vector after every completed iteration, rebuilt from the journal

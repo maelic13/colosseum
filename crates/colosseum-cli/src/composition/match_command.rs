@@ -232,6 +232,7 @@ pub(crate) async fn run_match(
             resolved_configuration: resolved.value(),
             invocations: vec![&engine_a, &engine_b],
             wave_shape: None,
+            rail_warnings: None,
         };
         print_output(&output, machine);
         return ExitCode::SUCCESS;
@@ -382,6 +383,20 @@ pub(crate) async fn run_match(
                 eprintln!("run record failed: {error}");
                 return ExitCode::from(3);
             }
+            let results =
+                match record_run_results(&writer, &mut recorder, Some(players.distinct_names()))
+                    .await
+                {
+                    Ok(results) => Some(results),
+                    Err(ResultsFailure::Output(error)) => {
+                        eprintln!("match output failed: {error}");
+                        return ExitCode::from(3);
+                    }
+                    Err(ResultsFailure::Record(error)) => {
+                        eprintln!("run record failed: {error}");
+                        return ExitCode::from(3);
+                    }
+                };
             let (run_status, exit_code) = match report.status {
                 match_runner::MatchStatus::Completed => (RunStatus::Completed, 0),
                 match_runner::MatchStatus::Cancelled => (RunStatus::Cancelled, CANCELLED_EXIT_CODE),
@@ -409,9 +424,11 @@ pub(crate) async fn run_match(
                     run_directory: directory.paths().root.clone(),
                     report,
                     resume,
+                    results,
                 });
             } else {
                 print_fixed_match(&report);
+                print_run_results(results.as_ref());
                 println!("artifacts: {}", directory.paths().root.display());
             }
             ExitCode::from(exit_code)

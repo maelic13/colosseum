@@ -441,11 +441,24 @@ pub(crate) struct StoredSpsaWorkflow {
 pub(crate) struct SpsaStatusOutput {
     pub(crate) run_status: RunStatus,
     pub(crate) diagnostics: SpsaStatusReport,
+    /// Per knob, in tune-file order: the completed iterations whose arm
+    /// `centre - c` was sent as the minimum, or `centre + c` as the maximum.
+    /// A knob can be clamped on every iteration while its centre never
+    /// touches a bound, which bound contact does not show.
+    pub(crate) arm_clamps: Vec<SpsaKnobClamps>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) candidate_result: Option<SpsaTuneResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) candidate_unavailable_reason: Option<String>,
     pub(crate) snapshot_authority: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct SpsaKnobClamps {
+    pub(crate) name: String,
+    pub(crate) completed_iterations: u32,
+    pub(crate) clamped_at_min: u32,
+    pub(crate) clamped_at_max: u32,
 }
 
 /// A tune read back from its run directory for inspection.
@@ -556,6 +569,29 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
                     / 1_000.0,
             )
         });
+    let completed = replay.completed_iterations.len() as u32;
+    let arm_clamps = match spsa_clamp_counts(
+        &workflow.schedule,
+        &workflow.bound_tune.initial_centers(),
+        &replay.completed_iterations,
+    ) {
+        Ok(counts) => workflow
+            .schedule
+            .knobs
+            .iter()
+            .zip(counts.last().expect("the counts start from zeros"))
+            .map(|(knob, count)| SpsaKnobClamps {
+                name: knob.name.clone(),
+                completed_iterations: completed,
+                clamped_at_min: count.at_min,
+                clamped_at_max: count.at_max,
+            })
+            .collect(),
+        Err(error) => {
+            eprintln!("SPSA status failed: the stored schedule does not rebuild the arms: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let invalid = has_invalid || record.status == RunStatus::Invalid;
     let diagnostics = match diagnose_spsa(
         &workflow.bound_tune,
@@ -591,6 +627,7 @@ pub(crate) fn run_spsa_status(run_directory: &Path, machine: bool) -> ExitCode {
     let output = SpsaStatusOutput {
         run_status: record.status,
         diagnostics,
+        arm_clamps,
         candidate_result,
         candidate_unavailable_reason,
         snapshot_authority: "checksum-verified current checkpoint with previous-generation fallback; read-only and never recovered in place".into(),
@@ -736,6 +773,127 @@ pub(crate) struct SpsaHistoryReport {
 pub(crate) struct SpsaHistoryRow {
     pub(crate) iteration: u64,
     pub(crate) centers: Vec<f64>,
+    /// Per knob, in the order of `centers`: the iterations so far whose arm
+    /// `centre - c` was sent as the knob's minimum.
+    pub(crate) clamped_at_min: Vec<u32>,
+    /// The same for `centre + c` and the maximum.
+    pub(crate) clamped_at_max: Vec<u32>,
+}
+
+/// How many completed iterations clamped one knob's arms at each range end.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub(crate) struct SpsaClampCount {
+    pub(crate) at_min: u32,
+    pub(crate) at_max: u32,
+}
+
+/// The running clamp counts of a tune: entry `n` holds every knob's counts
+/// over its first `n` completed iterations, so entry 0 is all zeros. Each
+/// iteration's arms are rebuilt from the centres it started from and the
+/// schedule's gain, exactly as the driver built them.
+pub(crate) fn spsa_clamp_counts(
+    schedule: &SpsaScheduleArtifact,
+    initial: &[f64],
+    completed: &[spsa_driver::SpsaIterationSummary],
+) -> Result<Vec<Vec<SpsaClampCount>>, colosseum_core::SpsaError> {
+    let knobs = schedule
+        .knobs
+        .iter()
+        .map(SpsaDerivedKnob::knob)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut running = vec![vec![SpsaClampCount::default(); knobs.len()]];
+    let mut centers = initial;
+    for summary in completed {
+        let clamps = colosseum_core::iteration_arm_clamps(
+            schedule.schedule,
+            summary.iteration,
+            centers,
+            &knobs,
+        )?;
+        let mut next = running.last().expect("the counts start from zeros").clone();
+        for (count, clamp) in next.iter_mut().zip(clamps) {
+            count.at_min += u32::from(clamp.at_min);
+            count.at_max += u32::from(clamp.at_max);
+        }
+        running.push(next);
+        centers = &summary.centers_after;
+    }
+    Ok(running)
+}
+
+/// One audit warning per knob whose arms were clamped at all.
+pub(crate) fn spsa_clamp_warnings(
+    schedule: &SpsaScheduleArtifact,
+    counts: &[SpsaClampCount],
+    completed_iterations: u32,
+) -> Vec<SpsaTuneWarning> {
+    schedule
+        .knobs
+        .iter()
+        .zip(counts)
+        .filter(|(_, count)| count.at_min > 0 || count.at_max > 0)
+        .map(|(knob, count)| SpsaTuneWarning::ArmsClampedAtRangeEnd {
+            name: knob.name.clone(),
+            min: knob.min,
+            max: knob.max,
+            completed_iterations,
+            clamped_at_min: count.at_min,
+            clamped_at_max: count.at_max,
+        })
+        .collect()
+}
+
+/// A knob whose first arms, `seed ± c_0`, already leave its range: from the
+/// first iteration on, one arm is sent as a range end.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct SpsaRailWarning {
+    pub(crate) name: String,
+    pub(crate) seed: i64,
+    pub(crate) c0: f64,
+    pub(crate) min: i64,
+    pub(crate) max: i64,
+    /// `seed - c_0` would be sent as `min`.
+    pub(crate) clamped_at_min: bool,
+    /// `seed + c_0` would be sent as `max`.
+    pub(crate) clamped_at_max: bool,
+}
+
+/// Every knob whose iteration-1 arms leave its range, by the test the tune's
+/// clamp counts use.
+pub(crate) fn spsa_rail_warnings(
+    schedule: &SpsaScheduleArtifact,
+    tune: &SpsaTune,
+) -> Result<Vec<SpsaRailWarning>, colosseum_core::SpsaError> {
+    let mut warnings = Vec::new();
+    for (derived, parameter) in schedule.knobs.iter().zip(&tune.parameters) {
+        let knob = derived.knob()?;
+        let c = schedule.schedule.coefficients(0, knob)?.c;
+        let clamp = colosseum_core::arm_clamp(parameter.initial as f64, c, knob);
+        if clamp.at_min || clamp.at_max {
+            warnings.push(SpsaRailWarning {
+                name: derived.name.clone(),
+                seed: parameter.initial,
+                c0: c,
+                min: derived.min,
+                max: derived.max,
+                clamped_at_min: clamp.at_min,
+                clamped_at_max: clamp.at_max,
+            });
+        }
+    }
+    Ok(warnings)
+}
+
+pub(crate) fn print_spsa_rail_warning(warning: &SpsaRailWarning) {
+    let ends = match (warning.clamped_at_min, warning.clamped_at_max) {
+        (true, true) => format!("both ends, {} and {}", warning.min, warning.max),
+        (true, false) => format!("its minimum {}", warning.min),
+        _ => format!("its maximum {}", warning.max),
+    };
+    eprintln!(
+        "SPSA rail warning: {:?} starts at {} with c_0 {:.3}, so its first arms {} +/- {:.3} leave [{}, {}] and one is sent at {ends}",
+        warning.name, warning.seed, warning.c0, warning.seed, warning.c0, warning.min, warning.max
+    );
 }
 
 /// The rows of a tune's history: its initial centres, then the centres after
@@ -751,12 +909,16 @@ pub(crate) fn spsa_history_rows(
     std::iter::once(SpsaHistoryRow {
         iteration: 0,
         centers: initial.to_vec(),
+        clamped_at_min: Vec::new(),
+        clamped_at_max: Vec::new(),
     })
     .chain(completed.iter().enumerate().filter_map(|(index, summary)| {
         let iteration = index as u64 + 1;
         (iteration.is_multiple_of(every) || iteration == last).then(|| SpsaHistoryRow {
             iteration,
             centers: summary.centers_after.clone(),
+            clamped_at_min: Vec::new(),
+            clamped_at_max: Vec::new(),
         })
     }))
     .collect()
@@ -800,7 +962,16 @@ pub(crate) fn spsa_history_table(report: &SpsaHistoryReport) -> String {
         .iter()
         .map(|row| {
             std::iter::once(row.iteration.to_string())
-                .chain(row.centers.iter().map(|center| format!("{center:.3}")))
+                .chain(row.centers.iter().enumerate().map(|(knob, center)| {
+                    let mut cell = format!("{center:.3}");
+                    for (marker, counts) in [('<', &row.clamped_at_min), ('>', &row.clamped_at_max)]
+                    {
+                        if let Some(count) = counts.get(knob).filter(|count| **count > 0) {
+                            cell.push_str(&format!(" {marker}{count}"));
+                        }
+                    }
+                    cell
+                }))
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
@@ -826,6 +997,16 @@ pub(crate) fn spsa_history_table(report: &SpsaHistoryReport) -> String {
     for row in &rows {
         text.push_str(&line(row));
     }
+    if report
+        .rows
+        .iter()
+        .flat_map(|row| row.clamped_at_min.iter().chain(&row.clamped_at_max))
+        .any(|count| *count > 0)
+    {
+        text.push_str(
+            "<N, >N: iterations so far whose arm centre - c was sent as the minimum, or centre + c as the maximum\n",
+        );
+    }
     text
 }
 
@@ -839,7 +1020,17 @@ pub(crate) fn run_spsa_history(command: &SpsaHistoryCommand, machine: bool) -> E
         Err(code) => return code,
     };
     let completed = &inspected.replay.completed_iterations;
-    let report = SpsaHistoryReport {
+    let initial = inspected.workflow.bound_tune.initial_centers();
+    let clamps = match spsa_clamp_counts(&inspected.workflow.schedule, &initial, completed) {
+        Ok(clamps) => clamps,
+        Err(error) => {
+            eprintln!(
+                "SPSA history failed: the stored schedule does not rebuild the arms: {error}"
+            );
+            return ExitCode::from(3);
+        }
+    };
+    let mut report = SpsaHistoryReport {
         run_status: inspected.record.status,
         completed_iterations: completed.len() as u64,
         planned_iterations: inspected.workflow.settings.iterations,
@@ -850,12 +1041,13 @@ pub(crate) fn run_spsa_history(command: &SpsaHistoryCommand, machine: bool) -> E
             .iter()
             .map(|knob| knob.name.clone())
             .collect(),
-        rows: spsa_history_rows(
-            &inspected.workflow.bound_tune.initial_centers(),
-            completed,
-            command.every.unwrap_or(1),
-        ),
+        rows: spsa_history_rows(&initial, completed, command.every.unwrap_or(1)),
     };
+    for row in &mut report.rows {
+        let counts = &clamps[row.iteration as usize];
+        row.clamped_at_min = counts.iter().map(|count| count.at_min).collect();
+        row.clamped_at_max = counts.iter().map(|count| count.at_max).collect();
+    }
     if machine {
         print_json(&MachineOutput::SpsaHistory {
             run_directory: &command.run_directory,
@@ -892,8 +1084,25 @@ pub(crate) fn print_spsa_status(report: &SpsaStatusOutput, run_directory: &Path)
         ),
     }
     for knob in &report.diagnostics.knobs {
+        let clamped = report
+            .arm_clamps
+            .iter()
+            .find(|clamps| clamps.name == knob.name)
+            .filter(|clamps| clamps.clamped_at_min > 0 || clamps.clamped_at_max > 0)
+            .map_or_else(String::new, |clamps| {
+                format!(
+                    "; arm clamped {}",
+                    clamped_text(
+                        "",
+                        clamps.clamped_at_min,
+                        clamps.clamped_at_max,
+                        clamps.completed_iterations
+                    )
+                    .trim_start()
+                )
+            });
         println!(
-            "{}: {:.6} ({:.2}% of range); bound-contact {:?}, seed-movement {:?}, recent-stability {:?}, rounding-resolution {:?}",
+            "{}: {:.6} ({:.2}% of range); bound-contact {:?}, seed-movement {:?}, recent-stability {:?}, rounding-resolution {:?}{clamped}",
             knob.name,
             knob.current,
             knob.current_normalized_to_range * 100.0,
@@ -1241,6 +1450,18 @@ pub(crate) async fn run_spsa_command(
         }
     };
     if dry_run {
+        // A warning, never a refusal: whether a knob may start where its
+        // first arms leave the range is the registration's decision.
+        let rail_warnings = match spsa_rail_warnings(&expected_schedule, &tune) {
+            Ok(warnings) => warnings,
+            Err(error) => {
+                eprintln!("configuration error: {error}");
+                return ExitCode::from(2);
+            }
+        };
+        for warning in &rail_warnings {
+            print_spsa_rail_warning(warning);
+        }
         print_output(
             &MachineOutput::DryRun {
                 command: "spsa",
@@ -1251,6 +1472,7 @@ pub(crate) async fn run_spsa_command(
                     settings.games_per_iteration,
                     conditions.concurrency,
                 )),
+                rail_warnings: Some(rail_warnings),
             },
             machine,
         );
@@ -1569,6 +1791,24 @@ pub(crate) async fn run_spsa_command(
     } else {
         None
     };
+    // Which arms reached a range end is reported, never acted on: the
+    // driver's arms and updates are untouched.
+    let mut tune_audit = tune_audit;
+    match spsa_clamp_counts(
+        &expected_schedule,
+        &bound_tune.initial_centers(),
+        &driver.completed_iterations,
+    ) {
+        Ok(counts) => tune_audit.warnings.extend(spsa_clamp_warnings(
+            &expected_schedule,
+            counts.last().expect("the counts start from zeros"),
+            driver.completed_iterations.len() as u32,
+        )),
+        Err(error) => {
+            eprintln!("SPSA result failed: the schedule does not rebuild the arms: {error}");
+            return ExitCode::from(3);
+        }
+    }
     let report = SpsaReport {
         schema_version: SPSA_RESULT_SCHEMA_VERSION,
         games: crate::journal::JOURNAL_FILE,
@@ -1612,11 +1852,13 @@ pub(crate) async fn run_spsa_command(
     }
 }
 
-/// Version 3 keeps per iteration only what the schedule cannot give again:
-/// the centres after it, its pair score and faults. Version 2 also stored the
-/// arm vectors, perturbation signs and gains, about 16 KB per iteration at 82
-/// knobs; version 1 carried every game's full record.
-pub(crate) const SPSA_RESULT_SCHEMA_VERSION: u32 = 3;
+/// Version 4 adds to `tune_audit` a warning per knob whose arms were clamped
+/// at a range end. Version 3 keeps per iteration only what the schedule
+/// cannot give again: the centres after it, its pair score and faults.
+/// Version 2 also stored the arm vectors, perturbation signs and gains, about
+/// 16 KB per iteration at 82 knobs; version 1 carried every game's full
+/// record.
+pub(crate) const SPSA_RESULT_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct SpsaReport {
@@ -1945,7 +2187,7 @@ fn coefficient_summary(prepared: &SpsaIteration) -> String {
         } else if (high - low).abs() < 1e-12 {
             format!("{low:.4}")
         } else {
-            format!("{low:.4}\u{2013}{high:.4}")
+            format!("{low:.4}..{high:.4}")
         }
     };
     format!(
@@ -2432,6 +2674,7 @@ pub(crate) fn print_spsa(report: &SpsaReport, run_directory: &Path) {
         }
         println!("  games    {games} played");
         println!("  faults   {fault_line}");
+        println!("  clamped  {}", spsa_clamped_arms(report));
         println!("  files    {files}");
         return;
     }
@@ -2510,11 +2753,52 @@ pub(crate) fn print_spsa(report: &SpsaReport, run_directory: &Path) {
     );
     println!("  faults     {fault_line}");
     println!("  at a rail  {}", spsa_railed_parameters(report));
+    println!("  clamped    {}", spsa_clamped_arms(report));
     println!("  files      {files}");
     println!("             tuned-options.txt   setoption lines, ready to paste");
     println!("             tuned-options.toml  the same as a run-file fragment");
     println!("             result.json         one summary per iteration; games in games.jsonl");
     println!("  next       verify the tuned values with an SPRT against the start values");
+}
+
+/// The knobs whose arms reached a range end, with how often, from the
+/// report's audit: "none", or "Aggression at min on 12 of 40 iterations".
+fn spsa_clamped_arms(report: &SpsaReport) -> String {
+    let clamped = report
+        .tune_audit
+        .warnings
+        .iter()
+        .filter_map(|warning| match warning {
+            SpsaTuneWarning::ArmsClampedAtRangeEnd {
+                name,
+                completed_iterations,
+                clamped_at_min,
+                clamped_at_max,
+                ..
+            } => Some(clamped_text(
+                name,
+                *clamped_at_min,
+                *clamped_at_max,
+                *completed_iterations,
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if clamped.is_empty() {
+        "none".to_owned()
+    } else {
+        clamped.join(", ")
+    }
+}
+
+fn clamped_text(name: &str, at_min: u32, at_max: u32, iterations: u32) -> String {
+    let ends = [("min", at_min), ("max", at_max)]
+        .into_iter()
+        .filter(|(_, count)| *count > 0)
+        .map(|(end, count)| format!("at {end} on {count}"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    format!("{name} {ends} of {iterations} iterations")
 }
 
 pub(crate) fn print_spsa_tune_warning(warning: &SpsaTuneWarning) {
@@ -2540,6 +2824,21 @@ pub(crate) fn print_spsa_tune_warning(warning: &SpsaTuneWarning) {
         } => eprintln!(
             "SPSA tune warning: {name:?} starts on its upper rail ({initial} = {rail}); its initial gradient is one-sided"
         ),
+        SpsaTuneWarning::ArmsClampedAtRangeEnd {
+            name,
+            completed_iterations,
+            clamped_at_min,
+            clamped_at_max,
+            ..
+        } => eprintln!(
+            "SPSA tune warning: an arm clamped at a range end: {}",
+            clamped_text(
+                name,
+                *clamped_at_min,
+                *clamped_at_max,
+                *completed_iterations
+            )
+        ),
     }
 }
 
@@ -2563,6 +2862,34 @@ mod tests {
                 first: iteration * 2 + 1,
                 last: iteration * 2 + 2,
             },
+        }
+    }
+
+    /// Not part of the suite: the clamp counts a finished tune adds to its
+    /// result's audit and prints at its end, computed by the end-of-run code
+    /// from a recorded tune named by `COLOSSEUM_RECORDED_TUNE`.
+    #[test]
+    #[ignore = "reads a recorded tune named by COLOSSEUM_RECORDED_TUNE"]
+    fn the_end_of_run_clamp_counts_of_a_recorded_tune() {
+        let root = PathBuf::from(
+            std::env::var_os("COLOSSEUM_RECORDED_TUNE")
+                .expect("COLOSSEUM_RECORDED_TUNE names a tune's run directory"),
+        );
+        let inspected = inspect_spsa_run(&root, "recorded tune").expect("a readable tune");
+        let completed = &inspected.replay.completed_iterations;
+        let counts = spsa_clamp_counts(
+            &inspected.workflow.schedule,
+            &inspected.workflow.bound_tune.initial_centers(),
+            completed,
+        )
+        .unwrap();
+        for warning in spsa_clamp_warnings(
+            &inspected.workflow.schedule,
+            counts.last().unwrap(),
+            completed.len() as u32,
+        ) {
+            print_spsa_tune_warning(&warning);
+            println!("{}", serde_json::to_string(&warning).unwrap());
         }
     }
 

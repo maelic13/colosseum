@@ -2,7 +2,7 @@
 
 Release acceptance for Colosseum CLI 0.1.0 ([Phase 10 record](phase-10-record.md), item (ab); GUIDE 10.9r):
 the harness measured against a second runner, fastchess 1.8.0-alpha
-(`072859b`), on the reference host, with Rarog as the validation engine. Each
+(`072859b`), on the reference host, with the Rust engine as the validation engine. Each
 check was run by the maintainer, one command at a time, and analysed from its
 run directory before the next. An adopting project trusts the released binary
 and repeats none of this. Symmetry is its own step, 10.9v.
@@ -36,7 +36,7 @@ of these changes what they measured.
 Two builds whose difference fastchess has measured, a fixed 2,000 games.
 
 ```text
-colosseum-cli match rarog-b22core-pext-pgo.exe rarog-b22base-pext-pgo.exe \
+colosseum-cli match engine-b22core-pext-pgo.exe engine-b22base-pext-pgo.exe \
   --a-label b22core --b-label b22base --games 2000 \
   --a-base-ms 3000 --a-increment-ms 30 --b-base-ms 3000 --b-increment-ms 30 \
   --a-option Hash=64 --a-option Threads=1 --b-option Hash=64 --b-option Threads=1 \
@@ -45,8 +45,8 @@ colosseum-cli match rarog-b22core-pext-pgo.exe rarog-b22base-pext-pgo.exe \
   --dir colosseum-qual-scale
 ```
 
-Engines: `rarog-b22core-pext-pgo.exe` (sha256 `C51476EBE81E…`, bench
-4,706,910) and `rarog-b22base-pext-pgo.exe` (`CDAF2AE5090D…`, 7,601,220),
+Engines: `engine-b22core-pext-pgo.exe` (sha256 `C51476EBE81E…`, bench
+4,706,910) and `engine-b22base-pext-pgo.exe` (`CDAF2AE5090D…`, 7,601,220),
 both matching their sidecars.
 
 | | Colosseum 0.1.0 | fastchess, same binaries |
@@ -62,7 +62,7 @@ games per hour. With engines kept per slot, start-up is 7.3 ms per game at
 the median (a slot's first game about 200 ms) and teardown 0.1 ms, against
 42.0 ms and 10.7 ms with fresh processes per game in the 10.9m baseline on
 the same binaries. The closest any move came to its deadline was 51 ms (18 ms
-in the baseline), and no move was charged past Rarog's own hard-limit bound
+in the baseline), and no move was charged past the Rust engine's own hard-limit bound
 by more than 10 ms (21 in the baseline): the KPK bitbase these pre-fix
 binaries build on first use is now built at most once per process. The
 largest time a search was held off its CPU was 27.7 ms (p99 of the per-side
@@ -74,7 +74,7 @@ An SPRT of a pair fastchess has gated, under its conditions: normalized
 `[0, 10]`, α = β = 0.05, at most 8,000 pairs.
 
 ```text
-colosseum-cli sprt rarog-b24a-core-pext-pgo.exe rarog-b24a-base-pext-pgo.exe \
+colosseum-cli sprt engine-b24a-core-pext-pgo.exe engine-b24a-base-pext-pgo.exe \
   --a-label b24a-core --b-label b24a-base --model normalized --elo0 0 --elo1 10 \
   --alpha 0.05 --beta 0.05 --max-pairs 8000 \
   --a-base-ms 3000 --a-increment-ms 30 --b-base-ms 3000 --b-increment-ms 30 \
@@ -84,8 +84,8 @@ colosseum-cli sprt rarog-b24a-core-pext-pgo.exe rarog-b24a-base-pext-pgo.exe \
   --dir colosseum-qual-verdict
 ```
 
-Engines: `rarog-b24a-core-pext-pgo.exe` (sha256 `9206A59884D0…`) and
-`rarog-b24a-base-pext-pgo.exe` (`4EC72F0FA40F…`), the hashes fastchess's
+Engines: `engine-b24a-core-pext-pgo.exe` (sha256 `9206A59884D0…`) and
+`engine-b24a-base-pext-pgo.exe` (`4EC72F0FA40F…`), the hashes fastchess's
 manifest records.
 
 | | Colosseum 0.1.0 | fastchess, same binaries and design |
@@ -106,9 +106,9 @@ slot for both colours. The run's last progress block showed "time remaining
 ## 3. Ratings — passed
 
 A newcomer placed in a pool whose ratings are held fixed, reproducing a
-rating the desktop application measured. The reference is Rarog's RAR-M57: a
+rating the desktop application measured. The reference is the engine project's own reference run: a
 desktop gauntlet (tournament `8791a27e`, 2026-09-19) of
-`rarog-v2.5.0-dev-fit3900-windows-pext-native-pgo.exe` (sha256
+`engine-v2.5.0-dev-fit3900-windows-pext-native-pgo.exe` (sha256
 `1F73D5C9…`) against ten opponents at their Super Rating Tournament ratings,
 600 games each, which rated it **3191**. Here the same binary plays six of
 those opponents, 400 games each, their ratings pinned at the same values,
@@ -120,7 +120,7 @@ pinned cores here, unpinned in the desktop event.
 
 ```text
 colosseum-cli tournament run --format gauntlet --seeds 1 --games-per-pair 2 --cycles 200 \
-  --engine rarog-v2.5.0-dev-fit3900-windows-pext-native-pgo.exe --label "Rarog 2.5.0-dev" \
+  --engine engine-v2.5.0-dev-fit3900-windows-pext-native-pgo.exe --label "Engine 2.5.0-dev" \
   --engine Houdini_15a_x64.exe --label "Houdini 1.5a" \
   --engine Critter_1.6a_64bit.exe --label "Critter 1.6a" \
   --engine EngineDeepShredder13UCIx64.exe --label "Shredder 13" \
@@ -141,7 +141,7 @@ With the field pinned, the newcomer's rating is in effect the mean of its
 performances against the opponents, so the six kept here predict 3190.7 from
 RAR-M57's own per-opponent results; the four left out average 3191 too.
 
-| Opponent (pinned) | Rarog, CLI, 400 games | Rarog, RAR-M57, 600 games | Performance, CLI / RAR-M57 |
+| Opponent (pinned) | Engine, CLI, 400 games | Engine, reference run, 600 games | Performance, CLI / reference |
 |---|---|---|---|
 | Houdini 1.5a (3211) | 50.6% | 50.5% | 3215 / 3215 |
 | Shredder 13 (3201) | 49.8% | 50.5% | 3199 / 3205 |
@@ -153,7 +153,7 @@ RAR-M57's own per-opponent results; the four left out average 3191 too.
 
 The interval (3187.9–3215.9) contains the reference, and every opponent's
 score is within the noise of 400 and 600 games (largest difference 4.0
-points, Stockfish 5). 2,400 official games, W-D-L 937-643-820 for Rarog, no
+points, Stockfish 5). 2,400 official games, W-D-L 937-643-820 for the Rust engine, no
 fault of any kind, 14 slots with no overlapping span, 5,066 games per hour.
 The report printed a pinned rating as "3192.0 unavailable [fixed]"; a display
 defect, fixed in the tuning candidate.
@@ -161,9 +161,9 @@ defect, fixed in the tuning candidate.
 ## 4. Tuning — passed on strength, with one criterion missed
 
 Whether `spsa` recovers a known loss. Four parameters of
-`rarog-b23core-tune.exe` (sha256 `25467C63…`, bench 4,706,910, the tune build
-Rarog's own SPSA uses) were pushed about ten perturbation steps from their
-defaults, each away from where Rarog's 3,900-iteration tune had taken it, and
+`engine-b23core-tune.exe` (sha256 `25467C63…`, bench 4,706,910, the tune build
+the Rust engine's own SPSA uses) were pushed about ten perturbation steps from their
+defaults, each away from where the Rust engine's 3,900-iteration tune had taken it, and
 each from a different pruning mechanism. Three runs: the detune's cost, the
 tune, and the gate on its result.
 
@@ -176,10 +176,10 @@ repeated; the criterion was not moved.
 
 **4b, the tune.** 45,000 games from the detuned start, 1,500 iterations of 30
 games, `r_end` 0.03, 15 slots (`tools/results/colosseum-qual-recovery.toml`
-holds the vector; `min`, `max` and `c_end` are Rarog's own).
+holds the vector; `min`, `max` and `c_end` are the Rust engine's own).
 
 ```text
-colosseum-cli spsa rarog-b23core-tune.exe --tune colosseum-qual-recovery.toml \
+colosseum-cli spsa engine-b23core-tune.exe --tune colosseum-qual-recovery.toml \
   --r-end 0.03 --total-games 45000 --games-per-iteration 30 \
   --base-ms 3000 --increment-ms 30 --option Hash=64 --option Threads=1 \
   --book UHO_Lichess_4852_v1.epd --book-order random --seed 47 \
@@ -194,7 +194,7 @@ colosseum-cli spsa rarog-b23core-tune.exe --tune colosseum-qual-recovery.toml \
 | `CoreFpLinear` | 165 | 184 | ≤ 127 | 90 |
 
 **Two of the four met the per-parameter criterion fixed before the run, so as
-stated it failed.** `CoreRfpLinear` returned to 16, where Rarog's long tune
+stated it failed.** `CoreRfpLinear` returned to 16, where the Rust engine's long tune
 put it (17), and `CoreLmrQuiet` travelled eighteen perturbation steps: a sign
 or scale error in the tuner cannot produce that. The other two stayed within
 the schedule's noise: at `r_end` 0.03 one iteration's noise moves a parameter
@@ -215,7 +215,7 @@ The criterion was about coordinates, but the property being qualified is that
 a tune recovers strength, and it did. The surface is coupled: with
 `CoreLmrQuiet` at 1148 rather than 2432, `CoreFpLinear` at 184 and
 `CoreLmpSquare` at 2275 are worth what the defaults are at theirs, which is
-also why the defaults are not the only optimum — Rarog's 82-parameter tune of
+also why the defaults are not the only optimum — the Rust engine's 82-parameter tune of
 this arm gained about 119 Elo over them. A per-coordinate criterion is
 therefore the wrong instrument at this budget, and a repeat of this test
 should gate on strength and keep coordinate movement as evidence.
@@ -227,7 +227,7 @@ the engine: any colour, pairing, placement or clock asymmetry shows here as a
 difference where none exists.
 
 ```text
-colosseum-cli calibrate rarog-b24a-core-pext-pgo.exe rarog-b24a-core-pext-pgo.exe \
+colosseum-cli calibrate engine-b24a-core-pext-pgo.exe engine-b24a-core-pext-pgo.exe \
   --games 30000 --a-base-ms 3000 --a-increment-ms 30 \
   --b-base-ms 3000 --b-increment-ms 30 \
   --a-option Hash=64 --a-option Threads=1 --b-option Hash=64 --b-option Threads=1 \
@@ -236,7 +236,7 @@ colosseum-cli calibrate rarog-b24a-core-pext-pgo.exe rarog-b24a-core-pext-pgo.ex
   --dir colosseum-qual-symmetry
 ```
 
-Both sides are `rarog-b24a-core-pext-pgo.exe` (sha256 `9206A59884D0…`), which
+Both sides are `engine-b24a-core-pext-pgo.exe` (sha256 `9206A59884D0…`), which
 the command requires to be byte-identical.
 
 | | Result | Tolerance |

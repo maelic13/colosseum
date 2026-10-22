@@ -226,9 +226,9 @@ mod tests {
     fn resolves_every_direct_engine_control() {
         let parsed = Harness::try_parse_from([
             "test",
-            "engines/rarog.exe",
+            "engines/candidate.exe",
             "--label",
-            "Rarog tuned",
+            "Candidate tuned",
             "--engine-arg=--uci",
             "--engine-arg",
             "network.nnue",
@@ -248,8 +248,8 @@ mod tests {
         .unwrap();
         let launch = parsed.engine.resolve().unwrap();
 
-        assert_eq!(launch.executable, PathBuf::from("engines/rarog.exe"));
-        assert_eq!(launch.label.as_deref(), Some("Rarog tuned"));
+        assert_eq!(launch.executable, PathBuf::from("engines/candidate.exe"));
+        assert_eq!(launch.label.as_deref(), Some("Candidate tuned"));
         assert_eq!(launch.arguments, ["--uci", "network.nnue"]);
         assert_eq!(launch.working_directory, Some(PathBuf::from("engines")));
         assert_eq!(launch.environment["RUST_LOG"], "warn");

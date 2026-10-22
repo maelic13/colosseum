@@ -2,13 +2,13 @@
 
 The controlled Phase-4B live comparison was repeated on 2026-09-22 against
 current FastChess and Cute Chess releases and the source the release is cut
-from. Each run used the same Rarog 2.3.1 executable on both arms, depth 1, four
+from. Each run used the same Rust engine 2.3.1 executable on both arms, depth 1, four
 colour-reversed pairs, no opening book, concurrency 1 and deliberately early
 draw adjudication. Each runner finished in seconds.
 
 The matrix was first recorded on 2026-08-03 against a release candidate. It was
 re-recorded here because that candidate is not the source being released, and
-because the Rarog 2.3.1 build the original hashes belong to (SHA-256
+because the Rust engine 2.3.1 build the original hashes belong to (SHA-256
 `2a95390d…`) is no longer on the reference host: a record nobody can reproduce
 is not evidence. Both external runners are the exact binaries recorded before,
 and **both external transcripts came back byte-identical** to the ones recorded
@@ -23,7 +23,7 @@ Colosseum observation moved, onto the source being released.
 | FastChess | 1.8.0-alpha, CI commit `072859b` | `8444e73965ae44e716cde1bb546a7d7c8c9fc7a442a44194a0c71a3bffa7dd0d` |
 | Cute Chess CLI | 1.5.1, Qt 6.8.3 | `8889f9582dc688c567704cf083f6025baf77f791cde903698c70b3420caf5d7e` |
 | Colosseum CLI | 0.1.0 release source, Phase 10.10 | `3206ce79a6aab188c2b2f6b90ac6d6739c0f99f55265d9b88ba5ea6cf45a646f` |
-| Rarog | 2.3.1 Windows PEXT PGO | `033f66334385e30ad358293a411e72508fa5edf04d6fc57310bc545b39046898` |
+| Rust engine | 2.3.1 Windows PEXT PGO | `033f66334385e30ad358293a411e72508fa5edf04d6fc57310bc545b39046898` |
 
 The versions were checked against the official
 [FastChess 1.8.0-alpha release](https://github.com/Disservin/fastchess/releases/tag/v1.8.0-alpha)
@@ -35,11 +35,11 @@ Paths are represented by stable placeholders because executable location is
 not part of runner semantics.
 
 ```text
-<fastchess> -engine cmd=<rarog> name=A -engine cmd=<rarog> name=B -each depth=1 -rounds 4 -repeat -concurrency 1 -draw movenumber=5 movecount=2 score=10000 -ratinginterval 8
+<fastchess> -engine cmd=<engine> name=A -engine cmd=<engine> name=B -each depth=1 -rounds 4 -repeat -concurrency 1 -draw movenumber=5 movecount=2 score=10000 -ratinginterval 8
 
-<cutechess-cli> -engine cmd=<rarog> name=A -engine cmd=<rarog> name=B -each proto=uci tc=inf depth=1 -rounds 4 -games 2 -repeat -concurrency 1 -draw movenumber=5 movecount=2 score=10000 -ratinginterval 8
+<cutechess-cli> -engine cmd=<engine> name=A -engine cmd=<engine> name=B -each proto=uci tc=inf depth=1 -rounds 4 -games 2 -repeat -concurrency 1 -draw movenumber=5 movecount=2 score=10000 -ratinginterval 8
 
-<colosseum-cli> sprt <rarog> <rarog> --max-pairs 4 --preset gainer --a-depth 1 --b-depth 1 --draw-adjudication --draw-move 5 --draw-moves 2 --draw-score-cp 10000 --dir <run-dir> --json --seed 123 --placement off
+<colosseum-cli> sprt <engine> <engine> --max-pairs 4 --preset gainer --a-depth 1 --b-depth 1 --draw-adjudication --draw-move 5 --draw-moves 2 --draw-score-cp 10000 --dir <run-dir> --json --seed 123 --placement off
 ```
 
 ### Repeating this comparison

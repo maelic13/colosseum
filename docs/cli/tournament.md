@@ -111,6 +111,16 @@ supplied ratings are retained in the result and the run record as run inputs.
 own initial `--rating` instead of a separately supplied value. Naming the same
 participant through both is refused rather than resolved silently.
 
+Every progress block lists the whole field, and so does
+[`status`](status.md). At its end a tournament also prints, keeps in
+`run-record.json` under `results` and gives in its `--json` value what
+[`stats`](stats.md) replays from its directory: the standings with their
+intervals, each pair's W/D/L and Elo from its engine's side, how the games
+ended, the faults and how each was scored, and each engine's search. `standings.csv` fills `AvgNps` with each engine's total
+nodes over total search time. The run record counts the tournament's colour
+pairs; its pentanomial stays zero, because a tournament's pairs are against
+different opponents and each has its own.
+
 Every run directory contains the append-only game journal `games.jsonl`,
 `games.pgn` and `run.log`, checksum-protected current/previous checkpoints,
 `standings.csv`, `crosstable.csv`, `result.json`, the resolved configuration,

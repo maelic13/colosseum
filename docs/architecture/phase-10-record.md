@@ -378,7 +378,7 @@ games" procedure at 10.10, once, on the final state.
   Findings): the residual forfeits are not the harness's. Per-search held
   time, kernel time and page faults (10.9m instrument) show the forfeiting
   searches on their CPU the whole time, each taking the ~130 page faults of
-  Rarog's 512 KiB KPK bitbase, which Rarog builds inside the evaluation on
+  the Rust engine's 512 KiB KPK bitbase, which the Rust engine builds inside the evaluation on
   first use (33–37 ms, uninterruptible by its clock check). fastchess keeps
   processes for the whole run and pays it once; Colosseum's fresh processes
   pay it in most games, and it forfeits when it lands in a scramble. A
@@ -558,7 +558,7 @@ games" procedure at 10.10, once, on the final state.
   centres before still reach the observer once, in the full
   `SpsaCommittedIteration`, for the journal and the progress block; the
   replay returns the last iteration in full for `spsa status`. Measured on
-  the real 82-knob Rarog tune: 26.1 KB per iteration pretty-printed in
+  the real 82-knob tune: 26.1 KB per iteration pretty-printed in
   version 2 (the 15-slot run's `result.json`), 2.2 KB in version 3; the
   5,000-iteration one-knob stub result fell from 5.66 MB to 2.46 MB. The
   dead self-comparison was the resume check: summaries rebuilt by the
@@ -1085,7 +1085,7 @@ games" procedure at 10.10, once, on the final state.
   directory exists, because the two say different things about one rating.
 - **(ae) Persistent engine processes per slot**, by maintainer decision
   2026-09-19 after 10.9m: fastchess keeps its engines for a whole tournament,
-  so an engine's one-time work (Rarog's KPK bitbase, 33–37 ms on first use) is
+  so an engine's one-time work (the Rust engine's KPK bitbase, 33–37 ms on first use) is
   paid once, where Colosseum's fresh processes paid it inside a game's search
   in most games; and a fresh process costs its slot about 1% of its time
   (start-up 61 ms of a 9 s game at 3+0.03). Crash isolation is kept by
@@ -1116,13 +1116,13 @@ games" procedure at 10.10, once, on the final state.
   that crashes in every game is replaced four times in four games while its
   opponent plays all four in one process; a kept engine is reaped when the
   harness is killed. The fresh-process kill test and the teardown phase test
-  pass `per-game`, which is what they test. Real smoke at 15 slots on Rarog:
+  pass `per-game`, which is what they test. Real smoke at 15 slots on the Rust engine:
   a 60-game match, start-up median 8.3 ms (220–258 ms for a slot's first
-  game), teardown 0.1 ms, no fault, no Rarog process left after the run; a
+  game), teardown 0.1 ms, no fault, no engine process left after the run; a
   3-iteration, 82-knob tune the same.
 - **(af) Corrections from the adoption audit** (GUIDE 10.9w, Sol High), by
-  maintainer decision 2026-09-21 after Rarog audited the harness it is about
-  to adopt (Rarog `analysis/b2_audit_2026-09-21.md`). The audit recounted the
+  maintainer decision 2026-09-21 after the Rust engine's project audited the harness it was about
+  to adopt. The audit recounted the
   symmetry and scale runs from their PGNs to the recorded figures and found
   no defect in the harness; what it found is release preparation:
   - The recorded Phase 8.1 parity command no longer runs, because
@@ -1145,26 +1145,26 @@ games" procedure at 10.10, once, on the final state.
     (ag) can version the GUI.
   - Qualification §4's per-coordinate criterion is recorded as missed. Keep
     it so; add nothing that softens it.
-  - Every binary in the qualification runs predates Rarog's start-up fix, so
+  - Every binary in the qualification runs predates the Rust engine's start-up fix, so
     no run exercises fresh processes per game on a fixed engine. One optional
     maintainer-run `match --engine-processes per-game` of 2,000 games on a
-    post-fix Rarog pair is offered as a command, not required, and does not
+    post-fix pair is offered as a command, not required, and does not
     block the release. It is the qualification's scale command with the
     post-fix pair and fresh processes per game, written for PowerShell and
-    run from `D:\code\rarog\tools\results`, so the run directory lands beside
+    run from `<engine repository>\tools\results`, so the run directory lands beside
     the other `colosseum-qual-*` ones (dry-run from there, exit 0, 2026-09-22):
 
     ```text
     D:\code\colosseum\target\release\colosseum-cli.exe match `
-      D:\code\rarog\tools\test_engines\rarog-startupfix-core-pext-pgo.exe `
-      D:\code\rarog\tools\test_engines\rarog-startupfix-base-pext-pgo.exe `
+      <engine repository>\tools\test_engines\engine-startupfix-core-pext-pgo.exe `
+      <engine repository>\tools\test_engines\engine-startupfix-base-pext-pgo.exe `
       --a-label startupfix-core --b-label startupfix-base --games 2000 `
       --engine-processes per-game `
       --a-base-ms 3000 --a-increment-ms 30 --b-base-ms 3000 --b-increment-ms 30 `
       --a-option Hash=64 --a-option Threads=1 `
       --b-option Hash=64 --b-option Threads=1 `
       --a-margin-ms 20 --b-margin-ms 20 `
-      --book D:\code\rarog\tools\books\UHO_Lichess_4852_v1.epd `
+      --book <engine repository>\tools\books\UHO_Lichess_4852_v1.epd `
       --book-order random --seed 48 --placement auto --concurrency 14 `
       --dir colosseum-freshproc-postfix
     ```
@@ -1187,7 +1187,7 @@ games" procedure at 10.10, once, on the final state.
     against 0.1 ms — about 1.4% of a nine-second game, which is why
     `per-slot` remains the default. The figure is higher than the 42.0 ms the
     10.9m baseline measured with fresh processes on the pre-fix binaries, and
-    for a coherent reason rather than noise: Rarog's fix moved its KPK
+    for a coherent reason rather than noise: the Rust engine's fix moved its KPK
     bitbase out of the first search and into process start-up, so a run that
     starts 4,000 processes pays it 2,000 times instead of hiding it inside a
     game. The two runs use different binaries, so that is an explanation, not
@@ -1206,12 +1206,12 @@ games" procedure at 10.10, once, on the final state.
   parameters, and a test parses the recorded command against the shipped
   clap surface, so the two cannot drift apart again. Proved by running it on
   2026-09-21: colosseum-cli 0.1.0 built from the Phase 10.9w source,
-  `rarog-v2.3.1-windows-pext-pgo.exe` (sha256 `033f6633…`) on both arms,
+  `engine-v2.3.1-windows-pext-pgo.exe` (sha256 `033f6633…`) on both arms,
   exit 4, `inconclusive`, 8 games, 0/8/0, 4 complete pairs, pentanomial
   `[0, 0, 4, 0, 0]`, 0 faults — every shared field equal to the recorded
   observation. The pre-correction form exits 2. Noted for (j): that proof
-  used a different build of Rarog 2.3.1 from the one the recorded artifact
-  hashes belong to (`2a95390d…`), which is not in `D:\chess\engines\rarog`.
+  used a different build of the Rust engine 2.3.1 from the one the recorded artifact
+  hashes belong to (`2a95390d…`), which is not in the local engine library.
 
   **Implementation evidence (Phase 10.9w) — the GUI source since 1.0.2.**
   The diff of `crates/colosseum-gui` between `main` and the release source,
@@ -1260,7 +1260,7 @@ games" procedure at 10.10, once, on the final state.
   games.** `cargo build --release -p colosseum-gui` succeeds and the binary
   reports `colosseum 1.0.2`; the workspace suite is green (589 tests). The
   app itself, run 2026-09-21 from a `--portable` copy so that no real user
-  data was touched, played a short tournament: Basilisk 1.10.0 against Rarog
+  data was touched, played a short tournament: Basilisk 1.10.0 against the Rust engine
   2.4.0 from `D:\chess\engines`, round robin, two games at 100 ms per move.
   It finished in 37 s, 1.5–0.5 to Basilisk, terminations one `Checkmate` and
   one `50-move rule`, no forfeit and no engine error. The live view drew the
@@ -1268,7 +1268,7 @@ games" procedure at 10.10, once, on the final state.
   nodes and nps; standings, head-to-head, terminations and the tournament
   information panel all filled; the tournament was then deleted through the
   app. The GUI scheduler's real-engine smoke suite passes 6 of 7 against
-  Rarog 2.4.0 (full round robin, openings, resume across restart,
+  the Rust engine 2.4.0 (full round robin, openings, resume across restart,
   stop-drain-resume, force-stop); the seventh is the regression above. A
   headless four-game run through the same scheduler, runner and store
   confirmed the stored PGN carries the annotations above.
@@ -1277,7 +1277,7 @@ cut. Their final form, with the decisions and evidence that closed them, is
 the release-preparation section below.*
 
 **Decisions 2026-09-19 (maintainer):** (w) closed as rejected: its study
-traced the forfeits to Rarog's lazily built KPK bitbase, fixed in Rarog, and
+traced the forfeits to the Rust engine's lazily built KPK bitbase, fixed in the engine, and
 the 10,000-game target is not pursued; (ae) carries its one harness change.
 (r) and (ad) follow the release. (ab)'s symmetry run is its own step, 10.9v,
 run overnight when the machine is free and not blocking `cli-v0.1.0`; the
@@ -1349,7 +1349,7 @@ change if one were revisited.
   **Demonstrated in the application 2026-09-22**, a `--portable` copy with an
   engine "Ghost 1.0" pointed at a path that does not exist: the tournament
   finished 2/2 with both engines on zero games, zero points and unchanged Elo,
-  terminations `Aborted` 2, and the message `Ghost 1.0 vs Rarog 2.4.0
+  terminations `Aborted` 2, and the message `Ghost 1.0 vs Engine 2.4.0
   (round 1) — not scored, the game was not played. Detail: io error: The
   system cannot find the path specified. (os error 3)`. Correcting Ghost's
   path and reopening showed the tournament back at 0/2 and Stopped; Start
@@ -1385,7 +1385,7 @@ change if one were revisited.
     CLI is a thin composition root over a stable library boundary; the
     deferred (r), (z) and (ad) have each landed or been declined, because
     each changes the run record; and one full CLI minor release after that
-    has been used by an adopting project's CI (Rarog) with no change to the
+    has been used by an adopting project's CI with no change to the
     command surface, run-file schema, run-directory layout, JSON report
     schemas or exit codes. Until then, 0.x minor releases may change those
     formats and say so in the changelog; adopters pin an archive by SHA-256.
@@ -1456,8 +1456,8 @@ change if one were revisited.
     documentation drift gate (`colosseum-docs --check`), `git diff --check`,
     and confirms the product manifest version equals the tag's and the
     product changelog has a section for it.
-  - Deliberately not copied from Rarog's xtask: architecture tiers,
-    `--native`, `--pgo`, `verify-isa`. Rarog's product is its codegen;
+  - Deliberately not copied from the engine project's xtask: architecture tiers,
+    `--native`, `--pgo`, `verify-isa`. An engine's product is its codegen;
     Colosseum ships one portable binary per platform.
   - Both workflows call these commands. `release-gui.yml` additionally gains
     what `release-cli.yml` already has: the publish job downloads named
@@ -1469,7 +1469,7 @@ change if one were revisited.
     match each other's glob, but the explicit list stays: it is what proves
     a platform job did not silently drop an artifact. Versions stay in
     artifact names: a file identifies itself in a download folder and
-    Rarog's `setup_tools.ps1` pins a tagged archive by its SHA-256; the
+    an engine project's setup script pins a tagged archive by its SHA-256; the
     `gui-v`/`cli-v` tag-list links are the stable "latest" pointers.
     **No `SHA256SUMS` is published** (maintainer decision 2026-09-22):
     checksums are useless to most users as a download. The workflows keep
@@ -1560,8 +1560,8 @@ change if one were revisited.
   1.1.0; run the Phase 4B oracle replay and the Phase 8.1 parity matrix on
   the corrected source, exactly as recorded in
   `docs/fixtures/phase8/parity.json` (never drop the draw parameters to make
-  a command parse; the recorded artifact hashes belong to one Rarog 2.3.1
-  build, SHA-256 `2a95390d…`, which is not the copy in `D:\chess\engines\rarog`
+  a command parse; the recorded artifact hashes belong to one Rust engine 2.3.1
+  build, SHA-256 `2a95390d…`, which is not the copy in the local engine library
   — locate it or re-record the matrix on the build used); repeat the short
   third-party usability flows; dispatch the CLI candidate and the new GUI
   candidate and pass exact archive smoke on all four platforms; run the full
@@ -1596,7 +1596,7 @@ change if one were revisited.
   - **Changelogs dated** 2026-09-22; both tags still validate.
   - **Phase 4B oracle replay**: the ordered fastchess stream and the
     controlled live parity fixtures pass unchanged.
-  - **Phase 8.1 parity matrix, re-recorded.** The Rarog build the August
+  - **Phase 8.1 parity matrix, re-recorded.** The Rust engine build the August
     hashes belong to is on no disk of the reference host, so the matrix was
     repeated on the build that is there (`033f6633…`) with both external
     runners at their exact recorded hashes. All three runners agree on every
@@ -1658,7 +1658,7 @@ change if one were revisited.
   iterations (10.9t): the 10(x) throughput run measured 83% occupancy and
   4,517 games per hour against the 85% and 5,000 fixed beforehand — up from
   2,745 and above weather-factory's 3,720 on the same surface. Neither is
-  chased now. Reopen when the first real Rarog tune on the released binary
+  chased now. Reopen when the first real tune on the released binary
   shows wall-clock that matters to the project; take (ad) first, because it
   removes the iteration barrier for every mini-match size and its zero-game
   study is cheap, and (z) only if (ad) leaves a margin worth an experiment.

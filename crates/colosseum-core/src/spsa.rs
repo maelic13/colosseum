@@ -473,6 +473,51 @@ pub fn round_half_away_from_zero(value: f64) -> Result<i64, SpsaError> {
     Ok(rounded as i64)
 }
 
+/// Whether one knob's two arms at one iteration, `centre - c` and
+/// `centre + c`, left the knob's range and were clamped to its ends before
+/// rounding.
+///
+/// The perturbation sign only decides which engine plays which arm, so the
+/// pair of arms, and whether either reached a range end, does not depend on
+/// it. An arm that leaves the range by less than half a unit is still sent as
+/// the end it would have rounded to, but it is clamped all the same: the
+/// floating arm the update assumes was never played.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpsaArmClamp {
+    /// `centre - c` was below `min`, so the arm was played at `min`.
+    pub at_min: bool,
+    /// `centre + c` was above `max`, so the arm was played at `max`.
+    pub at_max: bool,
+}
+
+/// Which range ends the arms `centre ± c` reach for `knob`.
+#[must_use]
+pub fn arm_clamp(center: f64, c: f64, knob: SpsaKnob) -> SpsaArmClamp {
+    SpsaArmClamp {
+        at_min: center - c < knob.min as f64,
+        at_max: center + c > knob.max as f64,
+    }
+}
+
+/// Every knob's [`SpsaArmClamp`] at zero-based `iteration`, from the centres
+/// the iteration started from.
+pub fn iteration_arm_clamps(
+    schedule: SpsaSchedule,
+    iteration: u32,
+    centers: &[f64],
+    knobs: &[SpsaKnob],
+) -> Result<Vec<SpsaArmClamp>, SpsaError> {
+    validate_vectors(centers, knobs)?;
+    centers
+        .iter()
+        .zip(knobs)
+        .map(|(center, knob)| {
+            let coefficients = schedule.coefficients(iteration, *knob)?;
+            Ok(arm_clamp(*center, coefficients.c, *knob))
+        })
+        .collect()
+}
+
 fn arm_value(value: f64, knob: SpsaKnob) -> SpsaArmValue {
     let floating = value.clamp(knob.min as f64, knob.max as f64);
     let sent = round_half_away_from_zero(floating)
@@ -617,6 +662,49 @@ mod tests {
 
     fn close(actual: f64, expected: f64) {
         assert!((actual - expected).abs() <= 1e-14, "{actual} != {expected}");
+    }
+
+    /// An arm is clamped when its unrounded value leaves the range, even by
+    /// less than half a unit: the arm the update assumes was not the one
+    /// played. Each end is counted on its own.
+    #[test]
+    fn an_arm_is_clamped_when_its_unrounded_value_leaves_the_range() {
+        let knob = SpsaKnob::new(0, 2048, 256.0, 1.0).unwrap();
+        // A seed of 80 with c_0 256 in 0..2048.
+        assert_eq!(
+            arm_clamp(80.0, 256.0, knob),
+            SpsaArmClamp {
+                at_min: true,
+                at_max: false
+            }
+        );
+        // 0.3 below the minimum is still sent as 0, but it was clamped.
+        assert!(arm_clamp(0.7, 1.0, knob).at_min);
+        // Exactly on the minimum is inside the range.
+        assert!(!arm_clamp(1.0, 1.0, knob).at_min);
+        assert!(arm_clamp(2047.5, 1.0, knob).at_max);
+        let narrow = SpsaKnob::new(0, 10, 1.0, 1.0).unwrap();
+        assert_eq!(
+            arm_clamp(5.0, 6.0, narrow),
+            SpsaArmClamp {
+                at_min: true,
+                at_max: true
+            }
+        );
+    }
+
+    /// The clamps of an iteration use that iteration's gain, which shrinks
+    /// as the tune goes on: a centre clamped early can be clear later.
+    #[test]
+    fn iteration_clamps_follow_the_shrinking_gain() {
+        let schedule = SpsaSchedule::new(1_000).unwrap();
+        let knob = SpsaKnob::new(0, 100, 10.0, 1.0).unwrap();
+        let first = schedule.coefficients(0, knob).unwrap().c;
+        let last = schedule.coefficients(999, knob).unwrap().c;
+        let center = (first + last) / 2.0;
+        assert!(iteration_arm_clamps(schedule, 0, &[center], &[knob]).unwrap()[0].at_min);
+        assert!(!iteration_arm_clamps(schedule, 999, &[center], &[knob]).unwrap()[0].at_min);
+        assert!(iteration_arm_clamps(schedule, 0, &[center], &[]).is_err());
     }
 
     #[test]

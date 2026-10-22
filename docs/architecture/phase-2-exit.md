@@ -6,7 +6,7 @@ workflows already exist.
 
 | Exit condition | Evidence | Result |
 |---|---|---|
-| Ordinary engines need only executable paths | Two independently copied repository UCI fixtures pass `engine check` with no descriptor, options or arguments; locally discovered Rarog and Basilisk executables also passed the same path-only command | Pass |
+| Ordinary engines need only executable paths | Two independently copied repository UCI fixtures pass `engine check` with no descriptor, options or arguments; locally discovered Rust-engine and Basilisk executables also passed the same path-only command | Pass |
 | Run-file, flattening, unset and path origins are deterministic | `config_resolution` covers inherited/flattened and file/all-CLI canonical byte/hash equality, recursive table merge, replacement, RFC 6901 unset, depth/cycle and Windows aliases | Pass |
 | Randomness is stable and independent by consumer | Domain golden vectors cover every built-in stream and sampling primitive; adding a named consumer cannot move any old stream | Pass |
 | Dry-run/JSON streams are automation-safe | Command-line tests prove no launch during dry-run, one typed JSON value on successful stdout and empty stdout on failure | Pass |

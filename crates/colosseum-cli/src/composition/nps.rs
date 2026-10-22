@@ -203,6 +203,7 @@ pub(crate) async fn run_nps(command: NpsCommand, machine: bool, dry_run: bool) -
                 resolved_configuration: resolved.value(),
                 invocations,
                 wave_shape: None,
+                rail_warnings: None,
             },
             machine,
         );
@@ -254,7 +255,7 @@ pub(crate) async fn run_nps(command: NpsCommand, machine: bool, dry_run: bool) -
                 let difference = ((right.median_nps / left.median_nps) - 1.0).abs() * 100.0;
                 if difference > command.self_tolerance_percent {
                     eprintln!(
-                        "nps warning: self-pair median difference {difference:.3}% exceeds tolerance ±{:.3}%",
+                        "nps warning: self-pair median difference {difference:.3}% exceeds tolerance +/-{:.3}%",
                         command.self_tolerance_percent
                     );
                 }
@@ -525,6 +526,7 @@ pub(crate) async fn run_nps_scaling(
                 resolved_configuration: resolved.value(),
                 invocations,
                 wave_shape: None,
+                rail_warnings: None,
             },
             machine,
         );

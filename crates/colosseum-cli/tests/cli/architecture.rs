@@ -183,6 +183,77 @@ fn user_facing_documentation_links_product_tag_lists_not_repository_latest() {
     }
 }
 
+/// A Windows console shows text in its own code page, not UTF-8, so a
+/// non-ASCII symbol in anything the CLI prints arrives garbled: an em dash in
+/// the standings read `ÔÇö`. What the CLI and the crates it prints through put
+/// in code is ASCII; comments may use what they like.
+#[test]
+fn what_the_cli_prints_is_ascii() {
+    let crates = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    // Inputs, not output: tests that non-ASCII input is read correctly.
+    let inputs = ["# a comment, \u{e9} and all", "\"non-ascii-\u{17e}\""];
+    let mut violations = Vec::new();
+    for name in [
+        "colosseum-core",
+        "colosseum-application",
+        "colosseum-uci",
+        "colosseum-engine",
+        "colosseum-cli",
+    ] {
+        for path in source_files(&crates.join(name).join("src")) {
+            // The 1.x desktop application's scheduler, which only egui
+            // renders, while it is still in this repository.
+            if name == "colosseum-engine" && path.ends_with("scheduler.rs") {
+                continue;
+            }
+            let text = fs::read_to_string(&path).unwrap();
+            for (number, line) in text.lines().enumerate() {
+                let code = code_part(line);
+                if inputs.iter().any(|input| code.contains(input)) {
+                    continue;
+                }
+                if !code.is_ascii() || has_non_ascii_escape(code) {
+                    violations.push(format!(
+                        "{}:{}: {}",
+                        path.display(),
+                        number + 1,
+                        line.trim()
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "non-ASCII text the CLI may print:\n{}",
+        violations.join("\n")
+    );
+}
+
+/// A line without its `//` comment, if it has one outside a string literal.
+fn code_part(line: &str) -> &str {
+    let mut in_string = false;
+    let mut previous = ' ';
+    for (index, character) in line.char_indices() {
+        if character == '"' && previous != '\\' {
+            in_string = !in_string;
+        } else if !in_string && line[index..].starts_with("//") {
+            return &line[..index];
+        }
+        previous = character;
+    }
+    line
+}
+
+/// Whether `code` writes a non-ASCII character as a `\u{...}` escape.
+fn has_non_ascii_escape(code: &str) -> bool {
+    code.split("\\u{").skip(1).any(|rest| {
+        rest.split_once('}')
+            .and_then(|(hex, _)| u32::from_str_radix(hex, 16).ok())
+            .is_some_and(|value| value > 0x7f)
+    })
+}
+
 fn source_files(directory: &std::path::Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for entry in fs::read_dir(directory).unwrap() {
