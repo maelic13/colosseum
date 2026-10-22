@@ -50,13 +50,13 @@ confirmed to reject an injected missing-file link.
 The Linux x86-64 executable SHA-256 remains byte-for-byte identical to the
 previous engine-tested candidate:
 `aee38483368fdf60f14eace766011716a18dd7d9333390186c9eef019472b543`.
-Its Rarog and Basilisk gate evidence therefore carries forward unchanged.
+Its Rust-engine and Basilisk gate evidence therefore carries forward unchanged.
 
 The Windows x86-64 executable rebuilt to SHA-256
 `03f3cd60df832866be20488ba85ab6584334868aaae07417628aa57b4bafe65d`.
 Although the source delta contains no CLI source, manifest, lockfile or
 dependency change, both short Windows gates were repeated with that exact
-extracted executable. Rarog source commit
+extracted executable. The Rust engine's source commit
 `8f35647630eb57839f0435e94b3c58858bd91711` was built from a clean archive;
 Basilisk remained at commit
 `3cbf90ba5f7b6c7aab2c25e8066ba1417b273447`.
@@ -70,9 +70,9 @@ required capped-inconclusive outcome, not a failure.
 
 | Gate | Result SHA-256 | Accepted projection |
 |---|---|---|
-| Windows / Rarog, repeated | `4d543838abac61a920f8c1dadc2171c866ec49f97d5d50c43f332179e150c672` | 8 draws, 4 pairs, `[0,0,4,0,0]`, adjudicated draws, zero faults, exit 4 |
+| Windows / Rust engine, repeated | `4d543838abac61a920f8c1dadc2171c866ec49f97d5d50c43f332179e150c672` | 8 draws, 4 pairs, `[0,0,4,0,0]`, adjudicated draws, zero faults, exit 4 |
 | Windows / Basilisk, repeated | `d3169846f91eb6cf3a60ba18447a152a0f46f797beba92ab799d7f7354f92aab` | same |
-| Linux / Rarog, retained | `6b5930014d7e0c618ceb7ed170e2beaab22808afe5ab6bb8ba7ceaa390dd10bf` | same |
+| Linux / Rust engine, retained | `6b5930014d7e0c618ceb7ed170e2beaab22808afe5ab6bb8ba7ceaa390dd10bf` | same |
 | Linux / Basilisk, retained | `1562555c26fd279f9b9c7aed24d73b5535e7ba39b1e5ef99ed0c9d3c0dabd947` | same |
 
 This agrees exactly with Phase 8.1 on game and pair counts, colour reversal,

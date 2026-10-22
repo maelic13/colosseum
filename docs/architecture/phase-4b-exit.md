@@ -18,7 +18,7 @@ executables. The acceptance manifest is
 
 ## Root-caused live differences
 
-The live smoke intentionally used the same Rarog executable on both sides at
+The live smoke intentionally used the same Rust engine executable on both sides at
 depth 1, no book, four reversed-colour pairs, one worker and permissive draw
 adjudication. Every runner produced eight adjudicated draws and no faults.
 

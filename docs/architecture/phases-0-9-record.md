@@ -168,7 +168,7 @@ path-only UCI executables, isolated GUI-state sentinels, configuration
 equivalence, named-stream invariance, copied-executable self-test, bounded pipe
 and descendant containment, durable recovery, aborted/terminal status and
 inward dependencies. The same path-only compliance command also passed locally
-with the independently developed Rarog (Rust) and Basilisk (C++) engines; their
+with an independently developed Rust engine and Basilisk (C++); their
 machine paths are deliberately not repository inputs. The CLI's unused legacy
 engine/SQLite dependency was removed. The full workspace/GUI suite remained
 green. Detailed criterion ownership and intentional later-phase boundaries are
@@ -444,7 +444,7 @@ boundary are recorded in
 
 **Accepted (8.1):** the 0.1.0 release candidate built from the Phase 7.3
 source (tournament parity accepted) was compared on Windows with
-FastChess 1.8.0-alpha and Cute Chess 1.5.1 using the same hashed Rarog binary.
+FastChess 1.8.0-alpha and Cute Chess 1.5.1 using the same hashed Rust engine binary.
 All three runners agreed on the oracle matrix's shared game count, complete
 pairs, colour reversal, W/D/L, draw ratio, termination and fault fields;
 FastChess and Colosseum also agreed on the pentanomial vector. The capped-SPRT
@@ -551,7 +551,7 @@ or GitHub Release. The complete identity, archive hashes and acceptance record
 are in
 [`docs/architecture/phase-9.4-candidate.md`](../architecture/phase-9.4-candidate.md).
 
-**Accepted (9.5):** Rarog commit `8f35647` and Basilisk commit `3cbf90b`
+**Accepted (9.5):** The Rust engine's commit `8f35647` and Basilisk commit `3cbf90b`
 remove their duplicate runner, statistics, SPSA, affinity, recovery, NPS,
 datagen and tool-vendoring implementations. Both retain only declarative
 Colosseum profiles/tune vectors and explicitly classified engine-owned build,
@@ -590,7 +590,7 @@ passed
 checksums and exact-archive smoke for all four supported packages. Every archive
 contains the CLI-only README, product changelog and identical 24-file offline
 guide, with local links checked from the extracted package. The Linux
-executable is byte-identical to the prior engine-tested candidate; its Rarog
+executable is byte-identical to the prior engine-tested candidate; its Rust-engine
 and Basilisk gates carry forward. The rebuilt Windows executable repeated both
 gates, and all four accepted results match eight draws, four complete pairs,
 pentanomial `[0,0,4,0,0]`, adjudicated-draw termination, zero faults and the

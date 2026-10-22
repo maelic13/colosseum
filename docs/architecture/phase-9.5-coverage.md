@@ -2,14 +2,14 @@
 
 Date: 2026-08-07
 
-This acceptance audits the current Rarog and Basilisk development workflows
+This acceptance audits the current Rust-engine and Basilisk development workflows
 against PLAN §S5.14. Generic harness implementations were removed from both
 working trees, not copied into an archive directory: their Git histories are
 the archive, while current users see only supported commands.
 
 | Engine | Accepted commit | Declarative policy retained |
 |---|---|---|
-| Rarog | `8f35647630eb57839f0435e94b3c58858bd91711` | Seven run profiles and twelve SPSA parameter vectors under `tools/colosseum/` |
+| Rust engine | `8f35647630eb57839f0435e94b3c58858bd91711` | Seven run profiles and twelve SPSA parameter vectors under `tools/colosseum/` |
 | Basilisk | `3cbf90ba5f7b6c7aab2c25e8066ba1417b273447` | Nine run profiles and five active SPSA parameter vectors under `tools/colosseum/` |
 
 Neither engine acquired a Colosseum manifest. Executable paths, books,
@@ -44,8 +44,8 @@ invalid schedule.
 
 | Residual | Classification |
 |---|---|
-| Rarog `xtask`/`build_test.ps1`, Basilisk CMake/PGO build script and local build manifests | Engine build, ISA/PGO, compiler/flag comparability and artifact policy |
-| Rarog perft/search-quality/SMP diagnostics and profiling scripts | Engine-internal correctness and diagnostic counters; not generic UCI measurements |
+| The Rust engine's `xtask`/`build_test.ps1`, Basilisk CMake/PGO build script and local build manifests | Engine build, ISA/PGO, compiler/flag comparability and artifact policy |
+| The Rust engine's perft/search-quality/SMP diagnostics and profiling scripts | Engine-internal correctness and diagnostic counters; not generic UCI measurements |
 | Each engine's move-generation, search, tactical, sanitizer and regression tests | Engine correctness |
 | Texel sampling, extraction, filtering, fitting and value-baking tools | Non-UCI training-data and source-integration policy |
 | `tools/colosseum/*.toml` plus concise invocation documentation | Declarative engine-project experiment policy explicitly allowed by S5.14 |
@@ -55,14 +55,14 @@ invalid schedule.
 
 The audit found one generic mechanism gap. Colosseum's PLAN promised that its
 two-sided resignation default was externally overridable, but the CLI could
-only change its threshold or disable it. Rarog had real one-sided historical
+only change its threshold or disable it. The Rust engine had real one-sided historical
 conditions, so silently converting them would have changed the experiment.
 
 The Phase 9.5 commit that exposes the resignation policy adds
 `--one-sided-resign-adjudication` to fixed matches, SPRT,
 calibration, tournaments and SPSA, records the choice in resolved
 configuration, preserves two-sided deserialization as the compatibility
-default, and tests both decision rules. Rarog profiles use the compatibility
+default, and tests both decision rules. The Rust engine profiles use the compatibility
 mode explicitly; Basilisk retains the safer two-sided default. No generic CLI
 mechanism gap remains after this correction.
 
@@ -72,7 +72,7 @@ mechanism gap remains after this correction.
   command reference was refreshed. `cargo check --workspace --tests`,
   `cargo clippy --workspace`, `cargo test --workspace --all-targets` and the
   generated-documentation drift check all passed.
-- Rarog: `cargo fmt --check`, `cargo test`, live `engine check`, six profile
+- The Rust engine: `cargo fmt --check`, `cargo test`, live `engine check`, six profile
   dry runs and `spsa plan` for all twelve tune vectors passed.
 - Basilisk: live `engine check`, seven profile dry runs, both calibration
   variants, and `spsa plan` for all five tune vectors passed. Thirteen retained
