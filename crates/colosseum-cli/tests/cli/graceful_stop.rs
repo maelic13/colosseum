@@ -321,8 +321,23 @@ fn assert_tournament_stops_and_resumes(format: &[&str]) {
         resumed["report"]["plan"]["schedule"], expected["report"]["plan"]["schedule"],
         "the resumed run planned a different schedule"
     );
+    // `AvgNps` is a measured speed, not a result: two runs of the same games
+    // search at different speeds, and a stub whose moves all take under a
+    // millisecond has none to report.
+    let without_speeds = |results: &Value| {
+        let mut results = results.clone();
+        let csv = results["standings_csv"].as_str().unwrap().to_owned();
+        results["standings_csv"] = Value::String(
+            csv.lines()
+                .map(|row| row.rsplit_once(',').map_or(row, |(rest, _)| rest))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        results
+    };
     assert_eq!(
-        resumed["report"]["results"], expected["report"]["results"],
+        without_speeds(&resumed["report"]["results"]),
+        without_speeds(&expected["report"]["results"]),
         "resumed standings differ from the uninterrupted run"
     );
     let record = record(&run);
