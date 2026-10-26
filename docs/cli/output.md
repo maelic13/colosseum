@@ -57,9 +57,11 @@ when the annotated export is sitting beside the journal.
 
 A durable run prints one progress block on standard error every
 `--progress-every N` units of its own work, and one more when it terminates.
-The unit is what the command is made of: complete pairs for `sprt` and
-`calibrate`, games for `match` and `tournament run`, committed iterations for
-`spsa`. The defaults are 10 pairs, 20 games and 1 iteration.
+The unit is games for `match`, `sprt`, `calibrate` and `tournament run`, and
+committed iterations for `spsa`; the defaults are 20 games and 1 iteration.
+`sprt` and `calibrate` count the games whose colour-reversed pair is complete,
+because those are the games their statistics are computed over; that games are
+played in pairs is a setting, not the unit a block counts.
 
 Counting units rather than seconds means a block always reports the same amount
 of new evidence, whatever the time control. `--progress-min-secs` (default 5)
@@ -75,10 +77,9 @@ time is the run's own: a stopped and resumed run carries on from the time its
 earlier invocations spent, and the pause between them is not counted.
 
 ```text
-progress [sprt]: 105/200 pairs (52%), 8m41s elapsed
+progress [sprt]: 210/400 games (52%), 8m41s elapsed
   players         candidate vs. baseline
   test            nElo [0.00, 5.00], alpha 0.05, beta 0.05 (preset gainer)
-  games           210
   Elo             +193.1 +/- 45.0
   nElo            +248.0 +/- 47.0
   W/D/L           158/0/52
@@ -94,8 +95,8 @@ An Elo estimate is a value and the half-width of its 95% interval; `Ptnml` is
 the pentanomial vector; `time remaining` extrapolates the rate this invocation
 has observed — a resumed run's rate is its own, not one diluted by the
 earlier invocations' conditions — and is `0s` once the run has stopped. A sequential test caps that estimate at
-the pairs its `--max-pairs` still allows, and takes the nearer of that and the
-pairs its LLR would need at the drift it has. The `faults` line counts
+the games its `--max-pairs` still allows, and takes the nearer of that and the
+games its LLR would need at the drift it has. The `faults` line counts
 engine faults with losses on time among them, each as engine A's count and
 engine B's (the plus and minus arms for a tune), `time: 0-2`, their rate over the games
 played, and the allowance: 1% of the scheduled games and at least 5 for
@@ -113,10 +114,11 @@ lines alike, is appended to `run.log`, and the most recent one is retained in
 `run-record.json`, so [`status`](status.md) prints exactly what the console
 last showed and a closed console loses nothing.
 
-At its end, `match`, `sprt` and `calibrate` also print each engine's games by
-colour and its search, read back from the run directory exactly as
-[`stats`](stats.md) replays them, and keep the same figures in
-`run-record.json` under `results` and in the `--json` value:
+At its end, a run prints its own short report on standard output and names
+its results file. `match`, `sprt` and `calibrate` write each engine's games by
+colour and its search to `results.txt` in the run directory, read back from
+the run directory exactly as [`stats`](stats.md) replays them, and keep the
+same figures in `run-record.json` under `results` and in the `--json` value:
 
 ```text
 candidate: as White 2755 W / 5010 D / 1907 L of 9672, score 54.4%; as Black 2050 W / 4973 D / 2649 L of 9672, score 46.9%

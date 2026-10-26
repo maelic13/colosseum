@@ -6,6 +6,21 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Runs report games, not pairs. `sprt` and `calibrate` progress counts the
+  games in complete colour-reversed pairs, so the count and the games/hour
+  rate beside it agree; `--progress-every` for both is in games and defaults
+  to 20. The SPRT report gives its sample, post-terminal evidence and cap in
+  games and says at which game a boundary was reached or the fault limit
+  exceeded. `match`, `stats` and `spsa --dry-run` likewise report games
+- `match`, `sprt`, `calibrate` and tournaments end with their own short
+  report again. Each engine's results by colour, how the games ended, the
+  faults, each engine's search and a tournament's pairs go to `results.txt`
+  in the run directory, which the report names; they stay in
+  `run-record.json` and the `--json` value as before
+- `run.log` stop and resume events and `status` of an `sprt` or `calibrate`
+  run count games
+
 ## [0.4.0] — 2026-10-22
 
 What reading a finished run without a parser of your own asked for: each

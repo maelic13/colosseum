@@ -817,20 +817,16 @@ impl PairedProgress {
         }
     }
 
-    /// The lines both commands share, in the order an operator reads them:
-    /// the size of the sample, what it is worth, then how it was reached.
+    /// Games in complete colour-reversed pairs: what every paired figure is
+    /// computed over, and what a paired command's headline counts.
+    pub(crate) fn paired_games(&self) -> u64 {
+        u64::from(self.pairs) * 2
+    }
+
+    /// The lines every paired command shares, in the order an operator reads
+    /// them: what the sample is worth, then how it was reached. The sample's
+    /// size is the headline's.
     pub(crate) fn add_fields(&self, block: &mut ProgressBlock, policy: FaultPolicy) {
-        // A run that counts games has the game count in its headline already;
-        // what it does not say is how many of them are complete pairs, which
-        // is what every figure below is computed over.
-        match block.unit {
-            ProgressUnit::Games => {
-                block.field("pairs", format!("{} complete", self.pairs));
-            }
-            _ => {
-                block.field("games", self.scored_games.to_string());
-            }
-        }
         match pentanomial_statistics(&self.vector, Z95) {
             Ok(statistics) => {
                 block

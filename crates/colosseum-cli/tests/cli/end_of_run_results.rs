@@ -1,7 +1,8 @@
 //! What a two-engine run reports at its end beyond its statistics: each
-//! engine's official games by colour and its search telemetry, on the
-//! console, in its `--json` value and in `run-record.json`, in the figures
-//! `stats` replays from the same directory.
+//! engine's official games by colour and its search telemetry, in
+//! `results.txt`, in its `--json` value and in `run-record.json`, in the
+//! figures `stats` replays from the same directory. The console keeps the
+//! command's own report and names the file.
 //!
 //! How the games are counted is unit-tested in `stats_replay`.
 
@@ -149,7 +150,7 @@ fn a_match_ends_with_each_engines_games_by_colour_and_its_search() {
 }
 
 #[test]
-fn the_console_summary_prints_the_colours_and_the_search_of_each_engine() {
+fn the_results_file_has_the_colours_and_the_search_of_each_engine() {
     let root = tempfile::tempdir().unwrap();
     let run = root.path().join("run");
     let played = labelled_match(&run, 2).output().unwrap();
@@ -159,15 +160,24 @@ fn the_console_summary_prints_the_colours_and_the_search_of_each_engine() {
         String::from_utf8_lossy(&played.stderr)
     );
     let stdout = String::from_utf8(played.stdout).unwrap();
+    // The console keeps to the match's own report and names the file.
+    assert!(
+        stdout
+            .lines()
+            .any(|line| line.starts_with("results: ") && line.ends_with("results.txt")),
+        "{stdout}"
+    );
+    assert!(!stdout.contains(": as White "), "{stdout}");
+    let text = std::fs::read_to_string(run.join("results.txt")).unwrap();
     for engine in ["Alpha", "Beta"] {
         assert!(
-            stdout.contains(&format!("{engine}: as White ")),
-            "{engine} has no colour line:\n{stdout}"
+            text.contains(&format!("{engine}: as White ")),
+            "{engine} has no colour line:\n{text}"
         );
-        let search = stdout
+        let search = text
             .lines()
             .find(|line| line.starts_with(&format!("{engine}: ")) && line.contains("annotated"))
-            .unwrap_or_else(|| panic!("{engine} has no search line:\n{stdout}"));
+            .unwrap_or_else(|| panic!("{engine} has no search line:\n{text}"));
         for figure in ["depth", "nodes per move", "ms per move", "nodes per second"] {
             assert!(search.contains(figure), "{figure} missing: {search}");
         }

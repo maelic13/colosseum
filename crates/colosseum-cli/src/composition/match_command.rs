@@ -275,7 +275,7 @@ pub(crate) async fn run_match(
     };
     let observer = Arc::new(DurableMatchOutput::new(
         writer.clone(),
-        ProgressUnit::Games,
+        MatchOutputKind::Match,
         &completed_games,
     ));
     colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
@@ -428,7 +428,7 @@ pub(crate) async fn run_match(
                 });
             } else {
                 print_fixed_match(&report);
-                print_run_results(results.as_ref());
+                print_results_file(results.as_ref(), &directory.paths().root);
                 println!("artifacts: {}", directory.paths().root.display());
             }
             ExitCode::from(exit_code)
@@ -478,7 +478,9 @@ pub(crate) fn match_progress_block(
     }
     // A fixed match plays colour-reversed pairs on one opening, exactly as a
     // sequential test does, so it has the same paired estimates and reports
-    // them the same way.
+    // them the same way. Its headline counts every game played, and the
+    // estimates cover only those whose pair is complete, so it says how many.
+    block.field("paired games", sample.paired_games().to_string());
     sample.add_fields(&mut block, policy);
     if let Some(rate) =
         progress::rate_per_hour(schedule.units_since_start(done), schedule.session_hours())
@@ -507,10 +509,19 @@ pub(crate) fn match_progress_block(
 /// size is the same at the first game and the thirty-thousandth.
 pub(crate) struct DurableMatchOutput {
     pub(crate) writer: RunWriter,
-    /// What a checkpoint counts: games for a match, complete pairs for a
-    /// calibration.
-    unit: ProgressUnit,
+    kind: MatchOutputKind,
     state: Mutex<MatchAggregate>,
+}
+
+/// Which command a [`DurableMatchOutput`] writes for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MatchOutputKind {
+    /// A fixed match: progress counts every game played.
+    Match,
+    /// A calibration: progress counts the games in complete pairs, the
+    /// sample its interval is computed over, and a checkpoint is due by
+    /// complete pairs.
+    Calibration,
 }
 
 struct MatchAggregate {
@@ -539,12 +550,12 @@ impl DurableMatchOutput {
     /// Start from the games a resume found in the journal.
     pub(crate) fn new(
         writer: RunWriter,
-        unit: ProgressUnit,
+        kind: MatchOutputKind,
         games: &[match_runner::MatchGame],
     ) -> Self {
         Self {
             writer,
-            unit,
+            kind,
             state: Mutex::new(MatchAggregate {
                 sample: PairedProgress::from_games(games),
                 attempted: games.len() as u64,
@@ -554,17 +565,17 @@ impl DurableMatchOutput {
     }
 
     fn command(&self) -> &'static str {
-        match self.unit {
-            ProgressUnit::Pairs => "calibrate",
-            _ => "match",
+        match self.kind {
+            MatchOutputKind::Calibration => "calibrate",
+            MatchOutputKind::Match => "match",
         }
     }
 
-    /// Units committed, cheaply, for deciding whether a block is due.
+    /// Games committed, cheaply, for deciding whether a block is due.
     pub(crate) fn units(&self) -> u64 {
-        self.state.lock().map_or(0, |state| match self.unit {
-            ProgressUnit::Pairs => u64::from(state.sample.pairs),
-            _ => state.attempted,
+        self.state.lock().map_or(0, |state| match self.kind {
+            MatchOutputKind::Calibration => state.sample.paired_games(),
+            MatchOutputKind::Match => state.attempted,
         })
     }
 
@@ -636,9 +647,9 @@ impl match_runner::MatchObserver for DurableMatchOutput {
         let pairs_before = state.sample.pairs;
         state.sample.add_game(game);
         state.attempted += 1;
-        let units = match self.unit {
-            ProgressUnit::Pairs => u64::from(state.sample.pairs - pairs_before),
-            _ => 1,
+        let units = match self.kind {
+            MatchOutputKind::Calibration => u64::from(state.sample.pairs - pairs_before),
+            MatchOutputKind::Match => 1,
         };
         if state.cadence.record(units) {
             self.writer.checkpoint(state.checkpoint(self.command()))?;
@@ -672,7 +683,7 @@ pub(crate) fn print_fixed_match(report: &match_runner::FixedMatchReport) {
                 statistics.normalized_elo.lower,
                 statistics.normalized_elo.upper
             ),
-            progress::plural(u64::from(sample.pairs), "complete pair")
+            progress::plural(sample.paired_games(), "paired game")
         ),
         Err(error) => println!("Elo and nElo unavailable: {error}"),
     }

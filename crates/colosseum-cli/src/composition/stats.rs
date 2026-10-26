@@ -124,8 +124,10 @@ pub(crate) fn run_stats(command: StatsCommand, machine: bool) -> ExitCode {
                     report.games, report.wins, report.draws, report.losses, report.score
                 );
                 println!(
-                    "pairing: {}; {} complete pairs, {} unpaired games",
-                    report.pairing, report.complete_pairs, report.unpaired_games
+                    "pairing: {}; {} paired games, {} unpaired games",
+                    report.pairing,
+                    u64::from(report.complete_pairs) * 2,
+                    report.unpaired_games
                 );
                 if let Some(vector) = report.pentanomial {
                     println!("pentanomial: {vector:?}");
@@ -232,10 +234,10 @@ pub(crate) fn colour_lines(by_colour: &[crate::stats_replay::EngineColourResults
         .collect()
 }
 
-/// What a run prints at its end after its own statistics, in the figures
-/// `stats` replays from the same run directory: a two-engine run's colours or
-/// a tournament's standings and pairs, how the games ended, the faults and
-/// each engine's search.
+/// What a run writes to its results file at its end, in the figures `stats`
+/// replays from the same run directory: a two-engine run's colours or a
+/// tournament's standings and pairs, how the games ended, the faults and each
+/// engine's search.
 pub(crate) fn run_results_lines(results: &crate::stats_replay::RunResults) -> Vec<String> {
     let mut lines = colour_lines(&results.by_colour);
     if let Some(tournament) = &results.tournament {
@@ -469,9 +471,13 @@ pub(crate) fn fault_lines(report: &crate::run_analysis::FaultReport) -> Vec<Stri
     ]
 }
 
-pub(crate) fn print_run_results(results: Option<&crate::stats_replay::RunResults>) {
-    for line in results.map(run_results_lines).unwrap_or_default() {
-        println!("{line}");
+/// Where a finished run wrote its results, as one line of its final report.
+pub(crate) fn print_results_file(
+    results: Option<&crate::stats_replay::RunResults>,
+    run_directory: &Path,
+) {
+    if results.is_some() {
+        println!("results: {}", run_directory.join(RESULTS_FILE).display());
     }
 }
 
@@ -533,8 +539,8 @@ pub(crate) fn run_stats_plan(action: StatsPlanAction, machine: bool) -> ExitCode
                         print_json(&MachineOutput::StatsFixedPlan { report });
                     } else {
                         println!(
-                            "required: {} complete pairs ({} games)",
-                            report.required_pairs, report.required_games
+                            "required: {} games, in colour-reversed pairs",
+                            report.required_games
                         );
                         println!(
                             "planned score half-width: {:.8}",
@@ -542,8 +548,8 @@ pub(crate) fn run_stats_plan(action: StatsPlanAction, machine: bool) -> ExitCode
                         );
                         if let Some(achieved) = &report.achieved_resolution {
                             println!(
-                                "observed {} pairs: estimate {:.4}, interval {:.4}..{:.4}, conservative resolution {:.4}",
-                                achieved.pairs,
+                                "observed {} games: estimate {:.4}, interval {:.4}..{:.4}, conservative resolution {:.4}",
+                                u64::from(achieved.pairs) * 2,
                                 achieved.estimate,
                                 achieved.lower,
                                 achieved.upper,
@@ -585,11 +591,11 @@ pub(crate) fn run_stats_plan(action: StatsPlanAction, machine: bool) -> ExitCode
                         print_json(&MachineOutput::StatsSprtPlan { report });
                     } else {
                         println!(
-                            "expected pairs: mean {:.2}, median {}, 5%..95% {}..{}; capped {} of {}",
-                            report.mean_pairs,
-                            report.median_pairs,
-                            report.p05_pairs,
-                            report.p95_pairs,
+                            "expected games: mean {:.2}, median {}, 5%..95% {}..{}; capped {} of {}",
+                            report.mean_pairs * 2.0,
+                            u64::from(report.median_pairs) * 2,
+                            u64::from(report.p05_pairs) * 2,
+                            u64::from(report.p95_pairs) * 2,
                             report.capped,
                             report.request.simulations
                         );

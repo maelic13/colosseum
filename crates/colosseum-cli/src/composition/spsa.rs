@@ -347,8 +347,8 @@ pub(crate) fn print_spsa_plan(report: &SpsaPlanReport) {
     println!("SPSA schedule and workload plan");
     println!("iterations: {}", report.settings.iterations);
     println!(
-        "games: {} ({} pairs; {} games/iteration)",
-        report.total_games, report.total_pairs, report.settings.games_per_iteration
+        "games: {} ({} games/iteration)",
+        report.total_games, report.settings.games_per_iteration
     );
     println!(
         "durability: {} checkpoint publications; {} retained generations; {} schedule artifact",
@@ -397,11 +397,8 @@ pub(crate) fn print_spsa_plan(report: &SpsaPlanReport) {
     }
     for comparison in &report.horizon_comparisons {
         println!(
-            "comparison horizon {}: {} games, {} pairs, {} checkpoints",
-            comparison.iterations,
-            comparison.games,
-            comparison.pairs,
-            comparison.checkpoint_publications
+            "comparison horizon {}: {} games, {} checkpoints",
+            comparison.iterations, comparison.games, comparison.checkpoint_publications
         );
     }
     println!("interpretation: {}", report.interpretation);

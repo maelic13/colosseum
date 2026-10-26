@@ -112,8 +112,9 @@ own initial `--rating` instead of a separately supplied value. Naming the same
 participant through both is refused rather than resolved silently.
 
 Every progress block lists the whole field, and so does
-[`status`](status.md). At its end a tournament also prints, keeps in
-`run-record.json` under `results` and gives in its `--json` value what
+[`status`](status.md). Its closing report prints the standings; at its end a
+tournament also writes to `results.txt`, keeps in `run-record.json` under
+`results` and gives in its `--json` value what
 [`stats`](stats.md) replays from its directory: the standings with their
 intervals, each pair's W/D/L and Elo from its engine's side, how the games
 ended, the faults and how each was scored, and each engine's search. `standings.csv` fills `AvgNps` with each engine's total
@@ -123,7 +124,7 @@ different opponents and each has its own.
 
 Every run directory contains the append-only game journal `games.jsonl`,
 `games.pgn` and `run.log`, checksum-protected current/previous checkpoints,
-`standings.csv`, `crosstable.csv`, `result.json`, the resolved configuration,
+`standings.csv`, `crosstable.csv`, `result.json`, `results.txt`, the resolved configuration,
 and the common run record; see [run directories](run-directories.md).
 Repeating the same command with an existing `--dir` resumes only schedule games
 absent from the journal. `--restart` archives the old directory first.

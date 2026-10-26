@@ -376,12 +376,12 @@ Options:
           Type-II error probability
 
       --progress-every <PROGRESS_EVERY>
-          Official pairs between progress blocks on standard error
+          Official games between progress blocks on standard error. Games are committed a colour-reversed pair at a time
 
-          [default: 10]
+          [default: 20]
 
       --progress-min-secs <PROGRESS_MIN_SECS>
-          Shortest time between two progress blocks. A run whose pairs finish faster than this coalesces them instead of flooding the console
+          Shortest time between two progress blocks. A run whose games finish faster than this coalesces them instead of flooding the console
 
           [default: 5]
 
@@ -1078,15 +1078,15 @@ Options:
           [default: 5]
 
       --progress-every <PROGRESS_EVERY>
-          Complete pairs between progress blocks on standard error
+          Games between progress blocks on standard error, counting only games whose colour-reversed pair is complete
 
-          [default: 10]
+          [default: 20]
 
       --unset-run-option <LONG_NAME>
           Remove one inherited run-file option before applying CLI arguments
 
       --progress-min-secs <PROGRESS_MIN_SECS>
-          Shortest time between two progress blocks. A run whose pairs finish faster than this coalesces them instead of flooding the console
+          Shortest time between two progress blocks. A run whose games finish faster than this coalesces them instead of flooding the console
 
           [default: 5]
 
