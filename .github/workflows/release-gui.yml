@@ -2,15 +2,27 @@ name: Colosseum GUI candidate and release
 # Title runs by the product-scoped tag, or by the commit a candidate came from.
 run-name: GUI ${{ github.ref_type == 'tag' && github.ref_name || format('candidate {0}', github.sha) }}
 
+# The GUI lane works as the CLI's does (release-cli.yml): a `gui-vX.Y.Z` tag
+# on main, or on the patch line of its `gui-vX.Y.0`, validates, builds,
+# packages and smokes every artifact read-only and only then publishes. A pull
+# request into main builds the same artifacts as a candidate, so a green pull
+# request is a releasable one, and when the GUI's version has no tag yet the
+# candidate also runs the release check. A manual dispatch is the rehearsal on
+# a chosen ref. Neither creates a tag or a release.
+
 on:
-  # A candidate builds, packages and smokes every artifact and retains the
-  # bundle, without a tag and without publishing anything — the GUI lane's
-  # equivalent of the CLI's, so the first real tag is not the first time this
-  # workflow has run end to end.
-  workflow_dispatch:
   push:
     tags:
-      - 'gui-v*'
+      - 'gui-v[0-9]+.[0-9]+.[0-9]+*'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer commit on the same pull request supersedes its candidate build; tag
+# and dispatch runs are never cancelled.
+concurrency:
+  group: release-gui-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -20,16 +32,24 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  # Timeouts stop a stalled runner, not a slow build: each is about three
+  # times the slowest successful run to 2026-10-29 (11 minutes).
   validate:
     name: Validate GUI release identity
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       mode: ${{ steps.metadata.outputs.mode }}
       version: ${{ steps.metadata.outputs.version }}
       prerelease: ${{ steps.metadata.outputs.prerelease }}
       source_sha: ${{ steps.metadata.outputs.source_sha }}
     steps:
+      # The full history carries the tags, which say whether a candidate's
+      # version has been released already.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -38,12 +58,24 @@ jobs:
         id: metadata
         shell: bash
         run: |
+          set -euo pipefail
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             metadata="$(cargo run --locked -q -p colosseum-release -- "$GITHUB_REF_NAME")"
             mode=release
           else
             metadata="$(cargo run --locked -q -p colosseum-release -- candidate gui)"
             mode=candidate
+            version="$(jq -r .version <<<"$metadata")"
+            tag="gui-v$version"
+            # A version not tagged yet, other than a development one, is a
+            # release proposal: it passes every check the tag run makes
+            # before it builds.
+            if [[ "$version" != *-dev* ]] && ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              echo "proposes $tag"
+              cargo run --locked -q -p colosseum-release -- "$tag"
+            else
+              echo "candidate of $version; nothing is proposed for release"
+            fi
           fi
           test "$(jq -r .product <<<"$metadata")" = gui
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
@@ -58,6 +90,7 @@ jobs:
   build:
     name: Build (${{ matrix.target }})
     needs: validate
+    timeout-minutes: 40
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -94,6 +127,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.source_sha }}
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -189,6 +223,7 @@ jobs:
   build-arch:
     name: Build (x86_64 Arch package)
     needs: validate
+    timeout-minutes: 40
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel
@@ -202,6 +237,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.source_sha }}
+          persist-credentials: false
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -221,15 +257,28 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   # Collect all platform artifacts and attach them to the triggering release
   # ────────────────────────────────────────────────────────────────────────────
+  # The required check for this workflow: it always runs and fails unless
+  # every build succeeded, because a job skipped after a failed dependency
+  # reports as passing.
   collect:
-    name: Verify the exact artifact list
+    name: Verify the complete GUI matrix
     needs: [validate, build, build-arch]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
+      - name: Every build succeeded
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          exit ${{ (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')) && 1 || 0 }}
+
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.source_sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Download the named platform artifacts
         uses: actions/download-artifact@v8
@@ -303,12 +352,36 @@ jobs:
 
   publish:
     name: Publish stable release
-    if: needs.validate.outputs.mode == 'release'
+    if: needs.validate.outputs.mode == 'release' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/gui-v')
     needs: [validate, collect]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # On main, or on a patch line: a commit descending from this minor's
+      # `gui-vX.Y.0`, which is itself on main.
+      - name: Prove the tagged commit is on main or its patch line
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha='${{ needs.validate.outputs.source_sha }}'
+          git fetch -q origin main
+          if git merge-base --is-ancestor "$sha" origin/main; then
+            echo "$GITHUB_REF_NAME is on main"; exit 0
+          fi
+          base="$(sed -E 's/^(gui-v[0-9]+\.[0-9]+)\..*$/\1.0/' <<<"$GITHUB_REF_NAME")"
+          git rev-parse -q --verify "refs/tags/$base" >/dev/null || { echo "::error::$GITHUB_REF_NAME is not on main and $base does not exist"; exit 1; }
+          git merge-base --is-ancestor "$base" origin/main || { echo "::error::$base is not on main"; exit 1; }
+          git merge-base --is-ancestor "$base" "$sha" || { echo "::error::$GITHUB_REF_NAME does not descend from $base"; exit 1; }
+          echo "$GITHUB_REF_NAME is on the $base patch line"
+
       - name: Download the verified bundle
         uses: actions/download-artifact@v8
         with:

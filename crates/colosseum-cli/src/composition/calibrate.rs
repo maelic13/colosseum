@@ -19,10 +19,11 @@ pub(crate) struct CalibrationCommand {
     #[arg(long, default_value_t = DEFAULT_CALIBRATION_TOLERANCE_NELO)]
     pub(crate) tolerance_nelo: f64,
 
-    /// Complete pairs between progress blocks on standard error.
-    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..))]
+    /// Games between progress blocks on standard error, counting only
+    /// games whose colour-reversed pair is complete.
+    #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) progress_every: u64,
-    /// Shortest time between two progress blocks. A run whose pairs finish
+    /// Shortest time between two progress blocks. A run whose games finish
     /// faster than this coalesces them instead of flooding the console.
     #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) progress_min_secs: u64,
@@ -132,7 +133,7 @@ pub(crate) async fn run_calibration(
     };
     let observer = Arc::new(DurableMatchOutput::new(
         writer.clone(),
-        ProgressUnit::Pairs,
+        MatchOutputKind::Calibration,
         &completed_games,
     ));
     colosseum_engine::incidents::set_dir(directory.paths().root.join("failed-games"));
@@ -150,7 +151,7 @@ pub(crate) async fn run_calibration(
     recorder.write_through(writer.clone());
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "calibration",
-        "progress": {"every": command.progress_every, "unit": "pairs", "min_secs": command.progress_min_secs},
+        "progress": {"every": command.progress_every, "unit": "games", "min_secs": command.progress_min_secs},
         "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
         "optional": true,
         "design": prepared.design,
@@ -170,12 +171,15 @@ pub(crate) async fn run_calibration(
         return ExitCode::from(3);
     }
     let progress = match_runner::MatchProgress::default();
-    let resumed_pairs: u64 = PairedProgress::from_games(&completed_games).pairs.into();
+    // Progress counts the games in complete pairs: the sample the interval
+    // is computed over.
+    let resumed_games = PairedProgress::from_games(&completed_games).paired_games();
+    let games_planned = u64::from(prepared.design.games / 2) * 2;
     let resume = ResumeFacts::of(
         opened.resumed,
-        ProgressUnit::Pairs,
-        resumed_pairs,
-        Some(u64::from(prepared.design.games / 2)),
+        ProgressUnit::Games,
+        resumed_games,
+        Some(games_planned),
     );
     let players = Players::new(&prepared.engine_a, &prepared.engine_b);
     let request = match_runner::FixedMatchRequest {
@@ -208,11 +212,10 @@ pub(crate) async fn run_calibration(
     announce_resume(&writer, resume);
     let calibration_future = match_runner::run_fixed_match(request);
     tokio::pin!(calibration_future);
-    let pairs_planned = u64::from(prepared.design.games / 2);
     let mut schedule = ProgressSchedule::new(
         command.progress_every,
         command.progress_min_secs,
-        resumed_pairs,
+        resumed_games,
     )
     .on_clock(clock);
     let mut poll =
@@ -226,7 +229,7 @@ pub(crate) async fn run_calibration(
                         &observer.sample().0,
                         &schedule,
                         &players,
-                        pairs_planned,
+                        games_planned,
                         prepared.fault_policy,
                     );
                     publish_progress(&block, &writer, &mut recorder);
@@ -238,7 +241,7 @@ pub(crate) async fn run_calibration(
         &observer.sample().0,
         &schedule,
         &players,
-        pairs_planned,
+        games_planned,
         prepared.fault_policy,
     );
     if schedule.needs_final(final_block.done) {
@@ -335,8 +338,8 @@ pub(crate) async fn run_calibration(
     if run_status == RunStatus::Cancelled {
         log_stop(
             &writer,
-            ProgressUnit::Pairs,
-            u64::from(report.fixed_match.games_completed / 2),
+            ProgressUnit::Games,
+            u64::from(report.fixed_match.games_completed / 2) * 2,
             exit_code,
         );
     }
@@ -523,31 +526,28 @@ pub(crate) fn prepare_calibration(
 /// there is no LLR and nothing to extrapolate towards one.
 ///
 /// `sample` is the paired sample committed so far, as
-/// [`DurableMatchOutput::sample`] reports it.
+/// [`DurableMatchOutput::sample`] reports it; the block counts the games in
+/// its complete pairs against `games_planned`.
 pub(crate) fn calibration_progress_block(
     sample: &PairedProgress,
     schedule: &ProgressSchedule,
     players: &Players,
-    pairs_planned: u64,
+    games_planned: u64,
     policy: FaultPolicy,
 ) -> ProgressBlock {
-    let done = u64::from(sample.pairs);
+    let done = sample.paired_games();
     let mut block = ProgressBlock::new(
         "calibrate",
-        ProgressUnit::Pairs,
+        ProgressUnit::Games,
         done,
-        Some(pairs_planned),
+        Some(games_planned),
         schedule.run_elapsed(),
     );
     block.field("players", players.to_string());
     sample.add_fields(&mut block, policy);
-    // Pairs are this command's unit of work, but throughput is reported in
-    // games, as every other command reports it, so two runs can be compared
-    // directly. A committed pair is exactly two games.
-    if let Some(rate) = progress::rate_per_hour(
-        schedule.units_since_start(done).saturating_mul(2),
-        schedule.session_hours(),
-    ) {
+    if let Some(rate) =
+        progress::rate_per_hour(schedule.units_since_start(done), schedule.session_hours())
+    {
         block.field("rate", format!("{rate:.0} games/hour"));
     }
     block.field(
@@ -555,7 +555,7 @@ pub(crate) fn calibration_progress_block(
         match progress::time_for_units(
             schedule.units_since_start(done),
             schedule.session_elapsed(),
-            pairs_planned.saturating_sub(done),
+            games_planned.saturating_sub(done),
         ) {
             Some(left) => progress::format_duration(left.as_secs_f64()),
             None => "unknown".to_owned(),
@@ -655,7 +655,7 @@ pub(crate) fn print_calibration(
             u64::from(report.fixed_match.games_attempted)
         )
     );
-    print_run_results(results);
+    print_results_file(results, run_directory);
     println!("artifacts: {}", run_directory.display());
 }
 
@@ -680,33 +680,26 @@ mod tests {
         let started = Instant::now()
             .checked_sub(Duration::from_secs(60))
             .expect("a host that has been up for a minute");
-        let schedule = ProgressSchedule::started_at(2, 1, 0, started);
+        let schedule = ProgressSchedule::started_at(4, 1, 0, started);
         let players = Players {
             a: "Engine 1".into(),
             b: "Engine 2".into(),
         };
         let block =
-            calibration_progress_block(&sample, &schedule, &players, 4, FaultPolicy::default());
+            calibration_progress_block(&sample, &schedule, &players, 8, FaultPolicy::default());
         let text = block.render();
         assert!(
-            text.starts_with("progress [calibrate]: 4/4 pairs (100%),"),
+            text.starts_with("progress [calibrate]: 8/8 games (100%),"),
             "{text}"
         );
-        for field in [
-            "players",
-            "games",
-            "W/D/L",
-            "Ptnml",
-            "faults",
-            "time remaining",
-        ] {
+        for field in ["players", "W/D/L", "Ptnml", "faults", "time remaining"] {
             assert!(text.contains(field), "{field} missing from:\n{text}");
         }
         assert!(text.contains("[0, 0, 4, 0, 0]"), "{text}");
         assert!(text.contains("time remaining  0s"), "{text}");
-        // Throughput in games, as `match`, `spsa` and `tournament` report it.
+        // Counted and timed in games, as every match-playing command is.
         assert!(text.contains(" games/hour"), "{text}");
-        assert!(!text.contains("pairs/hour"), "{text}");
+        assert!(!text.contains("pair"), "{text}");
         // A degenerate sample has no estimate in either model, and the block
         // says so for both rather than dropping a line a reader looks for.
         assert_eq!(text.matches("unavailable:").count(), 2, "{text}");

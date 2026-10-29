@@ -57,34 +57,36 @@ This includes the explicit `--ponder` condition for clock-based tests. It is
 off by default and becomes part of the resolved SPRT identity and run record.
 
 The final report always names the model, hypotheses, alpha/beta, exact Wald
-bounds, finite cap, official pentanomial vector, fault counts and terminal or
-invalid pair. LLR and decision are present once the sample is non-degenerate;
+bounds, finite cap, official pentanomial vector, fault counts and the game at
+which a boundary was reached or the fault limit exceeded. LLR and decision are present once the sample is non-degenerate;
 an all-identical early/capped sample reports that LLR is unavailable rather than
 inventing a finite statistic.
 
-Progress is written to stderr every `--progress-every N` official pairs
-(default 10) and once more at termination. An SPRT block carries the whole
+Progress is written to stderr every `--progress-every N` official games
+(default 20) and once more at termination. Every count is in games: that they
+are played and committed as colour-reversed pairs is how the test is set up,
+and `--max-pairs 200` caps it at 400 games. An SPRT block carries the whole
 decision: the two engines, the test itself (the Elo bounds of its two
 hypotheses in the model they are measured in, alpha and beta, and the preset
 it came from, marked overridden when any of its values was changed — the same
-line is printed once when the run starts), games and pairs committed, logistic and normalized
+line is printed once when the run starts), logistic and normalized
 Elo each with the half-width of its 95% interval, W/D/L, the pentanomial
 vector, engine faults and time losses, the LLR against its exact Wald bounds,
-games per hour — the unit every command reports throughput in, so two runs
-compare directly — and the time still expected. That last figure extrapolates the
-LLR the test already computed at its average drift per pair, never exceeds the
-pairs `--max-pairs` still allows, and is `0s` once the test has stopped; a
+games per hour, and the time still expected. That last figure extrapolates the
+LLR the test already computed at its average drift, never exceeds the games
+`--max-pairs` still allows, and is `0s` once the test has stopped; a
 sequential path is not a straight line, so read it as a projection.
 
-The closing report names the hypotheses as an interval, what was concluded and
-how long the invocation took:
+The closing report names the hypotheses as an interval, what was concluded,
+where the run's results file is and how long the run took:
 
 ```text
 SPRT [0.00, 10.00] completed - H1 accepted: the gain is at least 10.00 normalized Elo
-official sample: 105 pairs; post-terminal: 1 pair
-model normalized: alpha 0.05, beta 0.05, cap 200 pairs
+official sample: 210 games; post-terminal: 2 games
+model normalized: alpha 0.05, beta 0.05, cap 400 games
 LLR 2.960096 in [-2.944439, 2.944439]
-terminal pair: 105; invalid pair: none
+boundary reached: game 210; fault limit exceeded: none
+results: ./colosseum-runs/sprt-.../results.txt
 artifacts: ./colosseum-runs/sprt-...
 Finished match
 Total Time: 8m41s

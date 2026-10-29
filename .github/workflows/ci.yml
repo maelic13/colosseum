@@ -1,8 +1,25 @@
+# CI — the hermetic workspace on every supported OS, debug and optimized.
+#
+# This is the mandatory gate into main. It runs on a pull request into main,
+# where GitHub builds the merge commit, so the run tests exactly what main
+# would become, and on manual dispatch for any branch. It does not run on
+# pushes: a push to main only ever lands a pull request that already passed.
+# A newer commit to the same pull request cancels the superseded run.
+#
+# The release workflows (release-cli.yml, release-gui.yml) run beside it on
+# the same pull request and build every release artifact as a candidate, so a
+# pull request green in all three is one the tag will release.
+
 name: CI
 
 on:
   pull_request:
-  workflow_call:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -12,17 +29,23 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  # Timeouts stop a stalled runner, not a slow test: each is about three
+  # times the slowest successful run to 2026-10-29 (15 minutes).
   quality:
     name: Format, architecture and lint
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       # eframe/egui needs GTK + XCB headers on Linux.
       - name: Install Linux GUI dependencies
+        timeout-minutes: 10
         run: |
           sudo apt-get update -q
           sudo apt-get install -y \
@@ -48,6 +71,7 @@ jobs:
 
   platform-tests:
     name: ${{ matrix.os }} / ${{ matrix.profile }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -56,12 +80,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Linux GUI dependencies
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         run: |
           sudo apt-get update -q
           sudo apt-get install -y \
@@ -84,3 +111,22 @@ jobs:
       - name: Run required hermetic tests (release)
         if: matrix.profile == 'release'
         run: cargo test --workspace --all-targets --profile ci-release
+
+  # ---- One required check for the whole workflow ----------------------------
+  # Branch protection requires this job, not the matrix cells, so the required
+  # set does not change with the matrix. It always runs and fails unless every
+  # job it needs succeeded: GitHub reports a job skipped after a failed
+  # dependency as passing, so a required job must never be skipped.
+  complete:
+    name: CI complete
+    needs: [quality, platform-tests]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Every CI job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          exit ${{ (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')) && 1 || 0 }}

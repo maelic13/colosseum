@@ -341,11 +341,19 @@ pub(crate) enum ResultsFailure {
     Record(String),
 }
 
+/// The run-directory file a finished run's results are written to as text.
+pub(crate) const RESULTS_FILE: &str = "results.txt";
+
 /// Read a run's results back from its directory, once every game it wrote is
 /// there, and keep them in its run record before the record turns terminal.
 /// They are read from the files `stats` replays, so the end of a run and a
 /// later replay report the same figures. `names` are a two-engine run's
 /// engines A and B; a tournament names its participants itself.
+///
+/// The same results are written as text to [`RESULTS_FILE`]. The console
+/// keeps the command's own final report and names the file: colour splits,
+/// terminations and each engine's search are for reading afterwards, and
+/// printed below a verdict they buried it.
 pub(crate) async fn record_run_results(
     writer: &RunWriter,
     recorder: &mut RunRecorder,
@@ -363,6 +371,11 @@ pub(crate) async fn record_run_results(
     })
     .await
     .map_err(|error| ResultsFailure::Output(error.to_string()))?;
+    let mut text = run_results_lines(&results).join("\n");
+    text.push('\n');
+    writer
+        .replace(writer.root().join(RESULTS_FILE), text.into_bytes())
+        .map_err(ResultsFailure::Output)?;
     let value = serde_json::to_value(&results)
         .map_err(|error| ResultsFailure::Record(error.to_string()))?;
     recorder

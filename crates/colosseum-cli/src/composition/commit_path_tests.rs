@@ -89,7 +89,7 @@ async fn a_growing_run_keeps_its_checkpoint_constant_and_only_appends_its_journa
     let writer = RunWriter::start(directory, crate::journal::JournalResume::fresh())
         .await
         .unwrap();
-    let observer = DurableMatchOutput::new(writer.clone(), ProgressUnit::Games, &[]);
+    let observer = DurableMatchOutput::new(writer.clone(), MatchOutputKind::Match, &[]);
 
     let mut checkpoints = Vec::new();
     let mut journal_before = Vec::new();

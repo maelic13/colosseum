@@ -40,10 +40,11 @@ pub(crate) struct SprtCommand {
     #[arg(long)]
     pub(crate) beta: Option<f64>,
 
-    /// Official pairs between progress blocks on standard error.
-    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..))]
+    /// Official games between progress blocks on standard error. Games are
+    /// committed a colour-reversed pair at a time.
+    #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) progress_every: u64,
-    /// Shortest time between two progress blocks. A run whose pairs finish
+    /// Shortest time between two progress blocks. A run whose games finish
     /// faster than this coalesces them instead of flooding the console.
     #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) progress_min_secs: u64,
@@ -448,6 +449,7 @@ pub(crate) async fn run_sprt(
         }
     };
     if dry_run {
+        Players::new(&engine_a, &engine_b).note_shared_name();
         print_output(
             &MachineOutput::DryRun {
                 command: "sprt",
@@ -520,7 +522,7 @@ pub(crate) async fn run_sprt(
     recorder.write_through(writer.clone());
     if let Err(error) = recorder.set_workflow(json!({
         "kind": "sprt",
-        "progress": {"every": progress_every, "unit": "pairs", "min_secs": progress_min_secs},
+        "progress": {"every": progress_every, "unit": "games", "min_secs": progress_min_secs},
         "pgn_annotation_writer": colosseum_engine::pgn::PGN_ANNOTATION_WRITER,
         "design": design,
         "apply": &apply_record,
@@ -543,12 +545,13 @@ pub(crate) async fn run_sprt(
         eprintln!("SPRT test: {}", sprt_test_line(design));
     }
     let openings_report = openings.report().clone();
-    let resumed_pairs = official_pairs.len() as u64;
+    // Every count an operator reads is in games; a pair is two of them.
+    let resumed_games = official_pairs.len() as u64 * 2;
     let resume = ResumeFacts::of(
         opened.resumed,
-        ProgressUnit::Pairs,
-        resumed_pairs,
-        Some(u64::from(design.max_pairs)),
+        ProgressUnit::Games,
+        resumed_games,
+        Some(u64::from(design.max_pairs) * 2),
     );
     announce_resume(&writer, resume);
     let players = Players::new(&engine_a, &engine_b);
@@ -576,7 +579,7 @@ pub(crate) async fn run_sprt(
     let schedule_future = sprt_runner::run_pair_schedule(request);
     tokio::pin!(schedule_future);
     let mut progress =
-        ProgressSchedule::new(progress_every, progress_min_secs, resumed_pairs).on_clock(clock);
+        ProgressSchedule::new(progress_every, progress_min_secs, resumed_games).on_clock(clock);
     let mut poll =
         tokio::time::interval_at(tokio::time::Instant::now() + PROGRESS_POLL, PROGRESS_POLL);
     let outcome = loop {
@@ -638,7 +641,7 @@ pub(crate) async fn run_sprt(
                 return ExitCode::from(3);
             }
             let sample = OfficialSample {
-                committed_units: report.schedule.official_pairs.len() as u64,
+                committed_units: (report.schedule.official_pairs.len() * 2) as u64,
                 scored_games: (report.schedule.official_pairs.len() * 2) as u64,
                 completed_pairs: report.schedule.official_pairs.len() as u64,
                 pentanomial: report.schedule.pentanomial.map(u64::from),
@@ -672,8 +675,8 @@ pub(crate) async fn run_sprt(
             if run_status == RunStatus::Cancelled {
                 log_stop(
                     &writer,
-                    ProgressUnit::Pairs,
-                    report.schedule.official_pairs.len() as u64,
+                    ProgressUnit::Games,
+                    report.schedule.official_pairs.len() as u64 * 2,
                     sprt_exit_code(status),
                 );
             }
@@ -758,6 +761,7 @@ pub(crate) fn resolve_sprt_design(command: &SprtCommand) -> Result<SprtDesign, S
 ///
 /// `sample` is the official sample committed so far and `post_terminal` the
 /// pairs kept after the boundary, as [`DurableSprtOutput::sample`] reports them.
+/// The block counts both in games.
 pub(crate) fn sprt_progress_block(
     sample: &PairedProgress,
     post_terminal: usize,
@@ -767,12 +771,12 @@ pub(crate) fn sprt_progress_block(
     terminal: bool,
     policy: FaultPolicy,
 ) -> ProgressBlock {
-    let done = u64::from(sample.pairs);
+    let done = sample.paired_games();
     let mut block = ProgressBlock::new(
         "sprt",
-        ProgressUnit::Pairs,
+        ProgressUnit::Games,
         done,
-        Some(u64::from(design.max_pairs)),
+        Some(u64::from(design.max_pairs) * 2),
         progress.run_elapsed(),
     );
     block.field("players", players.to_string());
@@ -783,7 +787,7 @@ pub(crate) fn sprt_progress_block(
             "post-terminal",
             format!(
                 "{} kept as evidence the sample excludes",
-                progress::plural(post_terminal as u64, "pair")
+                progress::plural(post_terminal as u64 * 2, "game")
             ),
         );
     }
@@ -817,26 +821,23 @@ pub(crate) fn sprt_progress_block(
             block.field("LLR", format!("unavailable: {error}"));
         }
     }
-    // Pairs are this command's unit of work, but throughput is reported in
-    // games, as every other command reports it, so two runs can be compared
-    // directly. A committed pair is exactly two games.
-    if let Some(rate) = progress::rate_per_hour(
-        progress.units_since_start(done).saturating_mul(2),
-        progress.session_hours(),
-    ) {
+    if let Some(rate) =
+        progress::rate_per_hour(progress.units_since_start(done), progress.session_hours())
+    {
         block.field("rate", format!("{rate:.0} games/hour"));
     }
     // A test that has stopped has nothing left to run, whatever the cap says.
     // Otherwise the estimate is the pairs the LLR would need at its current
-    // drift, and never more than the pairs the cap still allows.
-    let to_cap = u64::from(design.max_pairs).saturating_sub(done);
+    // drift, and never more than the pairs the cap still allows; it is timed
+    // in games, as the block counts them.
+    let to_cap = u64::from(design.max_pairs).saturating_sub(u64::from(sample.pairs));
     // An LLR past its bound has decided the test even before the driver has
     // stopped it; without this its estimate fell back to the whole cap.
     let decided = terminal
         || statistics
             .as_ref()
             .is_ok_and(|result| result.decision != SprtDecision::Continue);
-    let remaining = remaining_pairs(statistics.as_ref().ok(), to_cap, decided);
+    let remaining = remaining_pairs(statistics.as_ref().ok(), to_cap, decided) * 2;
     block.field(
         "time remaining",
         match progress::time_for_units(
@@ -932,11 +933,11 @@ impl DurableSprtOutput {
         }
     }
 
-    /// Official pairs, cheaply, for deciding whether a block is due.
+    /// Official games, cheaply, for deciding whether a block is due.
     pub(crate) fn units(&self) -> u64 {
         self.state
             .lock()
-            .map_or(0, |state| u64::from(state.sample.pairs))
+            .map_or(0, |state| state.sample.paired_games())
     }
 
     /// The official sample and the post-terminal count, for a progress block.
@@ -1055,8 +1056,8 @@ fn sprt_verdict(report: &sprt_runner::SprtReport) -> String {
             parameters.elo0
         ),
         sprt_runner::SprtStatus::Inconclusive => format!(
-            "inconclusive - the {} cap was reached without a boundary",
-            progress::plural(u64::from(report.design.max_pairs), "pair")
+            "inconclusive - the cap of {} was reached without a boundary",
+            progress::plural(u64::from(report.design.max_pairs) * 2, "game")
         ),
         sprt_runner::SprtStatus::Cancelled => {
             "cancelled - stopped cleanly before a boundary or the cap".to_owned()
@@ -1088,8 +1089,8 @@ pub(crate) fn print_sprt(
     );
     println!(
         "official sample: {}; post-terminal: {}",
-        progress::plural(report.schedule.official_pairs.len() as u64, "pair"),
-        progress::plural(report.schedule.post_terminal_pairs.len() as u64, "pair")
+        progress::plural(report.schedule.official_pairs.len() as u64 * 2, "game"),
+        progress::plural(report.schedule.post_terminal_pairs.len() as u64 * 2, "game")
     );
     let faults = report.schedule.faults;
     println!(
@@ -1106,7 +1107,7 @@ pub(crate) fn print_sprt(
         elo_model_name(report.design.parameters.model),
         report.design.parameters.alpha,
         report.design.parameters.beta,
-        progress::plural(u64::from(report.design.max_pairs), "pair")
+        progress::plural(u64::from(report.design.max_pairs) * 2, "game")
     );
     if let Some(statistics) = report.schedule.statistics {
         println!(
@@ -1116,18 +1117,20 @@ pub(crate) fn print_sprt(
     } else {
         println!("LLR unavailable: official sample is still statistically degenerate");
     }
+    // A pair's evidence is complete with its second game, so that is the game
+    // a decision or a voided test is reported at.
+    let at_game = |pair: Option<u32>| {
+        pair.map_or_else(
+            || "none".into(),
+            |pair| format!("game {}", u64::from(pair) * 2),
+        )
+    };
     println!(
-        "terminal pair: {}; invalid pair: {}",
-        report
-            .schedule
-            .terminal_pair
-            .map_or_else(|| "none".into(), |value| value.to_string()),
-        report
-            .schedule
-            .invalid_pair
-            .map_or_else(|| "none".into(), |value| value.to_string())
+        "boundary reached: {}; fault limit exceeded: {}",
+        at_game(report.schedule.terminal_pair),
+        at_game(report.schedule.invalid_pair)
     );
-    print_run_results(results);
+    print_results_file(results, run_directory);
     println!("artifacts: {}", run_directory.display());
     println!("Finished match");
     println!(
@@ -1268,7 +1271,7 @@ mod progress_block_tests {
         );
         let text = block.render();
         assert!(
-            text.starts_with("progress [sprt]: 20/20 pairs (100%), "),
+            text.starts_with("progress [sprt]: 40/40 games (100%), "),
             "{text}"
         );
         let labels = block
@@ -1281,7 +1284,6 @@ mod progress_block_tests {
             [
                 "players",
                 "test",
-                "games",
                 "Elo",
                 "nElo",
                 "W/D/L",
@@ -1298,7 +1300,6 @@ mod progress_block_tests {
             field(&block, "test"),
             "nElo [0.00, 10.00], alpha 0.05, beta 0.05"
         );
-        assert_eq!(field(&block, "games"), "40");
         assert_eq!(field(&block, "W/D/L"), "20/20/0");
         // The pentanomial is the committed vector, and the LLR is stated
         // against its exact Wald bounds.
@@ -1311,15 +1312,16 @@ mod progress_block_tests {
         for model in ["Elo", "nElo"] {
             assert!(field(&block, model).contains(" +/- "), "{text}");
         }
-        // Throughput is in games, as every command reports it, although this
-        // command's unit of work is the pair.
+        // Counted and timed in games, as every match-playing command is,
+        // although the games are committed a pair at a time.
         assert!(field(&block, "rate").ends_with(" games/hour"), "{text}");
+        assert!(!text.contains("pair"), "{text}");
         // A terminated test has nothing left to run.
         assert_eq!(field(&block, "time remaining"), "0s");
     }
 
     #[test]
-    fn a_running_sprt_names_its_post_terminal_pairs_and_the_trend_it_extrapolates() {
+    fn a_running_sprt_names_its_post_terminal_games_and_the_trend_it_extrapolates() {
         let block = sprt_progress_block(
             &sample(),
             2,
@@ -1331,7 +1333,7 @@ mod progress_block_tests {
         );
         assert_eq!(
             field(&block, "post-terminal"),
-            "2 pairs kept as evidence the sample excludes"
+            "4 games kept as evidence the sample excludes"
         );
         let remaining = field(&block, "time remaining");
         assert!(remaining.ends_with(" if the trend holds"), "{remaining}");

@@ -109,4 +109,8 @@ demonstrated before proceeding. Complete one numbered step—including tests,
 documentation and status evidence—then commit it before starting the next.
 Use a short imperative subject naming the outcome, preferably including the
 step identifier. Never add `Co-authored-by` or assistant-attribution trailers.
-The full worktree, architecture and commit rules are binding in `AGENTS.md`.
+Work happens on a short-lived branch from `main` that lands as one squash
+commit through a pull request; nothing is pushed to `main` directly, and a
+release is an annotated tag on the merged `main` (`docs/DEVELOPMENT.md`
+*Delivery* and *Releases*). The full worktree, architecture and commit rules
+are binding in `AGENTS.md`.

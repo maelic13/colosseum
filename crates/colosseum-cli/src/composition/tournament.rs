@@ -687,7 +687,7 @@ pub(crate) async fn run_tournament_command(
             "mode": if command.max_engine_faults.is_some() { "explicit-limit" } else { "default-allowance" },
             "max_engine_faults": max_engine_faults,
         },
-        "artifacts": ["checkpoint.json", "games.pgn", "standings.csv", "crosstable.csv", "result.json"],
+        "artifacts": ["checkpoint.json", "games.pgn", "standings.csv", "crosstable.csv", "result.json", "results.txt"],
     })) {
         eprintln!("run record failed: {error}");
         return ExitCode::from(3);
@@ -841,7 +841,7 @@ pub(crate) async fn run_tournament_command(
                 });
             } else {
                 print_tournament(&report);
-                print_run_results(Some(&results));
+                print_results_file(Some(&results), &directory.paths().root);
                 println!("artifacts: {}", directory.paths().root.display());
             }
             ExitCode::from(exit_code)

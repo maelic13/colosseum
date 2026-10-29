@@ -243,7 +243,7 @@ fn a_capped_sprt_reports_its_hypotheses_verdict_and_duration() {
     let text = stderr(&output);
     let last = blocks(&text).pop().expect("a final block");
     assert!(
-        last.starts_with("progress [sprt]: 2/2 pairs (100%),"),
+        last.starts_with("progress [sprt]: 4/4 games (100%),"),
         "{last}"
     );
     assert!(
@@ -253,10 +253,29 @@ fn a_capped_sprt_reports_its_hypotheses_verdict_and_duration() {
 
     let report = String::from_utf8_lossy(&output.stdout);
     assert!(
-        report.contains("SPRT [0.00, 10.00] inconclusive - the 2 pairs cap was reached"),
+        report.contains("SPRT [0.00, 10.00] inconclusive - the cap of 4 games was reached"),
         "{report}"
     );
-    assert!(report.contains("official sample: 2 pairs"), "{report}");
+    assert!(report.contains("official sample: 4 games"), "{report}");
+    // Pairing is how the games are played, not what the report counts.
+    let counted = report
+        .lines()
+        .filter(|line| !line.starts_with("results: ") && !line.starts_with("artifacts: "));
+    assert!(!last.contains("pair"), "{last}");
+    for line in counted {
+        assert!(!line.contains("pair"), "{report}");
+    }
+    // The end-of-run results are in the run directory, and the report names
+    // the file rather than printing them.
+    assert!(
+        report
+            .lines()
+            .any(|line| line.starts_with("results: ") && line.ends_with("results.txt")),
+        "{report}"
+    );
+    assert!(!report.contains("as White"), "{report}");
+    let results = std::fs::read_to_string(run.join("results.txt")).unwrap();
+    assert!(results.contains("colosseum-cli: as White "), "{results}");
     assert!(report.contains("Finished match"), "{report}");
     assert!(report.contains("Total Time: "), "{report}");
 }

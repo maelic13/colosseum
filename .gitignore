@@ -48,6 +48,7 @@ $RECYCLE.BIN/
 *.swp
 *.swo
 
-# Claude Code local tooling state (un-ignore specific shared files if needed)
-.claude/
+# Claude Code local tooling state; the shared settings (attribution off) are kept
+.claude/*
+!.claude/settings.json
 /.localtest/

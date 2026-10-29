@@ -174,15 +174,24 @@ Not steps — they are never "done".
 
 ### Cutting a release (maintainer)
 
-- `cargo xtask release-check gui-vX.Y.Z` and `cli-vX.Y.Z` pass on the
-  commit to be tagged; both changelogs are dated.
-- Open a pull request to `main`; wait for green CI; squash-merge; dispatch
-  both candidates on `main` and check their archives; tag the accepted
-  commit; push the tags; watch both release workflows; check both release
-  pages and open the post-tag links the phase record lists. Wrong release: delete
-  release and tag, fix on `main`, tag again.
-- A GUI patch found in use goes to `main` as `gui-vX.Y.(Z+1)` on its own;
-  the CLI is not re-released for it, and vice versa.
+The procedure is [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) *Releases*;
+in short:
+
+- The release commit — product version, `Cargo.lock`, the changelog section
+  dated — goes on a branch from `main`, and `cargo xtask release-check
+  <product>-vX.Y.Z` passes there.
+- Its pull request is the rehearsal: `CI complete`, `Verify the complete CLI
+  matrix` and `Verify the complete GUI matrix` green, the proposed product's
+  candidate including the release check. Squash-merge it.
+- Tag the merged `main` with an annotated tag and push only the tag; watch
+  the release workflow; check the release page and open the post-tag links
+  the phase record lists. Wrong release: delete release and tag, fix `main`
+  by pull request, tag again.
+- The next pull request that changes the product reopens it at the next
+  version with `-dev`.
+- A patch while `main` holds unreleased work is tagged on a branch from the
+  last release tag, after the fix has landed on `main`; the other product
+  is not re-released for it.
 
 ## What to do now
 

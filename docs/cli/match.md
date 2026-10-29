@@ -21,7 +21,7 @@ Side-specific direct controls use an `a-` or `b-` prefix:
 
 | Control | Meaning |
 |---|---|
-| `--a-label` / `--b-label` | Display label |
+| `--a-label` / `--b-label` | Display label. Without labels, two engines of one name — one binary run twice with different options — are named `name (A)` and `name (B)` in the PGN and every report, and the dry run says so |
 | `--a-engine-arg` / `--b-engine-arg` | Engine process argument; repeat as needed |
 | `--a-cwd` / `--b-cwd` | Engine working directory |
 | `--a-env` / `--b-env` | `KEY=VALUE` environment override |
@@ -276,14 +276,16 @@ configuration is refused on resume. The directory contains:
 | `run-record.json` | Versioned lifecycle and official sample |
 | `run.log` | Append-only JSON-lines log of progress blocks, faults, stop and resume |
 | `result.json` | Final structured match report |
+| `results.txt` | Each engine's games by colour, terminations, faults and search, as text |
 | `failed-games/` | Round-trip timing, UCI traffic and stderr for abnormal games |
 
 Progress is written to stderr every `--progress-every N` games, and once more
 at the end; a match block reports the score, the Elo estimate with its 95%
 interval, faults against the allowance and the rate. See the
 [output contract](output.md) for the shared rules. The
-final human report names the artifact directory, the two engines' scores, the
-fault counts and how many games ended abnormally and in which way. It does not
+final human report names the artifact directory and the results file, the two
+engines' scores, the fault counts and how many games ended abnormally and in
+which way. It does not
 list the games: `games.pgn` holds every result, `run.log` every event, and
 `failed-games/` the UCI traffic of each abnormal game. In `--json` mode stdout still
 contains exactly one JSON document; it includes `run_directory`, while progress

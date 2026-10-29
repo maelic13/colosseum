@@ -6,6 +6,38 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-29
+
+Reading a run at a glance: every count is in games, the console keeps a
+short final report and the detailed results go to a file, and one binary run
+twice is reported as two engines. Reporting only: no game is played, paired,
+scored or tested differently.
+
+### Changed
+- Runs report games, not pairs. `sprt` and `calibrate` progress counts the
+  games in complete colour-reversed pairs, so the count and the games/hour
+  rate beside it agree; `--progress-every` for both is in games and defaults
+  to 20. The SPRT report gives its sample, post-terminal evidence and cap in
+  games and says at which game a boundary was reached or the fault limit
+  exceeded. `match`, `stats` and `spsa --dry-run` likewise report games
+- `match`, `sprt`, `calibrate` and tournaments end with their own short
+  report again. Each engine's results by colour, how the games ended, the
+  faults, each engine's search and a tournament's pairs go to `results.txt`
+  in the run directory, which the report names; they stay in
+  `run-record.json` and the `--json` value as before
+- `run.log` stop and resume events and `status` of an `sprt` or `calibrate`
+  run count games
+- Two engines of one name — one binary run twice with different options and
+  no `--a-label`/`--b-label` — are named `name (A)` and `name (B)` in
+  `games.pgn`, progress blocks and every report, and the `match` and `sprt`
+  dry runs say so
+
+### Fixed
+- Search telemetry of a two-engine run is kept per side, not per name. Two
+  sides of one name were merged into one engine's search line at the end of
+  the run and in `stats`; scoring was never affected. `stats` on an earlier
+  run directory now splits them too
+
 ## [0.4.0] — 2026-10-22
 
 What reading a finished run without a parser of your own asked for: each

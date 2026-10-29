@@ -30,6 +30,29 @@ Agents work locally only: create the required commits, but never push, fetch,
 create tags, releases or pull requests, or perform other remote operations.
 The maintainer owns every remote operation.
 
+### Branches and pull requests
+
+- `main` is the trunk; nothing else lives long, and nothing is pushed to it
+  directly. Every coherent piece of work — a feature, a fix, a release, or
+  one tooling or documentation change — lives on its own short-lived branch
+  from `main` and lands as ONE squash commit through a pull request: no
+  merge commits, no rebase merges. The full procedure, the required checks
+  and the release steps are in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
+  *Delivery* and *Releases*.
+- On the branch, commit in small verified steps: one numbered step or one
+  coherent change per commit, as below. These commits are working records;
+  GitHub keeps them under the pull request (`refs/pull/<n>/head`) after the
+  squash, and their subjects may name the step.
+- Before the pull request opens, merge `main` into the branch if `main`
+  moved, so the pull request shows only the branch's own change.
+- The squash message — the pull request's title and description, which is
+  all that reaches `main` — has a fixed shape: a short imperative title that
+  says what changed ("Keep a two-engine run's telemetry per side"; a release
+  is "Colosseum CLI 0.5.0"), with no phase, step or plan references; then a
+  few plain lines on what and why, wrapped at 72 columns; then, after an
+  empty line, the verification, one line each ("Tests: cargo test --workspace
+  --all-targets, 632 passed").
+
 Use the per-step model assignment in `PLAN.md` §S8, mirrored on the numbered
 `GUIDE.md` item. When asked what comes next, state both the step and its
 recommended model/effort. If a Terra step exposes a material design choice not
