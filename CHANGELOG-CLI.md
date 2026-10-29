@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-29
+
+Reading a run at a glance: every count is in games, the console keeps a
+short final report and the detailed results go to a file, and one binary run
+twice is reported as two engines. Reporting only: no game is played, paired,
+scored or tested differently.
+
 ### Changed
 - Runs report games, not pairs. `sprt` and `calibrate` progress counts the
   games in complete colour-reversed pairs, so the count and the games/hour
