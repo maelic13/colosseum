@@ -226,6 +226,7 @@ pub(crate) async fn run_match(
         }
     };
     if dry_run {
+        Players::new(&engine_a, &engine_b).note_shared_name();
         let output = MachineOutput::DryRun {
             command: "match",
             config_sha256: resolved.sha256(),

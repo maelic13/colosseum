@@ -184,6 +184,103 @@ fn the_results_file_has_the_colours_and_the_search_of_each_engine() {
     }
 }
 
+/// One binary run as both engines with different options and no labels: the
+/// two sides keep their own search, named by side, and between them they
+/// account for every engine move the run played.
+#[test]
+fn one_binary_with_two_option_sets_reports_two_searches() {
+    let root = tempfile::tempdir().unwrap();
+    let run = root.path().join("run");
+    let played = cli()
+        .arg("match")
+        .arg(stub())
+        .arg(stub())
+        .args([
+            "--games",
+            "4",
+            "--a-engine-arg=__uci-stub",
+            "--a-engine-arg=--sleep-ms=2",
+            "--b-engine-arg=__uci-stub",
+            "--b-engine-arg=--sleep-ms=6",
+            "--a-movetime-ms",
+            "50",
+            "--b-movetime-ms",
+            "50",
+            "--max-moves",
+            "4",
+            "--dir",
+        ])
+        .arg(&run)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(
+        played.status.success(),
+        "{}",
+        String::from_utf8_lossy(&played.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&played.stderr);
+    assert!(
+        stderr.contains("colosseum-cli (A) vs. colosseum-cli (B)"),
+        "{stderr}"
+    );
+    let output = json(&played);
+    let engines = output["results"]["telemetry"]["engines"]
+        .as_array()
+        .unwrap();
+    let names = engines
+        .iter()
+        .map(|engine| engine["engine"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["colosseum-cli (A)", "colosseum-cli (B)"]);
+
+    // Every engine move in the PGN carries one annotation; the two searches
+    // split them between them, and colours alternate, so evenly.
+    let pgn = std::fs::read_to_string(run.join("games.pgn")).unwrap();
+    assert!(pgn.contains("[White \"colosseum-cli (A)\"]"), "{pgn}");
+    assert!(pgn.contains("[White \"colosseum-cli (B)\"]"), "{pgn}");
+    let total = pgn
+        .split('{')
+        .skip(1)
+        .filter(|comment| !comment.starts_with("book}"))
+        .count() as u64;
+    let moves = engines
+        .iter()
+        .map(|engine| count(engine, "eligible_moves"))
+        .collect::<Vec<_>>();
+    assert!(moves.iter().all(|&count| count > 0), "{engines:?}");
+    assert_eq!(moves.iter().sum::<u64>(), total, "{engines:?}");
+
+    let text = std::fs::read_to_string(run.join("results.txt")).unwrap();
+    let searches = text
+        .lines()
+        .filter(|line| line.contains("annotated"))
+        .count();
+    assert_eq!(searches, 2, "{text}");
+    // A later replay of the directory keeps them apart the same way.
+    assert_eq!(
+        replay(&run)["telemetry"]["engines"],
+        output["results"]["telemetry"]["engines"]
+    );
+
+    // The dry run says how the two will be named before anything is played.
+    let dry = cli()
+        .arg("match")
+        .arg(stub())
+        .arg(stub())
+        .args(["--games", "2", "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(dry.status.success(), "{dry:?}");
+    let note = String::from_utf8_lossy(&dry.stderr);
+    assert!(
+        note.contains(
+            "engines A and B are both named colosseum-cli; they are reported as colosseum-cli (A) and colosseum-cli (B)"
+        ),
+        "{note}"
+    );
+}
+
 /// An SPRT counts its official pairs by colour; the pairs it finished after
 /// its boundary are evidence, not sample, and stay out.
 #[test]

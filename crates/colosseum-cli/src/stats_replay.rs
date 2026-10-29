@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::pgn_telemetry::{SearchTelemetryReport, analyze_pgn, unavailable};
+use crate::pgn_telemetry::{
+    RunSides, SearchTelemetryReport, analyze_pgn, analyze_run_pgn, unavailable,
+};
 use crate::run_analysis::{
     FaultReport, TerminationReport, TournamentAnalysis, TournamentInputs, analyse_directory,
 };
@@ -204,7 +206,7 @@ pub fn run_results(root: &Path, names: Option<[&str; 2]>) -> RunResults {
         None => Vec::new(),
     };
     let telemetry = match fs::read_to_string(root.join(crate::journal::PGN_FILE)) {
-        Ok(text) => analyze_pgn(&text),
+        Ok(text) => run_telemetry(&text, &journal, names),
         Err(error) => unavailable(format!("the run's PGN could not be read: {error}")),
     };
     let (analysis, analysis_unavailable) = match analyse_directory(root, names) {
@@ -228,6 +230,19 @@ pub fn run_results(root: &Path, names: Option<[&str; 2]>) -> RunResults {
         tournament,
         analysis_unavailable,
     }
+}
+
+/// A run's search telemetry from its own PGN. A two-engine run's is kept per
+/// side, which its journal records for every game, so one binary run twice
+/// is still two engines; a tournament's is per participant name.
+fn run_telemetry(pgn: &str, journal: &[u8], names: Option<[&str; 2]>) -> SearchTelemetryReport {
+    let Some([a, b]) = names else {
+        return analyze_pgn(pgn);
+    };
+    let games = crate::journal::read_journal_bytes(journal)
+        .into_iter()
+        .filter_map(|record| Some((record.number, side_had_white(&record.white)?)));
+    analyze_run_pgn(pgn, &RunSides::new([a.to_owned(), b.to_owned()], games))
 }
 
 /// Whether the journal's `white` names engine A, for a two-engine run.
@@ -653,18 +668,27 @@ fn empty_detail(excluded: &ExcludedGames) -> String {
 /// Statistics keep structured authority, but the annotations live in the
 /// directory's own `games.pgn`, so reading the journal is no reason to report
 /// telemetry as unavailable when the PGN beside it carries the moves.
+///
+/// A two-engine run's PGN is read per side, as its end-of-run results are,
+/// even when the source replayed was the PGN itself, which knows only names.
 fn directory_telemetry(
     directory: &Path,
     from_source: SearchTelemetryReport,
 ) -> SearchTelemetryReport {
-    if from_source.status == "available" {
+    let names = run_engine_names(&directory.join("resolved-config.json"));
+    if from_source.status == "available" && names.is_none() {
         return from_source;
     }
     let pgn = directory.join("games.pgn");
     let Ok(text) = fs::read_to_string(&pgn) else {
         return from_source;
     };
-    let from_pgn = analyze_pgn(&text);
+    let journal = fs::read(directory.join(crate::journal::JOURNAL_FILE)).unwrap_or_default();
+    let from_pgn = run_telemetry(
+        &text,
+        &journal,
+        names.as_ref().map(|[a, b]| [a.as_str(), b.as_str()]),
+    );
     if from_pgn.status == "available" {
         from_pgn
     } else {
@@ -1377,7 +1401,14 @@ pub(crate) fn run_engine_names(source: &Path) -> Option<[String; 2]> {
             .filter(|stem| !stem.is_empty())
             .map(str::to_owned)
     };
-    Some([name("engine_a")?, name("engine_b")?])
+    let [a, b] = [name("engine_a")?, name("engine_b")?];
+    // The run's PGN names two sides of one name by their side, and so must
+    // every figure read back from it.
+    Some(if a == b {
+        [format!("{a} (A)"), format!("{b} (B)")]
+    } else {
+        [a, b]
+    })
 }
 
 #[cfg(test)]

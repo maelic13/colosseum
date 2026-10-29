@@ -21,7 +21,7 @@ Side-specific direct controls use an `a-` or `b-` prefix:
 
 | Control | Meaning |
 |---|---|
-| `--a-label` / `--b-label` | Display label |
+| `--a-label` / `--b-label` | Display label. Without labels, two engines of one name — one binary run twice with different options — are named `name (A)` and `name (B)` in the PGN and every report, and the dry run says so |
 | `--a-engine-arg` / `--b-engine-arg` | Engine process argument; repeat as needed |
 | `--a-cwd` / `--b-cwd` | Engine working directory |
 | `--a-env` / `--b-env` | `KEY=VALUE` environment override |

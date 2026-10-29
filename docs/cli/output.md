@@ -130,8 +130,7 @@ baseline: 1,190,480 of 1,190,480 moves annotated (100.0%); depth 15.50 mean, 13 
 They are followed by how the counted games ended and the faults and time
 losses, as [`stats`](stats.md) describes them; each search line also gives the depth without mate scores.
 Only counted games are split by colour; the search figures cover every game in
-`games.pgn`. Two sides with the same name are told apart as `(A)` and `(B)`
-in the split, but their searches are one line, since the PGN names them alike.
+`games.pgn`, each counted for the side that played it.
 
 A final report never lists a run's games one by one. It says how many ended
 abnormally and in which way; `games.pgn` holds every result, `run.log` every

@@ -141,12 +141,80 @@ pub fn unavailable(reason: impl Into<String>) -> SearchTelemetryReport {
     }
 }
 
+/// Search telemetry per engine, each game's players named by its `White` and
+/// `Black` tags: what a PGN from anywhere says about who played.
 pub fn analyze_pgn(text: &str) -> SearchTelemetryReport {
+    analyze_games(text, |_| None)
+}
+
+/// Which side had White in each game of a two-engine run, by `GameNumber`.
+///
+/// A run's journal knows which side played White; its PGN only names the
+/// players. Two sides of one name are still two engines, so a run's
+/// telemetry is kept per side through this rather than per name.
+#[derive(Debug, Clone, Default)]
+pub struct RunSides {
+    /// Engine A's name, then engine B's, as the run reports them.
+    pub names: [String; 2],
+    /// Whether engine A had White, by game number. A game number the journal
+    /// gives both sides is left out, and that game falls back to its tags.
+    pub a_white: BTreeMap<u32, bool>,
+}
+
+impl RunSides {
+    /// Sides from `(game number, engine A had White)` pairs.
+    #[must_use]
+    pub fn new(names: [String; 2], games: impl IntoIterator<Item = (u32, bool)>) -> Self {
+        let mut a_white = BTreeMap::new();
+        let mut ambiguous = Vec::new();
+        for (number, white) in games {
+            if a_white
+                .insert(number, white)
+                .is_some_and(|seen| seen != white)
+            {
+                ambiguous.push(number);
+            }
+        }
+        for number in ambiguous {
+            a_white.remove(&number);
+        }
+        Self { names, a_white }
+    }
+
+    /// White's and Black's names for the PGN game `game`, when the journal
+    /// says which side was which.
+    fn players(&self, game: &str) -> Option<(String, String)> {
+        let number = pgn_tag(game, "GameNumber")?.parse::<u32>().ok()?;
+        let [a, b] = &self.names;
+        Some(if *self.a_white.get(&number)? {
+            (a.clone(), b.clone())
+        } else {
+            (b.clone(), a.clone())
+        })
+    }
+}
+
+/// [`analyze_pgn`] for a two-engine run's own PGN, per side rather than per
+/// name.
+pub fn analyze_run_pgn(text: &str, sides: &RunSides) -> SearchTelemetryReport {
+    analyze_games(text, |game| sides.players(game))
+}
+
+/// The telemetry of every game in `text`; `players` names a game's White and
+/// Black, and a game it has no answer for is named by its tags.
+fn analyze_games(
+    text: &str,
+    players: impl Fn(&str) -> Option<(String, String)>,
+) -> SearchTelemetryReport {
     let mut by_engine = BTreeMap::<String, EngineSamples>::new();
     let mut excluded_opening_moves = 0_u32;
     for game in split_pgn(text) {
-        let white = pgn_tag(game, "White").unwrap_or_else(|| "White".into());
-        let black = pgn_tag(game, "Black").unwrap_or_else(|| "Black".into());
+        let (white, black) = players(game).unwrap_or_else(|| {
+            (
+                pgn_tag(game, "White").unwrap_or_else(|| "White".into()),
+                pgn_tag(game, "Black").unwrap_or_else(|| "Black".into()),
+            )
+        });
         let tagged_opening_plies = pgn_tag(game, "OpeningPlyCount")
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(0);
@@ -630,6 +698,59 @@ mod tests {
         assert_eq!(b.depth.median, Some(30.0));
         assert_eq!(b.elapsed_seconds.mean, Some(0.5));
         assert_eq!(b.implied_nps.mean, Some(3_000.0));
+    }
+
+    /// One binary run twice: the PGN names both players alike, and only the
+    /// journal's sides tell their searches apart.
+    #[test]
+    fn a_run_keeps_two_sides_of_one_name_apart_by_side() {
+        let game = |number: u32, white_depth: u32, black_depth: u32| {
+            format!(
+                "[Event \"e\"]\n[White \"twin\"]\n[Black \"twin\"]\n[Result \"1/2-1/2\"]\n\
+                 [GameNumber \"{number}\"]\n\n\
+                 1. e4 {{d={white_depth} t=1s n=10}} e5 {{d={black_depth} t=1s n=10}} 1/2-1/2\n\n"
+            )
+        };
+        // Engine A searches to depth 10, engine B to depth 20, whichever
+        // colour each has.
+        let pgn = game(1, 10, 20) + &game(2, 20, 10) + &game(3, 10, 20);
+        assert_eq!(analyze_pgn(&pgn).engines.len(), 1, "one name, one engine");
+
+        let sides = RunSides::new(
+            ["twin (A)".into(), "twin (B)".into()],
+            [(1, true), (2, false), (3, true)],
+        );
+        let report = analyze_run_pgn(&pgn, &sides);
+        let engines = report
+            .engines
+            .iter()
+            .map(|engine| {
+                (
+                    engine.engine.as_str(),
+                    engine.eligible_moves,
+                    engine.depth.mean,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            engines,
+            [("twin (A)", 3, Some(10.0)), ("twin (B)", 3, Some(20.0))]
+        );
+    }
+
+    #[test]
+    fn a_game_the_journal_does_not_place_is_named_by_its_tags() {
+        let pgn = "[Event \"e\"]\n[White \"x\"]\n[Black \"y\"]\n[Result \"1/2-1/2\"]\n\
+                   [GameNumber \"7\"]\n\n1. e4 {d=1 t=1s n=1} e5 {d=1 t=1s n=1} 1/2-1/2\n\n";
+        // Game 7 is given both sides, so it is not placed at all.
+        let sides = RunSides::new(["a".into(), "b".into()], [(7, true), (7, false)]);
+        let report = analyze_run_pgn(pgn, &sides);
+        let names = report
+            .engines
+            .iter()
+            .map(|engine| engine.engine.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["x", "y"]);
     }
 
     #[test]

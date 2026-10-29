@@ -885,13 +885,14 @@ pub async fn play_pair_game(
     engine_a.allocated_cpus = slot.engine_a.allocation.clone();
     engine_b.allocated_cpus = slot.engine_b.allocation.clone();
     let (opening, opening_assignment) = settings.openings.assignment(number);
+    let (engine_a, engine_b) = engine_specs(engine_a, engine_b);
     play_game(GameRequest {
         number,
         slot: slot.slot_index,
         engines: settings.engines.clone(),
         identity_override: None,
-        engine_a: engine_spec(engine_a, EngineId::from_u128(1)),
-        engine_b: engine_spec(engine_b, EngineId::from_u128(2)),
+        engine_a,
+        engine_b,
         time_control_a: settings.engine_a_time_control,
         time_control_b: settings.engine_b_time_control,
         adjudication: settings.adjudication,
@@ -1171,8 +1172,7 @@ pub async fn run_fixed_match(request: FixedMatchRequest) -> Result<FixedMatchRep
     let owns_engines = caller_engines.is_none();
     let kept_engines =
         caller_engines.or_else(|| SlotEngines::for_mode(engine_processes, execution.slots.len()));
-    let engine_a = engine_spec(engine_a, EngineId::from_u128(1));
-    let engine_b = engine_spec(engine_b, EngineId::from_u128(2));
+    let (engine_a, engine_b) = engine_specs(engine_a, engine_b);
     let mut report = FixedMatchReport {
         status: MatchStatus::Completed,
         games_requested: games,
@@ -1478,6 +1478,22 @@ pub(crate) fn record_fault(
         Some(GameFault::Infrastructure { .. }) => counts.infrastructure += 1,
         None => {}
     }
+}
+
+/// Both sides' game specs, engine A's first.
+///
+/// One binary run twice with different options and no labels gives two sides
+/// one name. Each is then named by its side, `name (A)` and `name (B)`, so the
+/// PGN, the report and every per-engine figure read from them keep the two
+/// apart; a reader who wants other names gives `--a-label` and `--b-label`.
+fn engine_specs(a: EngineLaunchSpec, b: EngineLaunchSpec) -> (EngineGameSpec, EngineGameSpec) {
+    let mut a = engine_spec(a, EngineId::from_u128(1));
+    let mut b = engine_spec(b, EngineId::from_u128(2));
+    if a.name == b.name {
+        a.name = format!("{} (A)", a.name);
+        b.name = format!("{} (B)", b.name);
+    }
+    (a, b)
 }
 
 fn engine_spec(launch: EngineLaunchSpec, id: EngineId) -> EngineGameSpec {

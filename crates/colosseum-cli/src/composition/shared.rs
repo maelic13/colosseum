@@ -218,6 +218,19 @@ impl Players {
 }
 
 impl Players {
+    /// Say on standard error, in a dry run, that both engines carry one name
+    /// and how they are told apart. Nothing for two names; a run's progress
+    /// blocks name the players as they are reported.
+    pub(crate) fn note_shared_name(&self) {
+        if self.a == self.b {
+            let [a, b] = self.distinct_names();
+            eprintln!(
+                "note: engines A and B are both named {}; they are reported as {a} and {b}. Give --a-label and --b-label to name them",
+                self.a
+            );
+        }
+    }
+
     /// The two names as the PGN writes them. Two engines of one name are
     /// told apart by their side, since their games are still two sides of a
     /// board.
@@ -232,7 +245,8 @@ impl Players {
 
 impl std::fmt::Display for Players {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{} vs. {}", self.a, self.b)
+        let [a, b] = self.distinct_names();
+        write!(formatter, "{a} vs. {b}")
     }
 }
 

@@ -449,6 +449,7 @@ pub(crate) async fn run_sprt(
         }
     };
     if dry_run {
+        Players::new(&engine_a, &engine_b).note_shared_name();
         print_output(
             &MachineOutput::DryRun {
                 command: "sprt",

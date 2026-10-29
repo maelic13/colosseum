@@ -20,6 +20,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `run-record.json` and the `--json` value as before
 - `run.log` stop and resume events and `status` of an `sprt` or `calibrate`
   run count games
+- Two engines of one name — one binary run twice with different options and
+  no `--a-label`/`--b-label` — are named `name (A)` and `name (B)` in
+  `games.pgn`, progress blocks and every report, and the `match` and `sprt`
+  dry runs say so
+
+### Fixed
+- Search telemetry of a two-engine run is kept per side, not per name. Two
+  sides of one name were merged into one engine's search line at the end of
+  the run and in `stats`; scoring was never affected. `stats` on an earlier
+  run directory now splits them too
 
 ## [0.4.0] — 2026-10-22
 
