@@ -59,6 +59,13 @@ pub enum MetadataError {
         changelog: &'static str,
         version: Version,
     },
+    #[error(
+        "{changelog}'s heading for {version} is not dated: write `## [{version}] — YYYY-MM-DD`"
+    )]
+    UndatedNotes {
+        changelog: &'static str,
+        version: Version,
+    },
     #[error("product must be gui or cli")]
     Product,
     #[error("invalid CLI artifact platform/architecture pair: {platform}/{arch}")]
@@ -103,11 +110,23 @@ pub fn validate(root: &Path, tag: &str) -> Result<ReleaseMetadata, MetadataError
 
     let heading = format!("## [{}]", version);
     let notes = read(root, product.changelog)?;
-    if !notes.lines().any(|line| line.trim().starts_with(&heading)) {
+    let Some(line) = notes
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with(&heading))
+    else {
         let _misfiled = read(root, product.other_changelog)?
             .lines()
             .any(|line| line.trim().starts_with(&heading));
         return Err(MetadataError::MissingNotes {
+            changelog: product.changelog,
+            version,
+        });
+    };
+    // A release's section is dated in the commit that is tagged, so the
+    // notes a release publishes say when it was cut.
+    if !is_dated(&line[heading.len()..]) {
+        return Err(MetadataError::UndatedNotes {
             changelog: product.changelog,
             version,
         });
@@ -116,18 +135,36 @@ pub fn validate(root: &Path, tag: &str) -> Result<ReleaseMetadata, MetadataError
     Ok(metadata(product, version, tag.to_owned(), "release"))
 }
 
+/// Whether what follows a release heading's `## [X.Y.Z]` is ` — YYYY-MM-DD`
+/// (an em dash or a hyphen).
+fn is_dated(rest: &str) -> bool {
+    let rest = rest.trim_start();
+    let Some(date) = rest
+        .strip_prefix('—')
+        .or_else(|| rest.strip_prefix('-'))
+        .map(str::trim)
+    else {
+        return false;
+    };
+    let bytes = date.as_bytes();
+    bytes.len() == 10
+        && bytes.iter().enumerate().all(|(index, byte)| match index {
+            4 | 7 => *byte == b'-',
+            _ => byte.is_ascii_digit(),
+        })
+}
+
 /// Validate the package-owned version for an immutable, unpublished candidate.
 ///
 /// Candidates deliberately do not require final changelog headings or tags.
 /// They are workflow artifacts tied to a commit SHA, never GitHub Releases.
+/// A development version between releases (`X.Y.Z-dev`) is a candidate like
+/// any other, for either product; only a tag refuses a CLI prerelease.
 pub fn candidate(root: &Path, name: &str) -> Result<ReleaseMetadata, MetadataError> {
     let product = product(name)?;
     let version = Version::parse(&package_version(root, product)?)?;
     if !version.build.is_empty() {
         return Err(MetadataError::BuildMetadata);
-    }
-    if product.name == "cli" && !version.pre.is_empty() {
-        return Err(MetadataError::CliPrerelease);
     }
     let proposed_tag = format!("{}{}", product.tag_prefix, version);
     Ok(metadata(product, version, proposed_tag, "candidate"))
@@ -353,8 +390,16 @@ mod tests {
             )
             .unwrap();
         }
-        fs::write(root.path().join("CHANGELOG-GUI.md"), "## [1.2.3]\n").unwrap();
-        fs::write(root.path().join("CHANGELOG-CLI.md"), "## [1.2.3]\n").unwrap();
+        fs::write(
+            root.path().join("CHANGELOG-GUI.md"),
+            "## [1.2.3] — 2026-01-02\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("CHANGELOG-CLI.md"),
+            "## [1.2.3] - 2026-01-02\n",
+        )
+        .unwrap();
         root
     }
 
@@ -445,6 +490,40 @@ mod tests {
     }
 
     #[test]
+    fn a_tag_needs_its_section_dated() {
+        let root = fixture();
+        for heading in ["## [1.2.3]", "## [1.2.3] — soon", "## [1.2.3] — 2026-1-2"] {
+            fs::write(root.path().join("CHANGELOG-CLI.md"), format!("{heading}\n")).unwrap();
+            assert!(
+                matches!(
+                    validate(root.path(), "cli-v1.2.3"),
+                    Err(MetadataError::UndatedNotes { .. })
+                ),
+                "{heading}"
+            );
+        }
+    }
+
+    /// Between releases the CLI carries `X.Y.Z-dev`: a candidate builds it,
+    /// and no tag can publish it.
+    #[test]
+    fn a_development_version_is_a_candidate_and_never_a_release() {
+        let root = fixture();
+        fs::write(
+            root.path().join("crates/colosseum-cli/Cargo.toml"),
+            "[package]\nname = \"colosseum-cli\"\nversion = \"1.3.0-dev\"\n",
+        )
+        .unwrap();
+        let cli = candidate(root.path(), "cli").unwrap();
+        assert_eq!(cli.version, "1.3.0-dev");
+        assert!(cli.prerelease);
+        assert!(matches!(
+            validate(root.path(), "cli-v1.3.0-dev"),
+            Err(MetadataError::CliPrerelease)
+        ));
+    }
+
+    #[test]
     fn candidate_uses_manifest_without_claiming_release_readiness() {
         let root = fixture();
         fs::write(root.path().join("CHANGELOG-CLI.md"), "## [Unreleased]\n").unwrap();
@@ -462,7 +541,7 @@ mod tests {
         let root = fixture();
         fs::write(
             root.path().join("CHANGELOG-CLI.md"),
-            "# CLI\n\n## [Unreleased]\n\nFuture.\n\n## [1.2.3]\n\nCLI notes.\n\n## [1.2.2]\n\nOld.\n",
+            "# CLI\n\n## [Unreleased]\n\nFuture.\n\n## [1.2.3] — 2026-01-02\n\nCLI notes.\n\n## [1.2.2] — 2026-01-01\n\nOld.\n",
         )
         .unwrap();
         assert_eq!(
