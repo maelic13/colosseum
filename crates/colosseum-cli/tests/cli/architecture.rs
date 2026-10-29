@@ -79,15 +79,30 @@ fn independent_release_lanes_are_complete_and_least_privileged() {
     let gui = fs::read_to_string(root.join(".github/workflows/release-gui.yml")).unwrap();
     let cli = fs::read_to_string(root.join(".github/workflows/release-cli.yml")).unwrap();
 
-    assert!(gui.contains("'gui-v*'"));
-    assert!(!gui.contains("'cli-v*'"));
-    assert!(cli.contains("'cli-v*'"));
-    assert!(!cli.contains("'gui-v*'"));
-    // Both lanes build a candidate only on a manual dispatch, never on a
-    // branch push.
-    for workflow in [&gui, &cli] {
-        assert!(workflow.contains("workflow_dispatch:"));
-        assert!(!workflow.contains("branches:"));
+    assert!(gui.contains("'gui-v[0-9]+.[0-9]+.[0-9]+*'"));
+    assert!(!gui.contains("'cli-v"));
+    assert!(cli.contains("'cli-v[0-9]+.[0-9]+.[0-9]+'"));
+    assert!(!cli.contains("'gui-v"));
+    // Both lanes build a candidate on every pull request into main and on a
+    // manual dispatch, never on a branch push, and only a tag push of the
+    // lane's own product publishes.
+    for (workflow, name) in [(&gui, "gui"), (&cli, "cli")] {
+        assert!(workflow.contains("workflow_dispatch:"), "{name}");
+        assert!(
+            workflow.contains("  pull_request:\n    branches: [main]\n"),
+            "{name}"
+        );
+        assert!(
+            workflow.contains("  push:\n    tags:\n"),
+            "{name}: a push runs only for a tag"
+        );
+        assert_eq!(workflow.matches("branches:").count(), 1, "{name}");
+        assert!(
+            workflow.contains(&format!(
+                "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/{name}-v')"
+            )),
+            "{name}"
+        );
     }
 
     // Each lane builds, packages and smokes exactly its own product, through
