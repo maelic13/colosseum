@@ -14,6 +14,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crossbeam_channel::{Receiver, TryRecvError};
 use eframe::egui::{self, Color32, DragValue, Layout, RichText, ScrollArea, Ui};
 use egui_extras::{Column, TableBuilder};
 
@@ -25,7 +26,7 @@ use colosseum_engine::{
     InFlightGame, TournamentResults, TournamentRow, TournamentStatus, store::STATUS_FINISHED,
 };
 
-use crate::backend::Backend;
+use crate::backend::{self, Backend};
 use crate::theme;
 use crate::widgets;
 
@@ -48,6 +49,11 @@ pub struct ResultsTab {
     selected: Option<TournamentId>,
     /// Cached reconstructed results for the selected (stored) tournament.
     results: Option<(TournamentId, TournamentResults)>,
+    /// The stored results being reconstructed on a worker thread.
+    results_job: Option<(TournamentId, Receiver<anyhow::Result<TournamentResults>>)>,
+    /// The tournament whose stored results could not be reconstructed (not
+    /// retried every frame; selecting it again retries).
+    results_failed: Option<TournamentId>,
     /// Tournament awaiting delete confirmation (two-step inline confirm).
     pending_delete: Option<TournamentId>,
     /// Rows highlighted for bulk actions (ctrl/shift click). The *current*
@@ -84,8 +90,11 @@ pub struct ResultsTab {
     /// the tab drops straight into the live view rather than the stored-detail
     /// layer — without re-attempting the load every frame (or after a failure).
     auto_loaded: Option<TournamentId>,
-    /// When the list was last re-read from the database (auto-refresh).
-    last_refresh: Option<std::time::Instant>,
+    /// Each loaded tournament's status when the list was last read. The
+    /// list is re-read only when this changes (or after an action): stored
+    /// rows change only through a loaded tournament or an action here, and a
+    /// loaded row's progress comes from its live snapshot.
+    list_basis: Vec<(TournamentId, TournamentStatus)>,
     /// Per-tournament live-view (Standings | Live lens) states.
     live_views: crate::live_view::LiveViews,
 }
@@ -93,22 +102,30 @@ pub struct ResultsTab {
 impl ResultsTab {
     /// Draw the tab body. Call every frame.
     pub fn show(&mut self, ui: &mut Ui, backend: &mut Backend) {
-        // Auto-refresh: the list is a cheap query, so re-read it at most once
-        // a second (statuses change as tournaments run) and immediately after
-        // any action. No manual Refresh button needed.
-        let stale = self
-            .last_refresh
-            .is_none_or(|t| t.elapsed().as_secs_f32() > 1.0);
-        if self.list.is_none() || stale {
+        // Re-read the list when a loaded tournament appears, goes away or
+        // changes status, and right after any action — never on a timer:
+        // with hundreds of thousands of stored games the read is not free.
+        if self.list.is_none() || list_basis(backend) != self.list_basis {
             self.refresh(backend);
         }
 
-        // Follow loaded tournaments: a newly started or resumed one steals
-        // the selection so its live view appears right away.
+        for (id, reason) in backend.take_load_failures() {
+            let name = self
+                .list
+                .as_ref()
+                .and_then(|l| l.iter().find(|r| r.id == id))
+                .map_or_else(String::new, |r| format!(" {}", r.name));
+            self.error = Some(format!("Could not load{name}: {reason}"));
+        }
+
+        // Follow loaded tournaments: a newly started one steals the selection
+        // so its live view appears right away. One loaded only for viewing
+        // does not — it was selected when its load began, and the user may
+        // have moved on while it loaded.
         let active_ids: Vec<TournamentId> = backend.actives.iter().map(|a| a.handle.id).collect();
-        for id in &active_ids {
-            if !self.known_actives.contains(id) {
-                self.selected = Some(*id);
+        for active in &backend.actives {
+            if active.takes_focus && !self.known_actives.contains(&active.handle.id) {
+                self.selected = Some(active.handle.id);
             }
         }
         self.known_actives = active_ids;
@@ -205,17 +222,52 @@ impl ResultsTab {
         self.bulk_delete_modal(ui, backend);
         self.rename_modal(ui, backend);
 
-        // Centre: live view for loaded tournaments, stored results otherwise.
+        // Centre: live view for loaded tournaments, a placeholder while one
+        // loads, stored results otherwise.
         let live_id = self.selected.filter(|id| backend.active(*id).is_some());
+        let loading_id = self.selected.filter(|id| backend.is_loading(*id));
         egui::CentralPanel::default()
             .frame(egui::Frame::new())
             .show(ui, |ui| {
                 if let Some(id) = live_id {
                     self.live_view(ui, backend, id);
+                } else if let Some(id) = loading_id {
+                    self.loading_panel(ui, id);
                 } else {
                     self.detail_panel(ui, backend);
                 }
             });
+    }
+
+    /// Shown while the selected tournament loads in the background.
+    fn loading_panel(&self, ui: &mut Ui, id: TournamentId) {
+        let row = self
+            .list
+            .as_ref()
+            .and_then(|l| l.iter().find(|r| r.id == id));
+        let name = row.map_or("tournament", |r| r.name.as_str());
+        let games = row.map_or(0, |r| r.games_total);
+        ui.add_space(80.0);
+        ui.vertical_centered(|ui| {
+            ui.add(egui::Spinner::new().size(28.0).color(theme::accent()));
+            ui.add_space(12.0);
+            ui.label(
+                RichText::new(format!("Loading {name}…"))
+                    .color(theme::text_weak())
+                    .font(theme::semibold(15.0)),
+            );
+            if games > 0 {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(format!(
+                        "Replaying {} games",
+                        widgets::thousands(games as u64)
+                    ))
+                    .color(theme::text_faint())
+                    .size(12.5),
+                );
+            }
+        });
     }
 
     /// Load the selected tournament into the live view when it is unfinished
@@ -243,10 +295,9 @@ impl ResultsTab {
         // with the full standings, head-to-head, terminations and
         // Information rail — no reason a finished tournament should show a
         // stripped-down layer. Loading replays the DB only; no engines spawn
-        // and there is nothing left to play.
-        if let Err(e) = backend.try_resume(row) {
-            self.error = Some(format!("Could not load: {e}"));
-        }
+        // and there is nothing left to play. The load runs in the background;
+        // the placeholder shows until it lands.
+        backend.load_tournament(row, false);
     }
 
     /// Reload the tournament list from the database. Detail caches stay —
@@ -262,7 +313,7 @@ impl ResultsTab {
             self.selected = list.first().map(|t| t.id);
         }
         self.list = Some(list);
-        self.last_refresh = Some(std::time::Instant::now());
+        self.list_basis = list_basis(backend);
     }
 
     // ── Tournament list (right panel) ───────────────────────────────────────
@@ -381,14 +432,11 @@ impl ResultsTab {
                             self.multi_selected.clear();
                             self.selected = Some(row.id);
                             self.pending_delete = None;
-                            // Load immediately (finished tournaments too) —
+                            // Load straight away (finished tournaments too) —
                             // the loaded view carries the full standings,
                             // head-to-head and Information rail.
-                            if backend.active(row.id).is_none()
-                                && let Err(e) = backend.try_resume(row.clone())
-                            {
-                                self.error = Some(format!("Could not load: {e}"));
-                            }
+                            self.error = None;
+                            backend.load_tournament(row.clone(), false);
                         }
                     }
                     // Right-click selects (into the bulk set when not already
@@ -435,17 +483,13 @@ impl ResultsTab {
 
         if ui.button(format!("Start{suffix}")).clicked() {
             for id in &targets {
-                let row = list.iter().find(|r| r.id == *id);
-                if backend.active(*id).is_none()
-                    && let Some(row) = row
-                    && row.status != STATUS_FINISHED
-                    && let Err(e) = backend.try_resume(row.clone())
-                {
-                    self.error = Some(format!("Could not load: {e}"));
-                    continue;
-                }
                 if let Some(active) = backend.active(*id) {
                     active.handle.go();
+                } else if let Some(row) = list.iter().find(|r| r.id == *id)
+                    && row.status != STATUS_FINISHED
+                {
+                    // Plays as soon as its background load lands.
+                    backend.load_tournament(row.clone(), true);
                 }
             }
             ui.close();
@@ -1815,15 +1859,7 @@ impl ResultsTab {
             return;
         };
 
-        if self.results.as_ref().map(|(rid, _)| *rid) != Some(id) {
-            match backend.tournament_results(&row) {
-                Ok(res) => self.results = Some((id, res)),
-                Err(e) => {
-                    self.error = Some(format!("Could not load results: {e}"));
-                    self.results = None;
-                }
-            }
-        }
+        let results_loading = self.poll_results(ui, backend, &row);
 
         ScrollArea::vertical()
             .id_salt("results_detail_scroll")
@@ -1857,10 +1893,20 @@ impl ResultsTab {
                         ui.separator();
                         ui.add_space(8.0);
 
-                        if let Some((_, res)) = &self.results {
+                        if let Some((_, res)) = self.results.as_ref().filter(|(rid, _)| *rid == id)
+                        {
                             results_summary(ui, res);
                             ui.add_space(8.0);
                             standings_table(ui, res);
+                        } else if results_loading {
+                            ui.horizontal(|ui| {
+                                ui.add(egui::Spinner::new().size(14.0));
+                                ui.label(
+                                    RichText::new("Loading results…")
+                                        .color(theme::text_weak())
+                                        .size(13.0),
+                                );
+                            });
                         } else {
                             ui.label(
                                 RichText::new("No results to show.")
@@ -1870,6 +1916,48 @@ impl ResultsTab {
                         }
                     });
             });
+    }
+
+    /// Make sure the stored results of `row` are cached or on their way,
+    /// reconstructed on a worker thread. Returns whether they are still
+    /// loading.
+    fn poll_results(&mut self, ui: &Ui, backend: &Backend, row: &TournamentRow) -> bool {
+        let id = row.id;
+        if self.results.as_ref().is_some_and(|(rid, _)| *rid == id) {
+            return false;
+        }
+        if self.results_failed.is_some_and(|f| f != id) {
+            // Another tournament was selected: its failure no longer applies.
+            self.results_failed = None;
+        }
+        if self.results_failed == Some(id) {
+            return false;
+        }
+        if self.results_job.as_ref().is_none_or(|(jid, _)| *jid != id) {
+            self.results_job = Some((id, backend.spawn_tournament_results(row.clone())));
+        }
+        let Some((_, rx)) = &self.results_job else {
+            return false;
+        };
+        let outcome = match rx.try_recv() {
+            Ok(outcome) => outcome,
+            Err(TryRecvError::Empty) => {
+                ui.ctx().request_repaint_after(backend::LIVE_REPAINT);
+                return true;
+            }
+            Err(TryRecvError::Disconnected) => {
+                Err(anyhow::anyhow!("the loader stopped unexpectedly"))
+            }
+        };
+        self.results_job = None;
+        match outcome {
+            Ok(res) => self.results = Some((id, res)),
+            Err(e) => {
+                self.error = Some(format!("Could not load results: {e}"));
+                self.results_failed = Some(id);
+            }
+        }
+        false
     }
 
     fn action_bar(&mut self, ui: &mut Ui, backend: &mut Backend, row: &TournamentRow) {
@@ -1883,13 +1971,10 @@ impl ResultsTab {
                     .on_hover_text("Reload this tournament and continue from where it stopped.")
                     .clicked()
                 {
-                    match backend.try_resume(row.clone()) {
-                        Ok(()) => {
-                            // The live view takes over via the active-follow
-                            // logic on the next frame.
-                        }
-                        Err(e) => self.error = Some(format!("Resume failed: {e}")),
-                    }
+                    // Loads in the background; the live view takes over
+                    // once it lands (this row stays selected meanwhile).
+                    self.error = None;
+                    backend.load_tournament(row.clone(), false);
                 }
                 ui.add_space(6.0);
             }
@@ -1988,6 +2073,16 @@ impl ResultsTab {
 }
 
 // ── Live data ───────────────────────────────────────────────────────────────
+
+/// What the tournament list's freshness depends on: every loaded
+/// tournament with its status.
+fn list_basis(backend: &Backend) -> Vec<(TournamentId, TournamentStatus)> {
+    backend
+        .actives
+        .iter()
+        .filter_map(|a| a.snapshot.lock().ok().map(|s| (a.handle.id, s.status)))
+        .collect()
+}
 
 /// One results-table row: standings joined with rating + identity.
 #[derive(Clone)]

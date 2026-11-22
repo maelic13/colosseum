@@ -44,7 +44,9 @@ pub struct TournamentRow {
     pub games_total: usize,
 }
 
-/// A game row, as stored.
+/// A game row, as stored — everything but the PGN text, which is read only
+/// for export ([`Store::played_game_pgns`]). The PGN is most of a game's
+/// bytes, so leaving it out keeps loading a large tournament cheap.
 #[derive(Debug, Clone)]
 pub struct GameRow {
     pub id: GameId,
@@ -62,7 +64,6 @@ pub struct GameRow {
     pub white_move_ms: Option<f64>,
     pub black_move_ms: Option<f64>,
     pub plies: Option<u32>,
-    pub pgn: Option<String>,
     pub status: String,
     /// Opening start FEN; `None` means the standard start position.
     pub start_fen: Option<String>,
@@ -559,11 +560,11 @@ impl Store {
         Ok(())
     }
 
-    /// List all games of a tournament, ordered by round.
+    /// List all games of a tournament, ordered by round, without their PGN.
     pub fn list_games(&self, tournament: TournamentId) -> Result<Vec<GameRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, round, white_id, black_id, result, termination,
-                    white_nps, black_nps, plies, pgn, status, start_fen, opening_moves,
+                    white_nps, black_nps, plies, status, start_fen, opening_moves,
                     white_depth, black_depth, white_move_ms, black_move_ms
              FROM games WHERE tournament_id = ?1 ORDER BY round, rowid",
         )?;
@@ -578,14 +579,13 @@ impl Store {
                 white_nps: row.get(6)?,
                 black_nps: row.get(7)?,
                 plies: row.get(8)?,
-                pgn: row.get(9)?,
-                status: row.get(10)?,
-                start_fen: row.get(11)?,
-                opening_moves: row.get(12)?,
-                white_depth: row.get(13)?,
-                black_depth: row.get(14)?,
-                white_move_ms: row.get(15)?,
-                black_move_ms: row.get(16)?,
+                status: row.get(9)?,
+                start_fen: row.get(10)?,
+                opening_moves: row.get(11)?,
+                white_depth: row.get(12)?,
+                black_depth: row.get(13)?,
+                white_move_ms: row.get(14)?,
+                black_move_ms: row.get(15)?,
             })
         })?;
         let mut games = Vec::new();
@@ -593,6 +593,35 @@ impl Store {
             games.push(row?.into_game()?);
         }
         Ok(games)
+    }
+
+    /// The PGN of every played game of a tournament, in play order (the
+    /// order of [`Self::list_games`]). A game the runner could not play is
+    /// stored with an `Aborted` termination and a moveless placeholder PGN;
+    /// it is left out, as the on-disk PGN file leaves it out.
+    pub fn played_game_pgns(&self, tournament: TournamentId) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT pgn FROM games
+             WHERE tournament_id = ?1 AND pgn IS NOT NULL
+               AND (termination IS NULL OR termination <> ?2)
+             ORDER BY round, rowid",
+        )?;
+        let rows = stmt.query_map(
+            params![
+                tournament.to_string(),
+                serde_json::to_string(&Termination::Aborted)?
+            ],
+            |row| row.get::<_, String>(0),
+        )?;
+        let mut pgns = Vec::new();
+        for pgn in rows {
+            let pgn = pgn?;
+            let trimmed = pgn.trim();
+            if !trimmed.is_empty() {
+                pgns.push(trimmed.to_string());
+            }
+        }
+        Ok(pgns)
     }
 }
 
@@ -611,7 +640,6 @@ struct RawGame {
     white_move_ms: Option<f64>,
     black_move_ms: Option<f64>,
     plies: Option<u32>,
-    pgn: Option<String>,
     status: String,
     start_fen: Option<String>,
     opening_moves: Option<String>,
@@ -641,7 +669,6 @@ impl RawGame {
             white_move_ms: self.white_move_ms,
             black_move_ms: self.black_move_ms,
             plies: self.plies,
-            pgn: self.pgn,
             status: self.status,
             start_fen: self.start_fen,
             opening_moves,
@@ -711,6 +738,10 @@ CREATE TABLE IF NOT EXISTS games (
 );
 
 CREATE INDEX IF NOT EXISTS idx_games_tournament ON games(tournament_id);
+-- Counting a tournament's finished games (the Arena list) must not read the
+-- game rows: `status` sits after the PGN in each row, so without this index
+-- every count walks the PGN text of every game.
+CREATE INDEX IF NOT EXISTS idx_games_tournament_status ON games(tournament_id, status);
 ";
 
 #[cfg(test)]
@@ -813,6 +844,31 @@ mod tests {
         let valid = [row(ids[0]), row(ids[1]), row(ids[2])];
         store.insert_pending_games(tid, &valid).unwrap();
         assert_eq!(store.list_games(tid).unwrap().len(), 3);
+    }
+
+    /// The Arena list counts every tournament's finished games. Answered
+    /// from the game rows, that count reads through each game's PGN (stored
+    /// before `status`), which took over a second on a database of half a
+    /// million games; the `(tournament_id, status)` index answers it alone.
+    #[test]
+    fn the_finished_game_count_reads_only_the_index() {
+        let store = Store::open_in_memory().unwrap();
+        let plan: Vec<String> = store
+            .conn
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT COUNT(*) FROM games
+                 WHERE tournament_id = ?1 AND status = 'finished'",
+            )
+            .unwrap()
+            .query_map(["t"], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("COVERING INDEX idx_games_tournament_status")),
+            "unexpected plan: {plan:?}"
+        );
     }
 
     #[test]
@@ -964,6 +1020,8 @@ mod tests {
         let stored_abort = before.iter().find(|game| game.id == aborted).unwrap();
         assert_eq!(stored_abort.status, GAME_FINISHED);
         assert_eq!(stored_abort.termination, Some(Termination::Aborted));
+        // Export leaves the placeholder out even before the reset.
+        assert_eq!(store.played_game_pgns(tid).unwrap(), vec!["played pgn"]);
 
         assert_eq!(store.reset_unfinished_games(tid).unwrap(), 1);
 
@@ -972,8 +1030,9 @@ mod tests {
         assert_eq!(requeued.status, GAME_PENDING);
         assert_eq!(requeued.result, None);
         assert_eq!(requeued.termination, None);
-        assert_eq!(requeued.pgn, None);
         assert_eq!(requeued.plies, None);
+        // The re-queued game's placeholder PGN is gone; the played one stays.
+        assert_eq!(store.played_game_pgns(tid).unwrap(), vec!["played pgn"]);
 
         let kept = after.iter().find(|game| game.id == played).unwrap();
         assert_eq!(kept.status, GAME_FINISHED);
