@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **The Arena tab stays smooth with a large history.** With hundreds of
+  thousands of stored games it froze for over a second every second, and
+  opening it or choosing a tournament froze the window for seconds. The
+  tournament list now refreshes only when something changes, a tournament
+  loads in the background behind a "Loading…" placeholder, and loading no
+  longer reads the games' PGN text. The first start after the update
+  prepares the database for this, which can take a few seconds once
+
 ---
 
 ## [1.2.0] — 2026-11-14

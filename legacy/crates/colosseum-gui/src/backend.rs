@@ -12,11 +12,19 @@
 //! tournament is live the UI also repaints on a ~30 Hz timer (see
 //! [`repaint_interval`]) so the results table animates smoothly even if events
 //! are briefly quiet.
+//!
+//! Loading a stored tournament replays every one of its games from the
+//! database, which takes a second or more for a tournament of tens of
+//! thousands of games, so it runs on a worker thread
+//! ([`Backend::load_tournament`]) and the loaded tournament is installed by
+//! [`Backend::poll`] on a later frame.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crossbeam_channel::Receiver;
+use crossbeam_channel::{Receiver, TryRecvError};
 
 use colosseum_core::{
     EngineConfig, EngineId, RatingWriteback, TournamentConfig, TournamentEvent, TournamentId,
@@ -62,6 +70,32 @@ pub struct ActiveTournament {
     /// `games_finished` when the writeback last ran (apply once per new game,
     /// and never on mere load).
     pub writeback_at: usize,
+    /// Whether the Arena tab should select this tournament when it appears:
+    /// true for one that starts playing, false for one loaded only to view.
+    pub takes_focus: bool,
+}
+
+/// A stored tournament being loaded on a worker thread.
+struct PendingLoad {
+    id: TournamentId,
+    /// Press Go once it is loaded (the Arena list's Start action).
+    go: bool,
+    rx: Receiver<anyhow::Result<LoadedTournament>>,
+}
+
+/// What the load worker hands back: a resumed tournament whose driver has
+/// not been spawned yet.
+struct LoadedTournament {
+    handle: Tournament,
+    driver: Pin<Box<dyn Future<Output = ()> + Send>>,
+    snapshot: Arc<Mutex<TournamentSnapshot>>,
+    events: Receiver<TournamentEvent>,
+    name: String,
+    participants: Vec<ParticipantInfo>,
+    config: TournamentConfig,
+    priors: Vec<(EngineId, f64)>,
+    rating_writeback: RatingWriteback,
+    finished_now: usize,
 }
 
 /// All backend resources owned by the GUI.
@@ -76,6 +110,10 @@ pub struct Backend {
     /// Loaded tournaments (started or resumed this session). Several can be
     /// loaded — and even running — at once; each owns its driver + snapshot.
     pub actives: Vec<ActiveTournament>,
+    /// Stored tournaments being loaded on worker threads.
+    loading: Vec<PendingLoad>,
+    /// Loads that failed since the UI last asked, with the reason.
+    load_failures: Vec<(TournamentId, String)>,
 }
 
 impl Backend {
@@ -118,6 +156,8 @@ impl Backend {
             store,
             runtime,
             actives: Vec::new(),
+            loading: Vec::new(),
+            load_failures: Vec::new(),
         })
     }
 
@@ -133,9 +173,14 @@ impl Backend {
     /// Events only signal change; the authoritative state is read from the
     /// snapshot. Draining keeps the channel from growing unbounded. Also the
     /// hook that applies the configured rating writeback after each game.
+    ///
+    /// Also installs tournaments whose background load has finished; while a
+    /// load is in progress the UI keeps polling so it appears promptly.
     pub fn poll(&mut self) -> Option<Duration> {
+        self.collect_loads();
+        let loading = (!self.loading.is_empty()).then_some(LIVE_REPAINT);
         if self.actives.is_empty() {
-            return None;
+            return loading;
         }
         for active in &self.actives {
             while active.events.try_recv().is_ok() {}
@@ -145,6 +190,7 @@ impl Backend {
             .iter()
             .filter_map(|a| a.snapshot.lock().ok().map(|s| s.status))
             .filter_map(repaint_interval)
+            .chain(loading)
             .min()
     }
 
@@ -318,14 +364,17 @@ impl Backend {
             priors,
             rating_writeback,
             writeback_at: 0,
+            takes_focus: true,
         });
         Ok(())
     }
 
-    /// Unload a tournament (after it has stopped or finished). Does not delete
-    /// persisted data — it stays in the Arena list.
+    /// Unload a tournament (after it has stopped or finished), or abandon its
+    /// load if it is still loading. Does not delete persisted data — it stays
+    /// in the Arena list.
     pub fn close_tournament(&mut self, id: TournamentId) {
         self.actives.retain(|a| a.handle.id != id);
+        self.loading.retain(|l| l.id != id);
     }
 
     /// List all stored tournaments, most recent first, for the History tab.
@@ -336,13 +385,33 @@ impl Backend {
         })
     }
 
-    /// Reconstruct a stored tournament's results read-only (no engines spawned).
-    pub fn tournament_results(&self, row: &TournamentRow) -> anyhow::Result<TournamentResults> {
-        Ok(load_tournament_results(&self.store, row)?)
+    /// Reconstruct a stored tournament's results read-only (no engines
+    /// spawned) on a worker thread; the result arrives on the returned
+    /// channel.
+    pub fn spawn_tournament_results(
+        &self,
+        row: TournamentRow,
+    ) -> Receiver<anyhow::Result<TournamentResults>> {
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let db = self.dirs.database_path();
+        let spawned = std::thread::Builder::new()
+            .name("tournament-results".into())
+            .spawn(move || {
+                let results = Store::open(db)
+                    .and_then(|store| load_tournament_results(&store, &row))
+                    .map_err(anyhow::Error::from);
+                let _ = tx.send(results);
+            });
+        if let Err(e) = spawned {
+            tracing::warn!("could not start the results worker: {e}");
+        }
+        rx
     }
 
-    /// Delete a tournament and all of its games from the database.
-    pub fn delete_tournament(&self, id: TournamentId) -> anyhow::Result<()> {
+    /// Delete a tournament and all of its games from the database (and
+    /// abandon its load, if it is still loading).
+    pub fn delete_tournament(&mut self, id: TournamentId) -> anyhow::Result<()> {
+        self.loading.retain(|l| l.id != id);
         self.store.delete_tournament(id)?;
         Ok(())
     }
@@ -369,92 +438,88 @@ impl Backend {
     /// termination) is left out, as the on-disk PGN file leaves it out: its
     /// moveless placeholder draw is not a game.
     pub fn collect_pgn(&self, id: TournamentId) -> anyhow::Result<String> {
-        let games = self.store.list_games(id)?;
-        let mut out = String::new();
-        for g in games {
-            if g.termination == Some(colosseum_core::Termination::Aborted) {
-                continue;
-            }
-            if let Some(pgn) = g.pgn.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-                if !out.is_empty() {
-                    out.push_str("\n\n");
-                }
-                out.push_str(pgn);
-            }
-        }
-        Ok(out)
+        Ok(self.store.played_game_pgns(id)?.join("\n\n"))
     }
 
-    /// Wire a previously-persisted tournament back up as a loaded tournament
-    /// (in Stopped/Idle state — the user must press Go to begin play). A no-op
-    /// if it is already loaded.
-    pub fn try_resume(&mut self, row: TournamentRow) -> anyhow::Result<()> {
-        let name = row.name.clone();
+    /// Load a previously-persisted tournament as a loaded tournament, in
+    /// Stopped (or Finished) state, on a worker thread. A no-op if it is
+    /// already loaded or loading. With `go`, play begins as soon as it is
+    /// loaded; otherwise the user presses Go.
+    ///
+    /// The tournament appears in [`Self::actives`] on a later [`Self::poll`];
+    /// a failure is reported through [`Self::take_load_failures`].
+    pub fn load_tournament(&mut self, row: TournamentRow, go: bool) {
         let id = row.id;
         if self.active(id).is_some() {
-            return Ok(());
+            return;
         }
-
-        let driver_store = Store::open(self.dirs.database_path())?;
-        let participants_raw = driver_store.list_tournament_engines(id)?;
-
-        let participants: Vec<ParticipantInfo> = participants_raw
-            .iter()
-            .filter_map(|p| {
-                let cfg = p.config.as_ref()?;
-                let name = if cfg.meta.name.is_empty() {
-                    cfg.path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("?")
-                        .to_string()
-                } else {
-                    cfg.meta.name.clone()
-                };
-                Some(ParticipantInfo {
-                    id: p.engine,
-                    name,
-                    version: cfg.meta.version.clone(),
-                })
-            })
-            .collect();
-
-        // Priors come from the tournament's stored start ratings — NOT the
-        // current library — so the Δ column always measures against the
-        // tournament's beginning, even across resumes and after writebacks.
-        let priors: Vec<(EngineId, f64)> = participants_raw
-            .iter()
-            .map(|p| (p.engine, p.start_elo))
-            .collect();
-
-        let resume_store = Store::open(self.dirs.database_path())?;
-        let (events_tx, events_rx) = crossbeam_channel::unbounded();
-        let rating_writeback = row.config.rating_writeback.clone();
-        let config_copy = row.config.clone();
+        if let Some(pending) = self.loading.iter_mut().find(|l| l.id == id) {
+            pending.go |= go;
+            return;
+        }
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let db = self.dirs.database_path();
         // The library is passed for one repair only: a participant whose
         // recorded executable has since moved or been removed is relaunched
         // from the library's current entry, so correcting the path in the
         // Engines tab is enough to play the games that could not start.
-        let (handle, driver) = resume_tournament(row, resume_store, events_tx, &self.engines)?;
-        let snapshot = handle.snapshot_handle();
-        let finished_now = snapshot.lock().map_or(0, |s| s.games_finished);
+        let library = self.engines.clone();
+        let spawned = std::thread::Builder::new()
+            .name("tournament-load".into())
+            .spawn(move || {
+                let _ = tx.send(load_stored_tournament(&db, row, &library));
+            });
+        match spawned {
+            Ok(_) => self.loading.push(PendingLoad { id, go, rx }),
+            Err(e) => self
+                .load_failures
+                .push((id, format!("could not start the loader: {e}"))),
+        }
+    }
 
-        self.runtime.spawn(driver);
-        // Do NOT call handle.go() — leave in Stopped state; user presses Go.
+    /// Whether a tournament is being loaded in the background.
+    #[must_use]
+    pub fn is_loading(&self, id: TournamentId) -> bool {
+        self.loading.iter().any(|l| l.id == id)
+    }
 
-        self.actives.push(ActiveTournament {
-            handle,
-            snapshot,
-            events: events_rx,
-            name,
-            participants,
-            config: config_copy,
-            priors,
-            rating_writeback,
-            // Loading must not write anything — only new games do.
-            writeback_at: finished_now,
-        });
-        Ok(())
+    /// The loads that failed since the last call, with the reason.
+    pub fn take_load_failures(&mut self) -> Vec<(TournamentId, String)> {
+        std::mem::take(&mut self.load_failures)
+    }
+
+    /// Install every tournament whose background load has finished.
+    fn collect_loads(&mut self) {
+        let mut still_loading = Vec::with_capacity(self.loading.len());
+        for pending in std::mem::take(&mut self.loading) {
+            match pending.rx.try_recv() {
+                Err(TryRecvError::Empty) => still_loading.push(pending),
+                Err(TryRecvError::Disconnected) => self
+                    .load_failures
+                    .push((pending.id, "the loader stopped unexpectedly".into())),
+                Ok(Err(e)) => self.load_failures.push((pending.id, e.to_string())),
+                Ok(Ok(loaded)) => {
+                    self.runtime.spawn(loaded.driver);
+                    if pending.go {
+                        loaded.handle.go();
+                    }
+                    self.actives.push(ActiveTournament {
+                        handle: loaded.handle,
+                        snapshot: loaded.snapshot,
+                        events: loaded.events,
+                        name: loaded.name,
+                        participants: loaded.participants,
+                        config: loaded.config,
+                        priors: loaded.priors,
+                        rating_writeback: loaded.rating_writeback,
+                        // Loading must not write anything — only new games do.
+                        writeback_at: loaded.finished_now,
+                        takes_focus: pending.go,
+                    });
+                }
+            }
+        }
+        self.loading = still_loading;
     }
 
     /// Change a loaded tournament's parallel-games limit (running or
@@ -464,6 +529,67 @@ impl Backend {
             active.handle.set_concurrency(limit);
         }
     }
+}
+
+/// Rebuild a stored tournament from the database at `db` (the worker side of
+/// [`Backend::load_tournament`]): its participants, the start ratings the Δ
+/// column measures against, and the resumed driver, not yet spawned.
+fn load_stored_tournament(
+    db: &std::path::Path,
+    row: TournamentRow,
+    library: &[EngineConfig],
+) -> anyhow::Result<LoadedTournament> {
+    let name = row.name.clone();
+    let store = Store::open(db)?;
+    let participants_raw = store.list_tournament_engines(row.id)?;
+
+    let participants: Vec<ParticipantInfo> = participants_raw
+        .iter()
+        .filter_map(|p| {
+            let cfg = p.config.as_ref()?;
+            let name = if cfg.meta.name.is_empty() {
+                cfg.path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("?")
+                    .to_string()
+            } else {
+                cfg.meta.name.clone()
+            };
+            Some(ParticipantInfo {
+                id: p.engine,
+                name,
+                version: cfg.meta.version.clone(),
+            })
+        })
+        .collect();
+
+    // Priors come from the tournament's stored start ratings — NOT the
+    // current library — so the Δ column always measures against the
+    // tournament's beginning, even across resumes and after writebacks.
+    let priors: Vec<(EngineId, f64)> = participants_raw
+        .iter()
+        .map(|p| (p.engine, p.start_elo))
+        .collect();
+
+    let (events_tx, events_rx) = crossbeam_channel::unbounded();
+    let rating_writeback = row.config.rating_writeback.clone();
+    let config = row.config.clone();
+    let (handle, driver) = resume_tournament(row, store, events_tx, library)?;
+    let snapshot = handle.snapshot_handle();
+    let finished_now = snapshot.lock().map_or(0, |s| s.games_finished);
+    Ok(LoadedTournament {
+        handle,
+        driver: Box::pin(driver),
+        snapshot,
+        events: events_rx,
+        name,
+        participants,
+        config,
+        priors,
+        rating_writeback,
+        finished_now,
+    })
 }
 
 /// The repaint interval for a given tournament status: a steady ~30 Hz while

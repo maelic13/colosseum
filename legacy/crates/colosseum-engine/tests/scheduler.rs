@@ -492,8 +492,12 @@ async fn tournament_with_openings_runs_to_completion() {
     // Both games started from a book position and recorded it in the PGN.
     for g in &games {
         assert!(g.start_fen.is_some(), "game missing opening FEN");
+    }
+    let pgns = reopened.played_game_pgns(tid).unwrap();
+    assert_eq!(pgns.len(), 2);
+    for pgn in &pgns {
         assert!(
-            g.pgn.as_deref().unwrap().contains("[FEN \""),
+            pgn.contains("[FEN \""),
             "PGN should carry the opening FEN tag"
         );
     }
