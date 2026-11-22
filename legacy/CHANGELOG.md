@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [1.2.1] — 2026-11-22
+
 ### Fixed
 - **The Arena tab stays smooth with a large history.** With hundreds of
   thousands of stored games it froze for over a second every second, and
@@ -339,5 +343,6 @@ UCI pondering, and Linux packages.
 
 ---
 
-[Unreleased]: https://github.com/maelic13/colosseum/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/maelic13/colosseum/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/maelic13/colosseum/releases/tag/v1.2.1
 [1.2.0]: https://github.com/maelic13/colosseum/releases/tag/v1.2.0
