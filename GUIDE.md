@@ -14,7 +14,7 @@ argumentation.
 | | |
 |---|---|
 | Repository | `maelic13/colosseum` since the swap of 2026-11-13 (formerly `maelic13/colosseum-gui`, seeded from the CLI repository at its step 11.2); the CLI is `maelic13/colosseum-cli` (ADR-0001, PLAN §G8). `master` is the trunk, protected; work reaches it by squash pull requests from short-lived branches (*Repository settings* below). No 2.0 code yet |
-| Predecessor | Colosseum GUI 1.1.0 (egui), released 2026-09-22 from the CLI repository. Since the split it lives here in `legacy/`, frozen but for fixes, and continues on plain `vX.Y.Z` tags until 2.0.0 replaces it: **1.2.0**, released here 2026-11-14 from `63ca788`; installed 1.1.0 copies are not offered it (ADR-0001) |
+| Predecessor | Colosseum GUI 1.1.0 (egui), released 2026-09-22 from the CLI repository. Since the split it lives here in `legacy/`, frozen but for fixes, and continues on plain `vX.Y.Z` tags until 2.0.0 replaces it: **1.2.1**, released here 2026-11-22 as `v1.2.1`, after 1.2.0 (2026-11-14, `63ca788`); installed 1.1.0 copies are not offered either (ADR-0001) |
 | What is missing | The CLI repository's clean-up and Rarog's CLI download address, both outside this repository (PLAN §G8 *Order* 3), Phase 1 (design foundations), Phase 2 (repository and technology proof), Phase 3 (screen specifications), Phase 4 (implementation), Phase 5 (release) |
 | Depends on Colosseum CLI | 11.4 protocol specification (before Phase 3), 13.2 synthetic streams (before 2.3), 13.3–13.4 (before 4.5; the lifecycle decision with 4.2), 13.5–13.7 (before 4.6), 13.8 release candidate (4.8) — PLAN §G9 joint milestones |
 | Next step | **1.1.1** — the engine-library decisions; Delete All, names and versions and rating lists decided in inventory §12; the rating anchor (Q1) waits for the maintainer — `R2` (Claude Opus 5 — High); then 1.1.2–1.1.4 and 1.2, each `R2`. **2.1** — skeleton — `I2` (Claude Opus 5 — High) may start at the same time |
@@ -88,15 +88,15 @@ specification and exit; `(Mn)` marks a joint milestone.
 
 ### Phase 5 — Release
 
-- [ ] **5.1** EXIT — First 2.x release: 2.0.0, `CHANGELOG.md`, the pin set to the released CLI, `legacy/` removed, published right after the CLI release and offered to 1.2.0 (M9) — **V**
+- [ ] **5.1** EXIT — First 2.x release: 2.0.0, `CHANGELOG.md`, the pin set to the released CLI, `legacy/` removed, published right after the CLI release and offered to 1.2.0 and later (M9) — **V**
 
 ## What to do now
 
-**1.2.0 is out** (2026-11-14). Outside this repository the CLI repository's
-clean-up (PLAN §G8 *Order* 3) and Rarog's CLI download address remain, the
-maintainer's work there. Here: **decide 1.1.1–1.1.4, then write 1.2; 2.1
-beside them.** The inventory
-draft (1.1) is written; its fourteen questions for this repository are
+**1.2.1 is out** (2026-11-22; 1.2.0 on 2026-11-14). Outside this
+repository the CLI repository's clean-up (PLAN §G8 *Order* 3) and Rarog's
+CLI download address remain, the maintainer's work there. Here: **decide
+1.1.1–1.1.4, then write 1.2; 2.1 beside them.** The inventory draft (1.1)
+is written; its fourteen questions for this repository are
 steps 1.1.1–1.1.4, each answered, dated, in inventory §12. 1.2 carries the
 answers into the requirements and is reviewed with 1.1; when it is signed
 off it goes to the CLI repository, whose 11.3 and 11.4 produce the protocol
@@ -142,11 +142,16 @@ binding repository workflow.
 
 ### Cutting a 1.x release (maintainer, until 2.0.0)
 
-- On a release branch: date `legacy/CHANGELOG.md`'s section, add its link
-  at the bottom, and set the version in
-  `legacy/crates/colosseum-gui/Cargo.toml` (and `legacy/Cargo.lock`). Its
-  pull request, titled `Release X.Y.Z`, runs the release check and the full
-  candidate.
+- On a release branch, in one commit: date `legacy/CHANGELOG.md`'s
+  section, add its link at the bottom, and set the version in
+  `legacy/crates/colosseum-gui/Cargo.toml` (and `legacy/Cargo.lock`); and
+  record the release in every document that names the current 1.x
+  release: this guide (*Predecessor*, *What to do now*), `PLAN.md` (§G8
+  *Tags and versions*) and the checksum examples in `README.md`. The record
+  names the tag and the date, not a commit: the squash commit is known only
+  once the pull request merges. Its pull request, titled `Release X.Y.Z`,
+  runs the release check and the full candidate; nothing is left to record
+  after the tag.
 - On the merged `master`:
 
   ```

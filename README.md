@@ -51,9 +51,9 @@ To check a download arrived intact, compare its SHA-256 with the digest GitHub
 shows beside that asset on the release page:
 
 ```text
-Get-FileHash colosseum-1.2.0-windows-x64.msi
-sha256sum colosseum-1.2.0-linux-x64.deb
-shasum -a 256 colosseum-1.2.0-macos-arm64.dmg
+Get-FileHash colosseum-1.2.1-windows-x64.msi
+sha256sum colosseum-1.2.1-linux-x64.deb
+shasum -a 256 colosseum-1.2.1-macos-arm64.dmg
 ```
 
 The three lines are Windows, Linux and macOS respectively.

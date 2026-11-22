@@ -275,20 +275,21 @@ product rules across.
   replace an installed 1.x or coexist with it is decided at 4.7 against the
   1.x installer identities.
 - **Tags and versions.** Plain `vX.Y.Z` tags for both generations
-  (ADR-0001). 1.x, in `legacy/` until 2.0.0, continues as **1.2.0**, whose
-  update check reads `v` tags; installed 1.1.0 copies, which accept only
-  `gui-v` tags, are not offered it, and that is accepted. 2.0's first release
-  is **2.0.0**, the Colosseum brand continuing, and every 1.x from 1.2.0 on
-  is offered it. No bridge release. A release is named `Colosseum X.Y.Z`
+  (ADR-0001). 1.x, in `legacy/` until 2.0.0, continues from **1.2.0**
+  (now **1.2.1**, 2026-11-22), whose update check reads `v` tags;
+  installed 1.1.0 copies, which accept only `gui-v` tags, are not offered
+  it, and that is accepted. 2.0's first release is **2.0.0**, the
+  Colosseum brand continuing, and every 1.x from 1.2.0 on is offered it. No bridge release. A release is named `Colosseum X.Y.Z`
   on its release page (`Colosseum 1.2.0`, `Colosseum 2.0.0`); only the tag
   carries the `v`.
 - **Delivery** (as Rarog's). `master` is the trunk. Each larger piece of
   work lives on its own short-lived branch with its step commits and reaches
   `master` as one squash commit through a pull request; CI and the release
   candidate run on it, and the maintainer squash-merges it once both are
-  green. A release is a pull request that dates the changelog and sets the
-  version, then a `vX.Y.Z` tag pushed on the merged `master`; the release
-  workflow validates, builds and publishes it. Pull-request titles and
+  green. A release is a pull request that dates the changelog, sets the
+  version and records the release in the documents (`GUIDE.md`, *Cutting a
+  1.x release*), then a `vX.Y.Z` tag pushed on the merged `master`; the
+  release workflow validates, builds and publishes it. Pull-request titles and
   descriptions follow `AGENTS.md`.
 - **Order** ([ADR-0001](docs/architecture/adr/0001-1x-maintained-here-and-the-swap-at-the-split.md),
   amending CLI ADR-0012 *Branches and order*):
@@ -531,8 +532,8 @@ and behaviour at the §G5 scale.
 - **5.1 — EXIT: First release** (`V`). 2.0.0 (§G8); `CHANGELOG.md`; the
   pin set to the released CLI; `legacy/` and its release lane removed in the
   same change; the release published right after the CLI's (CLI 14.2), from
-  `master` at `maelic13/colosseum`, and offered to 1.2.0 by its update
-  check. (M9)
+  `master` at `maelic13/colosseum`, and offered to 1.2.0 and later by
+  their update check. (M9)
 
 **Programme exit:** the desktop application released from this repository
 over the protocol, with one game-playing implementation, in the CLI.
